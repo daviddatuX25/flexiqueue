@@ -1,0 +1,307 @@
+---
+description: Phase-driven agentic development with beads integration
+alwaysApply: true
+---
+
+# AGENTIC WORKFLOW: PHASE-DRIVEN DELIVERY
+
+## 🎯 CORE PRINCIPLES
+
+1. **Contract over Creativity**: Implementation follows specs in `docs/architecture/`, not imagination
+2. **Phases over Perfection**: Deliver Phase 1 completely before touching Phase 2
+3. **Beads = Single Source of Truth**: Work only comes from beads; if it's not a bead, create one
+4. **Ask Before Assuming**: 1 question up front > 10 rollbacks later
+
+---
+
+## 📍 SESSION START RITUAL
+
+Every session begins with:
+```bash
+bd ready                    # See available work
+bd show <id>               # Read full task details
+bd update <id> --status in_progress
+```
+
+**Before writing ANY code**, you must:
+
+### 1. VERIFY PHASE ALIGNMENT
+- Check `docs/plans/PHASES-OVERVIEW.md`
+- If user request touches Phase 2+ features, **ASK**: 
+  > "This involves [feature X] which is Phase 2. Should I:
+  > A) Implement Phase 1 version only (limited to Y)
+  > B) Expand scope to Phase 2 (requires updating scope freeze)
+  > C) Create a Phase 2 bead and defer it"
+
+### 2. READ CONTRACTS
+Before implementing, consult in order:
+1. `docs/architecture/08-API-SPEC-PHASE1.md` (endpoint behavior)
+2. `docs/architecture/09-UI-ROUTES-PHASE1.md` (page responsibilities)
+3. `docs/architecture/04-DATA-MODEL.md` (schema)
+4. `docs/architecture/05-SECURITY-CONTROLS.md` (auth/authz)
+5. Task-specific architecture docs
+
+**If the spec is silent or ambiguous, STOP and ASK**:
+> "The API spec doesn't define the response for 'duplicate scan'. Should it be:
+> A) 409 Conflict with { error: 'duplicate' }
+> B) 200 OK with { result: 'already_processed' }
+> What's the expected UX?"
+
+### 3. PLAN VISIBLE WORK
+State your plan in THIS format:
+```
+📋 PLAN for BD-042: User can approve application
+
+CONTRACTS:
+- API: POST /api/applications/:id/approve (per 08-api-spec, line 45)
+- Data: Application.status enum (per 04-data-model, line 78)
+- Security: Requires 'admin' role (per 05-security-controls)
+
+STEPS:
+1. Update Application schema to add 'approved_at' timestamp
+2. Create ApprovalService.approve(applicationId, adminId) method
+3. Add POST /api/applications/:id/approve endpoint
+4. Write feature test for approval flow
+5. Add "Approve" button to ApplicationDetail page
+
+EDGE CASES TO HANDLE:
+- Already approved application → 409 Conflict
+- Non-admin user → 403 Forbidden
+- Invalid application ID → 404 Not Found
+
+Proceed? (Y/n)
+```
+
+Wait for user confirmation before coding.
+
+---
+
+## 🔨 IMPLEMENTATION PHASE
+
+### CODE GENERATION RULES
+
+#### ATOMICITY
+- One file per message when possible
+- If changing >3 files, ask: "Should I show all files or one-by-one for review?"
+
+#### NO PLACEHOLDERS
+Never write:
+```javascript
+// ... rest of the code
+// implementation here
+// TODO: add validation
+```
+
+Either write the FULL implementation or explicitly state:
+> "I'm omitting X because [reason]. Should I include it or create a follow-up bead?"
+
+#### PATTERN MATCHING
+- Match existing code style (check 2-3 similar files first)
+- Use project's error handling patterns (check `docs/architecture/06-ERROR-HANDLING.md`)
+- Follow naming conventions from existing files
+
+#### TRACEABILITY
+Every non-trivial decision gets a comment linking to specs:
+```javascript
+// Per 05-security-controls.md: Only admins can approve
+if (!req.user.role === 'admin') {
+  throw new ForbiddenError('Approval requires admin role');
+}
+
+// Per 08-api-spec.md line 67: Return 409 for duplicate approval
+if (application.status === 'approved') {
+  throw new ConflictError('Application already approved');
+}
+```
+
+### TESTING WORKFLOW
+
+**Default for All Code Changes:**
+- Write/update automated tests (unit, feature, API)
+- Run tests before marking task done
+- Reference `docs/plans/QUALITY-GATES.md` for coverage targets
+
+**Additional for UI Changes:**
+1. **Checkpoint Testing**: When completing a UI task or before demos, perform manual browser test
+2. **Seeder Data**: For visual review or demos, run seeders to populate realistic data
+```bash
+   # Not on every commit - only at checkpoints
+   npm run db:seed  # or equivalent
+```
+3. **Visual Review**: After UI task completion, state: 
+   > "✅ BD-042 complete. **Ready for visual review** - seeded 15 sample applications."
+
+**Code Review Triggers:**
+- After completing a batch of related tasks (e.g., all auth endpoints)
+- Before marking a phase complete
+- When touching multiple modules (e.g., API + UI + background jobs)
+
+State explicitly:
+> "This completes the application approval flow (BD-040 through BD-044). **Ready for code review** before moving to next feature."
+
+---
+
+## 🚦 DECISION POINTS
+
+### When User Says "Continue" or "Next Task"
+1. Run `bd ready` to get current backlog
+2. Check `docs/plans/backlog/PHASE-1-TASKS.md` for dependencies
+3. Announce: 
+   > "Next unblocked task is BD-043: User can reject application. Starting..."
+
+### When You Spot an Issue
+**DO NOT silently fix** - instead:
+> "⚠️ I notice the API spec says 'exam_session_id is required', but the data model marks it optional. Should I:
+> A) Update data model to require it
+> B) Update API spec to make it optional
+> C) Keep as-is (optional in DB, required in API)"
+
+### When Suggesting Improvements
+Use **code review tone**, not commands:
+```
+✅ GOOD: "Consider adding rate limiting here because 05-security-controls.md recommends it for user-facing endpoints. Should I add it or create a follow-up bead?"
+
+❌ BAD: *silently adds rate limiting middleware without asking*
+```
+
+### When User Requests Out-of-Scope Work
+```
+User: "Can you add CSV import for applications?"
+
+You: "CSV import is in Phase 2 per PHASES-OVERVIEW.md. Options:
+A) Create a Phase 2 bead now and defer implementation
+B) Implement a simplified Phase 1 version (single-file, no validation)
+C) Update scope freeze to include it in Phase 1 (requires stakeholder approval)
+
+Which approach?"
+```
+
+---
+
+## 🎬 SESSION END RITUAL
+
+Before ending your turn:
+
+### 1. UPDATE BEADS
+```bash
+bd update <id> --status done    # For completed work
+bd create "Fix validation bug in ApprovalService" --context "Found during BD-042, non-blocking"
+bd sync
+```
+
+### 2. GIT WORKFLOW
+```bash
+git pull --rebase origin main
+git push origin <feature-branch>
+```
+**Work is NOT complete until `git push` succeeds.**
+
+### 3. HANDOFF REPORT
+Provide this summary:
+```
+📊 SESSION SUMMARY
+
+COMPLETED:
+✅ BD-042: User can approve application
+  - Added Application.approved_at field
+  - Created POST /api/applications/:id/approve endpoint
+  - Added feature tests (5 cases)
+  - UI: Approve button on ApplicationDetail page
+
+IN PROGRESS:
+🔄 BD-043: User can reject application (50% done - API complete, UI pending)
+
+NEXT UP:
+📌 BD-044: Admin dashboard shows approval stats (unblocked)
+📌 BD-045: Email notification on approval (depends on BD-044)
+
+NEW ISSUES CREATED:
+🐛 BD-099: Add rate limiting to approval endpoint (Phase 1 backlog)
+🔮 BD-100: CSV import for applications (Phase 2 - deferred)
+
+BLOCKERS:
+None
+
+QUALITY GATES:
+- All tests passing ✅
+- Seeded data for manual review ✅
+- Code review: Pending (this completes approval feature set)
+```
+
+### 4. PROMPT NEXT ACTION
+End with:
+> "Would you like me to:
+> A) Start BD-043 (reject application)
+> B) Perform code review of approval feature (BD-040 to BD-042)
+> C) Something else?"
+
+---
+
+## 🚫 ANTI-PATTERNS TO AVOID
+
+### ❌ Scope Creep
+```
+User: "Add the approve button"
+You: *also adds reject button, audit logging, and email notifications*
+```
+**FIX**: Only do what the bead asks. Suggest other work as new beads.
+
+### ❌ Spec Violation
+```
+API Spec: "Returns 201 Created"
+Your code: returns 200 OK with message "Created successfully"
+```
+**FIX**: If spec seems wrong, ASK to update it. Never silently deviate.
+
+### ❌ Assumption Coding
+```
+User: "Add validation"
+You: *implements 12 validation rules without asking what "validation" means*
+```
+**FIX**: "What validation rules? Email format? Required fields? Max length? Per the spec or new rules?"
+
+### ❌ Over-Explaining
+```
+❌ "I'll use a try-catch block because error handling is important in production systems and ensures graceful degradation..."
+
+✅ "Adding error handling per 06-ERROR-HANDLING.md pattern."
+```
+
+### ❌ Invisible Work
+```
+You: *completes task, updates bead, pushes code*
+You: "Done."
+```
+**FIX**: Always provide handoff report so next session has context.
+
+---
+
+## 🎯 SUCCESS METRICS
+
+You're doing this right when:
+- User rarely has to say "that's not what I meant"
+- Scope freeze document matches actual Phase 1 work
+- Code reviews find style issues, not architectural mismatches
+- Beads move to "done" without reopening
+- Next session can start immediately without archaeology
+
+You're doing this WRONG when:
+- Features get built then removed as "not Phase 1"
+- User has to explain the same requirement 3 times
+- Code contradicts architecture docs
+- Sessions end with "I'll finish this next time" (should be atomic bead completions)
+
+---
+
+## FINAL REMINDER
+
+Your job is not to "write code fast."
+Your job is to **deliver the right Phase 1 system, predictably, with no surprises.**
+
+That requires:
+1. Reading before writing
+2. Asking before assuming
+3. Planning before implementing
+4. Reporting before disappearing
+
+Every. Single. Session.
