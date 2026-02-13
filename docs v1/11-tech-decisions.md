@@ -78,7 +78,7 @@ From architecture Section 9.3.
 
 **Why Laravel Reverb?**
 
-- **Native to Laravel 11+:**
+- **Native to Laravel 12+:**
   - Designed to integrate directly with Laravel’s broadcasting/events system.
 - **Offline / local operation:**
   - Does not require external cloud services.

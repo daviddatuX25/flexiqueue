@@ -66,7 +66,7 @@ FlexiQueue is an **offline-first, phone-first queue management system** for gove
 
 | Layer | Technology | Version | Notes |
 |-------|-----------|---------|-------|
-| **Backend** | Laravel | 11.x | Modular monolith, session-based auth |
+| **Backend** | Laravel | 12.x | Modular monolith, session-based auth |
 | **Frontend** | Svelte | 5.x | Via Inertia.js (server-driven SPA) |
 | **Bridge** | Inertia.js | Latest | Connects Laravel routes to Svelte pages |
 | **Styling** | TailwindCSS | 4.x | Utility-first, mobile-first |

@@ -662,7 +662,7 @@ Device Behavior by Type:
 
 #### 3.1.1 Backend
 **Option A: Laravel (PHP Framework)**
-- Version: Laravel 10.x or 11.x
+- Version: Laravel 12.x
 - PHP Version: 8.1+
 - Web Server: Apache or Nginx
 - Features used:

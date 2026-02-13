@@ -8,7 +8,7 @@
 
 ## Project Context
 
-FlexiQueue uses **Laravel 11**, **Svelte 5 + Inertia.js**, **TailwindCSS 4 + DaisyUI 5**, MariaDB, WebSocket (Reverb), and PWA. No Laravel, PHP, Svelte, or DaisyUI-specific skills exist in the ecosystem yet; recommendations focus on Tailwind, frontend, testing, API design, and workflow.
+FlexiQueue uses **Laravel 12**, **Svelte 5 + Inertia.js**, **TailwindCSS 4 + DaisyUI 5**, MariaDB, WebSocket (Reverb), and PWA. No Laravel, PHP, Svelte, or DaisyUI-specific skills exist in the ecosystem yet; recommendations focus on Tailwind, frontend, testing, API design, and workflow.
 
 ---
 

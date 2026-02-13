@@ -1110,7 +1110,7 @@ STAFF INTERFACE (Identity Verification):
 ## 9.3 Real-Time: Laravel Reverb
 
 **Decision Factors:**
-- **Native:** Built for Laravel 11+
+- **Native:** Built for Laravel 12+
 - **Offline:** Runs on local server
 - **Cost:** Free (vs Pusher $49/month)
 - **Full Duplex:** True WebSocket support

@@ -1,0 +1,58 @@
+---
+description: Stack version pins, critical anti-patterns, and conventions for Laravel 12 + Inertia.js + Svelte 5 + DaisyUI 5
+alwaysApply: true
+---
+
+# STACK CONVENTIONS
+
+## Version Pins (Phase 1)
+
+| Layer | Technology | Version |
+|-------|------------|---------|
+| Backend | Laravel | 12.x |
+| Runtime | PHP | 8.2+ |
+| Frontend | Svelte | 5.x |
+| Bridge | Inertia.js | v2 (`@inertiajs/svelte` ^2.x) |
+| Styling | TailwindCSS | 4.x |
+| Components | DaisyUI | 5 |
+| Database | MariaDB | 10.6+ |
+| Real-time | Laravel Reverb | Latest |
+| JS Runtime | Node.js | 20+ |
+
+## Critical Anti-Patterns (NEVER DO)
+
+1. **SvelteKit patterns** — No `+page.svelte`, `+layout.svelte`, load functions, `$app/*` imports, or form actions. This is an Inertia app.
+2. **Svelte 4 syntax** — No `on:click`, `createEventDispatcher`, `<slot>`, or `export let`. Use Svelte 5 runes.
+3. **DaisyUI in tailwind.config.js** — Use `@plugin "daisyui"` in CSS, not JS config.
+4. **Business logic in controllers** — Controllers are thin. Use Service classes in `app/Services/`.
+5. **Skipping Form Requests** — All API endpoints use Form Request classes for validation.
+6. **Raw DB facade** — Use Eloquent models, not `DB::table()` for domain queries.
+7. **API-only routes for pages** — Use `Inertia::render()` for pages, not JSON responses.
+8. **Stores for page data** — Page data comes via `$props()` from Inertia, not Svelte stores.
+
+## File Naming Conventions
+
+| Type | Location | Naming |
+|------|----------|--------|
+| Controllers | `app/Http/Controllers/` | `PascalCaseController.php` |
+| Services | `app/Services/` | `NameService.php` |
+| Form Requests | `app/Http/Requests/` | `VerbNounRequest.php` |
+| Models | `app/Models/` | `PascalCase.php` (singular) |
+| Svelte Pages | `resources/js/Pages/{Section}/` | `Index.svelte`, `Show.svelte`, `Edit.svelte` |
+| Svelte Components | `resources/js/Components/` | `PascalCase.svelte` |
+| Layouts | `resources/js/Layouts/` | `NameLayout.svelte` |
+
+## Component System
+
+- **Theme**: FlexiQueue custom DaisyUI theme defined in `resources/css/app.css`
+- **Reference**: See `public/dev/components.html` for live component examples
+- **Spec**: See `docs/architecture/07-UI-UX-SPECS.md` for design tokens and patterns
+- **Touch targets**: Minimum 48x48px for mobile (staff phones)
+
+## Quick Checks Before Committing
+
+- [ ] No SvelteKit imports (`$app/`, `+page`, `+layout`)
+- [ ] Using Svelte 5 runes (`$state`, `$derived`, `$props`, `onclick`)
+- [ ] Controllers return `Inertia::render()` not JSON
+- [ ] Form validation in Form Request class
+- [ ] Business logic in Service class
