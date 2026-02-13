@@ -4,6 +4,10 @@
 **Types:** Foundation / Feature / Polish
 **Status:** All start as `open`. Claim via `bd update <id> --status in_progress`.
 
+**Granular beads:** To import tasks into `bd` (section by section), run from repo root:
+`./scripts/import-phase1-beads.sh foundation` (BD-001–007 done), then when needed:
+`./scripts/import-phase1-beads.sh admin`, `triage`, `station`, etc. See script header for all sections.
+
 ---
 
 ## Foundation Layer (BD-001 — BD-007)
@@ -12,12 +16,12 @@ These must be completed first. They establish the project skeleton.
 
 ---
 
-### BD-001: Initialize Laravel 11 project with Svelte 5 + Inertia.js + TailwindCSS + DaisyUI
+### BD-001: Initialize Laravel 12 project with Svelte 5 + Inertia.js + TailwindCSS + DaisyUI
 - **Type**: Foundation
-- **Context**: Tech stack per `docs v1/11-tech-decisions.md` and `07-UI-UX-SPECS.md`. Laravel 11, Svelte 5 (via `@inertiajs/svelte`), TailwindCSS 4, DaisyUI 5.
+- **Context**: Tech stack per `docs v1/11-tech-decisions.md` and `07-UI-UX-SPECS.md`. Laravel 12, Svelte 5 (via `@inertiajs/svelte`), TailwindCSS 4, DaisyUI 5.
 - **Dependencies**: None (first task).
 - **Acceptance Criteria**:
-  - `composer create-project laravel/laravel` with Laravel 11.
+  - `composer create-project laravel/laravel` with Laravel 12.
   - Inertia.js server-side adapter installed (`inertiajs/inertia-laravel`).
   - Svelte 5 + Vite + `@inertiajs/svelte` configured.
   - TailwindCSS 4 installed with `Inter` font imported (bundled locally for offline).
