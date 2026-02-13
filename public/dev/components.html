@@ -1,0 +1,2686 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="flexiqueue">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FlexiQueue UI Kit — DaisyUI 5 + Tailwind CSS 4</title>
+
+  <!-- DaisyUI 5 (must load BEFORE Tailwind browser build) -->
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@5/themes.css" rel="stylesheet" type="text/css" />
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
+  <!-- Tailwind CSS 4 Browser Build -->
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <!-- Google Fonts: Inter (project font) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    /* ═══════════════════════════════════════════════════
+       FlexiQueue Custom Theme
+       Brand Primary: #2563EB (Blue)
+       Per docs/architecture/07-UI-UX-SPECS.md Section 2.2
+       ═══════════════════════════════════════════════════ */
+    [data-theme="flexiqueue"] {
+      color-scheme: light;
+      /* Base palette */
+      --color-base-100: oklch(100% 0 0);
+      --color-base-200: oklch(98.5% 0.002 240);
+      --color-base-300: oklch(92% 0.004 240);
+      --color-base-content: oklch(14.57% 0.014 285.82);
+      /* Primary — brand blue #2563EB */
+      --color-primary: oklch(54.56% 0.2031 264.05);
+      --color-primary-content: oklch(100% 0 0);
+      /* Secondary — gray-600 #4B5563 */
+      --color-secondary: oklch(44.64% 0.0146 264.36);
+      --color-secondary-content: oklch(100% 0 0);
+      /* Accent — gold #F59E0B (priority/express) */
+      --color-accent: oklch(76.18% 0.1617 75.37);
+      --color-accent-content: oklch(100% 0 0);
+      /* Neutral — gray #6B7280 */
+      --color-neutral: oklch(51.06% 0.013 255.71);
+      --color-neutral-content: oklch(100% 0 0);
+      /* Semantic feedback */
+      --color-info: oklch(60.59% 0.1843 261.36);
+      --color-info-content: oklch(100% 0 0);
+      --color-success: oklch(58.58% 0.1686 149.48);
+      --color-success-content: oklch(100% 0 0);
+      --color-warning: oklch(59.30% 0.2037 38.37);
+      --color-warning-content: oklch(100% 0 0);
+      --color-error: oklch(52.35% 0.2109 27.33);
+      --color-error-content: oklch(100% 0 0);
+      /* Shape tokens */
+      --radius-selector: 0.5rem;
+      --radius-field: 0.5rem;
+      --radius-box: 0.75rem;
+      --size-selector: 0.25rem;
+      --size-field: 0.25rem;
+      --border: 1px;
+      --depth: 1;
+      --noise: 0;
+    }
+
+    * { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+
+    /* Smooth scrolling for anchor links */
+    html { scroll-behavior: smooth; scroll-padding-top: 1.5rem; }
+
+    /* Kit-specific utility styles */
+    .kit-section { scroll-margin-top: 1.5rem; }
+    .kit-label {
+      display: inline-block;
+      font-size: 0.625rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: oklch(50% 0.02 264);
+      background: oklch(95% 0.005 264);
+      padding: 0.125rem 0.5rem;
+      border-radius: 0.25rem;
+      margin-bottom: 0.5rem;
+    }
+    .kit-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .kit-grid {
+      display: grid;
+      gap: 1rem;
+    }
+    .kit-card {
+      border: 1px solid oklch(92% 0.005 264);
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      background: white;
+    }
+    .color-swatch {
+      width: 5rem;
+      height: 3.5rem;
+      border-radius: 0.5rem;
+      border: 1px solid oklch(90% 0 0);
+    }
+    .sidebar-link {
+      display: block;
+      padding: 0.375rem 0.75rem;
+      font-size: 0.8125rem;
+      color: oklch(45% 0.02 264);
+      border-radius: 0.375rem;
+      text-decoration: none;
+      transition: all 0.15s;
+    }
+    .sidebar-link:hover {
+      background: oklch(95% 0.005 264);
+      color: oklch(25% 0.02 264);
+    }
+    .sidebar-link.active {
+      background: oklch(54.56% 0.2031 264.05);
+      color: white;
+    }
+  </style>
+</head>
+<body class="bg-base-200 min-h-screen">
+
+  <!-- ═══════════════════════════════════════════════════
+       SIDEBAR NAVIGATION
+       ═══════════════════════════════════════════════════ -->
+  <aside class="fixed top-0 left-0 h-screen w-60 bg-base-100 border-r border-base-300 overflow-y-auto z-50 p-4 hidden lg:block">
+    <div class="mb-6">
+      <div class="text-lg font-bold text-base-content">FlexiQueue</div>
+      <div class="text-xs text-base-content/60 font-medium">UI Kit &middot; DaisyUI 5</div>
+    </div>
+    <nav class="space-y-0.5">
+      <div class="text-[0.625rem] uppercase tracking-wider font-semibold text-base-content/40 px-3 pt-3 pb-1">Foundation</div>
+      <a href="#colors" class="sidebar-link">Colors</a>
+      <a href="#typography" class="sidebar-link">Typography</a>
+
+      <div class="text-[0.625rem] uppercase tracking-wider font-semibold text-base-content/40 px-3 pt-4 pb-1">Components</div>
+      <a href="#buttons" class="sidebar-link">Buttons</a>
+      <a href="#badges" class="sidebar-link">Badges</a>
+      <a href="#alerts" class="sidebar-link">Alerts &amp; Toasts</a>
+      <a href="#cards" class="sidebar-link">Cards</a>
+      <a href="#stats" class="sidebar-link">Stats</a>
+      <a href="#tables" class="sidebar-link">Tables</a>
+      <a href="#forms" class="sidebar-link">Forms</a>
+      <a href="#modals" class="sidebar-link">Modals</a>
+      <a href="#dropdowns" class="sidebar-link">Dropdowns</a>
+      <a href="#tooltips" class="sidebar-link">Tooltips</a>
+      <a href="#loading" class="sidebar-link">Loading &amp; States</a>
+      <a href="#steps" class="sidebar-link">Steps &amp; Timeline</a>
+      <a href="#tabs" class="sidebar-link">Tabs</a>
+
+      <div class="text-[0.625rem] uppercase tracking-wider font-semibold text-base-content/40 px-3 pt-4 pb-1">Navigation</div>
+      <a href="#navbar" class="sidebar-link">Navbar</a>
+      <a href="#breadcrumbs" class="sidebar-link">Breadcrumbs</a>
+      <a href="#pagination" class="sidebar-link">Pagination</a>
+
+      <div class="text-[0.625rem] uppercase tracking-wider font-semibold text-base-content/40 px-3 pt-4 pb-1">FlexiQueue Mobile</div>
+      <a href="#fq-touch" class="sidebar-link">Touch Buttons</a>
+      <a href="#fq-alias" class="sidebar-link">Alias Display</a>
+      <a href="#fq-queue" class="sidebar-link">Queue Components</a>
+      <a href="#fq-footer" class="sidebar-link">Status Footer</a>
+      <a href="#fq-dock" class="sidebar-link">Dock</a>
+
+      <div class="text-[0.625rem] uppercase tracking-wider font-semibold text-base-content/40 px-3 pt-4 pb-1">Layouts</div>
+      <a href="#layout-topnav" class="sidebar-link">Top Navbar Layout</a>
+      <a href="#layout-sidebar" class="sidebar-link">Sidebar Layout</a>
+
+      <div class="text-[0.625rem] uppercase tracking-wider font-semibold text-base-content/40 px-3 pt-4 pb-1">Patterns</div>
+      <a href="#pattern-login" class="sidebar-link">Login Page</a>
+      <a href="#pattern-dashboard" class="sidebar-link">Admin Dashboard</a>
+      <a href="#pattern-data-table" class="sidebar-link">Data Table Page</a>
+      <a href="#pattern-form-page" class="sidebar-link">Form Page</a>
+      <a href="#pattern-detail" class="sidebar-link">Detail Page</a>
+      <a href="#pattern-triage" class="sidebar-link">Triage Interface</a>
+      <a href="#pattern-station" class="sidebar-link">Station Interface</a>
+      <a href="#pattern-informant" class="sidebar-link">Informant Display</a>
+    </nav>
+  </aside>
+
+  <!-- ═══════════════════════════════════════════════════
+       MAIN CONTENT
+       ═══════════════════════════════════════════════════ -->
+  <main class="lg:ml-60 p-6 lg:p-10 max-w-5xl">
+
+    <!-- Header -->
+    <div class="mb-10">
+      <h1 class="text-3xl font-bold text-base-content">FlexiQueue UI Kit</h1>
+      <p class="text-base-content/60 mt-1">DaisyUI 5 + Tailwind CSS 4 &middot; Brand Color <code class="bg-base-300 px-1.5 py-0.5 rounded text-sm font-mono">#2563EB</code> &middot; Light Theme</p>
+      <p class="text-sm text-base-content/50 mt-2">A reference for reusable UI patterns in the FlexiQueue Queue Management System.</p>
+    </div>
+
+
+    <!-- ═══════════════════════════════════════════════
+         1. COLORS
+         ═══════════════════════════════════════════════ -->
+    <section id="colors" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Colors</h2>
+      <p class="text-base-content/60 text-sm mb-6">Theme colors derived from brand blue <code class="bg-base-300 px-1 py-0.5 rounded text-xs font-mono">#2563EB</code>. Use DaisyUI semantic tokens — never hard-code hex values.</p>
+
+      <!-- Brand / Primary -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Brand / Primary</span>
+        <div class="kit-row mt-2">
+          <div>
+            <div class="color-swatch bg-primary"></div>
+            <div class="text-xs mt-1 font-medium">primary</div>
+            <div class="text-[0.625rem] text-base-content/50">#2563EB</div>
+          </div>
+          <div>
+            <div class="color-swatch bg-primary-content border-primary"></div>
+            <div class="text-xs mt-1 font-medium">primary-content</div>
+            <div class="text-[0.625rem] text-base-content/50">White on blue</div>
+          </div>
+          <div>
+            <div class="color-swatch bg-secondary"></div>
+            <div class="text-xs mt-1 font-medium">secondary</div>
+            <div class="text-[0.625rem] text-base-content/50">#4B5563</div>
+          </div>
+          <div>
+            <div class="color-swatch bg-accent"></div>
+            <div class="text-xs mt-1 font-medium">accent</div>
+            <div class="text-[0.625rem] text-base-content/50">#F59E0B (gold)</div>
+          </div>
+          <div>
+            <div class="color-swatch bg-neutral"></div>
+            <div class="text-xs mt-1 font-medium">neutral</div>
+            <div class="text-[0.625rem] text-base-content/50">#6B7280</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Base palette -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Base Palette</span>
+        <div class="kit-row mt-2">
+          <div>
+            <div class="color-swatch bg-base-100"></div>
+            <div class="text-xs mt-1 font-medium">base-100</div>
+          </div>
+          <div>
+            <div class="color-swatch bg-base-200"></div>
+            <div class="text-xs mt-1 font-medium">base-200</div>
+          </div>
+          <div>
+            <div class="color-swatch bg-base-300"></div>
+            <div class="text-xs mt-1 font-medium">base-300</div>
+          </div>
+          <div>
+            <div class="color-swatch bg-base-content"></div>
+            <div class="text-xs mt-1 font-medium">base-content</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Semantic / Feedback -->
+      <div class="kit-card">
+        <span class="kit-label">Feedback / Semantic</span>
+        <div class="kit-row mt-2">
+          <div>
+            <div class="color-swatch bg-info"></div>
+            <div class="text-xs mt-1 font-medium">info</div>
+            <div class="text-[0.625rem] text-base-content/50">#3B82F6</div>
+          </div>
+          <div>
+            <div class="color-swatch bg-success"></div>
+            <div class="text-xs mt-1 font-medium">success</div>
+            <div class="text-[0.625rem] text-base-content/50">#16A34A</div>
+          </div>
+          <div>
+            <div class="color-swatch bg-warning"></div>
+            <div class="text-xs mt-1 font-medium">warning</div>
+            <div class="text-[0.625rem] text-base-content/50">#EA580C</div>
+          </div>
+          <div>
+            <div class="color-swatch bg-error"></div>
+            <div class="text-xs mt-1 font-medium">error</div>
+            <div class="text-[0.625rem] text-base-content/50">#DC2626</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         2. TYPOGRAPHY
+         ═══════════════════════════════════════════════ -->
+    <section id="typography" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Typography</h2>
+      <p class="text-base-content/60 text-sm mb-6">Inter is the project typeface. Use Tailwind sizing utilities.</p>
+
+      <div class="kit-card space-y-4">
+        <div>
+          <span class="kit-label">Alias Display</span>
+          <p class="text-7xl font-bold text-center py-4">A1</p>
+          <p class="text-center text-sm text-base-content/50">text-7xl font-bold (72px) — Used for client alias on Station and Informant screens</p>
+        </div>
+        <div class="divider"></div>
+        <div>
+          <span class="kit-label">Headings</span>
+          <h1 class="text-4xl font-bold">Heading 1 — text-4xl font-bold (36px)</h1>
+          <h2 class="text-2xl font-semibold">Heading 2 — text-2xl font-semibold (24px)</h2>
+          <h3 class="text-xl font-semibold">Heading 3 — text-xl font-semibold</h3>
+          <h4 class="text-lg font-semibold">Heading 4 — text-lg font-semibold</h4>
+        </div>
+        <div class="divider"></div>
+        <div>
+          <span class="kit-label">Body Text</span>
+          <p class="text-base">Body — text-base (1rem/16px). The quick brown fox jumps over the lazy dog.</p>
+          <p class="text-sm text-base-content/70">Small — text-sm (14px). Secondary descriptive text, metadata.</p>
+          <p class="text-xs text-base-content/50">Extra Small — text-xs (12px). Badge text, captions, timestamps.</p>
+        </div>
+        <div class="divider"></div>
+        <div>
+          <span class="kit-label">Links</span>
+          <div class="space-y-1">
+            <p><a href="#" class="link link-primary">Primary link</a> — <code class="text-xs bg-base-200 px-1 rounded">link link-primary</code></p>
+            <p><a href="#" class="link link-hover">Hover link</a> — <code class="text-xs bg-base-200 px-1 rounded">link link-hover</code></p>
+            <p><a href="#" class="link link-secondary">Secondary link</a></p>
+            <p><a href="#" class="link link-accent">Accent link</a></p>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div>
+          <span class="kit-label">Inline Elements</span>
+          <p>Text with <strong>bold</strong>, <em>italic</em>, <code class="bg-base-200 px-1 py-0.5 rounded text-sm font-mono">inline code</code>, and <kbd class="kbd kbd-sm">Ctrl+S</kbd>.</p>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         3. BUTTONS
+         ═══════════════════════════════════════════════ -->
+    <section id="buttons" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Buttons</h2>
+      <p class="text-base-content/60 text-sm mb-6">Use <code class="bg-base-300 px-1 py-0.5 rounded text-xs">btn</code> base class with color and size modifiers.</p>
+
+      <!-- Variants -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Variants</span>
+        <div class="kit-row mt-2">
+          <button class="btn btn-primary">Primary</button>
+          <button class="btn btn-secondary">Secondary</button>
+          <button class="btn btn-accent">Accent</button>
+          <button class="btn btn-neutral">Neutral</button>
+          <button class="btn btn-ghost">Ghost</button>
+          <button class="btn btn-link">Link</button>
+        </div>
+      </div>
+
+      <!-- Outline -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Outline</span>
+        <div class="kit-row mt-2">
+          <button class="btn btn-outline btn-primary">Primary</button>
+          <button class="btn btn-outline btn-secondary">Secondary</button>
+          <button class="btn btn-outline btn-accent">Accent</button>
+          <button class="btn btn-outline">Default</button>
+        </div>
+      </div>
+
+      <!-- Sizes -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Sizes</span>
+        <div class="kit-row mt-2 items-end">
+          <button class="btn btn-primary btn-xs">Extra Small</button>
+          <button class="btn btn-primary btn-sm">Small</button>
+          <button class="btn btn-primary btn-md">Medium</button>
+          <button class="btn btn-primary btn-lg">Large</button>
+        </div>
+      </div>
+
+      <!-- Semantic / Feedback -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Semantic</span>
+        <div class="kit-row mt-2">
+          <button class="btn btn-info">Info</button>
+          <button class="btn btn-success">Success</button>
+          <button class="btn btn-warning">Warning</button>
+          <button class="btn btn-error">Error</button>
+        </div>
+      </div>
+
+      <!-- With Icons -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">With Icons (inline SVG)</span>
+        <div class="kit-row mt-2">
+          <button class="btn btn-primary">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            Add Station
+          </button>
+          <button class="btn btn-outline btn-primary">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            Export CSV
+          </button>
+          <button class="btn btn-ghost btn-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+            Edit
+          </button>
+          <button class="btn btn-error btn-sm btn-outline">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            Delete
+          </button>
+        </div>
+      </div>
+
+      <!-- States -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">States</span>
+        <div class="kit-row mt-2">
+          <button class="btn btn-primary" disabled>Disabled</button>
+          <button class="btn btn-primary">
+            <span class="loading loading-spinner loading-sm"></span>
+            Transferring...
+          </button>
+          <button class="btn btn-primary btn-wide">Wide Button</button>
+          <button class="btn btn-primary w-full max-w-xs">Full Width</button>
+        </div>
+      </div>
+
+      <!-- Button Group (Join) -->
+      <div class="kit-card">
+        <span class="kit-label">Button Group (join)</span>
+        <div class="kit-row mt-2">
+          <div class="join">
+            <button class="btn btn-sm join-item">List</button>
+            <button class="btn btn-sm join-item btn-active">Grid</button>
+            <button class="btn btn-sm join-item">Map</button>
+          </div>
+          <div class="join">
+            <button class="btn btn-outline btn-sm join-item">Today</button>
+            <button class="btn btn-outline btn-sm join-item btn-active">This Week</button>
+            <button class="btn btn-outline btn-sm join-item">This Month</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         4. BADGES
+         ═══════════════════════════════════════════════ -->
+    <section id="badges" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Badges</h2>
+      <p class="text-base-content/60 text-sm mb-6">Status indicators and labels. Key for session, role, and category status in FlexiQueue.</p>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Color Variants</span>
+        <div class="kit-row mt-2">
+          <span class="badge badge-primary">Primary</span>
+          <span class="badge badge-secondary">Secondary</span>
+          <span class="badge badge-accent">Accent</span>
+          <span class="badge badge-neutral">Neutral</span>
+          <span class="badge badge-info">Info</span>
+          <span class="badge badge-success">Success</span>
+          <span class="badge badge-warning">Warning</span>
+          <span class="badge badge-error">Error</span>
+          <span class="badge badge-ghost">Ghost</span>
+        </div>
+      </div>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Outline</span>
+        <div class="kit-row mt-2">
+          <span class="badge badge-outline badge-primary">Primary</span>
+          <span class="badge badge-outline badge-success">Success</span>
+          <span class="badge badge-outline badge-warning">Warning</span>
+          <span class="badge badge-outline badge-error">Error</span>
+        </div>
+      </div>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Sizes</span>
+        <div class="kit-row mt-2 items-center">
+          <span class="badge badge-primary badge-xs">XS</span>
+          <span class="badge badge-primary badge-sm">Small</span>
+          <span class="badge badge-primary badge-md">Medium</span>
+          <span class="badge badge-primary badge-lg">Large</span>
+        </div>
+      </div>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Session Status Badges</span>
+        <p class="text-sm text-base-content/60 mb-3">Standard status badges for queue session flow:</p>
+        <div class="kit-row mt-2">
+          <span class="badge badge-info badge-sm">waiting</span>
+          <span class="badge badge-success badge-sm">serving</span>
+          <span class="badge badge-neutral badge-sm">completed</span>
+          <span class="badge badge-error badge-sm">cancelled</span>
+          <span class="badge badge-warning badge-sm">no_show</span>
+        </div>
+      </div>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Role Badges</span>
+        <div class="kit-row mt-2">
+          <span class="badge badge-primary badge-sm">admin</span>
+          <span class="badge badge-secondary badge-sm">supervisor</span>
+          <span class="badge badge-accent badge-sm">staff</span>
+        </div>
+      </div>
+
+      <div class="kit-card">
+        <span class="kit-label">Client Category Badges</span>
+        <p class="text-sm text-base-content/60 mb-3">Triage categories for service track routing:</p>
+        <div class="kit-row mt-2">
+          <span class="badge badge-ghost badge-sm">Regular</span>
+          <span class="badge badge-accent badge-sm">PWD / Senior / Pregnant</span>
+          <span class="badge badge-warning badge-sm">Incomplete Docs</span>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         5. ALERTS & TOASTS
+         ═══════════════════════════════════════════════ -->
+    <section id="alerts" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Alerts &amp; Toasts</h2>
+      <p class="text-base-content/60 text-sm mb-6">Feedback messages for user actions and system events.</p>
+
+      <div class="space-y-3 mb-6">
+        <div class="alert alert-info">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span>Token A1 bound to Regular track. Waiting at Triage.</span>
+        </div>
+        <div class="alert alert-success">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span>Session completed for A1. Token released and available for reuse.</span>
+        </div>
+        <div class="alert alert-warning">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          <span>Offline — connection to server lost. Actions will be queued locally.</span>
+        </div>
+        <div class="alert alert-error">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span>Could not transfer session. Server unreachable.</span>
+          <button class="btn btn-sm">Retry</button>
+        </div>
+      </div>
+
+      <!-- Alert with no icon -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Simple Alert (no icon)</span>
+        <div class="alert alert-info mt-2">
+          <span>Client B3 has been waiting for 12 minutes at Interview (Table 3).</span>
+        </div>
+      </div>
+
+      <!-- Toast position -->
+      <div class="kit-card">
+        <span class="kit-label">Toast Pattern (positioned)</span>
+        <p class="text-sm text-base-content/60 mb-3">Use <code class="bg-base-200 px-1 rounded text-xs">toast</code> wrapper for positioned alerts (top-right is standard for FlexiQueue):</p>
+        <div class="relative h-32 bg-base-200 rounded-lg overflow-hidden">
+          <div class="absolute top-3 right-3 z-10">
+            <div class="alert alert-success shadow-lg text-sm py-2 px-4">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4"/></svg>
+              <span>A1 transferred to Cashier.</span>
+            </div>
+          </div>
+          <div class="flex items-center justify-center h-full text-xs text-base-content/30">Page content area</div>
+        </div>
+        <pre class="bg-base-200 rounded-lg p-3 text-xs mt-3 overflow-x-auto"><code>&lt;div class="toast toast-top toast-end"&gt;
+  &lt;div class="alert alert-success"&gt;
+    &lt;span&gt;A1 transferred to Cashier.&lt;/span&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         6. CARDS
+         ═══════════════════════════════════════════════ -->
+    <section id="cards" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Cards</h2>
+      <p class="text-base-content/60 text-sm mb-6">Content containers. The card is the primary layout primitive in FlexiQueue.</p>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <!-- Basic Card -->
+        <div class="card bg-base-100 shadow">
+          <div class="card-body">
+            <h3 class="card-title">Basic Card</h3>
+            <p class="text-sm text-base-content/70">Standard card with shadow. Use for forms, content sections, and data displays.</p>
+            <div class="card-actions justify-end">
+              <button class="btn btn-primary btn-sm">Action</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bordered Card -->
+        <div class="card bg-base-100 card-border">
+          <div class="card-body">
+            <h3 class="card-title">Bordered Card</h3>
+            <p class="text-sm text-base-content/70">Card with border instead of shadow. More subtle, good for grids.</p>
+            <div class="card-actions justify-end">
+              <button class="btn btn-ghost btn-sm">Details</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Station Card -->
+        <div class="card bg-base-100 shadow">
+          <div class="card-body">
+            <div class="flex items-center justify-between">
+              <h3 class="card-title text-base">Table 2 — Interview</h3>
+              <span class="badge badge-success badge-sm">Active</span>
+            </div>
+            <p class="text-sm text-base-content/70">Staff: Juan Cruz &middot; Queue: 3 waiting &middot; Serving: A1</p>
+            <div class="card-actions justify-end mt-2">
+              <button class="btn btn-ghost btn-sm">View Queue</button>
+              <button class="btn btn-primary btn-sm">Go to Station</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Current Client Card -->
+        <div class="card bg-base-100 shadow">
+          <div class="card-body items-center text-center">
+            <p class="text-xs text-base-content/50 uppercase tracking-wider">Now Serving</p>
+            <p class="text-7xl font-bold">A1</p>
+            <span class="badge badge-accent">PWD / Senior</span>
+            <p class="text-sm text-base-content/60 mt-1">Started: 10:35 AM &middot; Duration: 3m 45s</p>
+            <progress class="progress progress-primary w-full mt-2" value="67" max="100"></progress>
+            <p class="text-xs text-base-content/50">Step 2 of 3: Interview</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature/Stat Card Row -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Feature Cards (grid)</span>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+          <div class="card bg-base-100 card-border card-sm hover:shadow transition">
+            <div class="card-body items-center text-center">
+              <div class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary mb-1">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+              </div>
+              <span class="font-medium text-sm">Programs</span>
+              <span class="text-xs text-base-content/50">Create &amp; configure</span>
+            </div>
+          </div>
+          <div class="card bg-base-100 card-border card-sm hover:shadow transition">
+            <div class="card-body items-center text-center">
+              <div class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary mb-1">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+              </div>
+              <span class="font-medium text-sm">Stations</span>
+              <span class="text-xs text-base-content/50">Manage &amp; assign</span>
+            </div>
+          </div>
+          <div class="card bg-base-100 card-border card-sm hover:shadow transition">
+            <div class="card-body items-center text-center">
+              <div class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary mb-1">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"/></svg>
+              </div>
+              <span class="font-medium text-sm">Tokens</span>
+              <span class="text-xs text-base-content/50">Generate &amp; manage</span>
+            </div>
+          </div>
+          <div class="card bg-base-100 card-border card-sm hover:shadow transition">
+            <div class="card-body items-center text-center">
+              <div class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary mb-1">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              </div>
+              <span class="font-medium text-sm">Reports</span>
+              <span class="text-xs text-base-content/50">Audit &amp; export</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Empty State Card -->
+      <div class="kit-card">
+        <span class="kit-label">Empty State Card</span>
+        <div class="card bg-base-100 shadow mt-3">
+          <div class="card-body items-center text-center py-12">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-base-content/20 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            <p class="font-medium text-base-content">NO CLIENT ACTIVE</p>
+            <p class="text-sm text-base-content/60 max-w-sm">Press the button below to call the next client from the queue.</p>
+            <button class="btn btn-primary h-16 text-lg mt-3 px-10">CALL NEXT CLIENT</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         7. STATS
+         ═══════════════════════════════════════════════ -->
+    <section id="stats" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Stats</h2>
+      <p class="text-base-content/60 text-sm mb-6">Dashboard KPI widgets for the admin overview.</p>
+
+      <!-- Horizontal Stats -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Dashboard Stats</span>
+        <div class="stats stats-vertical lg:stats-horizontal shadow bg-base-100 w-full mt-3">
+          <div class="stat">
+            <div class="stat-title">Active Sessions</div>
+            <div class="stat-value text-primary">42</div>
+            <div class="stat-desc">12 waiting, 5 serving</div>
+          </div>
+          <div class="stat">
+            <div class="stat-title">Queue Waiting</div>
+            <div class="stat-value">12</div>
+            <div class="stat-desc">Across all stations</div>
+          </div>
+          <div class="stat">
+            <div class="stat-title">Stations Online</div>
+            <div class="stat-value text-success">5</div>
+            <div class="stat-desc">All stations staffed</div>
+          </div>
+          <div class="stat">
+            <div class="stat-title">Completed Today</div>
+            <div class="stat-value">87</div>
+            <div class="stat-desc text-success">+23% vs yesterday</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Single stat with action -->
+      <div class="kit-card">
+        <span class="kit-label">Single Stat with Action</span>
+        <div class="stats shadow bg-base-100 mt-3">
+          <div class="stat">
+            <div class="stat-title">Queue Waiting</div>
+            <div class="stat-value text-warning">12</div>
+            <a href="#" class="link link-primary stat-desc mt-1">View active queue &rarr;</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         8. TABLES
+         ═══════════════════════════════════════════════ -->
+    <section id="tables" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Tables</h2>
+      <p class="text-base-content/60 text-sm mb-6">Data tables for sessions, tokens, stations, and audit logs.</p>
+
+      <!-- Session table -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Sessions Table</span>
+        <div class="overflow-x-auto mt-3">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Alias</th>
+                <th>Track</th>
+                <th>Station</th>
+                <th>Status</th>
+                <th>Duration</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="hover:bg-base-200/50">
+                <td class="font-medium">A1</td>
+                <td>Regular</td>
+                <td>Table 2 — Interview</td>
+                <td><span class="badge badge-success badge-sm">serving</span></td>
+                <td class="text-base-content/60">3m 45s</td>
+                <td><a href="#" class="btn btn-ghost btn-sm">View</a></td>
+              </tr>
+              <tr class="hover:bg-base-200/50">
+                <td class="font-medium">B3</td>
+                <td>Priority</td>
+                <td>Table 2 — Interview</td>
+                <td><span class="badge badge-info badge-sm">waiting</span></td>
+                <td class="text-base-content/60">2m 10s</td>
+                <td><a href="#" class="btn btn-ghost btn-sm">View</a></td>
+              </tr>
+              <tr class="hover:bg-base-200/50">
+                <td class="font-medium">C7</td>
+                <td>Regular</td>
+                <td>Table 4 — Cashier</td>
+                <td><span class="badge badge-neutral badge-sm">completed</span></td>
+                <td class="text-base-content/60">12m 30s</td>
+                <td><a href="#" class="btn btn-ghost btn-sm">View</a></td>
+              </tr>
+              <tr class="hover:bg-base-200/50">
+                <td class="font-medium">D2</td>
+                <td>Incomplete</td>
+                <td>Table 5 — Legal</td>
+                <td><span class="badge badge-warning badge-sm">no_show</span></td>
+                <td class="text-base-content/60">—</td>
+                <td><a href="#" class="btn btn-ghost btn-sm">View</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Token table (zebra) -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Tokens Table (Zebra)</span>
+        <div class="overflow-x-auto mt-3">
+          <table class="table table-zebra">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Physical ID</th>
+                <th>QR Hash</th>
+                <th>Status</th>
+                <th>Session</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1</td>
+                <td class="font-medium">A1</td>
+                <td><code class="text-xs">a3f7c8...e2d1</code></td>
+                <td><span class="badge badge-info badge-sm">in_use</span></td>
+                <td>Session #101</td>
+                <td class="flex gap-1 justify-end">
+                  <button class="btn btn-ghost btn-xs">View</button>
+                </td>
+              </tr>
+              <tr>
+                <td>2</td>
+                <td class="font-medium">A2</td>
+                <td><code class="text-xs">b8e2a1...f4c9</code></td>
+                <td><span class="badge badge-success badge-sm">available</span></td>
+                <td>—</td>
+                <td class="flex gap-1 justify-end">
+                  <button class="btn btn-ghost btn-xs">View</button>
+                </td>
+              </tr>
+              <tr>
+                <td>3</td>
+                <td class="font-medium">A3</td>
+                <td><code class="text-xs">c1d5f7...a8b2</code></td>
+                <td><span class="badge badge-error badge-sm">lost</span></td>
+                <td>—</td>
+                <td class="flex gap-1 justify-end">
+                  <button class="btn btn-ghost btn-xs">Mark Available</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Compact Audit Log table -->
+      <div class="kit-card">
+        <span class="kit-label">Compact Table (Audit Log)</span>
+        <div class="overflow-x-auto mt-3">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Session</th>
+                <th>Action</th>
+                <th>Station</th>
+                <th>Staff</th>
+                <th>Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="text-xs text-base-content/60 font-mono">2026-02-11 14:32:01</td>
+                <td>A1</td>
+                <td><span class="badge badge-sm badge-ghost">transfer</span></td>
+                <td>Table 2 &rarr; Table 4</td>
+                <td>Juan Cruz</td>
+                <td class="text-xs text-base-content/60">Standard flow</td>
+              </tr>
+              <tr>
+                <td class="text-xs text-base-content/60 font-mono">2026-02-11 14:30:15</td>
+                <td>A1</td>
+                <td><span class="badge badge-sm badge-ghost">bind</span></td>
+                <td>Table 1 (Triage)</td>
+                <td>Maria Santos</td>
+                <td class="text-xs text-base-content/60">Category: Regular</td>
+              </tr>
+              <tr>
+                <td class="text-xs text-base-content/60 font-mono">2026-02-11 14:28:00</td>
+                <td>B3</td>
+                <td><span class="badge badge-sm badge-ghost">override</span></td>
+                <td>Table 3 &rarr; Table 2</td>
+                <td>Admin</td>
+                <td class="text-xs text-base-content/60">Supervisor override: client needs interview first</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         9. FORMS
+         ═══════════════════════════════════════════════ -->
+    <section id="forms" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Forms</h2>
+      <p class="text-base-content/60 text-sm mb-6">DaisyUI 5 form patterns. Use <code class="bg-base-300 px-1 py-0.5 rounded text-xs">fieldset</code> class on <code class="bg-base-300 px-1 py-0.5 rounded text-xs">&lt;fieldset&gt;</code> and <code class="bg-base-300 px-1 py-0.5 rounded text-xs">label</code> class on <code class="bg-base-300 px-1 py-0.5 rounded text-xs">&lt;label&gt;</code>.</p>
+
+      <!-- Text inputs -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Text Inputs</span>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+          <fieldset class="fieldset">
+            <label class="label" for="demo-name">Program Name</label>
+            <input id="demo-name" type="text" class="input w-full" placeholder="Cash Assistance Distribution">
+          </fieldset>
+          <fieldset class="fieldset">
+            <label class="label" for="demo-email">Staff Email <span class="text-error">*</span></label>
+            <input id="demo-email" type="email" class="input w-full" placeholder="juan@mswdo.gov.ph" required>
+          </fieldset>
+          <fieldset class="fieldset">
+            <label class="label" for="demo-err">With Error</label>
+            <input id="demo-err" type="text" class="input input-error w-full" value="abc">
+            <p class="text-error text-sm mt-1">Station name must be 2–50 characters.</p>
+          </fieldset>
+          <fieldset class="fieldset">
+            <label class="label" for="demo-dis">Disabled Input</label>
+            <input id="demo-dis" type="text" class="input w-full" value="Read-only value" disabled>
+          </fieldset>
+        </div>
+      </div>
+
+      <!-- Input sizes -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Input Sizes</span>
+        <div class="kit-row mt-3 items-end">
+          <fieldset class="fieldset">
+            <label class="label">XS</label>
+            <input type="text" class="input input-xs w-28" placeholder="XS input">
+          </fieldset>
+          <fieldset class="fieldset">
+            <label class="label">SM</label>
+            <input type="text" class="input input-sm w-32" placeholder="SM input">
+          </fieldset>
+          <fieldset class="fieldset">
+            <label class="label">MD (default)</label>
+            <input type="text" class="input w-36" placeholder="MD input">
+          </fieldset>
+          <fieldset class="fieldset">
+            <label class="label">LG</label>
+            <input type="text" class="input input-lg w-40" placeholder="LG input">
+          </fieldset>
+        </div>
+      </div>
+
+      <!-- Select, Textarea, File -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Select, Textarea, File Input</span>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+          <fieldset class="fieldset">
+            <label class="label" for="demo-select">Role Type</label>
+            <select id="demo-select" class="select w-full">
+              <option disabled selected>Select role</option>
+              <option>admin</option>
+              <option>supervisor</option>
+              <option>staff</option>
+            </select>
+          </fieldset>
+          <fieldset class="fieldset">
+            <label class="label" for="demo-station-type">Station Type</label>
+            <select class="select w-full">
+              <option disabled selected>Select type</option>
+              <option>triage</option>
+              <option>verification</option>
+              <option>interview</option>
+              <option>cashier</option>
+              <option>legal</option>
+            </select>
+          </fieldset>
+          <fieldset class="fieldset md:col-span-2">
+            <label class="label" for="demo-ta">Program Description (optional)</label>
+            <textarea id="demo-ta" class="textarea w-full" rows="3" placeholder="Brief description of this program..."></textarea>
+          </fieldset>
+        </div>
+      </div>
+
+      <!-- Checkbox, Radio, Toggle -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Checkbox, Radio, Toggle</span>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-3">
+          <div>
+            <p class="text-sm font-medium mb-2">Checkboxes</p>
+            <label class="flex items-center gap-2 cursor-pointer mb-1">
+              <input type="checkbox" class="checkbox checkbox-primary checkbox-sm" checked>
+              <span class="text-sm">Step is required</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer mb-1">
+              <input type="checkbox" class="checkbox checkbox-primary checkbox-sm">
+              <span class="text-sm">Enable identity verification</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" class="checkbox checkbox-primary checkbox-sm" disabled>
+              <span class="text-sm text-base-content/40">Disabled option</span>
+            </label>
+          </div>
+          <div>
+            <p class="text-sm font-medium mb-2">Radio Buttons</p>
+            <label class="flex items-center gap-2 cursor-pointer mb-1">
+              <input type="radio" name="demo-radio" class="radio radio-primary radio-sm" checked>
+              <span class="text-sm">Regular</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer mb-1">
+              <input type="radio" name="demo-radio" class="radio radio-primary radio-sm">
+              <span class="text-sm">Priority (PWD/Senior)</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="demo-radio" class="radio radio-primary radio-sm">
+              <span class="text-sm">Incomplete Documents</span>
+            </label>
+          </div>
+          <div>
+            <p class="text-sm font-medium mb-2">Toggles</p>
+            <label class="flex items-center gap-2 cursor-pointer mb-1">
+              <input type="checkbox" class="toggle toggle-primary toggle-sm" checked>
+              <span class="text-sm">Program active</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer mb-1">
+              <input type="checkbox" class="toggle toggle-sm">
+              <span class="text-sm">Station accepting clients</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Joined Inputs -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Joined Inputs (Search Bar)</span>
+        <div class="join w-full max-w-md mt-3">
+          <input type="text" class="input join-item w-full" placeholder="Search tokens or sessions...">
+          <button class="btn btn-primary join-item">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            Search
+          </button>
+        </div>
+      </div>
+
+      <!-- PIN Input -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Supervisor PIN Input (6-digit)</span>
+        <p class="text-sm text-base-content/60 mb-3">Used in override and force-end modals for supervisor authentication.</p>
+        <fieldset class="fieldset mt-2">
+          <label class="label">Supervisor PIN <span class="text-error">*</span></label>
+          <div class="join">
+            <input type="password" class="input join-item w-12 text-center text-lg font-mono" maxlength="1" placeholder="&bull;">
+            <input type="password" class="input join-item w-12 text-center text-lg font-mono" maxlength="1" placeholder="&bull;">
+            <input type="password" class="input join-item w-12 text-center text-lg font-mono" maxlength="1" placeholder="&bull;">
+            <input type="password" class="input join-item w-12 text-center text-lg font-mono" maxlength="1" placeholder="&bull;">
+            <input type="password" class="input join-item w-12 text-center text-lg font-mono" maxlength="1" placeholder="&bull;">
+            <input type="password" class="input join-item w-12 text-center text-lg font-mono" maxlength="1" placeholder="&bull;">
+          </div>
+          <p class="text-xs text-base-content/50 mt-1">Enter the 6-digit PIN assigned to a supervisor or admin.</p>
+        </fieldset>
+      </div>
+
+      <!-- Grouped Fieldset -->
+      <div class="kit-card">
+        <span class="kit-label">Grouped Fieldset (New User)</span>
+        <fieldset class="fieldset mt-3 border border-base-300 rounded-lg p-4">
+          <legend class="fieldset-legend">Staff Details</legend>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <fieldset class="fieldset">
+              <label class="label" for="gf-fn">Full Name <span class="text-error">*</span></label>
+              <input id="gf-fn" type="text" class="input w-full" required>
+            </fieldset>
+            <fieldset class="fieldset">
+              <label class="label" for="gf-em">Email <span class="text-error">*</span></label>
+              <input id="gf-em" type="email" class="input w-full" required>
+            </fieldset>
+            <fieldset class="fieldset">
+              <label class="label" for="gf-pw">Password <span class="text-error">*</span></label>
+              <input id="gf-pw" type="password" class="input w-full" required>
+            </fieldset>
+            <fieldset class="fieldset">
+              <label class="label" for="gf-role">Role <span class="text-error">*</span></label>
+              <select id="gf-role" class="select w-full" required>
+                <option disabled selected>Select role</option>
+                <option>admin</option>
+                <option>supervisor</option>
+                <option>staff</option>
+              </select>
+            </fieldset>
+            <fieldset class="fieldset">
+              <label class="label" for="gf-pin">Override PIN (6 digits)</label>
+              <input id="gf-pin" type="password" class="input w-full" maxlength="6" placeholder="Required for supervisor/admin">
+            </fieldset>
+            <fieldset class="fieldset">
+              <label class="label" for="gf-station">Station Assignment</label>
+              <select id="gf-station" class="select w-full">
+                <option>Unassigned</option>
+                <option>Table 1 — Triage</option>
+                <option>Table 2 — Interview</option>
+                <option>Table 3 — Verification</option>
+                <option>Table 4 — Cashier</option>
+                <option>Table 5 — Legal</option>
+              </select>
+            </fieldset>
+          </div>
+        </fieldset>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         10. MODALS
+         ═══════════════════════════════════════════════ -->
+    <section id="modals" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Modals</h2>
+      <p class="text-base-content/60 text-sm mb-6">Dialog overlays. Use the HTML <code class="bg-base-300 px-1 py-0.5 rounded text-xs">&lt;dialog&gt;</code> element.</p>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Modal Triggers</span>
+        <div class="kit-row mt-3">
+          <button class="btn btn-primary" onclick="document.getElementById('modal-confirm').showModal()">Confirm Transfer</button>
+          <button class="btn btn-outline btn-primary" onclick="document.getElementById('modal-pin').showModal()">Supervisor PIN</button>
+          <button class="btn btn-error btn-outline" onclick="document.getElementById('modal-danger').showModal()">Cancel Session</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('modal-info').showModal()">Session Details</button>
+        </div>
+      </div>
+
+      <!-- Confirm Transfer Modal -->
+      <dialog id="modal-confirm" class="modal">
+        <div class="modal-box">
+          <h3 class="text-lg font-bold">Transfer Client?</h3>
+          <p class="py-4 text-base-content/70">Transfer <strong>A1</strong> from <strong>Interview (Table 2)</strong> to <strong>Cashier (Table 4)</strong>? This is the next step in the Regular track.</p>
+          <div class="modal-action">
+            <form method="dialog">
+              <button class="btn btn-ghost">Cancel</button>
+            </form>
+            <button class="btn btn-success" onclick="document.getElementById('modal-confirm').close()">Transfer</button>
+          </div>
+        </div>
+        <form method="dialog" class="modal-backdrop"><button>close</button></form>
+      </dialog>
+
+      <!-- Supervisor PIN Modal -->
+      <dialog id="modal-pin" class="modal">
+        <div class="modal-box">
+          <h3 class="text-lg font-bold">Supervisor Override</h3>
+          <p class="text-sm text-base-content/60 mt-1">Enter a supervisor PIN and reason to override the standard flow.</p>
+          <fieldset class="fieldset mt-4">
+            <label class="label">Target Station <span class="text-error">*</span></label>
+            <select class="select w-full">
+              <option disabled selected>Select station</option>
+              <option>Table 1 — Triage</option>
+              <option>Table 3 — Verification</option>
+              <option>Table 4 — Cashier</option>
+              <option>Table 5 — Legal</option>
+            </select>
+          </fieldset>
+          <fieldset class="fieldset mt-3">
+            <label class="label">Reason <span class="text-error">*</span></label>
+            <textarea class="textarea w-full" rows="2" placeholder="Explain why this override is needed..."></textarea>
+          </fieldset>
+          <fieldset class="fieldset mt-3">
+            <label class="label">Supervisor PIN <span class="text-error">*</span></label>
+            <input type="password" class="input w-full" maxlength="6" placeholder="6-digit PIN">
+          </fieldset>
+          <div class="modal-action">
+            <form method="dialog">
+              <button class="btn btn-ghost">Cancel</button>
+            </form>
+            <button class="btn btn-warning" onclick="document.getElementById('modal-pin').close()">Override</button>
+          </div>
+        </div>
+        <form method="dialog" class="modal-backdrop"><button>close</button></form>
+      </dialog>
+
+      <!-- Danger Modal -->
+      <dialog id="modal-danger" class="modal">
+        <div class="modal-box">
+          <h3 class="text-lg font-bold text-error">Cancel Session</h3>
+          <p class="py-4 text-base-content/70">This will cancel the session for <strong>A1</strong>. The token will be released and the client will need to re-queue. This action is logged.</p>
+          <fieldset class="fieldset">
+            <label class="label">Reason (optional)</label>
+            <textarea class="textarea w-full" rows="2" placeholder="e.g. Client left the premises"></textarea>
+          </fieldset>
+          <div class="modal-action">
+            <form method="dialog">
+              <button class="btn btn-ghost">Keep Session</button>
+            </form>
+            <button class="btn btn-error" onclick="document.getElementById('modal-danger').close()">Cancel Session</button>
+          </div>
+        </div>
+        <form method="dialog" class="modal-backdrop"><button>close</button></form>
+      </dialog>
+
+      <!-- Session Info Modal -->
+      <dialog id="modal-info" class="modal">
+        <div class="modal-box max-w-lg">
+          <h3 class="text-lg font-bold">Session Details</h3>
+          <div class="py-4 space-y-2 text-sm">
+            <div class="flex justify-between border-b border-base-200 pb-2">
+              <span class="text-base-content/60">Alias</span>
+              <span class="font-medium">A1</span>
+            </div>
+            <div class="flex justify-between border-b border-base-200 pb-2">
+              <span class="text-base-content/60">Track</span>
+              <span class="font-medium">Regular</span>
+            </div>
+            <div class="flex justify-between border-b border-base-200 pb-2">
+              <span class="text-base-content/60">Category</span>
+              <span class="badge badge-ghost badge-sm">Regular</span>
+            </div>
+            <div class="flex justify-between border-b border-base-200 pb-2">
+              <span class="text-base-content/60">Current Station</span>
+              <span class="font-medium">Table 2 — Interview</span>
+            </div>
+            <div class="flex justify-between border-b border-base-200 pb-2">
+              <span class="text-base-content/60">Status</span>
+              <span class="badge badge-success badge-sm">serving</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-base-content/60">Started</span>
+              <span class="font-medium">10:35 AM</span>
+            </div>
+          </div>
+          <div class="modal-action">
+            <form method="dialog">
+              <button class="btn btn-ghost">Close</button>
+            </form>
+          </div>
+        </div>
+        <form method="dialog" class="modal-backdrop"><button>close</button></form>
+      </dialog>
+
+      <!-- Modal code reference -->
+      <div class="kit-card">
+        <span class="kit-label">Modal Code Pattern</span>
+        <pre class="bg-base-200 rounded-lg p-3 text-xs mt-2 overflow-x-auto"><code>&lt;!-- Trigger --&gt;
+&lt;button class="btn" onclick="document.getElementById('my-modal').showModal()"&gt;Open&lt;/button&gt;
+
+&lt;!-- Dialog --&gt;
+&lt;dialog id="my-modal" class="modal"&gt;
+  &lt;div class="modal-box"&gt;
+    &lt;h3 class="text-lg font-bold"&gt;Title&lt;/h3&gt;
+    &lt;p class="py-4"&gt;Content here.&lt;/p&gt;
+    &lt;div class="modal-action"&gt;
+      &lt;form method="dialog"&gt;
+        &lt;button class="btn btn-ghost"&gt;Cancel&lt;/button&gt;
+      &lt;/form&gt;
+      &lt;button class="btn btn-primary"&gt;Confirm&lt;/button&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+  &lt;form method="dialog" class="modal-backdrop"&gt;&lt;button&gt;close&lt;/button&gt;&lt;/form&gt;
+&lt;/dialog&gt;</code></pre>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         11. DROPDOWNS
+         ═══════════════════════════════════════════════ -->
+    <section id="dropdowns" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Dropdowns</h2>
+      <p class="text-base-content/60 text-sm mb-6">Context menus and action menus.</p>
+
+      <div class="kit-card">
+        <div class="kit-row">
+          <!-- Basic dropdown -->
+          <div class="dropdown">
+            <div tabindex="0" role="button" class="btn btn-primary btn-sm">Actions</div>
+            <ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box z-10 w-52 p-2 shadow-lg border border-base-300">
+              <li><a>View Session</a></li>
+              <li><a>Transfer Client</a></li>
+              <li><a>Override Flow</a></li>
+              <li class="border-t border-base-200 mt-1 pt-1"><a class="text-error">Cancel Session</a></li>
+            </ul>
+          </div>
+
+          <!-- Dropdown end -->
+          <div class="dropdown dropdown-end">
+            <div tabindex="0" role="button" class="btn btn-ghost btn-sm">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01"/></svg>
+            </div>
+            <ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box z-10 w-48 p-2 shadow-lg border border-base-300">
+              <li><a>Re-queue</a></li>
+              <li><a>Override</a></li>
+              <li><a class="text-error">Mark No-Show</a></li>
+            </ul>
+          </div>
+
+          <!-- Filter dropdown -->
+          <div class="dropdown">
+            <div tabindex="0" role="button" class="btn btn-outline btn-sm">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+              Filter Status
+            </div>
+            <ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box z-10 w-48 p-2 shadow-lg border border-base-300">
+              <li><a>All</a></li>
+              <li><a>Waiting</a></li>
+              <li><a>Serving</a></li>
+              <li><a>Completed</a></li>
+              <li><a>No-Show</a></li>
+              <li><a>Cancelled</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         12. TOOLTIPS
+         ═══════════════════════════════════════════════ -->
+    <section id="tooltips" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Tooltips</h2>
+      <p class="text-base-content/60 text-sm mb-6">Hover hints for icons and truncated text.</p>
+
+      <div class="kit-card">
+        <div class="kit-row">
+          <div class="tooltip" data-tip="View session details">
+            <button class="btn btn-ghost btn-sm">Hover me</button>
+          </div>
+          <div class="tooltip tooltip-primary" data-tip="Primary tooltip">
+            <button class="btn btn-primary btn-sm">Primary</button>
+          </div>
+          <div class="tooltip tooltip-bottom" data-tip="Tooltip on bottom">
+            <button class="btn btn-outline btn-sm">Bottom</button>
+          </div>
+          <div class="tooltip tooltip-left" data-tip="QR scan binds token to session">
+            <button class="btn btn-ghost btn-sm">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         13. LOADING & STATES
+         ═══════════════════════════════════════════════ -->
+    <section id="loading" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Loading &amp; States</h2>
+      <p class="text-base-content/60 text-sm mb-6">Loading indicators and skeleton placeholders.</p>
+
+      <!-- Spinners -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Loading Spinners</span>
+        <div class="kit-row mt-3">
+          <span class="loading loading-spinner loading-xs"></span>
+          <span class="loading loading-spinner loading-sm"></span>
+          <span class="loading loading-spinner loading-md"></span>
+          <span class="loading loading-spinner loading-lg"></span>
+          <span class="loading loading-dots loading-md"></span>
+          <span class="loading loading-ring loading-md"></span>
+        </div>
+      </div>
+
+      <!-- Inline Loading -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Inline Loading Pattern</span>
+        <div class="flex items-center gap-2 mt-3">
+          <span class="loading loading-spinner loading-md"></span>
+          <span>Loading queue data...</span>
+        </div>
+      </div>
+
+      <!-- Skeleton -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Skeleton Loader (Card)</span>
+        <div class="card bg-base-100 shadow mt-3">
+          <div class="card-body space-y-3">
+            <div class="skeleton h-4 w-1/3"></div>
+            <div class="skeleton h-3 w-full"></div>
+            <div class="skeleton h-3 w-5/6"></div>
+            <div class="skeleton h-3 w-4/6"></div>
+            <div class="flex gap-2 pt-2">
+              <div class="skeleton h-8 w-20 rounded-lg"></div>
+              <div class="skeleton h-8 w-16 rounded-lg"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Skeleton Table -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Skeleton Loader (Table)</span>
+        <div class="overflow-x-auto mt-3">
+          <table class="table">
+            <thead>
+              <tr>
+                <th><div class="skeleton h-3 w-20"></div></th>
+                <th><div class="skeleton h-3 w-28"></div></th>
+                <th><div class="skeleton h-3 w-16"></div></th>
+                <th><div class="skeleton h-3 w-12"></div></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><div class="skeleton h-3 w-24"></div></td><td><div class="skeleton h-3 w-32"></div></td><td><div class="skeleton h-3 w-16"></div></td><td><div class="skeleton h-6 w-12 rounded"></div></td></tr>
+              <tr><td><div class="skeleton h-3 w-20"></div></td><td><div class="skeleton h-3 w-28"></div></td><td><div class="skeleton h-3 w-16"></div></td><td><div class="skeleton h-6 w-12 rounded"></div></td></tr>
+              <tr><td><div class="skeleton h-3 w-28"></div></td><td><div class="skeleton h-3 w-24"></div></td><td><div class="skeleton h-3 w-16"></div></td><td><div class="skeleton h-6 w-12 rounded"></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Error State -->
+      <div class="kit-card">
+        <span class="kit-label">Error State</span>
+        <div class="card bg-base-100 shadow mt-3">
+          <div class="card-body items-center text-center py-10">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-error/40 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            <p class="font-medium text-base-content">Something went wrong</p>
+            <p class="text-sm text-base-content/60">Could not load queue data. Please check your connection and try again.</p>
+            <button class="btn btn-sm btn-primary mt-2">Retry</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         14. STEPS & TIMELINE
+         ═══════════════════════════════════════════════ -->
+    <section id="steps" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Steps &amp; Timeline</h2>
+      <p class="text-base-content/60 text-sm mb-6">Progress indicators for the service track flow.</p>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Service Track Steps (Horizontal)</span>
+        <ul class="steps steps-horizontal w-full mt-4 text-sm">
+          <li class="step step-primary">Triage</li>
+          <li class="step step-primary">Verification</li>
+          <li class="step step-primary">Interview</li>
+          <li class="step">Cashier</li>
+        </ul>
+      </div>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Vertical Steps (Session Progress)</span>
+        <ul class="steps steps-vertical mt-3 text-sm">
+          <li class="step step-primary">Bound at Triage <span class="text-xs text-base-content/50 ml-2">10:00 AM</span></li>
+          <li class="step step-primary">Transferred to Verification <span class="text-xs text-base-content/50 ml-2">10:05 AM</span></li>
+          <li class="step step-primary">Serving at Interview <span class="text-xs text-base-content/50 ml-2">10:15 AM</span></li>
+          <li class="step">Cashier</li>
+          <li class="step">Complete</li>
+        </ul>
+      </div>
+
+      <!-- Timeline-style with cards -->
+      <div class="kit-card">
+        <span class="kit-label">Transaction Log Timeline</span>
+        <div class="space-y-3 mt-3 border-l-2 border-base-300 pl-4 ml-2">
+          <div class="relative">
+            <div class="absolute -left-[1.35rem] top-1.5 w-2.5 h-2.5 bg-success rounded-full border-2 border-base-100"></div>
+            <p class="text-sm font-medium">Serving at Interview (Table 2)</p>
+            <p class="text-xs text-base-content/50">Feb 11, 2026 at 10:15 AM &middot; Juan Cruz</p>
+          </div>
+          <div class="relative">
+            <div class="absolute -left-[1.35rem] top-1.5 w-2.5 h-2.5 bg-primary rounded-full border-2 border-base-100"></div>
+            <p class="text-sm font-medium">Transferred to Verification (Table 3)</p>
+            <p class="text-xs text-base-content/50">Feb 11, 2026 at 10:05 AM &middot; Maria Santos</p>
+          </div>
+          <div class="relative">
+            <div class="absolute -left-[1.35rem] top-1.5 w-2.5 h-2.5 bg-info rounded-full border-2 border-base-100"></div>
+            <p class="text-sm font-medium">Token bound at Triage (Table 1)</p>
+            <p class="text-xs text-base-content/50">Feb 11, 2026 at 10:00 AM &middot; Maria Santos</p>
+            <p class="text-xs text-base-content/60 mt-0.5">Category: Regular &middot; Track: Regular</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         15. TABS
+         ═══════════════════════════════════════════════ -->
+    <section id="tabs" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Tabs</h2>
+      <p class="text-base-content/60 text-sm mb-6">Tabbed navigation for switching between views.</p>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Border Tabs</span>
+        <div role="tablist" class="tabs tabs-border mt-3">
+          <a role="tab" class="tab tab-active">Tracks</a>
+          <a role="tab" class="tab">Stations</a>
+          <a role="tab" class="tab">Tokens</a>
+        </div>
+      </div>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Lifted Tabs</span>
+        <div role="tablist" class="tabs tabs-lift mt-3">
+          <a role="tab" class="tab">Overview</a>
+          <a role="tab" class="tab tab-active">Queue</a>
+          <a role="tab" class="tab">History</a>
+        </div>
+      </div>
+
+      <div class="kit-card">
+        <span class="kit-label">Box Tabs</span>
+        <div role="tablist" class="tabs tabs-box mt-3">
+          <a role="tab" class="tab">Active</a>
+          <a role="tab" class="tab tab-active">Completed</a>
+          <a role="tab" class="tab">Cancelled</a>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         16. NAVBAR
+         ═══════════════════════════════════════════════ -->
+    <section id="navbar" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Navbar</h2>
+      <p class="text-base-content/60 text-sm mb-6">Top navigation bar patterns — desktop, branded, and mobile.</p>
+
+      <!-- Simple Navbar -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Simple Navbar (Desktop)</span>
+        <div class="bg-base-100 border border-base-300 rounded-lg mt-3">
+          <nav class="navbar px-4">
+            <div class="navbar-start">
+              <a class="text-lg font-semibold text-base-content">FlexiQueue</a>
+            </div>
+            <div class="navbar-center hidden md:flex">
+              <ul class="menu menu-horizontal px-1 gap-1">
+                <li><a class="text-sm menu-active">Dashboard</a></li>
+                <li><a class="text-sm">Programs</a></li>
+                <li><a class="text-sm">Stations</a></li>
+                <li><a class="text-sm">Reports</a></li>
+              </ul>
+            </div>
+            <div class="navbar-end gap-2">
+              <span class="text-sm text-base-content/60 hidden sm:inline">Admin User</span>
+              <span class="badge badge-primary badge-sm">admin</span>
+              <button class="btn btn-ghost btn-sm">Log out</button>
+            </div>
+          </nav>
+        </div>
+      </div>
+
+      <!-- Mobile Navbar with hamburger -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Mobile Navbar (Hamburger + Drawer Trigger)</span>
+        <div class="bg-base-100 border border-base-300 rounded-lg mt-2">
+          <nav class="navbar px-3 min-h-0 h-14">
+            <div class="navbar-start">
+              <button class="btn btn-ghost btn-sm btn-square" aria-label="Open menu">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+              </button>
+            </div>
+            <div class="navbar-center">
+              <span class="text-base font-semibold">FlexiQueue</span>
+            </div>
+            <div class="navbar-end gap-1.5">
+              <span class="badge badge-accent badge-xs">staff</span>
+              <div class="w-8 h-8 rounded-full bg-primary text-primary-content flex items-center justify-center text-xs font-bold">JC</div>
+            </div>
+          </nav>
+        </div>
+      </div>
+
+      <!-- Branded Navbar -->
+      <div class="kit-card mb-4">
+        <span class="kit-label">Branded Navbar (Primary BG)</span>
+        <div class="rounded-lg mt-3 overflow-hidden">
+          <nav class="navbar bg-primary text-primary-content px-4">
+            <div class="navbar-start">
+              <a class="text-lg font-semibold">FlexiQueue</a>
+            </div>
+            <div class="navbar-center hidden md:flex">
+              <ul class="menu menu-horizontal px-1 gap-1">
+                <li><a class="text-sm text-primary-content/80 hover:text-primary-content">Dashboard</a></li>
+                <li><a class="text-sm text-primary-content/80 hover:text-primary-content">Programs</a></li>
+                <li><a class="text-sm text-primary-content/80 hover:text-primary-content">Stations</a></li>
+                <li><a class="text-sm text-primary-content/80 hover:text-primary-content">Reports</a></li>
+              </ul>
+            </div>
+            <div class="navbar-end">
+              <button class="btn btn-ghost btn-sm text-primary-content">Log out</button>
+            </div>
+          </nav>
+        </div>
+      </div>
+
+      <!-- Full Drawer Sidebar + Mobile Pattern -->
+      <div class="kit-card">
+        <span class="kit-label">Drawer Sidebar + Mobile Toggle (Recommended Pattern)</span>
+        <p class="text-sm text-base-content/60 mb-3">Complete responsive layout: fixed sidebar on <code class="bg-base-200 px-1 rounded text-xs">lg:</code>, off-canvas drawer on mobile.</p>
+        <pre class="bg-base-200 rounded-lg p-3 text-xs overflow-x-auto"><code>&lt;div class="drawer lg:drawer-open"&gt;
+  &lt;input id="main-drawer" type="checkbox" class="drawer-toggle" /&gt;
+
+  &lt;!-- PAGE CONTENT --&gt;
+  &lt;div class="drawer-content flex flex-col bg-base-200 min-h-screen"&gt;
+    &lt;header class="navbar bg-base-100 border-b border-base-300 lg:hidden"&gt;
+      &lt;div class="navbar-start"&gt;
+        &lt;label for="main-drawer" class="btn btn-ghost btn-sm btn-square"&gt;
+          &lt;svg ...hamburger.../&gt;
+        &lt;/label&gt;
+      &lt;/div&gt;
+      &lt;div class="navbar-center"&gt;FlexiQueue&lt;/div&gt;
+      &lt;div class="navbar-end"&gt;&lt;span class="badge"&gt;role&lt;/span&gt;&lt;/div&gt;
+    &lt;/header&gt;
+    &lt;main class="flex-1 p-6 max-w-5xl"&gt;
+      {{-- page content --}}
+    &lt;/main&gt;
+  &lt;/div&gt;
+
+  &lt;!-- SIDEBAR --&gt;
+  &lt;div class="drawer-side z-40"&gt;
+    &lt;label for="main-drawer" class="drawer-overlay"&gt;&lt;/label&gt;
+    &lt;aside class="bg-neutral text-neutral-content w-64 min-h-full flex flex-col"&gt;
+      &lt;div class="p-5 border-b border-neutral-content/10"&gt;
+        &lt;span class="text-lg font-bold"&gt;FlexiQueue&lt;/span&gt;
+      &lt;/div&gt;
+      &lt;nav class="flex-1 p-3"&gt;
+        &lt;ul class="menu"&gt;
+          &lt;li&gt;&lt;a class="menu-active"&gt;Dashboard&lt;/a&gt;&lt;/li&gt;
+          &lt;li&gt;&lt;a&gt;Programs&lt;/a&gt;&lt;/li&gt;
+          &lt;li&gt;&lt;a&gt;Stations&lt;/a&gt;&lt;/li&gt;
+          &lt;li&gt;&lt;a&gt;Tokens&lt;/a&gt;&lt;/li&gt;
+          &lt;li&gt;&lt;a&gt;Users&lt;/a&gt;&lt;/li&gt;
+          &lt;li&gt;&lt;a&gt;Reports&lt;/a&gt;&lt;/li&gt;
+          &lt;li&gt;&lt;a&gt;Audit Log&lt;/a&gt;&lt;/li&gt;
+        &lt;/ul&gt;
+      &lt;/nav&gt;
+      &lt;div class="p-4 border-t border-neutral-content/10"&gt;
+        &lt;!-- user info + logout --&gt;
+      &lt;/div&gt;
+    &lt;/aside&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         17. BREADCRUMBS
+         ═══════════════════════════════════════════════ -->
+    <section id="breadcrumbs" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Breadcrumbs</h2>
+      <p class="text-base-content/60 text-sm mb-6">Hierarchical page navigation.</p>
+
+      <div class="kit-card">
+        <div class="breadcrumbs text-sm">
+          <ul>
+            <li><a>Dashboard</a></li>
+            <li><a>Programs</a></li>
+            <li class="text-base-content/60">Cash Assistance</li>
+          </ul>
+        </div>
+        <div class="breadcrumbs text-sm mt-2">
+          <ul>
+            <li><a>Admin</a></li>
+            <li><a>Stations</a></li>
+            <li><a>Table 2 — Interview</a></li>
+            <li class="text-base-content/60">Edit</li>
+          </ul>
+        </div>
+        <p class="text-xs text-base-content/40 mt-4">Or use the simpler back-link pattern:</p>
+        <a href="#" class="link link-hover text-sm mt-1 inline-block">&larr; Back to Stations</a>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         18. PAGINATION
+         ═══════════════════════════════════════════════ -->
+    <section id="pagination" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Pagination</h2>
+      <p class="text-base-content/60 text-sm mb-6">Page navigation for data tables.</p>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Button Pagination</span>
+        <div class="join mt-3">
+          <button class="join-item btn btn-sm">Previous</button>
+          <button class="join-item btn btn-sm">1</button>
+          <button class="join-item btn btn-sm btn-active">2</button>
+          <button class="join-item btn btn-sm">3</button>
+          <button class="join-item btn btn-sm btn-disabled">...</button>
+          <button class="join-item btn btn-sm">10</button>
+          <button class="join-item btn btn-sm">Next</button>
+        </div>
+      </div>
+
+      <div class="kit-card">
+        <span class="kit-label">Simple Info + Pagination</span>
+        <div class="flex items-center justify-between mt-3">
+          <p class="text-sm text-base-content/60">Page 2 of 10 (50 tokens)</p>
+          <div class="join">
+            <button class="join-item btn btn-sm btn-outline">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <button class="join-item btn btn-sm btn-outline">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         FLEXIQUEUE MOBILE COMPONENTS
+         ═══════════════════════════════════════════════ -->
+    <div class="divider text-base-content/30 text-xs uppercase tracking-wider my-10">FlexiQueue Mobile Components</div>
+
+
+    <!-- ═══════════════════════════════════════════════
+         FQ-1. TOUCH BUTTONS
+         ═══════════════════════════════════════════════ -->
+    <section id="fq-touch" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Touch Buttons</h2>
+      <p class="text-base-content/60 text-sm mb-6">Large touch targets for mobile staff interfaces. Primary actions are 80px tall, category buttons are ~120px.</p>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Primary Action Button (80px)</span>
+        <p class="text-sm text-base-content/60 mb-3">The main action on the Station page — full width, 80px height.</p>
+        <button class="btn btn-success h-20 text-lg w-full font-semibold">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+          SEND TO CASHIER
+        </button>
+        <p class="text-xs text-base-content/50 text-center mt-1">(Table 4 — Next Step)</p>
+      </div>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Complete Session Button (80px)</span>
+        <button class="btn btn-success h-20 text-lg w-full font-semibold">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          COMPLETE SESSION
+        </button>
+      </div>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Call Next Client Button (80px)</span>
+        <button class="btn btn-primary h-20 text-lg w-full font-semibold">CALL NEXT CLIENT</button>
+        <p class="text-xs text-base-content/50 text-center mt-1">B3 is next (Regular &middot; waiting 2m)</p>
+      </div>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Secondary Action Buttons (48px)</span>
+        <div class="grid grid-cols-3 gap-3 mt-2">
+          <button class="btn btn-ghost h-12">Re-queue</button>
+          <button class="btn btn-ghost h-12">Override</button>
+          <button class="btn btn-ghost h-12">Talk</button>
+        </div>
+      </div>
+
+      <div class="kit-card">
+        <span class="kit-label">Category Selection Buttons (~120px)</span>
+        <p class="text-sm text-base-content/60 mb-3">Triage category selection — full width, stacked, tall touch targets.</p>
+        <div class="space-y-4 mt-2">
+          <button class="btn btn-outline h-auto py-4 w-full flex-col items-start text-left">
+            <span class="text-lg font-semibold">Regular</span>
+            <span class="text-sm text-base-content/60 font-normal">Standard Processing</span>
+          </button>
+          <button class="btn btn-accent h-auto py-4 w-full flex-col items-start text-left">
+            <span class="text-lg font-semibold">PWD / Senior / Pregnant</span>
+            <span class="text-sm font-normal opacity-80">Express Lane</span>
+          </button>
+          <button class="btn btn-warning h-auto py-4 w-full flex-col items-start text-left">
+            <span class="text-lg font-semibold">Incomplete Documents</span>
+            <span class="text-sm font-normal opacity-80">Legal Assistance Required</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         FQ-2. ALIAS DISPLAY
+         ═══════════════════════════════════════════════ -->
+    <section id="fq-alias" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Alias Display</h2>
+      <p class="text-base-content/60 text-sm mb-6">Large client alias display for Station and Informant screens.</p>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Now Serving (Station View)</span>
+        <div class="text-center py-6">
+          <p class="text-xs text-base-content/50 uppercase tracking-wider mb-1">Now Serving</p>
+          <p class="text-7xl font-bold">A1</p>
+          <span class="badge badge-accent mt-2">PWD / Senior</span>
+          <p class="text-sm text-base-content/60 mt-2">Started: 10:35 AM &middot; Duration: <span class="font-mono">3:45</span></p>
+        </div>
+      </div>
+
+      <div class="kit-card">
+        <span class="kit-label">Now Serving Grid (Informant Display)</span>
+        <p class="text-sm text-base-content/60 mb-3">2x2 grid showing active sessions across stations.</p>
+        <div class="grid grid-cols-2 gap-3 mt-2">
+          <div class="card bg-base-100 shadow-sm">
+            <div class="card-body items-center text-center py-4">
+              <p class="text-4xl font-bold">A1</p>
+              <p class="text-sm text-base-content/60">Table 2 — Interview</p>
+            </div>
+          </div>
+          <div class="card bg-base-100 shadow-sm">
+            <div class="card-body items-center text-center py-4">
+              <p class="text-4xl font-bold">B3</p>
+              <p class="text-sm text-base-content/60">Table 3 — Verification</p>
+            </div>
+          </div>
+          <div class="card bg-base-100 shadow-sm">
+            <div class="card-body items-center text-center py-4">
+              <p class="text-4xl font-bold">C7</p>
+              <p class="text-sm text-base-content/60">Table 4 — Cashier</p>
+            </div>
+          </div>
+          <div class="card bg-base-100 shadow-sm">
+            <div class="card-body items-center text-center py-4 text-base-content/30">
+              <p class="text-4xl font-bold">—</p>
+              <p class="text-sm">Table 5 — Legal (empty)</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         FQ-3. QUEUE COMPONENTS
+         ═══════════════════════════════════════════════ -->
+    <section id="fq-queue" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Queue Components</h2>
+      <p class="text-base-content/60 text-sm mb-6">Queue preview list, progress bars, and offline banner.</p>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Queue Preview List (Station Page)</span>
+        <p class="text-sm font-medium mb-2">QUEUE (Next 5):</p>
+        <div class="space-y-1">
+          <div class="flex items-center justify-between py-2 px-3 bg-base-200 rounded-lg">
+            <div class="flex items-center gap-3">
+              <span class="font-bold">1. B3</span>
+              <span class="badge badge-ghost badge-xs">Regular</span>
+            </div>
+            <span class="text-xs text-base-content/50">2m</span>
+          </div>
+          <div class="flex items-center justify-between py-2 px-3 bg-base-200 rounded-lg">
+            <div class="flex items-center gap-3">
+              <span class="font-bold">2. C5</span>
+              <span class="badge badge-accent badge-xs">Priority</span>
+            </div>
+            <span class="text-xs text-base-content/50">4m</span>
+          </div>
+          <div class="flex items-center justify-between py-2 px-3 bg-base-200 rounded-lg">
+            <div class="flex items-center gap-3">
+              <span class="font-bold">3. D1</span>
+              <span class="badge badge-ghost badge-xs">Regular</span>
+            </div>
+            <span class="text-xs text-base-content/50">6m</span>
+          </div>
+          <div class="flex items-center justify-between py-2 px-3 bg-base-200 rounded-lg">
+            <div class="flex items-center gap-3">
+              <span class="font-bold">4. E2</span>
+              <span class="badge badge-warning badge-xs">Incomplete</span>
+            </div>
+            <span class="text-xs text-base-content/50">8m</span>
+          </div>
+          <div class="flex items-center justify-between py-2 px-3 bg-base-200 rounded-lg">
+            <div class="flex items-center gap-3">
+              <span class="font-bold">5. F4</span>
+              <span class="badge badge-ghost badge-xs">Regular</span>
+            </div>
+            <span class="text-xs text-base-content/50">10m</span>
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-sm w-full mt-2">View All (12 waiting)</button>
+      </div>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Progress Bar with Label</span>
+        <div class="mt-2">
+          <div class="flex justify-between text-sm mb-1">
+            <span>Step 2 of 3: Interview</span>
+            <span class="text-base-content/50">67%</span>
+          </div>
+          <progress class="progress progress-primary w-full" value="67" max="100"></progress>
+        </div>
+      </div>
+
+      <div class="kit-card mb-4">
+        <span class="kit-label">Offline Banner</span>
+        <div class="alert alert-warning mt-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          <span>Offline — connection lost. Reconnecting...</span>
+        </div>
+      </div>
+
+      <div class="kit-card">
+        <span class="kit-label">No-Show Counter Button</span>
+        <button class="btn btn-ghost w-full mt-2">Mark No-Show (2/3)</button>
+        <p class="text-xs text-base-content/50 text-center mt-1">After 3 attempts, a confirmation modal appears</p>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         FQ-4. STATUS FOOTER
+         ═══════════════════════════════════════════════ -->
+    <section id="fq-footer" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Status Footer</h2>
+      <p class="text-base-content/60 text-sm mb-6">Bottom status bar showing connection, queue count, and clock.</p>
+
+      <div class="kit-card">
+        <span class="kit-label">Status Footer (Online)</span>
+        <div class="bg-base-300 rounded-lg px-4 py-2 flex items-center justify-between text-sm mt-2">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 bg-success rounded-full"></span>
+            <span class="text-base-content/70">Online</span>
+          </div>
+          <span class="text-base-content/60">Queue: 12</span>
+          <span class="text-base-content/60">Processed: 45</span>
+          <span class="text-base-content/60 font-mono">15:34</span>
+        </div>
+        <div class="bg-base-300 rounded-lg px-4 py-2 flex items-center justify-between text-sm mt-2">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 bg-warning rounded-full animate-pulse"></span>
+            <span class="text-warning font-medium">Offline</span>
+          </div>
+          <span class="text-base-content/60">Queue: 12</span>
+          <span class="text-base-content/60">Processed: 45</span>
+          <span class="text-base-content/60 font-mono">15:34</span>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         FQ-5. DOCK (MOBILE BOTTOM NAV)
+         ═══════════════════════════════════════════════ -->
+    <section id="fq-dock" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Dock (Mobile Bottom Nav)</h2>
+      <p class="text-base-content/60 text-sm mb-6">DaisyUI <code class="bg-base-200 px-1 rounded text-xs">dock</code> component for mobile bottom navigation.</p>
+
+      <div class="kit-card">
+        <span class="kit-label">Station Mobile Dock</span>
+        <div class="relative bg-base-200 rounded-lg overflow-hidden" style="height: 180px;">
+          <div class="flex items-center justify-center h-full text-xs text-base-content/30">Page content</div>
+          <div class="absolute bottom-0 left-0 right-0 bg-base-100 border-t border-base-300 flex justify-around py-2">
+            <button class="flex flex-col items-center gap-0.5 text-primary">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4"/></svg>
+              <span class="text-[0.6rem] font-medium">Station</span>
+            </button>
+            <button class="flex flex-col items-center gap-0.5 text-base-content/50">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+              <span class="text-[0.6rem]">Queue</span>
+            </button>
+            <button class="flex flex-col items-center gap-0.5 text-base-content/50">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+              <span class="text-[0.6rem]">Scan</span>
+            </button>
+            <button class="flex flex-col items-center gap-0.5 text-base-content/50">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+              <span class="text-[0.6rem]">Settings</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         LAYOUTS
+         ═══════════════════════════════════════════════ -->
+    <div class="divider text-base-content/30 text-xs uppercase tracking-wider my-10">Layouts</div>
+
+
+    <!-- ═══════════════════════════════════════════════
+         19. LAYOUT: TOP NAVBAR
+         ═══════════════════════════════════════════════ -->
+    <section id="layout-topnav" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Layout: Top Navbar</h2>
+      <p class="text-base-content/60 text-sm mb-6">Simple top nav layout — used for public pages (login, informant display).</p>
+
+      <div class="border border-base-300 rounded-xl overflow-hidden bg-base-200 shadow-sm">
+        <nav class="bg-primary text-primary-content px-4 py-3 flex items-center justify-between">
+          <span class="font-semibold text-sm">FlexiQueue</span>
+          <span class="text-xs opacity-80">Cash Assistance Distribution</span>
+        </nav>
+        <div class="max-w-2xl mx-auto px-4 py-6">
+          <div class="skeleton h-5 w-1/4 mb-4"></div>
+          <div class="card bg-base-100 shadow-sm">
+            <div class="card-body">
+              <div class="skeleton h-3 w-full mb-2"></div>
+              <div class="skeleton h-3 w-5/6 mb-2"></div>
+              <div class="skeleton h-3 w-4/6"></div>
+            </div>
+          </div>
+        </div>
+        <div class="border-t border-base-300 bg-base-100 px-4 py-2 text-center text-[0.625rem] text-base-content/40">
+          FlexiQueue &middot; Phase 1
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         20. LAYOUT: SIDEBAR
+         ═══════════════════════════════════════════════ -->
+    <section id="layout-sidebar" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Layout: Sidebar</h2>
+      <p class="text-base-content/60 text-sm mb-6">Admin dashboard layout with sidebar navigation (AdminLayout.svelte).</p>
+
+      <div class="border border-base-300 rounded-xl overflow-hidden bg-base-200 shadow-sm">
+        <div class="flex" style="min-height: 320px;">
+          <aside class="w-44 bg-neutral text-neutral-content flex flex-col py-4 px-3 shrink-0">
+            <div class="font-bold text-sm mb-4 px-1">FlexiQueue</div>
+            <nav class="space-y-0.5 text-xs flex-1">
+              <a href="#" class="block px-2 py-1.5 rounded bg-neutral-content/10 font-medium">Dashboard</a>
+              <a href="#" class="block px-2 py-1.5 rounded hover:bg-neutral-content/5 text-neutral-content/70">Programs</a>
+              <a href="#" class="block px-2 py-1.5 rounded hover:bg-neutral-content/5 text-neutral-content/70">Stations</a>
+              <a href="#" class="block px-2 py-1.5 rounded hover:bg-neutral-content/5 text-neutral-content/70">Tokens</a>
+              <a href="#" class="block px-2 py-1.5 rounded hover:bg-neutral-content/5 text-neutral-content/70">Users</a>
+              <a href="#" class="block px-2 py-1.5 rounded hover:bg-neutral-content/5 text-neutral-content/70">Reports</a>
+              <a href="#" class="block px-2 py-1.5 rounded hover:bg-neutral-content/5 text-neutral-content/70">Audit Log</a>
+            </nav>
+            <div class="text-[0.6rem] text-neutral-content/40 mt-4 px-1">Phase 1</div>
+          </aside>
+          <div class="flex-1 p-4">
+            <div class="flex items-center justify-between mb-4">
+              <div class="skeleton h-5 w-1/4"></div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-base-content/50">admin@mswdo.gov.ph</span>
+                <span class="badge badge-primary badge-xs">admin</span>
+              </div>
+            </div>
+            <div class="grid grid-cols-3 gap-2 mb-4">
+              <div class="card bg-base-100 shadow-sm card-sm">
+                <div class="card-body py-2 px-3">
+                  <div class="text-[0.625rem] text-base-content/50 uppercase">Active</div>
+                  <div class="text-lg font-bold text-primary">42</div>
+                </div>
+              </div>
+              <div class="card bg-base-100 shadow-sm card-sm">
+                <div class="card-body py-2 px-3">
+                  <div class="text-[0.625rem] text-base-content/50 uppercase">Waiting</div>
+                  <div class="text-lg font-bold">12</div>
+                </div>
+              </div>
+              <div class="card bg-base-100 shadow-sm card-sm">
+                <div class="card-body py-2 px-3">
+                  <div class="text-[0.625rem] text-base-content/50 uppercase">Completed</div>
+                  <div class="text-lg font-bold text-success">87</div>
+                </div>
+              </div>
+            </div>
+            <div class="card bg-base-100 shadow-sm">
+              <div class="card-body">
+                <div class="skeleton h-3 w-full mb-2"></div>
+                <div class="skeleton h-3 w-5/6 mb-2"></div>
+                <div class="skeleton h-3 w-4/6"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════════
+         FULL PAGE PATTERNS
+         ═══════════════════════════════════════════════════ -->
+    <div class="divider text-base-content/30 text-xs uppercase tracking-wider my-10">Full Page Patterns</div>
+
+
+    <!-- ═══════════════════════════════════════════════
+         PATTERN: LOGIN PAGE
+         ═══════════════════════════════════════════════ -->
+    <section id="pattern-login" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Pattern: Login Page</h2>
+      <p class="text-base-content/60 text-sm mb-6">Standalone authentication page with centered card.</p>
+
+      <div class="border border-base-300 rounded-xl overflow-hidden bg-base-200 shadow-sm">
+        <nav class="bg-primary text-primary-content px-4 py-3 flex items-center justify-between">
+          <span class="font-semibold text-sm">FlexiQueue</span>
+          <span class="text-xs opacity-80">Queue Management System</span>
+        </nav>
+        <div class="flex items-start justify-center px-4 py-10">
+          <div class="w-full max-w-sm bg-base-100 border border-base-300 rounded-xl p-6 shadow-sm">
+            <h1 class="text-xl font-bold text-base-content mb-5">Sign in</h1>
+            <form class="space-y-4">
+              <fieldset class="fieldset">
+                <label class="label" for="login-email">Email</label>
+                <input id="login-email" type="email" class="input w-full" placeholder="you@mswdo.gov.ph" required>
+              </fieldset>
+              <fieldset class="fieldset">
+                <label class="label" for="login-pass">Password</label>
+                <input id="login-pass" type="password" class="input w-full" placeholder="••••••••" required>
+              </fieldset>
+              <button type="button" class="btn btn-primary w-full">Sign in</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         PATTERN: ADMIN DASHBOARD
+         ═══════════════════════════════════════════════ -->
+    <section id="pattern-dashboard" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Pattern: Admin Dashboard</h2>
+      <p class="text-base-content/60 text-sm mb-6">Dashboard with stats, active program, and station status.</p>
+
+      <div class="border border-base-300 rounded-xl overflow-hidden bg-base-200 shadow-sm">
+        <nav class="bg-base-100 border-b border-base-300 px-4 py-3 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="font-semibold text-base-content text-sm">FlexiQueue</span>
+            <span class="text-xs text-base-content/60">Admin User</span>
+            <span class="badge badge-primary badge-xs">admin</span>
+          </div>
+          <div class="flex items-center gap-2 text-xs">
+            <a href="#" class="link link-hover text-base-content/60 font-medium">Dashboard</a>
+            <a href="#" class="link link-hover text-base-content/60">Programs</a>
+            <a href="#" class="link link-hover text-base-content/60">Stations</a>
+            <a href="#" class="link link-hover text-base-content/60">Reports</a>
+            <button class="btn btn-ghost btn-xs">Log out</button>
+          </div>
+        </nav>
+        <div class="max-w-3xl mx-auto px-4 py-6 space-y-5">
+          <h1 class="text-xl font-bold">Admin Dashboard</h1>
+
+          <!-- Stats -->
+          <div class="stats stats-vertical sm:stats-horizontal shadow bg-base-100 w-full">
+            <div class="stat py-3 px-4">
+              <div class="stat-title text-xs">Active Sessions</div>
+              <div class="stat-value text-primary text-2xl">42</div>
+              <div class="stat-desc text-xs">12 waiting, 5 serving</div>
+            </div>
+            <div class="stat py-3 px-4">
+              <div class="stat-title text-xs">Stations Online</div>
+              <div class="stat-value text-2xl text-success">5</div>
+              <div class="stat-desc text-xs">All staffed</div>
+            </div>
+            <div class="stat py-3 px-4">
+              <div class="stat-title text-xs">Completed Today</div>
+              <div class="stat-value text-2xl">87</div>
+              <div class="stat-desc text-xs text-success">+23% vs yesterday</div>
+            </div>
+          </div>
+
+          <!-- Active Program -->
+          <div class="card bg-base-100 shadow">
+            <div class="card-body py-4 px-5">
+              <h2 class="card-title text-sm">ACTIVE PROGRAM: Cash Assistance Distribution</h2>
+              <div class="space-y-1 text-sm text-base-content/80 mt-1">
+                <p>Track A (Regular): 15 clients</p>
+                <p>Track B (Priority): 8 clients <span class="badge badge-accent badge-xs">express</span></p>
+                <p>Track C (Incomplete): 4 clients <span class="badge badge-warning badge-xs">legal</span></p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Station Status Table -->
+          <div class="card bg-base-100 shadow">
+            <div class="card-body py-4 px-5">
+              <h2 class="card-title text-sm mb-2">Station Status</h2>
+              <div class="overflow-x-auto">
+                <table class="table table-sm">
+                  <thead>
+                    <tr><th>Station</th><th>Staff</th><th>Queue</th><th>Current</th><th>Status</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Table 1 — Triage</td><td>Maria Santos</td><td>—</td><td>—</td><td><span class="badge badge-success badge-xs">active</span></td></tr>
+                    <tr><td>Table 2 — Interview</td><td>Juan Cruz</td><td>3</td><td>A1</td><td><span class="badge badge-success badge-xs">active</span></td></tr>
+                    <tr><td>Table 3 — Verification</td><td>Ana Reyes</td><td>2</td><td>B3</td><td><span class="badge badge-success badge-xs">active</span></td></tr>
+                    <tr><td>Table 4 — Cashier</td><td>Pedro Garcia</td><td>1</td><td>C7</td><td><span class="badge badge-success badge-xs">active</span></td></tr>
+                    <tr><td>Table 5 — Legal</td><td>—</td><td>0</td><td>—</td><td><span class="badge badge-warning badge-xs">no staff</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         PATTERN: DATA TABLE PAGE
+         ═══════════════════════════════════════════════ -->
+    <section id="pattern-data-table" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Pattern: Data Table Page</h2>
+      <p class="text-base-content/60 text-sm mb-6">Index page with filters, table, and pagination (Token management).</p>
+
+      <div class="border border-base-300 rounded-xl overflow-hidden bg-base-200 shadow-sm">
+        <div class="max-w-3xl mx-auto px-4 py-6 space-y-4">
+          <div class="flex items-center justify-between">
+            <h1 class="text-xl font-bold">Tokens</h1>
+            <button class="btn btn-primary btn-sm">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              Generate Batch
+            </button>
+          </div>
+          <div class="flex flex-wrap items-center gap-3">
+            <fieldset class="fieldset">
+              <label class="label text-xs">Status</label>
+              <select class="select select-sm w-44">
+                <option>All</option>
+                <option selected>Available</option>
+                <option>In Use</option>
+                <option>Lost</option>
+                <option>Damaged</option>
+              </select>
+            </fieldset>
+            <fieldset class="fieldset">
+              <label class="label text-xs">Search</label>
+              <input type="text" class="input input-sm w-52" placeholder="Token ID or hash...">
+            </fieldset>
+          </div>
+          <div class="overflow-x-auto card bg-base-100 shadow-sm">
+            <table class="table text-sm">
+              <thead>
+                <tr><th>Physical ID</th><th>QR Hash</th><th>Status</th><th>Session</th><th></th></tr>
+              </thead>
+              <tbody>
+                <tr class="hover:bg-base-200/50">
+                  <td class="font-medium">A1</td>
+                  <td><code class="text-xs">a3f7c8...e2d1</code></td>
+                  <td><span class="badge badge-success badge-sm">available</span></td>
+                  <td class="text-base-content/60">—</td>
+                  <td><a href="#" class="btn btn-ghost btn-xs">View</a></td>
+                </tr>
+                <tr class="hover:bg-base-200/50">
+                  <td class="font-medium">A2</td>
+                  <td><code class="text-xs">b8e2a1...f4c9</code></td>
+                  <td><span class="badge badge-info badge-sm">in_use</span></td>
+                  <td class="text-base-content/60">Session #102</td>
+                  <td><a href="#" class="btn btn-ghost btn-xs">View</a></td>
+                </tr>
+                <tr class="hover:bg-base-200/50">
+                  <td class="font-medium">A3</td>
+                  <td><code class="text-xs">c1d5f7...a8b2</code></td>
+                  <td><span class="badge badge-error badge-sm">lost</span></td>
+                  <td class="text-base-content/60">—</td>
+                  <td><a href="#" class="btn btn-ghost btn-xs">View</a></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="flex items-center justify-between">
+            <p class="text-xs text-base-content/50">Page 1 of 5 (50 tokens)</p>
+            <div class="join">
+              <button class="join-item btn btn-xs btn-disabled">Prev</button>
+              <button class="join-item btn btn-xs btn-active">1</button>
+              <button class="join-item btn btn-xs">2</button>
+              <button class="join-item btn btn-xs">3</button>
+              <button class="join-item btn btn-xs">Next</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         PATTERN: FORM PAGE
+         ═══════════════════════════════════════════════ -->
+    <section id="pattern-form-page" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Pattern: Form Page</h2>
+      <p class="text-base-content/60 text-sm mb-6">Create/Edit form inside a card with back navigation (New Station).</p>
+
+      <div class="border border-base-300 rounded-xl overflow-hidden bg-base-200 shadow-sm">
+        <div class="max-w-xl mx-auto px-4 py-6">
+          <div class="mb-5">
+            <a href="#" class="link link-hover text-xs">&larr; Stations</a>
+            <h1 class="text-xl font-bold mt-1">New Station</h1>
+          </div>
+          <div class="card bg-base-100 shadow-sm">
+            <div class="card-body space-y-4">
+              <fieldset class="fieldset">
+                <label class="label">Station Name <span class="text-error">*</span></label>
+                <input type="text" class="input w-full" placeholder="e.g. Table 2 — Interview" required>
+              </fieldset>
+              <fieldset class="fieldset">
+                <label class="label">Role Type <span class="text-error">*</span></label>
+                <select class="select w-full" required>
+                  <option disabled selected>Select type</option>
+                  <option>triage</option>
+                  <option>verification</option>
+                  <option>interview</option>
+                  <option>cashier</option>
+                  <option>legal</option>
+                </select>
+              </fieldset>
+              <fieldset class="fieldset">
+                <label class="label">Capacity</label>
+                <input type="number" class="input w-full" value="1" min="1" max="5">
+              </fieldset>
+              <fieldset class="fieldset">
+                <label class="label">Description (optional)</label>
+                <textarea class="textarea w-full" rows="3" placeholder="Brief description of this station..."></textarea>
+              </fieldset>
+              <div class="flex gap-2 pt-2">
+                <button class="btn btn-primary">Create Station</button>
+                <a href="#" class="btn btn-ghost">Cancel</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         PATTERN: DETAIL PAGE
+         ═══════════════════════════════════════════════ -->
+    <section id="pattern-detail" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Pattern: Detail Page</h2>
+      <p class="text-base-content/60 text-sm mb-6">Single-record view — Session detail with timeline and actions.</p>
+
+      <div class="border border-base-300 rounded-xl overflow-hidden bg-base-200 shadow-sm">
+        <div class="max-w-2xl mx-auto px-4 py-6 space-y-4">
+          <div>
+            <a href="#" class="link link-hover text-xs">&larr; Sessions</a>
+            <div class="flex items-center justify-between mt-1">
+              <h1 class="text-xl font-bold">Session: A1</h1>
+              <span class="badge badge-success">serving</span>
+            </div>
+          </div>
+          <div class="card bg-base-100 shadow-sm">
+            <div class="card-body">
+              <h2 class="card-title text-sm font-semibold mb-2">Session Information</h2>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                <div class="flex justify-between sm:block">
+                  <span class="text-base-content/50 text-xs">Alias</span>
+                  <span class="font-medium sm:block">A1</span>
+                </div>
+                <div class="flex justify-between sm:block">
+                  <span class="text-base-content/50 text-xs">Track</span>
+                  <span class="font-medium sm:block">Regular</span>
+                </div>
+                <div class="flex justify-between sm:block">
+                  <span class="text-base-content/50 text-xs">Category</span>
+                  <span class="badge badge-ghost badge-sm sm:block">Regular</span>
+                </div>
+                <div class="flex justify-between sm:block">
+                  <span class="text-base-content/50 text-xs">Current Station</span>
+                  <span class="font-medium sm:block">Table 2 — Interview</span>
+                </div>
+                <div class="flex justify-between sm:block">
+                  <span class="text-base-content/50 text-xs">Started</span>
+                  <span class="font-medium sm:block">February 11, 2026 at 10:00 AM</span>
+                </div>
+                <div class="flex justify-between sm:block">
+                  <span class="text-base-content/50 text-xs">Assigned Staff</span>
+                  <span class="font-medium sm:block">Juan Cruz</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card bg-base-100 shadow-sm">
+            <div class="card-body">
+              <h2 class="card-title text-sm font-semibold mb-2">Actions</h2>
+              <div class="flex flex-wrap gap-2">
+                <button class="btn btn-success btn-sm">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  Transfer to Next
+                </button>
+                <button class="btn btn-warning btn-sm">Override</button>
+                <button class="btn btn-error btn-sm btn-outline">Cancel Session</button>
+              </div>
+            </div>
+          </div>
+          <div class="card bg-base-100 shadow-sm">
+            <div class="card-body">
+              <h2 class="card-title text-sm font-semibold mb-2">Transaction Log</h2>
+              <div class="space-y-3 border-l-2 border-base-300 pl-4 ml-1">
+                <div class="relative">
+                  <div class="absolute -left-[1.35rem] top-1.5 w-2.5 h-2.5 bg-success rounded-full border-2 border-base-100"></div>
+                  <p class="text-xs font-medium">Serving at Interview (Table 2)</p>
+                  <p class="text-[0.625rem] text-base-content/50">10:15 AM &middot; Juan Cruz</p>
+                </div>
+                <div class="relative">
+                  <div class="absolute -left-[1.35rem] top-1.5 w-2.5 h-2.5 bg-primary rounded-full border-2 border-base-100"></div>
+                  <p class="text-xs font-medium">Transferred to Verification (Table 3)</p>
+                  <p class="text-[0.625rem] text-base-content/50">10:05 AM &middot; Maria Santos</p>
+                </div>
+                <div class="relative">
+                  <div class="absolute -left-[1.35rem] top-1.5 w-2.5 h-2.5 bg-info rounded-full border-2 border-base-100"></div>
+                  <p class="text-xs font-medium">Token bound at Triage</p>
+                  <p class="text-[0.625rem] text-base-content/50">10:00 AM &middot; Maria Santos &middot; Category: Regular</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         PATTERN: TRIAGE INTERFACE
+         ═══════════════════════════════════════════════ -->
+    <section id="pattern-triage" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Pattern: Triage Interface</h2>
+      <p class="text-base-content/60 text-sm mb-6">Mobile (375px) — Reception staff scans QR, selects category, binds client.</p>
+
+      <div class="border border-base-300 rounded-xl overflow-hidden bg-base-200 shadow-sm mx-auto" style="max-width: 375px;">
+        <!-- Header -->
+        <nav class="bg-primary text-primary-content px-4 py-3 flex items-center justify-between">
+          <span class="font-semibold text-sm">FlexiQueue | Triage</span>
+          <div class="flex items-center gap-2">
+            <span class="text-xs opacity-80">Maria S.</span>
+            <button class="btn btn-ghost btn-xs text-primary-content">Logout</button>
+          </div>
+        </nav>
+
+        <div class="p-4 space-y-4">
+          <!-- Scanned Token -->
+          <div class="text-center py-4">
+            <p class="text-sm text-base-content/60">TOKEN SCANNED</p>
+            <p class="text-4xl font-bold mt-1">A1</p>
+          </div>
+
+          <!-- Category Selection -->
+          <div>
+            <p class="text-sm font-medium mb-3">Select Client Category:</p>
+            <div class="space-y-3">
+              <button class="btn btn-outline h-auto py-3 w-full flex-col items-start text-left border-2 border-primary bg-primary/5">
+                <span class="text-base font-semibold">Regular</span>
+                <span class="text-xs text-base-content/60 font-normal">Standard Processing</span>
+              </button>
+              <button class="btn btn-accent h-auto py-3 w-full flex-col items-start text-left opacity-60">
+                <span class="text-base font-semibold">PWD / Senior / Pregnant</span>
+                <span class="text-xs font-normal opacity-80">Express Lane</span>
+              </button>
+              <button class="btn btn-warning h-auto py-3 w-full flex-col items-start text-left opacity-60">
+                <span class="text-base font-semibold">Incomplete Documents</span>
+                <span class="text-xs font-normal opacity-80">Legal Assistance Required</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex gap-3 pt-2">
+            <button class="btn btn-ghost flex-1">Cancel</button>
+            <button class="btn btn-success flex-1">Confirm</button>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="bg-base-300 px-4 py-2 flex items-center justify-between text-xs">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 bg-success rounded-full"></span>
+            <span>Online</span>
+          </div>
+          <span>Queue: 12</span>
+          <span>Processed: 45</span>
+          <span class="font-mono">15:34</span>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         PATTERN: STATION INTERFACE
+         ═══════════════════════════════════════════════ -->
+    <section id="pattern-station" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Pattern: Station Interface</h2>
+      <p class="text-base-content/60 text-sm mb-6">Mobile (375px) — Staff processes clients, calls next, routes flow.</p>
+
+      <div class="border border-base-300 rounded-xl overflow-hidden bg-base-200 shadow-sm mx-auto" style="max-width: 375px;">
+        <!-- Header -->
+        <nav class="bg-base-100 border-b border-base-300 px-4 py-3 flex items-center justify-between">
+          <div>
+            <p class="font-semibold text-sm">Table 2 — Interview</p>
+            <p class="text-xs text-base-content/50">Juan Cruz</p>
+          </div>
+          <button class="btn btn-ghost btn-sm btn-square">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+        </nav>
+
+        <div class="p-4 space-y-4">
+          <!-- Current Client -->
+          <div class="card bg-base-100 shadow">
+            <div class="card-body items-center text-center py-4">
+              <p class="text-xs text-base-content/50 uppercase tracking-wider">Now Serving</p>
+              <p class="text-6xl font-bold">A1</p>
+              <span class="badge badge-accent">PWD / Senior</span>
+              <p class="text-xs text-base-content/60 mt-1">Started: 10:35 AM &middot; Duration: <span class="font-mono">3:45</span></p>
+              <progress class="progress progress-primary w-full mt-2" value="67" max="100"></progress>
+              <p class="text-xs text-base-content/50">Step 2 of 3: Interview</p>
+            </div>
+          </div>
+
+          <!-- Primary Action -->
+          <button class="btn btn-success h-20 text-lg w-full font-semibold">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            SEND TO CASHIER
+          </button>
+          <p class="text-xs text-base-content/50 text-center -mt-2">(Table 4 — Next Step)</p>
+
+          <!-- Secondary Actions -->
+          <div class="grid grid-cols-3 gap-2">
+            <button class="btn btn-ghost btn-sm h-11">Re-queue</button>
+            <button class="btn btn-ghost btn-sm h-11">Override</button>
+            <button class="btn btn-ghost btn-sm h-11">Talk</button>
+          </div>
+
+          <!-- No-Show -->
+          <button class="btn btn-ghost btn-sm w-full text-base-content/60">Mark No-Show (0/3)</button>
+
+          <!-- Queue Preview -->
+          <div>
+            <p class="text-sm font-medium mb-2">QUEUE (Next 3):</p>
+            <div class="space-y-1 text-sm">
+              <div class="flex items-center justify-between py-1.5 px-3 bg-base-200 rounded">
+                <span class="font-medium">1. B3</span>
+                <div class="flex items-center gap-2">
+                  <span class="badge badge-ghost badge-xs">Regular</span>
+                  <span class="text-xs text-base-content/50">2m</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between py-1.5 px-3 bg-base-200 rounded">
+                <span class="font-medium">2. C5</span>
+                <div class="flex items-center gap-2">
+                  <span class="badge badge-accent badge-xs">Priority</span>
+                  <span class="text-xs text-base-content/50">4m</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between py-1.5 px-3 bg-base-200 rounded">
+                <span class="font-medium">3. D1</span>
+                <div class="flex items-center gap-2">
+                  <span class="badge badge-ghost badge-xs">Regular</span>
+                  <span class="text-xs text-base-content/50">6m</span>
+                </div>
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-xs w-full mt-1">View All (12 waiting)</button>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="bg-base-300 px-4 py-2 flex items-center justify-between text-xs">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 bg-success rounded-full"></span>
+            <span>Online</span>
+          </div>
+          <span>Queue: 12</span>
+          <span>Served: 45</span>
+          <span class="font-mono">15:34</span>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         PATTERN: INFORMANT DISPLAY
+         ═══════════════════════════════════════════════ -->
+    <section id="pattern-informant" class="kit-section mb-14">
+      <h2 class="text-2xl font-bold mb-1">Pattern: Informant Display</h2>
+      <p class="text-base-content/60 text-sm mb-6">Kiosk/tablet (768px) — Public-facing display showing now-serving and waiting list.</p>
+
+      <div class="border border-base-300 rounded-xl overflow-hidden bg-base-200 shadow-sm mx-auto" style="max-width: 768px;">
+        <!-- Header -->
+        <nav class="bg-primary text-primary-content px-6 py-4 flex items-center justify-between">
+          <div>
+            <span class="text-lg font-bold">FlexiQueue</span>
+            <span class="text-sm opacity-80 ml-3">Cash Assistance Distribution</span>
+          </div>
+          <span class="text-sm opacity-80">Feb 11, 2026</span>
+        </nav>
+
+        <div class="p-6 space-y-6">
+          <!-- Check Status Button -->
+          <div class="text-center">
+            <button class="btn btn-primary btn-lg">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+              CHECK YOUR STATUS
+            </button>
+          </div>
+
+          <!-- Now Serving -->
+          <div>
+            <h2 class="text-xl font-bold mb-3">NOW SERVING</h2>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="card bg-base-100 shadow">
+                <div class="card-body items-center text-center py-6">
+                  <p class="text-5xl font-bold text-primary">A1</p>
+                  <p class="text-sm text-base-content/60 mt-1">Table 2 — Interview</p>
+                </div>
+              </div>
+              <div class="card bg-base-100 shadow">
+                <div class="card-body items-center text-center py-6">
+                  <p class="text-5xl font-bold text-primary">B3</p>
+                  <p class="text-sm text-base-content/60 mt-1">Table 3 — Verification</p>
+                </div>
+              </div>
+              <div class="card bg-base-100 shadow">
+                <div class="card-body items-center text-center py-6">
+                  <p class="text-5xl font-bold text-primary">C7</p>
+                  <p class="text-sm text-base-content/60 mt-1">Table 4 — Cashier</p>
+                </div>
+              </div>
+              <div class="card bg-base-100 shadow">
+                <div class="card-body items-center text-center py-6 text-base-content/30">
+                  <p class="text-5xl font-bold">—</p>
+                  <p class="text-sm mt-1">Table 5 — Legal (empty)</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Currently Waiting -->
+          <div>
+            <h2 class="text-xl font-bold mb-3">CURRENTLY WAITING</h2>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="card bg-base-100 shadow-sm card-sm">
+                <div class="card-body py-3 px-4">
+                  <p class="text-sm font-semibold">Table 2 — Interview</p>
+                  <p class="text-base-content/60 text-sm">D1, E2, F4</p>
+                  <p class="text-xs text-base-content/50 mt-1">3 waiting</p>
+                </div>
+              </div>
+              <div class="card bg-base-100 shadow-sm card-sm">
+                <div class="card-body py-3 px-4">
+                  <p class="text-sm font-semibold">Table 3 — Verification</p>
+                  <p class="text-base-content/60 text-sm">G2, H5</p>
+                  <p class="text-xs text-base-content/50 mt-1">2 waiting</p>
+                </div>
+              </div>
+              <div class="card bg-base-100 shadow-sm card-sm">
+                <div class="card-body py-3 px-4">
+                  <p class="text-sm font-semibold">Table 4 — Cashier</p>
+                  <p class="text-base-content/60 text-sm">I3</p>
+                  <p class="text-xs text-base-content/50 mt-1">1 waiting</p>
+                </div>
+              </div>
+              <div class="card bg-base-100 shadow-sm card-sm">
+                <div class="card-body py-3 px-4">
+                  <p class="text-sm font-semibold">Table 5 — Legal</p>
+                  <p class="text-base-content/60 text-sm">—</p>
+                  <p class="text-xs text-base-content/50 mt-1">0 waiting</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Total -->
+          <div class="text-center py-4">
+            <p class="text-3xl font-bold text-primary">12</p>
+            <p class="text-sm text-base-content/60">Total in Queue</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════
+         FOOTER
+         ═══════════════════════════════════════════════ -->
+    <footer class="mt-16 pb-10 text-center">
+      <p class="text-sm text-base-content/40">FlexiQueue UI Kit &middot; DaisyUI 5 + Tailwind CSS 4</p>
+      <p class="text-xs text-base-content/30 mt-1">Brand: <code class="bg-base-300 px-1 rounded">#2563EB</code> &middot; Theme: Light &middot; Font: Inter</p>
+    </footer>
+
+  </main>
+
+  <!-- Scroll-spy for sidebar (lightweight) -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const links = document.querySelectorAll('.sidebar-link');
+      const sections = [];
+      links.forEach(link => {
+        const id = link.getAttribute('href')?.replace('#', '');
+        if (id) {
+          const el = document.getElementById(id);
+          if (el) sections.push({ id, el, link });
+        }
+      });
+
+      const observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          const match = sections.find(s => s.id === entry.target.id);
+          if (match) {
+            if (entry.isIntersecting) {
+              links.forEach(l => l.classList.remove('active'));
+              match.link.classList.add('active');
+            }
+          }
+        });
+      }, { rootMargin: '-10% 0px -80% 0px' });
+
+      sections.forEach(s => observer.observe(s.el));
+    });
+  </script>
+
+</body>
+</html>
