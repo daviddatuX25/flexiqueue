@@ -1,0 +1,73 @@
+---
+description: Local development environment standards using Laravel Sail (Docker) for PHP, Artisan, Composer, and MariaDB
+alwaysApply: true
+---
+
+# DEVELOPMENT ENVIRONMENT
+
+## Default: Laravel Sail (Docker)
+
+FlexiQueue uses **Laravel Sail** as the standard local development environment. Sail provides a consistent, reproducible stack via Docker containers.
+
+### Stack
+
+- **PHP**: 8.2+
+- **Database**: MariaDB 10.6+ (selected during `sail:install`)
+- **Node.js**: 20+ (in Sail container or on host for Vite — see setup doc)
+- **Real-time**: Laravel Reverb (added to Sail when needed)
+
+### Standard Commands
+
+When suggesting terminal commands, prefer Sail-based commands:
+
+```bash
+# Start containers
+./vendor/bin/sail up -d
+
+# Artisan commands
+./vendor/bin/sail artisan migrate
+./vendor/bin/sail artisan key:generate
+./vendor/bin/sail artisan db:seed
+
+# Composer
+./vendor/bin/sail composer install
+./vendor/bin/sail composer require package/name
+
+# NPM (two options — see setup doc for details)
+./vendor/bin/sail npm install
+./vendor/bin/sail npm run dev    # Option 1: in container (requires Vite config)
+npm run dev                       # Option 2: on host (WSL/Windows users)
+
+# Queue, Reverb (when added)
+./vendor/bin/sail artisan queue:work
+./vendor/bin/sail artisan reverb:start
+```
+
+**Alias tip**: Users can alias `sail='./vendor/bin/sail'` in their shell for shorter commands.
+
+### When to Use Sail
+
+- **Always** for PHP, Artisan, Composer, database operations (migrations, seeders), and queue/Reverb.
+- **Respect user choice**: If the user explicitly runs bare `php artisan` or `composer`, don't override — they may be using bare metal intentionally.
+- **NPM/Vite**: Suggest Sail by default; mention the host option for WSL/Windows users experiencing file watch issues (see setup doc).
+
+### Setup Documentation
+
+Point users to **[docs/SETUP-BD-001.md](../../../docs/SETUP-BD-001.md)** for:
+
+- First-time Sail installation (`php artisan sail:install` with **mariadb**)
+- Daily workflow (starting containers, running migrations, npm)
+- Bare metal alternative (Option B) for those who prefer local PHP/Node/MariaDB
+
+### Not Enforced In
+
+- **CI/CD**: Continuous integration can use any PHP/Node/MariaDB image; this rule is for local development only.
+- **Production**: Sail is a development tool; production uses standard Laravel deployment (see `docs/architecture/10-DEPLOYMENT.md` when available).
+
+---
+
+## Why Sail?
+
+- **Stack alignment**: Phase 1 requires MariaDB 10.6+; Sail can be configured with MariaDB (not default MySQL).
+- **Environment parity**: Avoids "works on my machine" issues, WSL/UNC path problems, and missing PHP/Composer.
+- **Already included**: `laravel/sail` is in `composer.json` require-dev; installation is the missing step.
