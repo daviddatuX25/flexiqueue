@@ -46,6 +46,14 @@ class UserFactory extends Factory
         return $this->state(fn (array $attributes) => ['role' => 'supervisor']);
     }
 
+    /** Per 05-SECURITY-CONTROLS §4: supervisor/admin with override PIN for override/force-complete. */
+    public function withOverridePin(string $pin = '123456'): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'override_pin' => \Illuminate\Support\Facades\Hash::make($pin),
+        ]);
+    }
+
     /** Inactive user cannot log in (LoginController checks is_active). */
     public function inactive(): static
     {
