@@ -121,12 +121,17 @@ Auth/Login.svelte
 
 ### 3.2 Triage Page — `Triage/Index.svelte`
 
+Single **"Get token"** (scan or enter) section: camera and manual entry live in one block with no mode toggle. User can start the camera to scan a QR code, or ignore the camera and type a token ID and tap Look up; both paths feed the same `scannedToken` and the category/track/confirm flow.
+
 ```
 Triage/Index.svelte [MobileLayout]
-├── QrScanner
-│   ├── CameraViewfinder (300x300, centered)
-│   ├── ManualEntryButton → ManualEntryModal
-│   └── ScanFeedback (success/error flash)
+├── GetTokenSection ("Scan or enter token ID")
+│   ├── StartCameraButton / StopCameraButton (toggles QrScanner visibility)
+│   ├── [IF camera open] QrScanner
+│   │   └── CameraViewfinder (300x300, centered) + ScanFeedback (success/error)
+│   ├── Divider ("or enter token ID")
+│   ├── TokenIdInput (placeholder e.g. "A1") + LookUpButton (inline, always visible)
+│   └── LookupErrorAlert (shown on failed lookup)
 │
 ├── CategorySelector (visible after scan)
 │   ├── ScannedTokenDisplay ("TOKEN SCANNED: A1")
@@ -248,7 +253,7 @@ Station/Index.svelte [MobileLayout]
 - `isProcessing`: boolean (for action buttons).
 
 **Data loaded (via Inertia props):**
-- `station` — station details (id, name, role_type).
+- `station` — station details (id, name).
 - `queue` — from `GET /api/stations/{id}/queue`.
 - `allStations` — for override modal (list of stations with names).
 - `user` — current staff user.
@@ -408,7 +413,7 @@ Admin/Programs/Show.svelte [AdminLayout]
 ├── [Tab: Stations]
 │   ├── StationList
 │   │   └── StationCard[]
-│   │       ├── StationName + role_type badge
+│   │       ├── StationName
 │   │       ├── Capacity, Active status
 │   │       ├── AssignedStaff[]
 │   │       ├── EditButton

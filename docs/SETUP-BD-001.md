@@ -13,15 +13,34 @@ Laravel Sail provides a consistent Docker-based development environment with PHP
 - **Docker Desktop** (Windows/Mac) or **Docker + Docker Compose** (Linux)
 - **Git** (for cloning the repo)
 
-### One-time setup
+**No local PHP, Composer, or Node.js required** — everything runs in Docker.
 
-1. **Install PHP dependencies** (requires PHP locally for this step only):
+### One-time setup (Docker-only)
+
+From the project root, run:
 
 ```bash
-composer install
+./scripts/sail-setup.sh
 ```
 
-If you don't have PHP installed locally, you can use a temporary Docker container:
+This script:
+
+1. Installs PHP dependencies via `composer install` (Docker)
+2. Creates `.env` from `.env.example`
+3. Runs `sail:install` with MariaDB + Redis (Docker)
+4. Starts Sail containers
+5. Generates the application key
+6. Installs Node dependencies and builds assets inside the container
+
+**On Windows:** Use WSL or Git Bash to run the script (requires bash).
+
+**Port conflicts:** If another Sail or web app is using ports 80, 5173, or 3306, stop it first (`docker compose down` in that project, or `./vendor/bin/sail down`).
+
+### Manual setup (if you prefer step-by-step)
+
+If you'd rather run commands manually or the script fails:
+
+1. **Composer install** (no local PHP needed):
 
 ```bash
 docker run --rm \
@@ -32,47 +51,49 @@ docker run --rm \
     composer install --ignore-platform-reqs
 ```
 
-2. **Set up environment file**:
+2. **Environment file**:
 
 ```bash
 cp .env.example .env
 ```
 
-3. **Install Sail with MariaDB**:
+3. **Sail install with MariaDB + Redis** (non-interactive):
 
 ```bash
-php artisan sail:install
+docker run --rm \
+    -u "$(id -u):$(id -g)" \
+    -v "$(pwd):/var/www/html" \
+    -w /var/www/html \
+    laravelsail/php82-composer:latest \
+    php artisan sail:install --with=mariadb,redis --no-interaction
 ```
 
-When prompted, select **mariadb** (and optionally **redis** if you want caching). This generates `docker-compose.yml`.
-
-4. **Start Sail containers**:
+4. **Start Sail**:
 
 ```bash
 ./vendor/bin/sail up -d
 ```
 
-**Tip**: Add `alias sail='./vendor/bin/sail'` to your shell profile for shorter commands.
-
-5. **Generate application key**:
+5. **Application key**:
 
 ```bash
 ./vendor/bin/sail artisan key:generate
 ```
 
-6. **Install Node dependencies**:
+6. **Node dependencies and build**:
 
 ```bash
-npm install --legacy-peer-deps
+./vendor/bin/sail npm install
+./vendor/bin/sail npm run build
 ```
 
-Use `--legacy-peer-deps` because `@sveltejs/vite-plugin-svelte` currently expects Vite 6 while Laravel 12 ships with Vite 7.
-
-7. **Run database migrations** (when available):
+7. **Run migrations** (when available):
 
 ```bash
 ./vendor/bin/sail artisan migrate
 ```
+
+**Tip**: Add `alias sail='./vendor/bin/sail'` to your shell profile for shorter commands.
 
 ### Daily workflow
 
@@ -84,39 +105,29 @@ Use `--legacy-peer-deps` because `@sveltejs/vite-plugin-svelte` currently expect
 
 2. **Run Vite dev server** (choose one):
 
-**Option 1 - On host** (recommended for WSL/Windows to avoid file watch issues):
-
-```bash
-npm run dev
-```
-
-**Option 2 - In Sail container** (requires Vite config update):
-
-Add to `vite.config.js`:
-
-```javascript
-server: {
-    host: '0.0.0.0',
-    hmr: {
-        host: 'localhost'
-    },
-    watch: {
-        ignored: ['**/storage/framework/views/**'],
-    },
-}
-```
-
-And ensure port 5173 is exposed in `docker-compose.yml` (Sail does this by default).
-
-Then run:
+**Option 1 - In Sail container** (recommended for consistency):
 
 ```bash
 ./vendor/bin/sail npm run dev
 ```
 
+**Option 2 - On host** (for WSL/Windows if you have file watch issues in the container):
+
+```bash
+npm run dev
+```
+
+(Requires Node.js on the host. Vite config may need `server.host: '0.0.0.0'` if accessing from another device.)
+
 3. **Access the app**: Open http://localhost — you should see the FlexiQueue welcome page (Svelte + DaisyUI theme).
 
-4. **Stop containers** (when done):
+4. **Real-time (optional):** If `BROADCAST_CONNECTION=reverb` in `.env`, the app will try to send events to Reverb. You must run the Reverb server in a **separate terminal** or you will see *"cURL error 7: Failed to connect to localhost port 6001"* when any broadcast is triggered:
+   ```bash
+   ./vendor/bin/sail artisan reverb:start
+   ```
+   Keep this running while using real-time features. To avoid the error when not using Reverb, set `BROADCAST_CONNECTION=null` in `.env`.
+
+5. **Stop containers** (when done):
 
 ```bash
 ./vendor/bin/sail down
@@ -143,7 +154,12 @@ Then run:
 
 # Logs
 ./vendor/bin/sail logs
+
+# Real-time WebSocket (BD-002: Laravel Reverb on port 6001)
+./vendor/bin/sail artisan reverb:start
 ```
+
+**Reverb:** For real-time features (e.g. live queue updates), run `./vendor/bin/sail artisan reverb:start` in a separate terminal. Port 6001 is published in `compose.yaml` so the browser (on the host) can connect to Reverb. Test at http://localhost/broadcast-test (fire a broadcast and confirm the Svelte page receives it). If you changed compose ports, run `./vendor/bin/sail down` then `./vendor/bin/sail up -d` so the new port is exposed.
 
 ---
 
@@ -187,13 +203,11 @@ DB_PASSWORD=your_password
 3. **Install Node dependencies**:
 
 ```bash
-npm install --legacy-peer-deps
+npm install
 npm run build
 ```
 
-Use `--legacy-peer-deps` because `@sveltejs/vite-plugin-svelte` currently expects Vite 6 while Laravel 12 ships with Vite 7.
-
-**Note**: If you see **"Could not resolve entry module index.html"**, the build is likely running from a bad cwd (e.g. Windows when the project is under WSL). Run `npm run build` from a WSL bash prompt or from a non-UNC project path.
+**Note**: If you see **"Could not resolve entry module index.html"** or path errors, the build may be running from a bad cwd (e.g. Windows when the project is under WSL). Run from a WSL bash prompt or use Sail: `./vendor/bin/sail npm run build`.
 
 4. **Run migrations** (when available):
 
@@ -216,6 +230,20 @@ npm run dev
 ```
 
 3. **Access the app**: Open http://localhost:8000 — you should see the FlexiQueue welcome page (Svelte + DaisyUI theme).
+
+---
+
+## E2E tests (Playwright)
+
+Browser tests use Playwright and run against the live app. **Use Sail for all npm and E2E** (per [.cursor/rules/environment.mdc](../.cursor/rules/environment.mdc)): install deps with `./vendor/bin/sail npm install`; do not run bare `npm install`. **The app must be running** (Sail and, for Inertia pages, built assets or `./vendor/bin/sail npm run dev`).
+
+1. Start Sail: `./vendor/bin/sail up -d`
+2. Install npm deps (including Playwright): `./vendor/bin/sail npm install`
+3. (Optional) First-time only — install Playwright browser binaries: `./vendor/bin/sail npx playwright install`
+4. (Optional) Start Vite for dev assets: `./vendor/bin/sail npm run dev` or build once: `./vendor/bin/sail npm run build`
+5. Run E2E: `./vendor/bin/sail npx playwright test` (or `./vendor/bin/sail npm run test:e2e`)
+
+Tests live in `e2e/`; config is `playwright.config.js`. See [docs/plans/QUALITY-GATES.md](plans/QUALITY-GATES.md) Section 6 for PHPUnit and Playwright commands.
 
 ---
 
