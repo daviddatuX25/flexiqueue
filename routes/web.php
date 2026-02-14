@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\StationController as ApiStationController;
 use App\Http\Controllers\Api\VerifyPinController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\DisplayController;
+use App\Http\Controllers\StationPageController;
 use App\Http\Controllers\TriagePageController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -93,7 +94,7 @@ Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->grou
 
 // All staff (admin, supervisor, staff): station and triage
 Route::middleware(['auth', 'role:admin,supervisor,staff'])->group(function (): void {
-    Route::get('/station', fn () => Inertia::render('Station/Index'))->name('station');
+    Route::get('/station/{station?}', StationPageController::class)->name('station');
     Route::get('/triage', TriagePageController::class)->name('triage');
 });
 
