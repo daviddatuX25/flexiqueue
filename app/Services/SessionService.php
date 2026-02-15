@@ -5,12 +5,13 @@ namespace App\Services;
 use App\Events\ClientArrived;
 use App\Events\NowServing;
 use App\Events\QueueLengthUpdated;
+use App\Events\StationActivity;
 use App\Events\StatusUpdate;
 use App\Exceptions\StepsRemainingException;
 use App\Exceptions\TokenInUseException;
-use App\Exceptions\TokenUnavailableException;
 use App\Models\Program;
 use App\Models\Session;
+use App\Support\ClientCategory;
 use App\Models\Station;
 use App\Models\Token;
 use App\Models\TrackStep;
@@ -50,9 +51,7 @@ class SessionService
             throw new TokenInUseException($session);
         }
 
-        if (in_array($token->status, ['lost', 'damaged'], true)) {
-            throw new TokenUnavailableException($token->status);
-        }
+        // Soft-deleted tokens excluded by Token model scope; token not found above.
 
         $track = $program->serviceTracks()->find($trackId);
         if (! $track) {
@@ -65,6 +64,8 @@ class SessionService
         }
 
         return DB::transaction(function () use ($token, $program, $track, $firstStep, $clientCategory, $staffUserId) {
+            $clientCategory = ClientCategory::normalize($clientCategory) ?? $clientCategory;
+            $nextPos = $this->getNextQueuePositionAtStation($firstStep->station_id);
             $session = \App\Models\Session::create([
                 'token_id' => $token->id,
                 'program_id' => $program->id,
@@ -73,7 +74,9 @@ class SessionService
                 'client_category' => $clientCategory,
                 'current_station_id' => $firstStep->station_id,
                 'current_step_order' => 1,
+                'station_queue_position' => $nextPos,
                 'status' => 'waiting',
+                'queued_at_station' => now(),
             ]);
 
             $token->update([
@@ -103,9 +106,11 @@ class SessionService
     }
 
     /**
-     * Per 08-API-SPEC-PHASE1 §3.7: Call session (increment no_show_attempts, set serving).
+     * Per plan: Call session — sets status to 'called' (announce, not yet serving).
+     * Client must physically show; staff clicks Serve to start.
+     * Enforces client_capacity.
      *
-     * @return array{session_id: int, alias: string, no_show_attempts: int, threshold_reached: bool, message?: string}
+     * @return array{session_id: int, alias: string, no_show_attempts: int, status: string}
      */
     public function call(Session $session, int $staffUserId): array
     {
@@ -113,7 +118,67 @@ class SessionService
             throw new \InvalidArgumentException('Session is not waiting at current station.', 409);
         }
 
-        $session->increment('no_show_attempts');
+        $station = $session->currentStation;
+        if (! $station) {
+            throw new \InvalidArgumentException('Session has no current station.', 409);
+        }
+
+        $clientCapacity = (int) ($station->client_capacity ?? 1);
+        $currentCount = Session::query()
+            ->where('current_station_id', $station->id)
+            ->whereIn('status', ['called', 'serving'])
+            ->count();
+
+        if ($currentCount >= $clientCapacity) {
+            throw new \InvalidArgumentException("Station at capacity ({$clientCapacity}). Cannot call more clients.", 409);
+        }
+
+        $session->update(['status' => 'called']);
+
+        TransactionLog::create([
+            'session_id' => $session->id,
+            'station_id' => $session->current_station_id,
+            'staff_user_id' => $staffUserId,
+            'action_type' => 'call',
+        ]);
+
+        $session = $session->fresh(['serviceTrack', 'currentStation']);
+        $station = $session->currentStation;
+        $isPriority = $session->isPriorityCategory();
+        $message = $isPriority
+            ? "{$session->alias} called from priority lane"
+            : "{$session->alias} called";
+        event(new StatusUpdate($session->current_station_id, $session));
+        event(new QueueLengthUpdated($session->current_station_id));
+        event(new StationActivity(
+            $session->current_station_id,
+            $station?->name ?? '—',
+            $message,
+            $session->alias,
+            'call',
+            now()->toIso8601String()
+        ));
+
+        return [
+            'session_id' => $session->id,
+            'alias' => $session->alias,
+            'no_show_attempts' => $session->no_show_attempts ?? 0,
+            'status' => 'called',
+        ];
+    }
+
+    /**
+     * Per plan: Serve session — client physically showed, staff clicks Serve.
+     * From 'called' only. Logs check_in, sets serving.
+     *
+     * @return array{session: Session}
+     */
+    public function serve(Session $session, int $staffUserId): array
+    {
+        if ($session->status !== 'called') {
+            throw new \InvalidArgumentException('Session is not in called state. Call the client first.', 409);
+        }
+
         $session->update(['status' => 'serving']);
 
         TransactionLog::create([
@@ -123,28 +188,25 @@ class SessionService
             'action_type' => 'check_in',
         ]);
 
-        event(new StatusUpdate($session->current_station_id, $session->fresh()));
+        $session = $session->fresh(['currentStation', 'serviceTrack']);
+        $station = $session->currentStation;
+        event(new StatusUpdate($session->current_station_id, $session));
         event(new NowServing($session->current_station_id, [
             'session_id' => $session->id,
             'alias' => $session->alias,
             'category' => $session->client_category,
         ]));
         event(new QueueLengthUpdated($session->current_station_id));
+        event(new StationActivity(
+            $session->current_station_id,
+            $station?->name ?? '—',
+            "{$session->alias} arrived (serving)",
+            $session->alias,
+            'check_in',
+            now()->toIso8601String()
+        ));
 
-        $attempts = $session->fresh()->no_show_attempts;
-        $thresholdReached = $attempts >= 3;
-
-        $result = [
-            'session_id' => $session->id,
-            'alias' => $session->alias,
-            'no_show_attempts' => $attempts,
-            'threshold_reached' => $thresholdReached,
-        ];
-        if ($thresholdReached) {
-            $result['message'] = 'No-show threshold reached. Prompt staff to mark no-show or keep waiting.';
-        }
-
-        return $result;
+        return ['session' => $session];
     }
 
     /**
@@ -182,10 +244,13 @@ class SessionService
         }
 
         return DB::transaction(function () use ($session, $previousStationId, $targetStationId, $newStepOrder, $staffUserId) {
+            $nextPos = $this->getNextQueuePositionAtStation($targetStationId);
             $session->update([
                 'current_station_id' => $targetStationId,
                 'current_step_order' => $newStepOrder,
+                'station_queue_position' => $nextPos,
                 'status' => 'waiting',
+                'queued_at_station' => now(),
                 'no_show_attempts' => 0,
             ]);
 
@@ -253,7 +318,7 @@ class SessionService
      */
     public function cancel(Session $session, int $staffUserId, ?string $remarks = null): array
     {
-        if (! in_array($session->status, ['waiting', 'serving'], true)) {
+        if (! in_array($session->status, ['waiting', 'called', 'serving'], true)) {
             throw new \InvalidArgumentException('Session is already completed.', 409);
         }
 
@@ -261,33 +326,59 @@ class SessionService
     }
 
     /**
-     * Per 08-API-SPEC-PHASE1 §3.6: Mark no-show.
+     * Per plan: Mark no-show. From 'called' (or 'waiting').
+     * Increments no_show_attempts. If >= 3, terminates session. Else, returns to waiting.
      *
-     * @return array{session: Session, token: array}
+     * @return array{session: Session, token?: array, back_to_waiting?: bool}
      */
     public function markNoShow(Session $session, int $staffUserId): array
     {
-        if (! in_array($session->status, ['waiting', 'serving'], true)) {
-            throw new \InvalidArgumentException('Session is already completed.', 409);
+        if (! in_array($session->status, ['waiting', 'called'], true)) {
+            throw new \InvalidArgumentException('No-show only applies to called or waiting clients. Use Cancel for serving.', 409);
         }
 
-        return $this->finishSession($session, $staffUserId, 'no_show');
+        $session->increment('no_show_attempts');
+        $attempts = $session->fresh()->no_show_attempts;
+
+        if ($attempts >= 3) {
+            return $this->finishSession($session, $staffUserId, 'no_show');
+        }
+
+        return DB::transaction(function () use ($session, $staffUserId) {
+            $stationId = $session->current_station_id;
+            $session->update(['status' => 'waiting']);
+
+            TransactionLog::create([
+                'session_id' => $session->id,
+                'station_id' => $stationId,
+                'staff_user_id' => $staffUserId,
+                'action_type' => 'no_show',
+                'metadata' => ['back_to_waiting' => true, 'attempt' => $session->no_show_attempts],
+            ]);
+
+            $session = $session->fresh(['currentStation', 'serviceTrack']);
+            if ($stationId) {
+                event(new StatusUpdate($stationId, $session));
+                event(new QueueLengthUpdated($stationId));
+            }
+
+            return [
+                'session' => $session,
+                'back_to_waiting' => true,
+                'no_show_attempts' => $session->no_show_attempts,
+            ];
+        });
     }
 
     /**
-     * Per 08-API-SPEC-PHASE1 §3.8: Force-complete (supervisor only, requires PIN).
+     * Per 08-API-SPEC-PHASE1 §3.8: Force-complete (supervisor only). Caller must validate auth first.
      *
      * @return array{session: Session, token: array}
      */
-    public function forceComplete(Session $session, string $reason, int $supervisorUserId, string $pin, int $staffUserId): array
+    public function forceComplete(Session $session, string $reason, int $supervisorUserId, int $staffUserId): array
     {
-        if (! in_array($session->status, ['waiting', 'serving'], true)) {
+        if (! in_array($session->status, ['waiting', 'called', 'serving'], true)) {
             throw new \InvalidArgumentException('Session is already completed.', 409);
-        }
-
-        $verified = $this->pinService->validate($supervisorUserId, $pin);
-        if (! $verified) {
-            throw new \InvalidArgumentException('Invalid supervisor PIN.', 401);
         }
 
         if (trim($reason) === '') {
@@ -302,19 +393,14 @@ class SessionService
     }
 
     /**
-     * Per 08-API-SPEC-PHASE1 §3.3: Override (supervisor route deviation).
+     * Per 08-API-SPEC-PHASE1 §3.3: Override (supervisor route deviation). Caller must validate auth first.
      *
      * @return array{session: Session, override: array}
      */
-    public function override(Session $session, int $targetStationId, string $reason, int $supervisorUserId, string $pin, int $staffUserId): array
+    public function override(Session $session, int $targetStationId, string $reason, int $supervisorUserId, int $staffUserId): array
     {
-        if (! in_array($session->status, ['waiting', 'serving'], true)) {
+        if (! in_array($session->status, ['waiting', 'called', 'serving'], true)) {
             throw new \InvalidArgumentException('Session is not in a valid state for override.', 409);
-        }
-
-        $verified = $this->pinService->validate($supervisorUserId, $pin);
-        if (! $verified) {
-            throw new \InvalidArgumentException('Invalid supervisor PIN.', 401);
         }
 
         if (trim($reason) === '') {
@@ -331,10 +417,13 @@ class SessionService
         $newStepOrder = $step?->step_order ?? $session->current_step_order;
 
         return DB::transaction(function () use ($session, $targetStationId, $reason, $supervisorUserId, $staffUserId, $previousStationId, $newStepOrder) {
+            $nextPos = $this->getNextQueuePositionAtStation($targetStationId);
             $session->update([
                 'current_station_id' => $targetStationId,
                 'current_step_order' => $newStepOrder,
+                'station_queue_position' => $nextPos,
                 'status' => 'waiting',
+                'queued_at_station' => now(),
                 'no_show_attempts' => 0,
             ]);
 
@@ -411,5 +500,15 @@ class SessionService
                 ],
             ];
         });
+    }
+
+    private function getNextQueuePositionAtStation(int $stationId): int
+    {
+        $max = Session::query()
+            ->where('current_station_id', $stationId)
+            ->whereIn('status', ['waiting', 'called', 'serving'])
+            ->max('station_queue_position');
+
+        return ($max ?? 0) + 1;
     }
 }

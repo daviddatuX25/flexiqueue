@@ -12,6 +12,7 @@ use App\Http\Requests\ForceCompleteSessionRequest;
 use App\Http\Requests\OverrideSessionRequest;
 use App\Http\Requests\TransferSessionRequest;
 use App\Models\Session;
+use App\Services\PinService;
 use App\Services\SessionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,7 +23,8 @@ use Illuminate\Http\Request;
 class SessionController extends Controller
 {
     public function __construct(
-        private SessionService $sessionService
+        private SessionService $sessionService,
+        private PinService $pinService
     ) {}
 
     /**
@@ -105,17 +107,38 @@ class SessionController extends Controller
     }
 
     /**
-     * Per 08-API-SPEC-PHASE1 §3.7: Call session (increment no-show attempts, set serving).
+     * Per plan: Call session — sets 'called' (announce). Staff clicks Serve when client shows.
      */
     public function call(Session $session): JsonResponse
     {
         try {
             $result = $this->sessionService->call($session, $this->user()->id);
         } catch (\InvalidArgumentException $e) {
-            return response()->json(['message' => $e->getMessage()], 409);
+            $code = (int) $e->getCode();
+            if ($code === 0) {
+                $code = 409;
+            }
+
+            return response()->json(['message' => $e->getMessage()], $code);
         }
 
         return response()->json($result);
+    }
+
+    /**
+     * Per plan: Serve session — client showed, staff clicks Serve. From 'called' only.
+     */
+    public function serve(Session $session): JsonResponse
+    {
+        try {
+            $result = $this->sessionService->serve($session, $this->user()->id);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 409);
+        }
+
+        return response()->json([
+            'session' => $this->formatSession($result['session']),
+        ]);
     }
 
     /**
@@ -190,7 +213,8 @@ class SessionController extends Controller
     }
 
     /**
-     * Per 08-API-SPEC-PHASE1 §3.6: Mark no-show.
+     * Per plan: Mark no-show. From 'called' or 'waiting'.
+     * If attempts < 3: back to waiting. If 3: terminates, returns token.
      */
     public function noShow(Session $session): JsonResponse
     {
@@ -200,10 +224,18 @@ class SessionController extends Controller
             return response()->json(['message' => $e->getMessage()], 409);
         }
 
-        return response()->json([
+        $response = [
             'session' => $this->formatSession($result['session']),
-            'token' => $result['token'],
-        ]);
+        ];
+        if (isset($result['token'])) {
+            $response['token'] = $result['token'];
+        }
+        if (isset($result['back_to_waiting'])) {
+            $response['back_to_waiting'] = true;
+            $response['no_show_attempts'] = $result['no_show_attempts'] ?? 0;
+        }
+
+        return response()->json($response);
     }
 
     /**
@@ -211,12 +243,23 @@ class SessionController extends Controller
      */
     public function forceComplete(ForceCompleteSessionRequest $request, Session $session): JsonResponse
     {
+        $validated = $request->validated();
+        $authType = $validated['auth_type'] ?? 'preset_pin';
+        $verified = $authType === 'temp_pin'
+            ? $this->pinService->validateTemporaryPin($validated['temp_code'] ?? '')
+            : $this->pinService->validate((int) $validated['supervisor_user_id'], $validated['supervisor_pin'] ?? '');
+
+        if (! $verified) {
+            return response()->json([
+                'message' => $authType === 'temp_pin' ? 'Authorization expired. Request a new one.' : 'Invalid supervisor PIN.',
+            ], 401);
+        }
+
         try {
             $result = $this->sessionService->forceComplete(
                 $session,
                 $request->validated('reason'),
-                (int) $request->validated('supervisor_user_id'),
-                $request->validated('supervisor_pin'),
+                $verified['user_id'],
                 $request->user()->id
             );
         } catch (\InvalidArgumentException $e) {
@@ -239,13 +282,24 @@ class SessionController extends Controller
      */
     public function override(OverrideSessionRequest $request, Session $session): JsonResponse
     {
+        $validated = $request->validated();
+        $authType = $validated['auth_type'] ?? 'preset_pin';
+        $verified = $authType === 'temp_pin'
+            ? $this->pinService->validateTemporaryPin($validated['temp_code'] ?? '')
+            : $this->pinService->validate((int) $validated['supervisor_user_id'], $validated['supervisor_pin'] ?? '');
+
+        if (! $verified) {
+            return response()->json([
+                'message' => $authType === 'temp_pin' ? 'Authorization expired. Request a new one.' : 'Invalid supervisor PIN.',
+            ], 401);
+        }
+
         try {
             $result = $this->sessionService->override(
                 $session,
                 (int) $request->validated('target_station_id'),
                 $request->validated('reason'),
-                (int) $request->validated('supervisor_user_id'),
-                $request->validated('supervisor_pin'),
+                $verified['user_id'],
                 $request->user()->id
             );
         } catch (\InvalidArgumentException $e) {
