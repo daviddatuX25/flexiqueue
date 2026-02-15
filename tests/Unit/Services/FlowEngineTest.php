@@ -198,4 +198,98 @@ class FlowEngineTest extends TestCase
 
         $this->assertNull($result);
     }
+
+    public function test_calculate_next_station_uses_override_steps_when_set(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $s1 = Station::create([
+            'program_id' => $program->id,
+            'name' => 'S1',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $s2 = Station::create([
+            'program_id' => $program->id,
+            'name' => 'S2',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $track = ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'Default',
+            'is_default' => true,
+        ]);
+
+        $token = new Token;
+        $token->qr_code_hash = hash('sha256', Str::random(32).'A1');
+        $token->physical_id = 'A1';
+        $token->status = 'in_use';
+        $token->save();
+
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'A1',
+            'current_station_id' => $s1->id,
+            'current_step_order' => 1,
+            'override_steps' => [$s1->id, $s2->id],
+            'status' => 'serving',
+        ]);
+
+        $result = $this->flowEngine->calculateNextStation($session);
+
+        $this->assertNotNull($result);
+        $this->assertSame($s2->id, $result['station_id']);
+        $this->assertSame(2, $result['step_order']);
+    }
+
+    public function test_calculate_next_station_returns_null_when_override_steps_complete(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $s1 = Station::create([
+            'program_id' => $program->id,
+            'name' => 'S1',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $track = ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'Default',
+            'is_default' => true,
+        ]);
+
+        $token = new Token;
+        $token->qr_code_hash = hash('sha256', Str::random(32).'A1');
+        $token->physical_id = 'A1';
+        $token->status = 'in_use';
+        $token->save();
+
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'A1',
+            'current_station_id' => $s1->id,
+            'current_step_order' => 1,
+            'override_steps' => [$s1->id],
+            'status' => 'serving',
+        ]);
+
+        $result = $this->flowEngine->calculateNextStation($session);
+
+        $this->assertNull($result);
+    }
 }

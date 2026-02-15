@@ -115,4 +115,59 @@ class TrackOverridesRefactorSchemaTest extends TestCase
         $session->refresh();
         $this->assertSame([$s1->id, $s2->id], $session->override_steps);
     }
+
+    public function test_permission_request_create_sets_session_awaiting_approval_for_override(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Test',
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $track = ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'Default',
+            'is_default' => true,
+        ]);
+        $s1 = Station::create([
+            'program_id' => $program->id,
+            'name' => 'S1',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $s2 = Station::create([
+            'program_id' => $program->id,
+            'name' => 'S2',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        TrackStep::create([
+            'track_id' => $track->id,
+            'station_id' => $s1->id,
+            'step_order' => 1,
+            'is_required' => true,
+        ]);
+        $token = new Token;
+        $token->qr_code_hash = hash('sha256', Str::random(32).'A3');
+        $token->physical_id = 'A3';
+        $token->status = 'in_use';
+        $token->save();
+
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'A3',
+            'current_station_id' => $s1->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+        ]);
+
+        $prService = app(\App\Services\PermissionRequestService::class);
+        $prService->create($session, 'override', $user->id, 'Needs help', $s2->id);
+
+        $session->refresh();
+        $this->assertSame('awaiting_approval', $session->status);
+        $this->assertNull($session->current_station_id);
+    }
 }

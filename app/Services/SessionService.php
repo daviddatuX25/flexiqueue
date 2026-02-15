@@ -10,6 +10,7 @@ use App\Events\StatusUpdate;
 use App\Exceptions\StepsRemainingException;
 use App\Exceptions\TokenInUseException;
 use App\Models\Program;
+use App\Models\ServiceTrack;
 use App\Models\Session;
 use App\Support\ClientCategory;
 use App\Models\Station;
@@ -239,8 +240,7 @@ class SessionService
             if (! $station || ! $station->is_active) {
                 throw new \InvalidArgumentException('Target station not found or inactive.', 422);
             }
-            $step = TrackStep::where('track_id', $session->track_id)->where('station_id', $targetStationId)->first();
-            $newStepOrder = $step?->step_order ?? $session->current_step_order;
+            $newStepOrder = $this->resolveStepOrderForTarget($session, $targetStationId);
         }
 
         return DB::transaction(function () use ($session, $previousStationId, $targetStationId, $newStepOrder, $staffUserId) {
@@ -294,17 +294,9 @@ class SessionService
             throw new \InvalidArgumentException('Session is not being served. Call next first.', 409);
         }
 
-        $maxRequiredStep = TrackStep::where('track_id', $session->track_id)->where('is_required', true)->max('step_order');
+        $maxRequiredStep = $this->getMaxRequiredStepOrder($session);
         if ($maxRequiredStep !== null && $session->current_step_order < $maxRequiredStep) {
-            $remaining = TrackStep::where('track_id', $session->track_id)
-                ->where('is_required', true)
-                ->where('step_order', '>', $session->current_step_order)
-                ->orderBy('step_order')
-                ->with('station')
-                ->get()
-                ->map(fn ($s) => ['step_order' => $s->step_order, 'station' => $s->station->name, 'is_required' => true])
-                ->values()
-                ->toArray();
+            $remaining = $this->getRemainingRequiredSteps($session);
             throw new StepsRemainingException('Cannot complete: required steps remaining.', $remaining);
         }
 
@@ -510,5 +502,262 @@ class SessionService
             ->max('station_queue_position');
 
         return ($max ?? 0) + 1;
+    }
+
+    /**
+     * Per TRACK-OVERRIDES-REFACTOR: Override by track or custom path.
+     * If customSteps provided: set session.override_steps, move to first station. Else: move to first station of track, update track_id.
+     *
+     * @param  array<int>|null  $customSteps
+     * @return array{session: Session, override: array}
+     */
+    public function overrideByTrack(Session $session, int $targetTrackId, string $reason, int $supervisorUserId, int $staffUserId, ?array $customSteps = null): array
+    {
+        if (! in_array($session->status, ['waiting', 'called', 'serving', 'awaiting_approval'], true)) {
+            throw new \InvalidArgumentException('Session is not in a valid state for override.', 409);
+        }
+
+        if (trim($reason) === '') {
+            throw new \InvalidArgumentException('Reason is required for overrides.', 422);
+        }
+
+        $program = $session->program;
+        if (! $program) {
+            throw new \InvalidArgumentException('Session has no program.', 422);
+        }
+
+        $track = ServiceTrack::where('program_id', $program->id)->find($targetTrackId);
+        if (! $track) {
+            throw new \InvalidArgumentException('Target track not found or does not belong to session program.', 422);
+        }
+
+        $previousStationId = $session->current_station_id;
+
+        if ($customSteps !== null && count($customSteps) > 0) {
+            return $this->reassignToCustomPath($session, $customSteps, $staffUserId, $reason, $supervisorUserId, $previousStationId);
+        }
+
+        $firstStep = $track->trackSteps()->where('step_order', 1)->first();
+        if (! $firstStep) {
+            throw new \InvalidArgumentException('Target track has no steps defined.', 422);
+        }
+
+        $targetStationId = $firstStep->station_id;
+        $station = Station::find($targetStationId);
+        if (! $station || ! $station->is_active) {
+            throw new \InvalidArgumentException('Target station not found or inactive.', 422);
+        }
+
+        return DB::transaction(function () use ($session, $targetStationId, $targetTrackId, $reason, $supervisorUserId, $staffUserId, $previousStationId) {
+            $nextPos = $this->getNextQueuePositionAtStation($targetStationId);
+            $session->update([
+                'track_id' => $targetTrackId,
+                'current_station_id' => $targetStationId,
+                'current_step_order' => 1,
+                'override_steps' => null,
+                'station_queue_position' => $nextPos,
+                'status' => 'waiting',
+                'queued_at_station' => now(),
+                'no_show_attempts' => 0,
+        ]);
+
+            TransactionLog::create([
+                'session_id' => $session->id,
+                'station_id' => $previousStationId,
+                'staff_user_id' => $staffUserId,
+                'action_type' => 'override',
+                'previous_station_id' => $previousStationId,
+                'next_station_id' => $targetStationId,
+                'remarks' => $reason,
+                'metadata' => ['supervisor_id' => $supervisorUserId],
+            ]);
+
+            $session = $session->fresh(['currentStation', 'serviceTrack']);
+            $supervisor = \App\Models\User::find($supervisorUserId);
+
+            event(new StatusUpdate($previousStationId, $session));
+            event(new ClientArrived($session, $targetStationId));
+            event(new QueueLengthUpdated($previousStationId));
+            event(new QueueLengthUpdated($targetStationId));
+
+            return [
+                'session' => $session,
+                'override' => [
+                    'authorized_by' => $supervisor ? $supervisor->name.' ('.ucfirst($supervisor->role->value).')' : 'Unknown',
+                    'reason' => $reason,
+                ],
+            ];
+        });
+    }
+
+    /**
+     * Per TRACK-OVERRIDES-REFACTOR: Reassign session to track (reject flow).
+     *
+     * @return array{session: Session}
+     */
+    public function reassignToTrack(Session $session, int $trackId, int $staffUserId): array
+    {
+        if ($session->status !== 'awaiting_approval') {
+            throw new \InvalidArgumentException('Session must be awaiting approval to reassign.', 409);
+        }
+
+        $track = ServiceTrack::where('program_id', $session->program_id)->find($trackId);
+        if (! $track) {
+            throw new \InvalidArgumentException('Target track not found.', 422);
+        }
+
+        $firstStep = $track->trackSteps()->where('step_order', 1)->first();
+        if (! $firstStep) {
+            throw new \InvalidArgumentException('Target track has no steps.', 422);
+        }
+
+        $station = Station::find($firstStep->station_id);
+        if (! $station || ! $station->is_active) {
+            throw new \InvalidArgumentException('First station of track not found or inactive.', 422);
+        }
+
+        return DB::transaction(function () use ($session, $track, $firstStep, $staffUserId) {
+            $nextPos = $this->getNextQueuePositionAtStation($firstStep->station_id);
+            $session->update([
+                'track_id' => $track->id,
+                'current_station_id' => $firstStep->station_id,
+                'current_step_order' => 1,
+                'override_steps' => null,
+                'station_queue_position' => $nextPos,
+                'status' => 'waiting',
+                'queued_at_station' => now(),
+            ]);
+
+            event(new ClientArrived($session->fresh(['currentStation', 'serviceTrack']), $firstStep->station_id));
+            event(new QueueLengthUpdated($firstStep->station_id));
+
+            return ['session' => $session->fresh()];
+        });
+    }
+
+    /**
+     * Per TRACK-OVERRIDES-REFACTOR: Reassign session to custom path (reject flow).
+     *
+     * @param  array<int>  $stationIds
+     * @return array{session: Session}
+     */
+    public function reassignToCustomPath(Session $session, array $stationIds, int $staffUserId, ?string $reason = null, ?int $supervisorUserId = null, ?int $previousStationId = null): array
+    {
+        if (count($stationIds) === 0) {
+            throw new \InvalidArgumentException('Custom path must have at least one station.', 422);
+        }
+
+        $firstStationId = (int) $stationIds[0];
+        $station = Station::find($firstStationId);
+        if (! $station || ! $station->is_active) {
+            throw new \InvalidArgumentException('First station in path not found or inactive.', 422);
+        }
+
+        $prevId = $previousStationId ?? $session->current_station_id;
+
+        return DB::transaction(function () use ($session, $stationIds, $firstStationId, $staffUserId, $reason, $supervisorUserId, $prevId) {
+            $nextPos = $this->getNextQueuePositionAtStation($firstStationId);
+            $session->update([
+                'current_station_id' => $firstStationId,
+                'current_step_order' => 1,
+                'override_steps' => $stationIds,
+                'station_queue_position' => $nextPos,
+                'status' => 'waiting',
+                'queued_at_station' => now(),
+                'no_show_attempts' => 0,
+            ]);
+
+            if ($reason && $supervisorUserId) {
+                TransactionLog::create([
+                    'session_id' => $session->id,
+                    'station_id' => $prevId,
+                    'staff_user_id' => $staffUserId,
+                    'action_type' => 'override',
+                    'previous_station_id' => $prevId,
+                    'next_station_id' => $firstStationId,
+                    'remarks' => $reason,
+                    'metadata' => ['supervisor_id' => $supervisorUserId],
+                ]);
+            }
+
+            $session = $session->fresh(['currentStation', 'serviceTrack']);
+            $supervisor = \App\Models\User::find($supervisorUserId ?? 0);
+
+            event(new StatusUpdate($prevId, $session));
+            event(new ClientArrived($session, $firstStationId));
+            event(new QueueLengthUpdated($prevId));
+            event(new QueueLengthUpdated($firstStationId));
+
+            return [
+                'session' => $session,
+                'override' => $reason ? [
+                    'authorized_by' => $supervisor ? $supervisor->name.' ('.ucfirst($supervisor->role->value).')' : 'Unknown',
+                    'reason' => $reason,
+                ] : null,
+            ];
+        });
+    }
+
+    /**
+     * Max required step order for completion. When override_steps set, all steps required.
+     */
+    private function getMaxRequiredStepOrder(Session $session): ?int
+    {
+        $overrideSteps = $session->override_steps;
+        if (is_array($overrideSteps) && count($overrideSteps) > 0) {
+            return count($overrideSteps);
+        }
+
+        return TrackStep::where('track_id', $session->track_id)->where('is_required', true)->max('step_order');
+    }
+
+    /**
+     * @return array<int, array{step_order: int, station: string, is_required: bool}>
+     */
+    private function getRemainingRequiredSteps(Session $session): array
+    {
+        $overrideSteps = $session->override_steps;
+        if (is_array($overrideSteps) && count($overrideSteps) > 0) {
+            $remaining = [];
+            $currentOrder = (int) ($session->current_step_order ?? 1);
+            for ($i = $currentOrder; $i < count($overrideSteps); $i++) {
+                $station = Station::find($overrideSteps[$i]);
+                $remaining[] = [
+                    'step_order' => $i + 1,
+                    'station' => $station?->name ?? 'Unknown',
+                    'is_required' => true,
+                ];
+            }
+
+            return $remaining;
+        }
+
+        return TrackStep::where('track_id', $session->track_id)
+            ->where('is_required', true)
+            ->where('step_order', '>', $session->current_step_order)
+            ->orderBy('step_order')
+            ->with('station')
+            ->get()
+            ->map(fn ($s) => ['step_order' => $s->step_order, 'station' => $s->station->name, 'is_required' => true])
+            ->values()
+            ->toArray();
+    }
+
+    /**
+     * Resolve step order when transferring to target station (custom mode).
+     */
+    private function resolveStepOrderForTarget(Session $session, int $targetStationId): int
+    {
+        $overrideSteps = $session->override_steps;
+        if (is_array($overrideSteps)) {
+            $idx = array_search($targetStationId, array_map('intval', $overrideSteps));
+            if ($idx !== false) {
+                return $idx + 1;
+            }
+        }
+
+        $step = TrackStep::where('track_id', $session->track_id)->where('station_id', $targetStationId)->first();
+
+        return $step?->step_order ?? $session->current_step_order;
     }
 }
