@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Program;
 use App\Models\Station;
+use App\Services\StationQueueService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -13,25 +14,41 @@ use Inertia\Response;
  */
 class StationPageController extends Controller
 {
+    public function __construct(
+        private StationQueueService $stationQueueService
+    ) {}
+
     /**
-     * Show station UI. Resolve station: route param > user's assigned > first available.
+     * Show station UI. Resolve station: route param > user's assigned (must be in active program) > first available.
      */
     public function __invoke(Request $request, ?Station $station = null): Response
     {
         $user = $request->user();
-
-        $resolvedStation = $station ?? ($user->assigned_station_id
-            ? Station::find($user->assigned_station_id)
-            : null);
-
         $program = Program::where('is_active', true)->first();
+        $footerStats = $this->stationQueueService->getProgramFooterStats($program);
+
+        $resolvedStation = $station;
+        if (! $resolvedStation && $user->assigned_station_id && $program) {
+            $assigned = Station::find($user->assigned_station_id);
+            if ($assigned && (int) $assigned->program_id === (int) $program->id) {
+                $resolvedStation = $assigned;
+            }
+        }
+
         $stationsList = [];
+        $tracksList = [];
         if ($program) {
             $stationsList = $program->stations()
                 ->where('is_active', true)
                 ->orderBy('name')
                 ->get(['id', 'name'])
                 ->map(fn (Station $s) => ['id' => $s->id, 'name' => $s->name])
+                ->values()
+                ->all();
+            $tracksList = $program->serviceTracks()
+                ->orderBy('name')
+                ->get(['id', 'name'])
+                ->map(fn ($t) => ['id' => $t->id, 'name' => $t->name])
                 ->values()
                 ->all();
         }
@@ -42,7 +59,10 @@ class StationPageController extends Controller
                 'name' => $resolvedStation->name,
             ] : null,
             'stations' => $stationsList,
-            'canSwitchStation' => in_array($user->role->value ?? '', ['admin', 'supervisor'], true),
+            'tracks' => $tracksList,
+            'canSwitchStation' => $user->isAdmin() || $user->isSupervisorForAnyProgram(),
+            'queueCount' => $footerStats['queue_count'],
+            'processedToday' => $footerStats['processed_today'],
         ]);
     }
 }

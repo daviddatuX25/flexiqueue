@@ -14,6 +14,8 @@ class TemporaryQrService
 {
     private const DEFAULT_TTL_SECONDS = 300;
 
+    private const NO_EXPIRY_SENTINEL = 315360000; // 10 years
+
     public function __construct(
         private TokenPrintService $tokenPrintService
     ) {}
@@ -25,7 +27,7 @@ class TemporaryQrService
      */
     public function generate(User $user, ?int $programId = null, ?int $expiresInSeconds = null): array
     {
-        $ttl = $expiresInSeconds ?? self::DEFAULT_TTL_SECONDS;
+        $ttl = $expiresInSeconds === 0 ? self::NO_EXPIRY_SENTINEL : ($expiresInSeconds ?? self::DEFAULT_TTL_SECONDS);
         $token = Str::random(64);
         $expiresAt = now()->addSeconds($ttl);
 

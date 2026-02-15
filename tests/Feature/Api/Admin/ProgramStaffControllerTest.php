@@ -1,0 +1,169 @@
+<?php
+
+namespace Tests\Feature\Api\Admin;
+
+use App\Models\Program;
+use App\Models\ProgramStationAssignment;
+use App\Models\ServiceTrack;
+use App\Models\Station;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class ProgramStaffControllerTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private User $admin;
+
+    private Program $program;
+
+    private Station $station1;
+
+    private Station $station2;
+
+    private User $staff1;
+
+    private User $staff2;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->admin = User::factory()->admin()->create();
+        $this->staff1 = User::factory()->create(['role' => 'staff']);
+        $this->staff2 = User::factory()->create(['role' => 'staff']);
+
+        $this->program = Program::create([
+            'name' => 'Test Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $this->admin->id,
+        ]);
+        $this->station1 = Station::create([
+            'program_id' => $this->program->id,
+            'name' => 'Interview',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $this->station2 = Station::create([
+            'program_id' => $this->program->id,
+            'name' => 'Cashier',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        ServiceTrack::create([
+            'program_id' => $this->program->id,
+            'name' => 'Default',
+            'is_default' => true,
+            'color_code' => '#333',
+        ]);
+    }
+
+    public function test_staff_assignments_returns_200_and_list(): void
+    {
+        $response = $this->actingAs($this->admin)->getJson("/api/admin/programs/{$this->program->id}/staff-assignments");
+
+        $response->assertStatus(200);
+        $response->assertJsonStructure([
+            'assignments' => [['user_id', 'user' => ['id', 'name', 'email'], 'station_id', 'station']],
+            'stations' => [['id', 'name']],
+        ]);
+        $stationNames = collect($response->json('stations'))->pluck('name')->all();
+        $this->assertContains('Interview', $stationNames);
+        $this->assertContains('Cashier', $stationNames);
+    }
+
+    public function test_assign_staff_to_station_returns_201(): void
+    {
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$this->program->id}/staff-assignments", [
+            'user_id' => $this->staff1->id,
+            'station_id' => $this->station1->id,
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('user_id', $this->staff1->id);
+        $response->assertJsonPath('station_id', $this->station1->id);
+
+        $this->assertDatabaseHas('program_station_assignments', [
+            'program_id' => $this->program->id,
+            'user_id' => $this->staff1->id,
+            'station_id' => $this->station1->id,
+        ]);
+    }
+
+    public function test_unassign_staff_removes_assignment(): void
+    {
+        ProgramStationAssignment::create([
+            'program_id' => $this->program->id,
+            'user_id' => $this->staff1->id,
+            'station_id' => $this->station1->id,
+        ]);
+
+        $response = $this->actingAs($this->admin)->deleteJson("/api/admin/programs/{$this->program->id}/staff-assignments/{$this->staff1->id}");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('station_id', null);
+
+        $this->assertDatabaseMissing('program_station_assignments', [
+            'program_id' => $this->program->id,
+            'user_id' => $this->staff1->id,
+        ]);
+    }
+
+    public function test_supervisors_returns_200(): void
+    {
+        $response = $this->actingAs($this->admin)->getJson("/api/admin/programs/{$this->program->id}/supervisors");
+
+        $response->assertStatus(200);
+        $response->assertJsonStructure(['supervisors', 'staff_with_pin']);
+    }
+
+    public function test_add_supervisor_requires_override_pin(): void
+    {
+        $staffNoPin = User::factory()->create(['role' => 'staff', 'override_pin' => null]);
+
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$this->program->id}/supervisors", [
+            'user_id' => $staffNoPin->id,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'User must have override PIN set to be a supervisor.');
+    }
+
+    public function test_add_supervisor_with_pin_returns_201(): void
+    {
+        $staffWithPin = User::factory()->supervisor()->withOverridePin('123456')->create();
+
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$this->program->id}/supervisors", [
+            'user_id' => $staffWithPin->id,
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('user_id', $staffWithPin->id);
+
+        $this->assertDatabaseHas('program_supervisors', [
+            'program_id' => $this->program->id,
+            'user_id' => $staffWithPin->id,
+        ]);
+    }
+
+    public function test_remove_supervisor_returns_200(): void
+    {
+        $staffWithPin = User::factory()->supervisor()->withOverridePin('123456')->create();
+        $this->program->supervisedBy()->attach($staffWithPin->id);
+
+        $response = $this->actingAs($this->admin)->deleteJson("/api/admin/programs/{$this->program->id}/supervisors/{$staffWithPin->id}");
+
+        $response->assertStatus(200);
+        $this->assertDatabaseMissing('program_supervisors', [
+            'program_id' => $this->program->id,
+            'user_id' => $staffWithPin->id,
+        ]);
+    }
+
+    public function test_staff_cannot_access_program_staff_apis_returns_403(): void
+    {
+        $response = $this->actingAs($this->staff1)->getJson("/api/admin/programs/{$this->program->id}/staff-assignments");
+        $response->assertStatus(403);
+    }
+}

@@ -526,15 +526,16 @@ class SessionService
             throw new \InvalidArgumentException('Session has no program.', 422);
         }
 
+        $previousStationId = $session->current_station_id;
+
+        // Per TRACK-OVERRIDES-REFACTOR: custom path skips track validation
+        if ($customSteps !== null && count($customSteps) > 0) {
+            return $this->reassignToCustomPath($session, $customSteps, $staffUserId, $reason, $supervisorUserId, $previousStationId);
+        }
+
         $track = ServiceTrack::where('program_id', $program->id)->find($targetTrackId);
         if (! $track) {
             throw new \InvalidArgumentException('Target track not found or does not belong to session program.', 422);
-        }
-
-        $previousStationId = $session->current_station_id;
-
-        if ($customSteps !== null && count($customSteps) > 0) {
-            return $this->reassignToCustomPath($session, $customSteps, $staffUserId, $reason, $supervisorUserId, $previousStationId);
         }
 
         $firstStep = $track->trackSteps()->where('step_order', 1)->first();
@@ -575,9 +576,11 @@ class SessionService
             $session = $session->fresh(['currentStation', 'serviceTrack']);
             $supervisor = \App\Models\User::find($supervisorUserId);
 
-            event(new StatusUpdate($previousStationId, $session));
+            if ($previousStationId !== null) {
+                event(new StatusUpdate($previousStationId, $session));
+                event(new QueueLengthUpdated($previousStationId));
+            }
             event(new ClientArrived($session, $targetStationId));
-            event(new QueueLengthUpdated($previousStationId));
             event(new QueueLengthUpdated($targetStationId));
 
             return [
@@ -683,9 +686,11 @@ class SessionService
             $session = $session->fresh(['currentStation', 'serviceTrack']);
             $supervisor = \App\Models\User::find($supervisorUserId ?? 0);
 
-            event(new StatusUpdate($prevId, $session));
+            if ($prevId !== null) {
+                event(new StatusUpdate($prevId, $session));
+                event(new QueueLengthUpdated($prevId));
+            }
             event(new ClientArrived($session, $firstStationId));
-            event(new QueueLengthUpdated($prevId));
             event(new QueueLengthUpdated($firstStationId));
 
             return [

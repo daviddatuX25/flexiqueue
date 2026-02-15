@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api;
 
+use App\Models\Program;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -15,7 +16,15 @@ class VerifyPinTest extends TestCase
 
     public function test_verify_pin_valid_returns_200(): void
     {
+        $admin = User::factory()->admin()->create();
+        $program = Program::create([
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $admin->id,
+        ]);
         $supervisor = User::factory()->supervisor()->withOverridePin('123456')->create();
+        $program->supervisedBy()->attach($supervisor->id);
         $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->postJson('/api/auth/verify-pin', [
@@ -26,12 +35,20 @@ class VerifyPinTest extends TestCase
         $response->assertStatus(200);
         $response->assertJsonPath('verified', true);
         $response->assertJsonPath('user_id', $supervisor->id);
-        $response->assertJsonPath('role', 'supervisor');
+        $response->assertJsonPath('role', 'staff');
     }
 
     public function test_verify_pin_invalid_returns_401(): void
     {
+        $admin = User::factory()->admin()->create();
+        $program = Program::create([
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $admin->id,
+        ]);
         $supervisor = User::factory()->supervisor()->withOverridePin('123456')->create();
+        $program->supervisedBy()->attach($supervisor->id);
         $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->postJson('/api/auth/verify-pin', [
@@ -46,7 +63,7 @@ class VerifyPinTest extends TestCase
 
     public function test_verify_pin_staff_without_pin_returns_401(): void
     {
-        $staff = User::factory()->create(); // no override_pin
+        $staff = User::factory()->create(['override_pin' => null]);
         $requester = User::factory()->create();
 
         $response = $this->actingAs($requester)->postJson('/api/auth/verify-pin', [

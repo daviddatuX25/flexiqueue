@@ -31,6 +31,8 @@ class UserFactory extends Factory
             'remember_token' => Str::random(10),
             'role' => 'staff',
             'is_active' => true,
+            'override_pin' => Hash::make('123456'),
+            'override_qr_token' => Hash::make(Str::random(64)),
         ];
     }
 
@@ -40,10 +42,13 @@ class UserFactory extends Factory
         return $this->state(fn (array $attributes) => ['role' => 'admin']);
     }
 
-    /** Per 05-SECURITY-CONTROLS: supervisor role (redirect to station). */
+    /**
+     * Creates staff user. For supervisor-like access, call supervisorForProgram($program) after create.
+     * Per refactor: supervisor is program-specific, not a role.
+     */
     public function supervisor(): static
     {
-        return $this->state(fn (array $attributes) => ['role' => 'supervisor']);
+        return $this->state(fn (array $attributes) => ['role' => 'staff']);
     }
 
     /** Per 05-SECURITY-CONTROLS §4: supervisor/admin with override PIN for override/force-complete. */

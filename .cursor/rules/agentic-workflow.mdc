@@ -9,21 +9,25 @@ alwaysApply: true
 
 1. **Contract over Creativity**: Implementation follows specs in `docs/architecture/`, not imagination
 2. **Phases over Perfection**: Deliver Phase 1 completely before touching Phase 2
-3. **Beads = Single Source of Truth**: Work only comes from beads; if it's not a bead, create one
-4. **Ask Before Assuming**: 1 question up front > 10 rollbacks later
+3. **Beads = Long-Term Memory**: Beads persist all work items. If it's not a bead, create one. Pre-generated beads are a starting point; create/edit beads as you discover work during the session.
+4. **Session = Current Scope Only**: Focus on the current bead's goal. New work → new bead (or edit existing). Don't carry mental state; let beads carry it.
+5. **Ask Before Assuming**: 1 question up front > 10 rollbacks later
+6. **Test first when adding behavior**: Test scenarios come from step 4 (explore edge cases); write the failing PHPUnit test for each scenario, then implement until green, then refactor.
 
 ---
 
 ## 📍 SESSION START RITUAL
 
-Every session begins with:
+**Plan-first:** If scope for this session isn't set yet, follow the plan-first rule (`.cursor/rules/plan-first-and-bead-scope.mdc`): surface ready/blocked work, ask the user what to work on, get confirmation. Then run the steps below for that scope.
+
+Every session (once scope is confirmed) continues with:
 ```bash
 bd ready                    # See available work
 bd show <id>               # Read full task details
 bd update <id> --status in_progress
 ```
 
-**Before writing ANY code**, you must:
+**Before writing ANY code**, follow these steps in order:
 
 ### 1. VERIFY PHASE ALIGNMENT
 - Check `docs/plans/PHASES-OVERVIEW.md`
@@ -34,7 +38,7 @@ bd update <id> --status in_progress
   > C) Create a Phase 2 bead and defer it"
 
 ### 2. READ CONTRACTS
-Before implementing, consult in order:
+Consult in order:
 1. `docs/architecture/08-API-SPEC-PHASE1.md` (endpoint behavior)
 2. `docs/architecture/09-UI-ROUTES-PHASE1.md` (page responsibilities)
 3. `docs/architecture/04-DATA-MODEL.md` (schema)
@@ -47,8 +51,9 @@ Before implementing, consult in order:
 > B) 200 OK with { result: 'already_processed' }
 > What's the expected UX?"
 
-### 3. PLAN VISIBLE WORK
-State your plan in THIS format:
+### 3. DRAFT THE PLAN
+State your plan in THIS format. **STEPS are test-first**: the first steps are PHPUnit feature/unit tests derived from step 4's test scenarios; then implementation steps.
+
 ```
 📋 PLAN for BD-042: User can approve application
 
@@ -57,17 +62,53 @@ CONTRACTS:
 - Data: Application.status enum (per 04-data-model, line 78)
 - Security: Requires 'admin' role (per 05-security-controls)
 
-STEPS:
-1. Update Application schema to add 'approved_at' timestamp
-2. Create ApprovalService.approve(applicationId, adminId) method
-3. Add POST /api/applications/:id/approve endpoint
-4. Write feature test for approval flow
-5. Add "Approve" button to ApplicationDetail page
+STEPS (test scenarios from step 4 → test steps first):
+1. Add PHPUnit feature test: admin can approve application (201, assert response).
+2. Implement ApprovalService.approve and POST endpoint.
+3. Add PHPUnit feature test: already approved → 409 Conflict.
+4. Add duplicate check in controller.
+5. Add PHPUnit feature test: non-admin → 403 Forbidden.
+6. Add role middleware/check.
+7. Add "Approve" button to ApplicationDetail page.
 
 EDGE CASES TO HANDLE:
 - Already approved application → 409 Conflict
 - Non-admin user → 403 Forbidden
 - Invalid application ID → 404 Not Found
+```
+
+### 4. EXPLORE FUNCTIONAL / EDGE CASES
+**After drafting the plan**, purposely look for gaps and **enumerate test scenarios** (these drive TDD):
+
+- For every acceptance-criteria flow: can the user *perform* it end-to-end?
+- For every "then Y": what action triggers Y? (e.g. "Logout redirects to /login" — is there a Log out button?)
+- What happens when X? Edge cases like empty state, error state, duplicate action, permissions.
+- Check that verification steps are actually doable by a real user.
+
+**Output test scenarios:** List the scenarios that will be implemented test-first (happy path + each important edge case). Example: "Test scenarios: (1) valid login redirects by role, (2) invalid credentials return 422 and errors, (3) inactive user cannot log in, (4) rate limit after 5 failures." These become the test steps at the top of your plan (step 3). Add any discovered gaps to the plan or note them for step 5.
+
+### 5. TRANSPOSE TO BEADS
+**Beads = long-term memory for what's strictly sure.** Only create beads for work that is clear and confirmed given current progress (see `docs/plans/backlog/PHASE-1-TASKS.md`). Concept changes mean we do not rely on a pre-generated task list.
+
+- If you found new work (e.g. "need to add Log out button" that wasn't in the original bead):
+  - **Option A:** Add it to the current bead's scope (edit bead description) if it's small and tightly coupled.
+  - **Option B:** Create a new sub-bead for it if it's separable.
+- If the plan reveals that the original bead's scope was too big, split it into multiple beads.
+- After transposing, the plan should map 1:1 to bead(s) you will close when done.
+
+```bash
+# Example: discovered work that needs its own bead
+bd create "Add Log out button to Dashboard and Station" --type=task --body="Verification requires logout UI."
+```
+
+### 6. CONFIRM WITH USER
+Present the final plan (including any new beads or scope edits) and wait for confirmation:
+```
+FUNCTIONAL CASES CHECKED:
+- Logout: user can trigger it from Dashboard/Station — added step to plan / created BD-XXX
+
+NEW BEADS CREATED (or scope edits):
+- BD-XXX: Add Log out button to Dashboard and Station
 
 Proceed? (Y/n)
 ```
@@ -114,21 +155,31 @@ if (application.status === 'approved') {
 }
 ```
 
+### TDD LOOP (Implementation)
+
+- **New behavior:** The test steps in the plan come from step 4 (explore edge cases). Write the failing PHPUnit test for the next scenario, run `./vendor/bin/sail artisan test` (or `php artisan test` when not using Sail), implement until the test passes, then refactor if needed. Repeat for each test scenario.
+- **Fixes or small changes:** Add or update the PHPUnit test that captures the fix, then implement; run full suite before marking the bead done.
+- **Reference:** Laravel Testing Expert skill and `docs/plans/QUALITY-GATES.md` for test layout and naming (`test_{action}_{scenario}_{expected_outcome}`).
+
 ### TESTING WORKFLOW
 
-**Default for All Code Changes:**
-- Write/update automated tests (unit, feature, API)
-- Run tests before marking task done
-- Reference `docs/plans/QUALITY-GATES.md` for coverage targets
+**Backend (PHPUnit only):**
+- All backend tests are PHPUnit (feature and unit). Run: `./vendor/bin/sail artisan test` (or `php artisan test` when not using Sail).
+- Write/update PHPUnit tests per the TDD loop above. Run tests before marking task done.
+- Reference `docs/plans/QUALITY-GATES.md` for coverage targets.
 
-**Additional for UI Changes:**
-1. **Checkpoint Testing**: When completing a UI task or before demos, perform manual browser test
-2. **Seeder Data**: For visual review or demos, run seeders to populate realistic data
+**Browser verification (Playwright E2E only):** Canonical verification for UI beads is the Playwright E2E suite. Do not use cursor-ide-browser or Dusk for bead verification.
+
+- **When:** Completing a UI bead (page, form, flow) or when acceptance criteria require browser verification.
+- **What to do:** Run the Playwright E2E suite via Sail: `./vendor/bin/sail npx playwright test` (app must be running — Sail up and optionally `./vendor/bin/sail npm run dev` or built assets). First-time: `./vendor/bin/sail npx playwright install` to install browser binaries. If the flow under the bead is not yet covered, add or update Playwright tests for it (e.g. login, redirect by role, form submit, key UI states).
+- **Report:** Pass = Playwright run passed and relevant E2E tests cover the flow. Fail = fix failing E2E or implementation. Skipped = app not running or E2E not set up yet. For ad-hoc manual checks the user may open a browser; the bead is not done until Playwright passes where applicable.
+
+**Seeder Data:** For visual review or demos, run seeders to populate realistic data
 ```bash
    # Not on every commit - only at checkpoints
-   npm run db:seed  # or equivalent
+   ./vendor/bin/sail artisan db:seed  # or php artisan db:seed
 ```
-3. **Visual Review**: After UI task completion, state: 
+**Visual Review:** After UI task completion, state: 
    > "✅ BD-042 complete. **Ready for visual review** - seeded 15 sample applications."
 
 **Code Review Triggers:**
@@ -144,10 +195,9 @@ State explicitly:
 ## 🚦 DECISION POINTS
 
 ### When User Says "Continue" or "Next Task"
-1. Run `bd ready` to get current backlog
-2. Check `docs/plans/backlog/PHASE-1-TASKS.md` for dependencies
-3. Announce: 
-   > "Next unblocked task is BD-043: User can reject application. Starting..."
+1. Run `bd ready` to see current beads
+2. Scan project and plan docs (`docs/architecture/`, `docs/plans/PHASES-OVERVIEW.md`, `docs/plans/backlog/PHASE-1-TASKS.md`) to see what's clearly in front
+3. If there is an obvious next piece of work, create a bead for it only when it's strictly sure, then start it; otherwise announce what you see and ask what to do next
 
 ### When You Spot an Issue
 **DO NOT silently fix** - instead:
@@ -183,6 +233,8 @@ Which approach?"
 Before ending your turn:
 
 ### 1. UPDATE BEADS
+**Beads = long-term memory.** Persist everything discovered during the session.
+
 ```bash
 bd update <id> --status done    # For completed work
 bd create "Fix validation bug in ApprovalService" --context "Found during BD-042, non-blocking"
@@ -196,7 +248,21 @@ git push origin <feature-branch>
 ```
 **Work is NOT complete until `git push` succeeds.**
 
-### 3. HANDOFF REPORT
+### 3. EXPLORE CASES AGAIN (BEFORE SUGGESTING NEXT)
+- **Again** look for functional or edge cases that are missing or incomplete.
+- If the **next subsequent task** (in backlog order) would already cover a case, note it — don't suggest doing it now.
+- For any gaps NOT covered by the next task, **present as options** for user choice:
+  > "**Optional cases (your choice):**
+  > - A) [e.g. Add logout link to Welcome page for consistency]
+  > - B) [e.g. Document rate-limit message in 08-API-SPEC]
+  > - C) None — proceed as-is.
+  > Which do you prefer?"
+- **Create beads** for any case the user chooses to defer (don't rely on memory):
+  ```bash
+  bd create "Add logout link to Welcome page" --type=task --body="Nice-to-have, found during BD-005."
+  ```
+
+### 4. HANDOFF REPORT
 Provide this summary:
 ```
 📊 SESSION SUMMARY
@@ -215,8 +281,8 @@ NEXT UP:
 📌 BD-044: Admin dashboard shows approval stats (unblocked)
 📌 BD-045: Email notification on approval (depends on BD-044)
 
-NEW ISSUES CREATED:
-🐛 BD-099: Add rate limiting to approval endpoint (Phase 1 backlog)
+NEW BEADS CREATED THIS SESSION:
+🆕 BD-099: Add rate limiting to approval endpoint (Phase 1 backlog)
 🔮 BD-100: CSV import for applications (Phase 2 - deferred)
 
 BLOCKERS:
@@ -228,11 +294,11 @@ QUALITY GATES:
 - Code review: Pending (this completes approval feature set)
 ```
 
-### 4. PROMPT NEXT ACTION
-End with:
+### 5. PROMPT NEXT ACTION
+After step 3 (explore cases + user options), end with:
 > "Would you like me to:
-> A) Start BD-043 (reject application)
-> B) Perform code review of approval feature (BD-040 to BD-042)
+> A) Start [next task] (e.g. BD-043)
+> B) [Address one of the optional cases from step 3]
 > C) Something else?"
 
 ---

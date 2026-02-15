@@ -9,16 +9,19 @@ use App\Models\Station;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 class DatabaseSeeder extends Seeder
 {
     /**
      * Seed users for login testing. Password for all: "password".
+     * Override PIN for all: "123456" (dev default). Preset QR: random token per user (saved as default).
      * Also seeds one program with a track and two stations for E2E (e.g. manage steps).
      */
     public function run(): void
     {
         $password = Hash::make('password');
+        $defaultPin = Hash::make('123456');
 
         $admin = User::updateOrCreate(
             ['email' => 'admin@example.com'],
@@ -27,6 +30,8 @@ class DatabaseSeeder extends Seeder
                 'password' => $password,
                 'role' => UserRole::Admin,
                 'is_active' => true,
+                'override_pin' => $defaultPin,
+                'override_qr_token' => Hash::make(Str::random(64)),
             ]
         );
 
@@ -37,16 +42,20 @@ class DatabaseSeeder extends Seeder
                 'password' => $password,
                 'role' => UserRole::Staff,
                 'is_active' => true,
+                'override_pin' => $defaultPin,
+                'override_qr_token' => Hash::make(Str::random(64)),
             ]
         );
 
-        User::updateOrCreate(
+        $supervisor = User::updateOrCreate(
             ['email' => 'supervisor@example.com'],
             [
                 'name' => 'Supervisor User',
                 'password' => $password,
-                'role' => UserRole::Supervisor,
+                'role' => UserRole::Staff,
                 'is_active' => true,
+                'override_pin' => $defaultPin,
+                'override_qr_token' => Hash::make(Str::random(64)),
             ]
         );
 
@@ -91,6 +100,9 @@ class DatabaseSeeder extends Seeder
         );
 
         $staff->update(['assigned_station_id' => $s1->id]);
+        $supervisor->update(['assigned_station_id' => $s2->id]);
+
+        $program->supervisedBy()->syncWithoutDetaching([$supervisor->id]);
         $program->update(['is_active' => true]);
     }
 }

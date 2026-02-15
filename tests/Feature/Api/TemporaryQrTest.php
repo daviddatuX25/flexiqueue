@@ -29,6 +29,10 @@ class TemporaryQrTest extends TestCase
 
     private Station $station2;
 
+    private \App\Models\ServiceTrack $track;
+
+    private \App\Models\ServiceTrack $trackToStation2;
+
     private Session $session;
 
     protected function setUp(): void
@@ -55,14 +59,21 @@ class TemporaryQrTest extends TestCase
             'capacity' => 1,
             'is_active' => true,
         ]);
-        $track = \App\Models\ServiceTrack::create([
+        $this->track = \App\Models\ServiceTrack::create([
             'program_id' => $this->program->id,
             'name' => 'Default',
             'is_default' => true,
             'color_code' => '#333',
         ]);
-        TrackStep::create(['track_id' => $track->id, 'station_id' => $this->station1->id, 'step_order' => 1, 'is_required' => true]);
-        TrackStep::create(['track_id' => $track->id, 'station_id' => $this->station2->id, 'step_order' => 2, 'is_required' => true]);
+        TrackStep::create(['track_id' => $this->track->id, 'station_id' => $this->station1->id, 'step_order' => 1, 'is_required' => true]);
+        TrackStep::create(['track_id' => $this->track->id, 'station_id' => $this->station2->id, 'step_order' => 2, 'is_required' => true]);
+        $this->trackToStation2 = \App\Models\ServiceTrack::create([
+            'program_id' => $this->program->id,
+            'name' => 'To S2',
+            'is_default' => false,
+            'color_code' => '#666',
+        ]);
+        TrackStep::create(['track_id' => $this->trackToStation2->id, 'station_id' => $this->station2->id, 'step_order' => 1, 'is_required' => true]);
         $token = new Token;
         $token->qr_code_hash = hash('sha256', Str::random(32).'A1');
         $token->physical_id = 'A1';
@@ -71,7 +82,7 @@ class TemporaryQrTest extends TestCase
         $this->session = Session::create([
             'token_id' => $token->id,
             'program_id' => $this->program->id,
-            'track_id' => $track->id,
+            'track_id' => $this->track->id,
             'alias' => 'A1',
             'client_category' => 'PWD',
             'current_station_id' => $this->station1->id,
@@ -109,7 +120,7 @@ class TemporaryQrTest extends TestCase
 
         $staff = User::factory()->create(['role' => 'staff']);
         $response = $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
-            'target_station_id' => $this->station2->id,
+            'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Skip step',
             'auth_type' => 'temp_qr',
             'qr_scan_token' => $scanToken,
@@ -131,14 +142,14 @@ class TemporaryQrTest extends TestCase
 
         $staff = User::factory()->create(['role' => 'staff']);
         $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
-            'target_station_id' => $this->station2->id,
+            'target_track_id' => $this->trackToStation2->id,
             'reason' => 'First use',
             'auth_type' => 'temp_qr',
             'qr_scan_token' => $scanToken,
         ])->assertStatus(200);
 
         $response = $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
-            'target_station_id' => $this->station1->id,
+            'target_track_id' => $this->track->id,
             'reason' => 'Replay',
             'auth_type' => 'temp_qr',
             'qr_scan_token' => $scanToken,

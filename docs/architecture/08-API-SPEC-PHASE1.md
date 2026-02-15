@@ -200,7 +200,7 @@ All session endpoints require `auth` middleware and either `role:admin,superviso
 4. Get first `track_step` (step_order = 1) for the track.
 5. Create `Session` with `status = 'waiting'`, `current_station_id` = first step's station, `current_step_order = 1`.
 6. Update `Token`: `status = 'in_use'`, `current_session_id = session.id`.
-7. Log `TransactionLog`: `action_type = 'bind'`, `station_id` = triage station, `next_station_id` = first station.
+7. Log `TransactionLog`: `action_type = 'bind'`, `station_id` = NULL (triage is not a station), `next_station_id` = first step's station.
 8. Broadcast `client_arrived` to `station.{first_station_id}`.
 9. Broadcast `queue_length` to `global.queue`.
 
@@ -506,8 +506,7 @@ All session endpoints require `auth` middleware and either `role:admin,superviso
 {
   "station": {
     "id": 2,
-    "name": "Interview",
-    "role_type": "processing"
+    "name": "Interview"
   },
   "now_serving": {
     "session_id": 101,
@@ -551,7 +550,7 @@ All session endpoints require `auth` middleware and either `role:admin,superviso
 ```
 
 **Queue Ordering:**
-- Waiting sessions ordered by `sessions.started_at` ASC (FIFO).
+- Waiting sessions ordered by `queue_sessions.started_at` ASC (FIFO).
 - Priority tracks do NOT automatically jump the queue (staff manually calls next in the order they choose). This matches the real-world MSWDO process where staff has discretion.
 
 ---
@@ -566,8 +565,7 @@ All session endpoints require `auth` middleware and either `role:admin,superviso
   "stations": [
     {
       "id": 1,
-      "name": "Triage",
-      "role_type": "triage",
+      "name": "Verification Desk",
       "is_active": true,
       "queue_count": 0,
       "assigned_staff": [{ "id": 1, "name": "Juan Cruz" }]
@@ -575,7 +573,6 @@ All session endpoints require `auth` middleware and either `role:admin,superviso
     {
       "id": 2,
       "name": "Interview",
-      "role_type": "processing",
       "is_active": true,
       "queue_count": 3,
       "assigned_staff": [{ "id": 2, "name": "Maria Santos" }]
@@ -640,7 +637,7 @@ All admin endpoints require `auth` + `role:admin` middleware.
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET /api/admin/programs/{programId}/stations` | List stations for program |
-| `POST /api/admin/programs/{programId}/stations` | Create station | Body: `{ name, role_type, capacity }` |
+| `POST /api/admin/programs/{programId}/stations` | Create station | Body: `{ name, capacity }` |
 | `PUT /api/admin/stations/{id}` | Update station |
 | `DELETE /api/admin/stations/{id}` | Delete station | Blocked if referenced by track steps |
 

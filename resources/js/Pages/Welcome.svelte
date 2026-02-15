@@ -13,10 +13,11 @@
 			<p class="text-base-content/80 mt-2">
 				Laravel 12 + Svelte 5 + Inertia.js + TailwindCSS 4 + DaisyUI 5
 			</p>
-			<div class="flex gap-2 mt-4">
+			<div class="flex flex-wrap gap-2 mt-4">
 				<button type="button" class="btn btn-primary">Primary</button>
 				<button type="button" class="btn btn-success">Success</button>
 				<button type="button" class="btn btn-outline">Outline</button>
+				<a href="/broadcast-test" class="btn btn-outline btn-sm">Reverb test</a>
 			</div>
 			<p class="text-sm text-neutral mt-4">
 				Test page — FlexiQueue theme applied. If you see styled buttons and primary blue, setup is correct.

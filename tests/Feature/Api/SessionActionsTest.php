@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api;
 
+use App\Events\StationActivity;
 use App\Models\Program;
 use App\Models\ServiceTrack;
 use App\Models\Session;
@@ -10,6 +11,7 @@ use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -25,6 +27,8 @@ class SessionActionsTest extends TestCase
     private Program $program;
 
     private ServiceTrack $track;
+
+    private ServiceTrack $trackToStation2;
 
     private Station $station1;
 
@@ -74,6 +78,18 @@ class SessionActionsTest extends TestCase
             'step_order' => 2,
             'is_required' => true,
         ]);
+        $this->trackToStation2 = ServiceTrack::create([
+            'program_id' => $this->program->id,
+            'name' => 'To S2',
+            'is_default' => false,
+            'color_code' => '#666',
+        ]);
+        TrackStep::create([
+            'track_id' => $this->trackToStation2->id,
+            'station_id' => $this->station2->id,
+            'step_order' => 1,
+            'is_required' => true,
+        ]);
         $this->token = new Token;
         $this->token->qr_code_hash = hash('sha256', Str::random(32).'A1');
         $this->token->physical_id = 'A1';
@@ -92,15 +108,60 @@ class SessionActionsTest extends TestCase
         $this->token->update(['current_session_id' => $this->session->id]);
     }
 
-    public function test_call_waiting_session_returns_200_and_sets_serving(): void
+    public function test_call_waiting_session_returns_200_and_sets_called(): void
     {
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/call");
 
         $response->assertStatus(200);
         $response->assertJsonPath('session_id', $this->session->id);
         $response->assertJsonPath('alias', 'A1');
-        $response->assertJsonPath('no_show_attempts', 1);
-        $response->assertJsonPath('threshold_reached', false);
+        $response->assertJsonPath('no_show_attempts', 0);
+        $response->assertJsonPath('status', 'called');
+        $this->assertDatabaseHas('queue_sessions', ['id' => $this->session->id, 'status' => 'called']);
+        $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'call']);
+    }
+
+    public function test_call_dispatches_station_activity_broadcast(): void
+    {
+        Event::fake([StationActivity::class]);
+
+        $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/call");
+
+        Event::assertDispatched(StationActivity::class, function (StationActivity $event) {
+            return $event->stationId === $this->station1->id
+                && $event->stationName === 'First Station'
+                && str_contains($event->message, 'A1')
+                && str_contains($event->message, 'priority lane')
+                && $event->alias === 'A1'
+                && $event->actionType === 'call';
+        });
+    }
+
+    public function test_serve_dispatches_station_activity_broadcast(): void
+    {
+        $this->session->update(['status' => 'called']);
+        Event::fake([StationActivity::class]);
+
+        $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/serve");
+
+        Event::assertDispatched(StationActivity::class, function (StationActivity $event) {
+            return $event->stationId === $this->station1->id
+                && $event->stationName === 'First Station'
+                && str_contains($event->message, 'A1')
+                && str_contains($event->message, 'arrived (serving)')
+                && $event->alias === 'A1'
+                && $event->actionType === 'check_in';
+        });
+    }
+
+    public function test_serve_called_session_returns_200_and_sets_serving(): void
+    {
+        $this->session->update(['status' => 'called']);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/serve");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session.status', 'serving');
         $this->assertDatabaseHas('queue_sessions', ['id' => $this->session->id, 'status' => 'serving']);
         $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'check_in']);
     }
@@ -199,8 +260,10 @@ class SessionActionsTest extends TestCase
         $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'cancel']);
     }
 
-    public function test_no_show_returns_200(): void
+    public function test_no_show_on_called_session_with_3_attempts_returns_200_and_terminates(): void
     {
+        $this->session->update(['status' => 'called', 'no_show_attempts' => 2]);
+
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/no-show");
 
         $response->assertStatus(200);
@@ -209,9 +272,22 @@ class SessionActionsTest extends TestCase
         $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'no_show']);
     }
 
+    public function test_no_show_on_called_session_with_1_attempt_returns_to_waiting(): void
+    {
+        $this->session->update(['status' => 'called', 'no_show_attempts' => 0]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/no-show");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session.status', 'waiting');
+        $response->assertJsonPath('back_to_waiting', true);
+        $response->assertJsonPath('no_show_attempts', 1);
+    }
+
     public function test_force_complete_with_valid_pin_returns_200(): void
     {
         $supervisor = User::factory()->supervisor()->withOverridePin('123456')->create();
+        $this->program->supervisedBy()->attach($supervisor->id);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/force-complete", [
             'reason' => 'Token accidentally reused',
@@ -231,6 +307,7 @@ class SessionActionsTest extends TestCase
     public function test_force_complete_invalid_pin_returns_401(): void
     {
         $supervisor = User::factory()->supervisor()->withOverridePin('123456')->create();
+        $this->program->supervisedBy()->attach($supervisor->id);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/force-complete", [
             'reason' => 'Token accidentally reused',
@@ -245,10 +322,11 @@ class SessionActionsTest extends TestCase
     public function test_override_with_valid_pin_returns_200(): void
     {
         $supervisor = User::factory()->supervisor()->withOverridePin('123456')->create();
+        $this->program->supervisedBy()->attach($supervisor->id);
         $this->session->update(['status' => 'serving']);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/override", [
-            'target_station_id' => $this->station2->id,
+            'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Skip to final step',
             'supervisor_user_id' => $supervisor->id,
             'supervisor_pin' => '123456',

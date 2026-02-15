@@ -123,4 +123,15 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | E2E Testing (Playwright / hyvor/laravel-playwright)
+    |--------------------------------------------------------------------------
+    | Prefix for testing endpoints. CAUTION: Only enabled in 'local' and 'testing'.
+    */
+    'e2e' => [
+        'prefix' => 'playwright',
+        'environments' => ['local', 'testing'],
+    ],
+
 ];

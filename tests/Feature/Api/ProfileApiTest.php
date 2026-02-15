@@ -1,0 +1,136 @@
+<?php
+
+namespace Tests\Feature\Api;
+
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
+use Tests\TestCase;
+
+/**
+ * Per PIN-QR-AUTHORIZATION-SYSTEM AUTH-2: Profile preset PIN/QR API.
+ */
+class ProfileApiTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_update_override_pin_requires_current_password(): void
+    {
+        $user = User::factory()->admin()->create(['password' => Hash::make('password')]);
+
+        $response = $this->actingAs($user)->putJson('/api/profile/override-pin', [
+            'current_password' => 'wrong',
+            'new_pin' => '123456',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('current_password');
+    }
+
+    public function test_update_override_pin_validates_new_pin_format(): void
+    {
+        $user = User::factory()->admin()->create(['password' => Hash::make('password')]);
+
+        $response = $this->actingAs($user)->putJson('/api/profile/override-pin', [
+            'current_password' => 'password',
+            'new_pin' => '12345',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('new_pin');
+    }
+
+    public function test_update_override_pin_succeeds_with_valid_input(): void
+    {
+        $user = User::factory()->admin()->create(['password' => Hash::make('password')]);
+
+        $response = $this->actingAs($user)->putJson('/api/profile/override-pin', [
+            'current_password' => 'password',
+            'new_pin' => '654321',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonFragment(['message' => 'Override PIN updated.']);
+        $user->refresh();
+        $this->assertTrue(Hash::check('654321', $user->override_pin));
+    }
+
+    public function test_show_override_qr_returns_has_preset_qr_false_when_not_set(): void
+    {
+        $user = User::factory()->admin()->create(['override_qr_token' => null]);
+
+        $response = $this->actingAs($user)->getJson('/api/profile/override-qr');
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('has_preset_qr', false);
+    }
+
+    public function test_show_override_qr_returns_has_preset_qr_true_after_regenerate(): void
+    {
+        $user = User::factory()->admin()->create();
+
+        $this->actingAs($user)->postJson('/api/profile/override-qr/regenerate');
+
+        $response = $this->actingAs($user)->getJson('/api/profile/override-qr');
+        $response->assertStatus(200);
+        $response->assertJsonPath('has_preset_qr', true);
+    }
+
+    public function test_regenerate_override_qr_returns_qr_data_uri_and_saves_hash(): void
+    {
+        $user = User::factory()->admin()->create();
+
+        $response = $this->actingAs($user)->postJson('/api/profile/override-qr/regenerate');
+
+        $response->assertStatus(200);
+        $response->assertJsonStructure(['qr_data_uri', 'message']);
+        $this->assertStringStartsWith('data:image/', $response->json('qr_data_uri'));
+        $user->refresh();
+        $this->assertNotNull($user->override_qr_token);
+    }
+
+    public function test_update_password_succeeds_with_valid_input(): void
+    {
+        $user = User::factory()->admin()->create(['password' => Hash::make('password')]);
+
+        $response = $this->actingAs($user)->putJson('/api/profile/password', [
+            'current_password' => 'password',
+            'password' => 'newsecret123',
+            'password_confirmation' => 'newsecret123',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonFragment(['message' => 'Password updated.']);
+        $this->assertTrue(Hash::check('newsecret123', $user->fresh()->password));
+    }
+
+    public function test_update_password_requires_current_password(): void
+    {
+        $user = User::factory()->admin()->create(['password' => Hash::make('password')]);
+
+        $response = $this->actingAs($user)->putJson('/api/profile/password', [
+            'current_password' => 'wrong',
+            'password' => 'newsecret123',
+            'password_confirmation' => 'newsecret123',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('current_password');
+    }
+
+    public function test_profile_endpoints_require_auth(): void
+    {
+        $this->putJson('/api/profile/override-pin', [
+            'current_password' => 'password',
+            'new_pin' => '123456',
+        ])->assertStatus(401);
+
+        $this->getJson('/api/profile/override-qr')->assertStatus(401);
+        $this->postJson('/api/profile/override-qr/regenerate')->assertStatus(401);
+        $this->putJson('/api/profile/password', [
+            'current_password' => 'password',
+            'password' => 'newpass',
+            'password_confirmation' => 'newpass',
+        ])->assertStatus(401);
+    }
+}

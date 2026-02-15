@@ -17,7 +17,15 @@
 		tracks: Track[];
 	}
 
-	let { activeProgram = null }: { activeProgram: ActiveProgram | null } = $props();
+	let {
+		activeProgram = null,
+		queueCount = 0,
+		processedToday = 0,
+	}: {
+		activeProgram: ActiveProgram | null;
+		queueCount?: number;
+		processedToday?: number;
+	} = $props();
 
 	const CATEGORIES = [
 		{ label: 'Regular', value: 'Regular' },
@@ -116,7 +124,7 @@
 
 	function resetScan() {
 		scannedToken = null;
-		scanHandled = false;
+		scanHandled = true;
 		manualPhysicalId = '';
 		selectedCategory = null;
 		setDefaultTrack();
@@ -154,7 +162,7 @@
 	<title>Triage — FlexiQueue</title>
 </svelte:head>
 
-<MobileLayout headerTitle="Triage">
+<MobileLayout headerTitle="Triage" {queueCount} {processedToday}>
 	<div class="flex flex-col gap-4">
 		{#if !activeProgram}
 			<div class="rounded-box bg-base-100 border border-base-300 p-6 text-center text-base-content/80">
@@ -175,6 +183,7 @@
 							showCamera = !showCamera;
 							error = '';
 							if (showCamera) scanHandled = false;
+							else scanHandled = true;
 						}}
 					>
 						{showCamera ? 'Stop camera' : 'Start camera'}

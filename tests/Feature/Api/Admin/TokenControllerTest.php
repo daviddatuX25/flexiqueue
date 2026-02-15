@@ -1,0 +1,258 @@
+<?php
+
+namespace Tests\Feature\Api\Admin;
+
+use App\Models\Token;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
+use Tests\TestCase;
+
+/**
+ * Per 08-API-SPEC-PHASE1 §5.5: GET /api/admin/tokens, POST /api/admin/tokens/batch, PUT /api/admin/tokens/{id}.
+ * All require role:admin.
+ */
+class TokenControllerTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private User $admin;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->admin = User::factory()->admin()->create();
+    }
+
+    private function createToken(string $physicalId = 'A1', string $status = 'available'): Token
+    {
+        $token = new Token;
+        $token->qr_code_hash = hash('sha256', Str::random(32).$physicalId);
+        $token->physical_id = $physicalId;
+        $token->status = $status;
+        $token->save();
+
+        return $token;
+    }
+
+    public function test_index_returns_tokens_list(): void
+    {
+        $this->createToken('A1', 'available');
+        $this->createToken('A2', 'available');
+
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/tokens');
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('tokens.0.physical_id', 'A1');
+        $response->assertJsonPath('tokens.0.status', 'available');
+        $response->assertJsonCount(2, 'tokens');
+    }
+
+    public function test_index_can_filter_by_status(): void
+    {
+        $t1 = $this->createToken('A1', 'available');
+        $t2 = $this->createToken('A2', 'available');
+        $this->createToken('A3', 'available');
+        // Create session to make A2 in_use
+        $user = User::factory()->create();
+        $program = \App\Models\Program::create(['name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
+        $station = \App\Models\Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
+        $track = \App\Models\ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
+        \App\Models\TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);
+        $session = \App\Models\Session::create([
+            'token_id' => $t2->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'A2',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+        ]);
+        $t2->update(['status' => 'in_use', 'current_session_id' => $session->id]);
+
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/tokens?status=available');
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(2, 'tokens');
+        $ids = collect($response->json('tokens'))->pluck('physical_id')->all();
+        $this->assertContains('A1', $ids);
+        $this->assertContains('A3', $ids);
+        $this->assertNotContains('A2', $ids);
+    }
+
+    public function test_index_can_search_by_physical_id(): void
+    {
+        $this->createToken('A1', 'available');
+        $this->createToken('B10', 'available');
+        $this->createToken('A10', 'available');
+
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/tokens?search=A1');
+
+        $response->assertStatus(200);
+        $tokens = $response->json('tokens');
+        $this->assertCount(2, $tokens); // A1 and A10
+        $ids = collect($tokens)->pluck('physical_id')->all();
+        $this->assertContains('A1', $ids);
+        $this->assertContains('A10', $ids);
+        $this->assertNotContains('B10', $ids);
+    }
+
+    public function test_batch_create_returns_201_with_created_tokens(): void
+    {
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/tokens/batch', [
+            'prefix' => 'A',
+            'count' => 3,
+            'start_number' => 1,
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('created', 3);
+        $response->assertJsonCount(3, 'tokens');
+        $response->assertJsonPath('tokens.0.physical_id', 'A1');
+        $response->assertJsonPath('tokens.0.status', 'available');
+        $response->assertJsonPath('tokens.1.physical_id', 'A2');
+        $response->assertJsonPath('tokens.2.physical_id', 'A3');
+        $this->assertDatabaseCount('tokens', 3);
+    }
+
+    public function test_batch_create_validates_required_fields(): void
+    {
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/tokens/batch', [
+            'prefix' => '',
+            'count' => 0,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['prefix', 'count', 'start_number']);
+    }
+
+    public function test_update_token_status_to_available_returns_200(): void
+    {
+        $token = $this->createToken('A1', 'available');
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/tokens/{$token->id}", [
+            'status' => 'available',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('token.status', 'available');
+    }
+
+    public function test_destroy_soft_deletes_available_token_returns_200(): void
+    {
+        $token = $this->createToken('A1', 'available');
+
+        $response = $this->actingAs($this->admin)->deleteJson("/api/admin/tokens/{$token->id}");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('deleted', true);
+        $this->assertSoftDeleted('tokens', ['id' => $token->id]);
+    }
+
+    public function test_destroy_token_in_use_returns_409(): void
+    {
+        $token = $this->createToken('A1', 'available');
+        $user = User::factory()->create();
+        $program = \App\Models\Program::create(['name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
+        $station = \App\Models\Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
+        $track = \App\Models\ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
+        \App\Models\TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);
+        $session = \App\Models\Session::create([
+            'token_id' => $token->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'A1',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+        ]);
+        $token->update(['status' => 'in_use', 'current_session_id' => $session->id]);
+
+        $response = $this->actingAs($this->admin)->deleteJson("/api/admin/tokens/{$token->id}");
+
+        $response->assertStatus(409);
+        $response->assertJsonPath('message', 'Cannot delete token in use.');
+    }
+
+    public function test_batch_delete_soft_deletes_tokens_returns_200(): void
+    {
+        $t1 = $this->createToken('A1', 'available');
+        $t2 = $this->createToken('A2', 'available');
+
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/tokens/batch-delete', [
+            'ids' => [$t1->id, $t2->id],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('deleted', 2);
+        $this->assertSoftDeleted('tokens', ['id' => $t1->id]);
+        $this->assertSoftDeleted('tokens', ['id' => $t2->id]);
+    }
+
+    public function test_batch_delete_with_in_use_returns_409(): void
+    {
+        $t1 = $this->createToken('A1', 'available');
+        $t2 = $this->createToken('A2', 'available');
+        $user = User::factory()->create();
+        $program = \App\Models\Program::create(['name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
+        $station = \App\Models\Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
+        $track = \App\Models\ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
+        \App\Models\TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);
+        $session = \App\Models\Session::create([
+            'token_id' => $t2->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'A2',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+        ]);
+        $t2->update(['status' => 'in_use', 'current_session_id' => $session->id]);
+
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/tokens/batch-delete', [
+            'ids' => [$t1->id, $t2->id],
+        ]);
+
+        $response->assertStatus(409);
+        $response->assertJsonPath('message', 'Cannot delete token(s) in use.');
+        $response->assertJsonPath('in_use_ids.0', $t2->id);
+    }
+
+    public function test_update_token_status_validates_allowed_values(): void
+    {
+        $token = $this->createToken('A1', 'available');
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/tokens/{$token->id}", [
+            'status' => 'invalid',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('status');
+    }
+
+    public function test_non_admin_cannot_access_index(): void
+    {
+        $staff = User::factory()->create(['role' => 'staff']);
+        $response = $this->actingAs($staff)->getJson('/api/admin/tokens');
+        $response->assertStatus(403);
+    }
+
+    public function test_non_admin_cannot_batch_create(): void
+    {
+        $staff = User::factory()->create(['role' => 'staff']);
+        $response = $this->actingAs($staff)->postJson('/api/admin/tokens/batch', [
+            'prefix' => 'A',
+            'count' => 5,
+            'start_number' => 1,
+        ]);
+        $response->assertStatus(403);
+    }
+
+    public function test_non_admin_cannot_update_token(): void
+    {
+        $token = $this->createToken('A1', 'available');
+        $staff = User::factory()->create(['role' => 'staff']);
+        $response = $this->actingAs($staff)->putJson("/api/admin/tokens/{$token->id}", ['status' => 'available']);
+        $response->assertStatus(403);
+    }
+}

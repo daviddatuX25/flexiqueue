@@ -12,8 +12,8 @@ Phase 1 uses a pragmatic testing approach suited to the one-month capstone timel
 
 ```text
               ┌───────────┐
-              │  Manual    │  ← Checkpoint testing (UI milestones)
-              │  Browser   │
+              │ Playwright │  ← E2E browser tests (UI flows, login, redirects)
+              │    E2E     │
               ├───────────┤
               │  Feature   │  ← Full HTTP request cycle (controllers + services + DB)
               │  Tests     │
@@ -23,7 +23,7 @@ Phase 1 uses a pragmatic testing approach suited to the one-month capstone timel
               └───────────┘
 ```
 
-**Priority order:** Feature tests > Unit tests > Manual browser tests.
+**Priority order:** Feature tests > Unit tests > Playwright E2E. Phase 1 uses **PHPUnit** for backend tests and **Playwright** for browser verification.
 
 Feature tests give the highest confidence-per-effort because they test the full stack (routing, middleware, validation, service, DB, response).
 
@@ -39,7 +39,7 @@ Feature tests give the highest confidence-per-effort because they test the full 
 | **API Endpoints** (Controllers) | Feature tests for success + primary error paths | **100%** of endpoints, at least 2 cases each (success + error) |
 | **Middleware** (EnsureRole, station access) | Feature tests with different roles | **100%** of role combinations per route group |
 | **Models** (business rules, scopes) | Unit tests for scopes and custom methods | **80%** of custom model methods |
-| **UI Pages** | Manual browser testing at milestones | All 4 core pages visually verified |
+| **UI Pages** | Playwright E2E tests for critical flows (login, redirect, forms) | All 4 core pages covered by E2E; manual check at milestones optional |
 
 ### 2.2 Critical Paths (Must Have Feature Tests)
 
@@ -117,7 +117,7 @@ Use Laravel factories and the demo seeder for test data:
 // In test setUp or individual test methods
 $program = Program::factory()->active()->create();
 $track = ServiceTrack::factory()->for($program)->default()->create();
-$station = Station::factory()->for($program)->create(['role_type' => 'triage']);
+$station = Station::factory()->for($program)->create();
 TrackStep::factory()->for($track)->create(['station_id' => $station->id, 'step_order' => 1]);
 $token = Token::factory()->available()->create();
 $staff = User::factory()->staff()->create(['assigned_station_id' => $station->id]);
@@ -146,25 +146,27 @@ $this->assertDatabaseHas('transaction_logs', [
 
 Before running `bd close <id>`, verify:
 
-- [ ] All new/modified code has corresponding tests.
-- [ ] `php artisan test` passes with zero failures.
+- [ ] All new/modified code has corresponding PHPUnit tests (per TDD loop).
+- [ ] `./vendor/bin/sail artisan test` (or `php artisan test`) passes with zero failures.
 - [ ] No new linter warnings introduced.
 - [ ] Transaction logs are written for every state change (if applicable).
 - [ ] Role-based access enforced (if endpoint added/modified).
 
 ### 4.2 Feature Batch Gate (Before Moving to Next Feature Set)
 
-After completing a batch of related beads (e.g., all station flow beads BD-019 through BD-027):
+After completing a batch of related beads (e.g., all station flow work):
 
-- [ ] Run full test suite: `php artisan test`.
-- [ ] Seed demo data: `php artisan db:seed`.
-- [ ] Manually test the happy path in browser.
+- [ ] Run full PHPUnit suite: `./vendor/bin/sail artisan test`.
+- [ ] Run Playwright E2E (if UI changed): `./vendor/bin/sail npx playwright test`.
+- [ ] Seed demo data: `./vendor/bin/sail artisan db:seed`.
+- [ ] Manually test the happy path in browser (optional).
 - [ ] Verify WebSocket events fire correctly (if applicable).
 - [ ] State: "Ready for code review — [feature set name]."
 
 ### 4.3 Phase 1 Completion Gate (Before Pilot Deployment)
 
-- [ ] Full test suite passes: `php artisan test` (zero failures).
+- [ ] Full PHPUnit suite passes: `./vendor/bin/sail artisan test` (zero failures).
+- [ ] Playwright E2E suite passes: `./vendor/bin/sail npx playwright test` (app running).
 - [ ] Demo seeder creates working environment: `php artisan migrate:fresh --seed`.
 - [ ] All 4 core pages render and function (Triage, Station, Display, Admin Dashboard).
 - [ ] Admin can configure a full program (tracks, stations, steps, tokens, staff).
@@ -183,7 +185,6 @@ After completing a batch of related beads (e.g., all station flow beads BD-019 t
 
 To stay within the one-month timeline, explicitly skip:
 
-- Browser/E2E testing frameworks (Cypress, Playwright) — manual browser testing is sufficient.
 - 100% line coverage — focus on critical paths, not getter/setter coverage.
 - Performance/load testing — manual observation during pilot is sufficient.
 - Accessibility (a11y) automated testing — follow design tokens (large touch targets, high contrast) but no automated WCAG suite.
@@ -195,21 +196,34 @@ These can be added in Phase 2 if the pilot reveals quality gaps.
 
 ## 6. Running Tests
 
+**PHPUnit (backend):** Use Sail when available. Run:
+
 ```bash
-# Run all tests
+# Run all PHPUnit tests
+./vendor/bin/sail artisan test
+# Or without Sail:
 php artisan test
 
 # Run specific test file
-php artisan test --filter=BindSessionTest
+./vendor/bin/sail artisan test --filter=BindSessionTest
 
 # Run with coverage report (requires Xdebug or PCOV)
-php artisan test --coverage --min=60
+./vendor/bin/sail artisan test --coverage --min=60
 
 # Run only feature tests
-php artisan test tests/Feature
+./vendor/bin/sail artisan test tests/Feature
 
 # Run only unit tests
-php artisan test tests/Unit
+./vendor/bin/sail artisan test tests/Unit
 ```
+
+**Playwright E2E (browser):** Use Sail for npm and E2E (per environment rule). App must be running (Sail up and optionally `./vendor/bin/sail npm run dev` or built assets). Install npm deps (including Playwright) via Sail: `./vendor/bin/sail npm install`. Run:
+
+```bash
+./vendor/bin/sail npx playwright test
+# Or: ./vendor/bin/sail npm run test:e2e
+```
+
+First-time: install browser binaries in the container: `./vendor/bin/sail npx playwright install`. See `playwright.config.js` and `e2e/` for E2E tests. Optional: set `PLAYWRIGHT_BASE_URL` and `PLAYWRIGHT_LARAVEL_BASE_URL` if the app is not at `http://localhost`.
 
 **Minimum passing coverage for Phase 1 completion: 60% overall**, with 100% coverage on the critical paths listed in Section 2.2.

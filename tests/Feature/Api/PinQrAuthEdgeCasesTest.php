@@ -30,6 +30,8 @@ class PinQrAuthEdgeCasesTest extends TestCase
 
     private Station $station2;
 
+    private \App\Models\ServiceTrack $trackToStation2;
+
     private Session $session;
 
     private User $staff;
@@ -66,6 +68,13 @@ class PinQrAuthEdgeCasesTest extends TestCase
         ]);
         TrackStep::create(['track_id' => $track->id, 'station_id' => $this->station1->id, 'step_order' => 1, 'is_required' => true]);
         TrackStep::create(['track_id' => $track->id, 'station_id' => $this->station2->id, 'step_order' => 2, 'is_required' => true]);
+        $this->trackToStation2 = \App\Models\ServiceTrack::create([
+            'program_id' => $this->program->id,
+            'name' => 'To S2',
+            'is_default' => false,
+            'color_code' => '#666',
+        ]);
+        TrackStep::create(['track_id' => $this->trackToStation2->id, 'station_id' => $this->station2->id, 'step_order' => 1, 'is_required' => true]);
         $token = new Token;
         $token->qr_code_hash = hash('sha256', Str::random(32).'A1');
         $token->physical_id = 'A1';
@@ -95,7 +104,7 @@ class PinQrAuthEdgeCasesTest extends TestCase
         ]);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/override", [
-            'target_station_id' => $this->station2->id,
+            'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Skip',
             'auth_type' => 'temp_pin',
             'temp_code' => '111111',
@@ -116,7 +125,7 @@ class PinQrAuthEdgeCasesTest extends TestCase
         ]);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/override", [
-            'target_station_id' => $this->station2->id,
+            'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Skip',
             'auth_type' => 'temp_qr',
             'qr_scan_token' => $scanToken,
@@ -129,7 +138,7 @@ class PinQrAuthEdgeCasesTest extends TestCase
     public function test_invalid_temp_code_returns_401(): void
     {
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/override", [
-            'target_station_id' => $this->station2->id,
+            'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Skip',
             'auth_type' => 'temp_pin',
             'temp_code' => '999999',
@@ -146,7 +155,7 @@ class PinQrAuthEdgeCasesTest extends TestCase
 
         for ($i = 0; $i < 5; $i++) {
             $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/override", [
-                'target_station_id' => $this->station2->id,
+                'target_track_id' => $this->trackToStation2->id,
                 'reason' => 'Skip',
                 'auth_type' => 'preset_pin',
                 'supervisor_user_id' => $this->supervisor->id,
@@ -156,7 +165,7 @@ class PinQrAuthEdgeCasesTest extends TestCase
         }
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/override", [
-            'target_station_id' => $this->station2->id,
+            'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Skip',
             'auth_type' => 'preset_pin',
             'supervisor_user_id' => $this->supervisor->id,
@@ -165,5 +174,105 @@ class PinQrAuthEdgeCasesTest extends TestCase
 
         $response->assertStatus(429);
         $response->assertJsonPath('message', 'Too many attempts. Try again in 15 minutes.');
+    }
+
+    public function test_call_regular_without_auth_when_override_required_returns_401(): void
+    {
+        $this->station1->update(['priority_first_override' => false]);
+        $regularToken = new Token;
+        $regularToken->qr_code_hash = hash('sha256', Str::random(32).'B1');
+        $regularToken->physical_id = 'B1';
+        $regularToken->status = 'in_use';
+        $regularToken->save();
+        $regularSession = Session::create([
+            'token_id' => $regularToken->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->session->track_id,
+            'alias' => 'B1',
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'status' => 'waiting',
+            'queued_at_station' => now()->subMinutes(5),
+        ]);
+        $regularToken->update(['current_session_id' => $regularSession->id]);
+        $this->session->update(['status' => 'waiting', 'queued_at_station' => now()->subMinutes(2)]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$regularSession->id}/call", []);
+
+        $response->assertStatus(401);
+        $response->assertJsonPath('message', 'Calling this client would skip priority clients. Supervisor authorization required.');
+    }
+
+    public function test_call_regular_with_temp_pin_when_override_required_returns_200(): void
+    {
+        $this->station1->update(['priority_first_override' => false]);
+        $regularToken = new Token;
+        $regularToken->qr_code_hash = hash('sha256', Str::random(32).'B1');
+        $regularToken->physical_id = 'B1';
+        $regularToken->status = 'in_use';
+        $regularToken->save();
+        $regularSession = Session::create([
+            'token_id' => $regularToken->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->session->track_id,
+            'alias' => 'B1',
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'status' => 'waiting',
+            'queued_at_station' => now()->subMinutes(5),
+        ]);
+        $regularToken->update(['current_session_id' => $regularSession->id]);
+        $this->session->update(['status' => 'waiting', 'queued_at_station' => now()->subMinutes(2)]);
+
+        $genRes = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', ['expires_in_seconds' => 300]);
+        $genRes->assertStatus(201);
+        $code = $genRes->json('code');
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$regularSession->id}/call", [
+            'auth_type' => 'temp_pin',
+            'temp_code' => $code,
+        ]);
+
+        $response->assertStatus(200);
+        $regularSession->refresh();
+        $this->assertSame('called', $regularSession->status);
+    }
+
+    public function test_override_with_preset_qr_returns_200(): void
+    {
+        $qrToken = 'preset-qr-token-'.Str::random(8);
+        $this->supervisor->update(['override_qr_token' => Hash::make($qrToken)]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/override", [
+            'target_track_id' => $this->trackToStation2->id,
+            'reason' => 'Preset QR auth',
+            'auth_type' => 'preset_qr',
+            'qr_scan_token' => $qrToken,
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session.track.id', $this->trackToStation2->id);
+        $this->session->refresh();
+        $this->assertSame($this->trackToStation2->id, $this->session->track_id);
+    }
+
+    public function test_override_with_preset_qr_by_non_supervisor_for_program_returns_403(): void
+    {
+        $plainStaff = User::factory()->create(['role' => 'staff']);
+        $qrToken = 'preset-qr-token-'.Str::random(8);
+        $plainStaff->update(['override_qr_token' => Hash::make($qrToken)]);
+        $this->program->supervisedBy()->detach($this->supervisor->id);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/override", [
+            'target_track_id' => $this->trackToStation2->id,
+            'reason' => 'Preset QR',
+            'auth_type' => 'preset_qr',
+            'qr_scan_token' => $qrToken,
+        ]);
+
+        $response->assertStatus(403);
+        $response->assertJsonPath('message', 'You are not a supervisor for this program. Preset authorization cannot be used here.');
     }
 }

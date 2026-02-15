@@ -339,7 +339,7 @@ Required fields per action type:
 
 | action_type | station_id | previous_station_id | next_station_id | remarks required? |
 |------------|-----------|--------------------|-----------------|--------------------|
-| `bind` | triage station | NULL | first station | No |
+| `bind` | NULL (triage is not a station) | NULL | first station | No |
 | `check_in` | current station | NULL | NULL | No |
 | `transfer` | current station | old station | new station | No |
 | `override` | current station | old station | new station | **YES** |

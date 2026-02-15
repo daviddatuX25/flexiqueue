@@ -22,7 +22,7 @@ Phase 1 delivers the **Core Value Loop**: a client walks in, receives a token, i
 #### Admin — Configuration
 - **Program management**: create, edit, activate/deactivate. Only ONE active program at a time.
 - **Service Track management**: create, edit, delete tracks per program. One default track per program. Color-coded.
-- **Station management**: create, edit, activate/deactivate stations per program. Role types: triage, processing, release.
+- **Station management**: create, edit, activate/deactivate stations per program (flow nodes with name, capacity; triage is separate, not a station type).
 - **Track Step management**: define ordered station sequence per track. Mark steps as required/optional. Set estimated duration.
 - **Token management**: create tokens in batches (generate QR hashes + physical IDs), list all tokens, update status (available/lost/damaged). Artisan command for bulk seeding.
 - **User management**: CRUD staff accounts, assign roles, activate/deactivate.

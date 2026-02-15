@@ -13,6 +13,9 @@
 /.zed
 /auth.json
 /node_modules
+/playwright-report
+/playwright/.cache
+/test-results
 /public/build
 /public/hot
 /public/storage

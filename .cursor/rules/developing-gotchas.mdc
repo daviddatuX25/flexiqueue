@@ -1,0 +1,95 @@
+---
+description: Frontend/Inertia/Svelte gotchas — avoid repeat bugs (resolve, useForm, build). Apply when editing Svelte pages, app.js, or build/config.
+globs: resources/js/**/*.svelte,resources/js/app.js,vite.config.js,package.json
+alwaysApply: false
+---
+
+# Developing gotchas (living doc)
+
+Concise checklist so we don’t repeat the same failures. Add new items here when we fix a non-obvious bug.
+
+---
+
+## Inertia + Svelte
+
+- **Blank page + "Cannot read properties of undefined (reading 'default')"**  
+  Resolve returned `undefined` because the page wasn’t in the bundle or the key didn’t match.  
+  → Rebuild with Sail (`./vendor/bin/sail npm run build`). Add new pages then rebuild. Use Sail for npm, not host npm, to avoid path/env issues.
+
+- **Blank page but server payload is correct (component + props)**  
+  Inertia Svelte expects `resolve(name)` to return an object with `.default` = the Svelte component.  
+  → In `app.js` resolve, return `{ default: (module.default ?? module), layout: module.layout }` so the adapter always gets a proper shape.
+
+- **"Cannot read properties of undefined (reading 'email')" (or any form field)**  
+  `form.errors` from `useForm()` can be undefined on first paint.  
+  → Use optional chaining everywhere: `form.errors?.email`, `form.errors?.password`. Never assume `form.errors` exists on load.
+
+- **"n.post is not a function" (or form.post / form.submit undefined) on submit**  
+  In Svelte, `useForm()` returns a **store**, not the form state object. The store’s value has `.post`, `.get`, etc.  
+  → Use the store prefix: `$form.post('/login')`, `$form.email`, `$form.errors`, `$form.processing` (and bind:value={$form.email}). Do not use `form.post` or `form.email`.
+
+---
+
+## Build & environment
+
+- **Build fails with "Could not resolve entry module index.html" or UNC path errors**  
+  Frontend build ran in wrong environment (e.g. Windows CMD, UNC path).  
+  → Run npm via Sail: `./vendor/bin/sail npm run build` or `./vendor/bin/sail npm run dev`. Don’t use host `npm run build` for this project.
+
+- **New Svelte page returns 404 or blank after adding**  
+  Eager `import.meta.glob` only includes files present at build time.  
+  → Rebuild after adding or renaming pages under `resources/js/Pages/`.
+
+- **"Failed to resolve import ../Layouts/... Does the file exist?"**  
+  Import path depth depends on page location. `Layouts/` lives at `resources/js/Layouts/`.  
+  → Use `../../Layouts/` from `Pages/Admin/` or `Pages/Station/`; use `../../../Layouts/` from `Pages/Admin/Programs/` etc.
+
+- **"This type of directive is not valid on components" (class:menu-active on Link)**  
+  Svelte `class:name={cond}` only works on DOM elements, not components like Inertia `<Link>`.  
+  → Use `class={cond ? 'menu-active' : ''}` instead of `class:menu-active={cond}`.
+
+- **Playwright: "require is not defined in ES module scope"**  
+  `playwright.config.js` uses CommonJS (`require`/`module.exports`) but `package.json` has `"type": "module"`.  
+  → Use ESM: `import { defineConfig, devices } from '@playwright/test'` and `export default defineConfig({...})`.
+
+- **Playwright: "headed browser without XServer" in Sail**  
+  Sail/Docker has no display. Headed mode fails with "Missing X server or $DISPLAY".  
+  → Use headless in Sail. To see the browser, run from host: `npx playwright test --headed` (app must be up).
+
+- **Playwright show-report: localhost:9323 doesn't load in browser**  
+  Report server runs inside Sail; port wasn't forwarded. Also binds to localhost by default.  
+  → Port 9323 added to compose.yaml. Run `sail npx playwright show-report --host 0.0.0.0` then open http://localhost:9323.
+
+---
+
+## UI flickering (one-shot callbacks)
+
+- **QR scan result flickers (flips between result and scanner)**  
+  The scanner library calls the success callback repeatedly while the QR is in view. Each call ran the same handler (e.g. `handleLookup` or set `scannedToken`), which cleared or overwrote state so the UI kept toggling.  
+  → Use a **latch**: e.g. `scanHandled`. On first success set `scanHandled = true` and process; in the callback do `if (scanHandled) return` so later calls are ignored. Reset the latch in "start over" flows (Cancel, failed lookup, or when user opens camera again).
+
+- **"Token is already in use" (or any lookup error) keeps flashing**  
+  Lookup returned non-success (e.g. token in_use); we set `scanHandled = false` so the next scanner tick ran again → handler cleared `error` then set it again → message flashed.  
+  → Treat the error as a **consumed** result: set `scanHandled = true` when showing "already in use" (or similar) so the scanner doesn’t keep re-triggering.   Reset `scanHandled` when the user takes a "try again" action (e.g. clicking Start camera) so the next scan is accepted.
+
+- **Display Board (or any page) flickers after scan then "OK GOT IT" — rapid back/forth**  
+  Scanner (html5-qrcode) fires `onScan` many times per second while the QR is in view. Each call did `router.visit(...)`, so we stacked hundreds of navigations.  
+  → Use a **latch** in the scan handler: `if (scanHandled) return; scanHandled = true;` then navigate once. Reset `scanHandled = false` when the user opens the scanner again (e.g. "TAP TO SCAN QR CODE" button). Same pattern as Triage.
+
+- **Triage flickers after successful bind — doesn't return to ready state**  
+  Scanner fires late callbacks after resetScan() clears state. Setting `scanHandled = false` in resetScan opens the door; a late callback then re-sets `scannedToken` and flips back to confirm view.  
+  → In `resetScan()`, set `scanHandled = true` (block late callbacks). Only set `scanHandled = false` when user clicks "Start camera". When stopping camera, set `scanHandled = true`.
+
+---
+
+## Backend / middleware
+
+- **HandleInertiaRequests causes 500 when sharing Program::where()**  
+  Testing DB may lack `programs` table before migrations.  
+  → Wrap `activeProgram` query in try-catch, return null on failure.
+
+---
+
+## When adding a new gotcha
+
+Keep format: **Symptom** (one line) → **Cause** (one line) → **Fix** (one line). No long prose.

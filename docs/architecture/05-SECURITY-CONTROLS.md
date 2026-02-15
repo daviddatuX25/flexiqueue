@@ -33,7 +33,7 @@ FlexiQueue operates on a **closed local network** with no internet exposure. The
 ### 2.1 Method: Laravel Session-Based Auth
 
 - **Login**: email + password → Laravel `Auth::attempt()` → session cookie.
-- **Session driver**: `database` (stored in `sessions` table — Laravel's built-in session table, NOT FlexiQueue's `sessions` table).
+- **Session driver**: `database` (stored in Laravel's `sessions` table; FlexiQueue queue client journeys use `queue_sessions`).
 - **Session lifetime**: 8 hours (matches typical event duration). Configurable in `.env`.
 - **CSRF protection**: enabled on all non-API forms (Laravel default `@csrf`).
 - **Remember me**: disabled for Phase 1 (security-first for shared devices).
@@ -88,7 +88,7 @@ All other routes require authentication.
 | **Tokens** — create, list, update status | YES | NO | NO | NO |
 | **Users** — CRUD, role assignment | YES | NO | NO | NO |
 | **Staff Assignment** — assign to station | YES | YES | NO | NO |
-| **Sessions — bind** (triage) | YES | YES | YES | NO |
+| **Sessions — bind** (triage / routing) | YES | YES | YES | NO |
 | **Sessions — call next** | YES | YES | YES | NO |
 | **Sessions — transfer** (standard) | YES | YES | YES | NO |
 | **Sessions — transfer** (custom target) | YES | YES | YES | NO |
@@ -103,6 +103,8 @@ All other routes require authentication.
 | **Dashboard — system health** | YES | YES (limited) | NO | NO |
 | **Informant Display** — view | YES | YES | YES | YES |
 | **Check Status** — QR lookup | YES | YES | YES | YES |
+
+**Triage access:** Triage is the routing capability (assign track to token, bind). Phase 1 allows all authenticated staff to access `/triage`. A future option is to restrict triage to a routing-only permission (specific role or device that can only perform routing, not station operations).
 
 ### 3.3 Station-Scoped Access
 

@@ -108,11 +108,12 @@ For detailed rationale, see `docs v1/11-tech-decisions.md`.
 |------|-----------|
 | **Program** | A government assistance event (e.g., "Social Pension Payout"). Only one active at a time. |
 | **Service Track** | A demographic-specific pathway through a program (e.g., Regular, Priority, Incomplete Docs). |
-| **Track Step** | An ordered position in a track, mapping to a station (Step 1 → Triage, Step 2 → Interview, ...). |
-| **Station** | A logical service point / desk (e.g., "Verification Desk", "Cashier"). Roles: triage, processing, release. |
+| **Track Step** | An ordered position in a track, mapping to a station (e.g., Step 1 → Verification Desk, Step 2 → Interview). |
+| **Station** | A flow node: logical service point/desk (e.g., "Verification Desk", "Cashier") where staff serve clients. All stations have capacity; triage is separate (assign-track flow), not a station type. |
+| **Triage** | The routing flow: assign track to token and create session (bind). Accessed at `/triage`. May be permission-specific (e.g. routing-only role or device) so only authorized users can perform routing. |
 | **Token** | A reusable physical QR card (e.g., "A1", "B15") carried by a client. Identified by SHA-256 hash. |
 | **Session** | A client's journey through the system, bound to one token. States: waiting, serving, completed, cancelled, no_show. |
-| **Bind** | Linking a token to a newly created session at triage. |
+| **Bind** | Assigning a track to a token and creating a session (done at triage flow; triage is not a station). |
 | **Unbind** | Releasing a token after session completion, cancellation, or no-show. Token becomes `available`. |
 | **Override** | A supervisor-approved deviation from the standard track flow. Requires PIN + reason. Fully logged. |
 | **Transaction Log** | An immutable audit record of every state change. Append-only — no updates or deletes allowed. |
@@ -139,4 +140,4 @@ The execution agent should consult these docs in this order:
 | `09-UI-ROUTES-PHASE1.md` | Routes, component trees, state management | Building any Svelte page |
 | `PHASES-OVERVIEW.md` | Scope freeze, what's in/out, success metrics | Checking if a feature is Phase 1 |
 | `QUALITY-GATES.md` | Testing standards, coverage targets | Before marking any bead as done |
-| `PHASE-1-TASKS.md` | The bead backlog with dependencies | Picking next work item |
+| `PHASE-1-TASKS.md` | How we add tasks and use beads (no pre-generated list) | Picking or creating next work |

@@ -69,15 +69,14 @@ Constraints:
 
 #### 1.4 `stations`
 
-Logical service points mapped to physical tables/desks.
+Flow nodes only: logical service points (desks/tables) where staff serve clients. Triage is separate (assign-track flow), not a station type.
 
 **Columns**
 
 - `id` BIGINT PRIMARY KEY
 - `program_id` BIGINT NOT NULL FK → `programs.id`
 - `name` VARCHAR(50)
-- `role_type` ENUM('triage','processing','release')
-- `capacity` INT
+- `capacity` INT DEFAULT 1
 - `is_active` BOOLEAN DEFAULT TRUE
 
 Constraints:
@@ -117,7 +116,7 @@ Physical QR cards used by clients.
 - `qr_code_hash` VARCHAR(64) UNIQUE
 - `physical_id` VARCHAR(10)
 - `status` ENUM('available','in_use','lost','damaged')
-- `current_session_id` BIGINT NULL FK → `sessions.id`
+- `current_session_id` BIGINT NULL FK → `queue_sessions.id`
 
 Constraints:
 
@@ -125,9 +124,9 @@ Constraints:
 
 ---
 
-#### 1.7 `sessions`
+#### 1.7 `queue_sessions`
 
-Client journeys through a program.
+Client journeys through a program. Named to avoid conflict with Laravel's `sessions` (HTTP).
 
 **Columns**
 
@@ -158,7 +157,7 @@ Immutable audit trail of state changes.
 **Columns**
 
 - `id` BIGINT PRIMARY KEY
-- `session_id` BIGINT NOT NULL FK → `sessions.id`
+- `session_id` BIGINT NOT NULL FK → `queue_sessions.id`
 - `station_id` BIGINT NOT NULL FK → `stations.id`
 - `staff_user_id` BIGINT NOT NULL FK → `users.id`
 - `action_type` ENUM('bind','check_in','transfer','override','complete','cancel','no_show')
@@ -257,7 +256,7 @@ High‑level rules to implement via migrations + application logic:
 - Only **one** default track (`is_default = TRUE`) per program.
 - Unique (`track_id`, `step_order`) in `track_steps`.
 - `tokens.status = 'in_use'` ⇒ `current_session_id IS NOT NULL`.
-- `sessions.alias` unique among **active** sessions (waiting/serving).
+- `queue_sessions.alias` unique among **active** sessions (waiting/serving).
 - `transaction_logs` is append‑only.
 
 ---
@@ -266,10 +265,10 @@ High‑level rules to implement via migrations + application logic:
 
 Recommended indexes (adapted from architecture Section 14):
 
-- `sessions`
-  - `INDEX idx_sessions_active ON sessions(status, current_station_id)`
+- `queue_sessions`
+  - `INDEX idx_queue_sessions_active ON queue_sessions(status, current_station_id)`
   - Optional partial unique index on `alias` for active statuses:
-    - `UNIQUE INDEX idx_alias_active ON sessions(alias) WHERE status IN ('waiting','serving')`
+    - `UNIQUE INDEX idx_alias_active ON queue_sessions(alias) WHERE status IN ('waiting','serving')`
 - `tokens`
   - `INDEX idx_tokens_hash ON tokens(qr_code_hash)`
 - `hardware_units`
@@ -321,14 +320,14 @@ UPDATE tokens
 SET status = 'in_use', current_session_id = 101
 WHERE id = 1;
 
-INSERT INTO sessions (id, token_id, track_id, alias, status)
+INSERT INTO queue_sessions (id, token_id, track_id, alias, status)
 VALUES (101, 1, 1, 'A1', 'waiting');
 ```
 
 5. **Transfer to next station**
 
 ```sql
-UPDATE sessions
+UPDATE queue_sessions
 SET current_station_id = 2,
     current_step_order = 2
 WHERE id = 101;
@@ -340,7 +339,7 @@ VALUES (101, 'transfer', 2);
 6. **Complete the session**
 
 ```sql
-UPDATE sessions
+UPDATE queue_sessions
 SET status = 'completed',
     completed_at = NOW()
 WHERE id = 101;

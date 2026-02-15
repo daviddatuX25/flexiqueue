@@ -41,6 +41,10 @@ npm run dev                       # Option 2: on host (WSL/Windows users)
 # Queue, Reverb (when added)
 ./vendor/bin/sail artisan queue:work
 ./vendor/bin/sail artisan reverb:start
+
+# Playwright E2E (install deps via Sail npm install; run tests via Sail)
+./vendor/bin/sail npx playwright install   # first-time: browser binaries
+./vendor/bin/sail npx playwright test     # or: ./vendor/bin/sail npm run test:e2e
 ```
 
 **Alias tip**: Users can alias `sail='./vendor/bin/sail'` in their shell for shorter commands.

@@ -1,0 +1,72 @@
+---
+description: Plan-first scope and bead scoping; ask user what to do before running agentic workflow. Keeps long-term tasks visible and avoids bundling blocking work.
+alwaysApply: true
+---
+
+# PLAN-FIRST & BEAD SCOPE
+
+This rule runs **before** the agentic workflow. It establishes what to work on and how beads are scoped so the agent doesn't re-scan the whole project every session.
+
+---
+
+## 1. PLAN-FIRST: ASK BEFORE DOING
+
+**Before** running the full Session Start Ritual (bd ready → read contracts → draft plan → implement):
+
+1. **Surface scope and ask**
+   - Use beads as the source of truth: `bd ready`, `bd list --status=open`, and dependencies.
+   - Optionally skim `docs/plans/PHASES-OVERVIEW.md` and `docs/plans/backlog/PHASE-1-TASKS.md` only when phase or backlog visibility is needed.
+   - Present a short **scope snapshot**: what's ready, what's blocked, what's the obvious next step.
+   - **Ask the user**: "What should we work on?" or "I see [BD-X] ready, [BD-Y] blocked by it. Proceed with BD-X, or something else?"
+
+2. **Get explicit confirmation**
+   - Wait for user to pick: a specific bead, "next ready task", or a new goal.
+   - Do **not** assume "continue" means "run bd ready and start the first ready bead" without confirming.
+
+3. **Then** run the agentic workflow
+   - Once scope is confirmed (e.g. "Work on BD-042"), proceed with the Session Start Ritual: read contracts, draft plan, explore edge cases, transpose to beads, confirm plan with user, then implement.
+
+**Goal:** Reduce repeated deep context scans. Beads + user choice define "what we're doing"; contracts and specs define "how."
+
+---
+
+## 2. LONG-TERM TASK VISIBILITY
+
+- **Beads are the horizon.** Use `bd ready` for "what can be done now"; use `bd list --status=open` and `bd dep` for ordering and blockers.
+- **Dependencies:** Use `bd dep add <issue> <depends-on>` so that "task B depends on task A" is explicit. Ready work = no open blockers.
+- **Session handoff:** At session end, the handoff report (per agentic-workflow) should state "Next up" and any new beads. That gives the next session a clear starting point without re-scanning.
+- **Avoid re-scanning:** Once the user has confirmed "work on BD-X" or "do the next ready task," rely on that plus the single bead's context and the relevant contract docs. Don't re-enumerate the entire backlog unless the user asks.
+
+---
+
+## 3. BEAD SCOPING: BLOCKING = SEPARATE BEADS
+
+- **One deliverable per bead.** A bead is one shippable outcome (e.g. "User can approve application," "Add Log out button to Dashboard").
+- **Do not scope blocking work together.** If task 2 cannot be done until task 1 is done (e.g. "Station queue view" depends on "Session model and bind token"), they are **two beads**, not one.
+  - Create bead A and bead B.
+  - Add dependency: `bd dep add <B> <A>` (B depends on A).
+  - Work on A first; when A is closed, B becomes ready.
+- **When in doubt:** Prefer two smaller beads with a dependency over one large bead that mixes "foundation" and "feature."
+
+---
+
+## 4. INTEGRATION WITH AGENTIC WORKFLOW
+
+| Step | This rule (plan-first) | Agentic workflow |
+|------|------------------------|------------------|
+| 1 | Surface ready/blocked, ask user what to do | — |
+| 2 | User confirms scope (bead or "next ready") | — |
+| 3 | — | Session Start Ritual: bd show, contracts, draft plan, edge cases, transpose to beads, confirm plan |
+| 4 | — | Implementation (TDD, then code) |
+| 5 | — | Session End: update beads, handoff with "Next up" |
+
+- **Spawning beads:** Both this rule and the agentic workflow can create or edit beads. When the workflow discovers new work (e.g. "need Log out button"), it creates a bead or edits scope per agentic-workflow step 5. That keeps long-term visibility without this rule duplicating logic.
+- **Checklists:** If the agentic workflow uses checklists (e.g. "steps to complete BD-X"), they live inside the scope set by this rule (the bead or goal the user confirmed).
+
+---
+
+## 5. QUICK REFERENCE
+
+- **Session start:** Scope snapshot → ask "What to work on?" → user confirms → then Session Start Ritual for that scope.
+- **Blocking tasks:** Never one bead for "A and B" when B depends on A; use two beads + `bd dep add B A`.
+- **Visibility:** `bd ready`, `bd list`, dependencies, and handoff "Next up" keep the horizon clear without full-project scans every time.

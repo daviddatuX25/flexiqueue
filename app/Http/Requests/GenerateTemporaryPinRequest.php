@@ -21,7 +21,7 @@ class GenerateTemporaryPinRequest extends FormRequest
     {
         return [
             'program_id' => ['nullable', 'integer', 'exists:programs,id'],
-            'expires_in_seconds' => ['nullable', 'integer', 'min:60', 'max:3600'],
+            'expires_in_seconds' => ['nullable', 'integer', 'min:0', 'max:315360000'], // 0 = no expiry (10yr sentinel)
         ];
     }
 }

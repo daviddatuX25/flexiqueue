@@ -150,7 +150,7 @@ REMOTE BARANGAY SITE
 │  LAYER 1: DATA PERSISTENCE                               │
 │                                                          │
 │  MariaDB 10.6+                                           │
-│  8 tables (see 04-DATA-MODEL.md)                         │
+│  8 tables (04-DATA-MODEL; 10-DATABASE-DESIGN-ASSESSMENT)  │
 │  + Laravel session table (for auth sessions)             │
 │  + Laravel cache table (optional)                        │
 │  + Laravel jobs table (optional, for queued events)      │

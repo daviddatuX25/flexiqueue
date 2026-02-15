@@ -83,7 +83,8 @@ class PinService
     }
 
     /**
-     * Validate supervisor PIN for override actions.
+     * Validate preset PIN. Preset is per-user (not tied to program); any user with override_pin can be validated.
+     * Caller must then check the user is allowed to authorize for the given program (admin or supervisor for that program).
      *
      * @return array{verified: true, user_id: int, role: string}|null User info on success, null on failure
      */
@@ -91,14 +92,6 @@ class PinService
     {
         $user = User::find($userId);
         if (! $user || ! $user->override_pin) {
-            return null;
-        }
-
-        if ($user->isAdmin()) {
-            // Admin can always validate
-        } elseif ($user->role === UserRole::Staff && $user->isSupervisorForAnyProgram()) {
-            // Staff who is supervisor for at least one program
-        } else {
             return null;
         }
 
@@ -111,5 +104,35 @@ class PinService
             'user_id' => $user->id,
             'role' => $user->role->value,
         ];
+    }
+
+    /**
+     * Validate preset QR scan token (user's persistent override_qr_token).
+     * Preset is per-user; any user with override_qr_token set can be validated.
+     * Caller must then check the user is allowed to authorize for the given program (admin or supervisor for that program).
+     *
+     * @return array{verified: true, user_id: int, role: string}|null
+     */
+    public function validatePresetQr(string $qrScanToken): ?array
+    {
+        if ($qrScanToken === '') {
+            return null;
+        }
+
+        $users = User::query()
+            ->whereNotNull('override_qr_token')
+            ->get();
+
+        foreach ($users as $user) {
+            if (Hash::check($qrScanToken, $user->override_qr_token)) {
+                return [
+                    'verified' => true,
+                    'user_id' => $user->id,
+                    'role' => $user->role->value,
+                ];
+            }
+        }
+
+        return null;
     }
 }

@@ -5,7 +5,7 @@
 	import { usePage } from '@inertiajs/svelte';
 	import { router } from '@inertiajs/svelte';
 
-	type AuthType = 'preset_pin' | 'temp_pin' | 'temp_qr' | 'preset_qr';
+	type AuthType = 'pin' | 'qr' | 'request_approval';
 
 	interface StationInfo {
 		id: number;
@@ -40,6 +40,8 @@
 		no_show_timer_seconds: number;
 		waiting: WaitingSession[];
 		priority_first?: boolean;
+		require_permission_before_override?: boolean;
+		call_next_requires_override?: boolean;
 		balance_mode?: string;
 		next_to_call?: { session_id: number; alias: string } | null;
 		stats: { total_waiting: number; total_served_today: number; avg_service_time_minutes: number };
@@ -48,11 +50,17 @@
 	let {
 		station = null,
 		stations = [],
+		tracks = [],
 		canSwitchStation = false,
+		queueCount = 0,
+		processedToday = 0,
 	}: {
 		station: StationInfo | null;
 		stations: StationInfo[];
+		tracks: StationInfo[];
 		canSwitchStation: boolean;
+		queueCount?: number;
+		processedToday?: number;
 	} = $props();
 
 	let queue = $state<QueueData | null>(null);
@@ -60,15 +68,14 @@
 	let error = $state('');
 	let actionLoading = $state<string | null>(null);
 	let showOverrideModal = $state(false);
-	let overrideTargetStationId = $state<number | null>(null);
+	let overrideTargetTrackId = $state<number | null>(null);
+	let overrideIsCustom = $state(false);
 	let overrideReason = $state('');
 	let overridePin = $state('');
 	let overrideSupervisorId = $state<number | null>(null);
 	let overrideSession = $state<ServingSession | null>(null);
-	let authType = $state<AuthType>('preset_pin');
-	let tempCodeGenerated = $state<string | null>(null);
+	let authType = $state<AuthType>('pin');
 	let tempCodeEntered = $state('');
-	let tempQrDataUri = $state<string | null>(null);
 	let tempQrScanToken = $state('');
 	let showQrScanner = $state(false);
 	let qrScanHandled = $state(false);
@@ -76,6 +83,8 @@
 	let forceCompleteSession = $state<ServingSession | null>(null);
 	let forceCompleteReason = $state('');
 	let noShowModalSession = $state<ServingSession | null>(null);
+	let showCallNextOverrideModal = $state(false);
+	let callNextSession = $state<{ session_id: number; alias: string } | null>(null);
 
 	/** Countdown per called session_id: when 0, No-show button enabled. Set when session enters 'called'. */
 	let noShowCountdown = $state<Record<number, number>>({});
@@ -90,6 +99,9 @@
 	const servingCount = $derived(queue?.station?.serving_count ?? queue?.serving?.length ?? 0);
 	const atCapacity = $derived(servingCount >= clientCapacity);
 	const noShowTimerSeconds = $derived(queue?.no_show_timer_seconds ?? 10);
+
+	/** Staff needs auth for override/force-complete; admin/supervisor do not */
+	const needsAuthForOverride = $derived(!canSwitchStation);
 
 	function getCsrfToken(): string {
 		const p = get(page);
@@ -160,6 +172,7 @@
 		}
 	});
 
+	// Real-time: refetch when client arrives or status changes (e.g. after custom path approve)
 	$effect(() => {
 		const hasCountdowns = Object.values(noShowCountdown).some((v) => v > 0);
 		if (!hasCountdowns) return;
@@ -213,12 +226,44 @@
 		const target = queue?.next_to_call ?? queue?.waiting?.[0];
 		if (!target || actionLoading || atCapacity) return;
 		const sessionId = typeof target === 'object' && 'session_id' in target ? target.session_id : target.session_id;
+		const alias = typeof target === 'object' && 'alias' in target ? target.alias : (queue?.waiting?.find((w) => w.session_id === sessionId)?.alias ?? '');
+
+		// Flow redirection: when call would skip priority, staff needs auth; admin/supervisor call directly
+		if (queue?.call_next_requires_override && needsAuthForOverride) {
+			callNextSession = { session_id: sessionId, alias };
+			showCallNextOverrideModal = true;
+			resetAuthState();
+			if (authUser && authUser.id) overrideSupervisorId = authUser.id;
+			return;
+		}
+
 		actionLoading = 'call';
 		const { ok, data } = await api('POST', `/api/sessions/${sessionId}/call`, {});
 		if (ok) {
 			await fetchQueue(true, () => { actionLoading = null; });
 		} else {
 			actionLoading = null;
+			error = (data as { message?: string })?.message ?? 'Call failed';
+		}
+	}
+
+	async function callNextWithAuth() {
+		const s = callNextSession;
+		if (!s || actionLoading) return;
+		const authBody = buildAuthBody();
+		if (!authBody) return;
+		actionLoading = 'call';
+		error = '';
+		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/call`, authBody);
+		actionLoading = null;
+		if (ok) {
+			showCallNextOverrideModal = false;
+			callNextSession = null;
+			overridePin = '';
+			overrideSupervisorId = null;
+			resetAuthState();
+			await fetchQueue(true, () => { actionLoading = null; });
+		} else {
 			error = (data as { message?: string })?.message ?? 'Call failed';
 		}
 	}
@@ -295,10 +340,8 @@
 	}
 
 	function resetAuthState() {
-		authType = 'preset_pin';
-		tempCodeGenerated = null;
+		authType = 'pin';
 		tempCodeEntered = '';
-		tempQrDataUri = null;
 		tempQrScanToken = '';
 		showQrScanner = false;
 		qrScanHandled = false;
@@ -319,34 +362,6 @@
 		if (authUser && authUser.id) overrideSupervisorId = authUser.id;
 	}
 
-	async function generateTempPin() {
-		if (actionLoading) return;
-		actionLoading = 'generate-temp-pin';
-		error = '';
-		const { ok, data } = await api('POST', '/api/auth/temporary-pin', { expires_in_seconds: 300 });
-		actionLoading = null;
-		if (ok) {
-			const d = data as { code?: string };
-			tempCodeGenerated = d?.code ?? null;
-		} else {
-			error = (data as { message?: string })?.message ?? 'Failed to generate code';
-		}
-	}
-
-	async function generateTempQr() {
-		if (actionLoading) return;
-		actionLoading = 'generate-temp-qr';
-		error = '';
-		const { ok, data } = await api('POST', '/api/auth/temporary-qr', { expires_in_seconds: 300 });
-		actionLoading = null;
-		if (ok) {
-			const d = data as { qr_data_uri?: string };
-			tempQrDataUri = d?.qr_data_uri ?? null;
-		} else {
-			error = (data as { message?: string })?.message ?? 'Failed to generate QR';
-		}
-	}
-
 	function handleQrScan(decodedText: string) {
 		if (qrScanHandled) return;
 		qrScanHandled = true;
@@ -355,62 +370,153 @@
 	}
 
 	function buildAuthBody(): Record<string, unknown> | null {
-		if (authType === 'preset_pin') {
-			if (!overrideSupervisorId || !overridePin || overridePin.length !== 6) return null;
-			return { auth_type: 'preset_pin', supervisor_user_id: overrideSupervisorId, supervisor_pin: overridePin };
-		}
-		if (authType === 'temp_pin') {
-			const code = (tempCodeEntered || tempCodeGenerated || '').trim();
+		if (authType === 'pin') {
+			const code = tempCodeEntered.trim();
 			if (code.length !== 6) return null;
-			return { auth_type: 'temp_pin', temp_code: code };
+			return { auth_type: 'pin', temp_code: code };
 		}
-		if (authType === 'temp_qr') {
+		if (authType === 'qr') {
 			if (!tempQrScanToken.trim()) return null;
-			return { auth_type: 'temp_qr', qr_scan_token: tempQrScanToken.trim() };
+			return { auth_type: 'qr', qr_scan_token: tempQrScanToken.trim() };
 		}
-		// preset_qr: not implemented yet
 		return null;
 	}
 
 	function canConfirmAuth(): boolean {
-		if (authType === 'preset_pin') return !!(overrideSupervisorId && overridePin && overridePin.length === 6);
-		if (authType === 'temp_pin') return (tempCodeEntered || tempCodeGenerated || '').length === 6;
-		if (authType === 'temp_qr') return !!tempQrScanToken.trim();
+		if (authType === 'request_approval') return true;
+		if (authType === 'pin') return tempCodeEntered.trim().length === 6;
+		if (authType === 'qr') return !!tempQrScanToken.trim();
 		return false;
 	}
 
 	async function override() {
 		const s = overrideSession;
-		if (!s || !overrideTargetStationId || !overrideReason.trim() || actionLoading) return;
-		const authBody = buildAuthBody();
-		if (!authBody) return;
+		if (!s || (!overrideTargetTrackId && !overrideIsCustom) || !overrideReason.trim() || actionLoading) return;
+		if (needsAuthForOverride && authType === 'request_approval') {
+			await requestApprovalOverride();
+			return;
+		}
+		const authBody = needsAuthForOverride ? buildAuthBody() : {};
+		if (needsAuthForOverride && !authBody) return;
+		if (overrideIsCustom) {
+			// Staff cannot define custom path; use request approval (must run before setting actionLoading)
+			await requestApprovalOverride();
+			return;
+		}
 		actionLoading = 'override';
 		error = '';
-		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/override`, {
-			target_station_id: overrideTargetStationId,
+		const overrideBody: { target_track_id?: number; custom_steps?: number[]; reason: string } = {
 			reason: overrideReason.trim(),
+			target_track_id: overrideTargetTrackId ?? undefined,
+		};
+		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/override`, {
+			...overrideBody,
 			...authBody,
 		});
 		actionLoading = null;
 		if (ok) {
 			showOverrideModal = false;
 			overrideSession = null;
-			overrideTargetStationId = null;
+			overrideTargetTrackId = null;
 			overrideReason = '';
 			overridePin = '';
 			overrideSupervisorId = null;
 			resetAuthState();
-			await fetchQueue(true, () => { actionLoading = null; });
+			await fetchQueue(true);
 		} else {
 			error = (data as { message?: string })?.message ?? 'Override failed';
+		}
+	}
+
+	async function requestApprovalOverride() {
+		const s = overrideSession;
+		if (!s || (!overrideTargetTrackId && !overrideIsCustom) || !overrideReason.trim() || actionLoading) return;
+		actionLoading = 'override';
+		error = '';
+		const body: { session_id: number; action_type: string; reason: string; target_track_id?: number | null; is_custom?: boolean } = {
+			session_id: s.session_id,
+			action_type: 'override',
+			reason: overrideReason.trim(),
+		};
+		if (overrideIsCustom) {
+			body.is_custom = true;
+		} else {
+			body.target_track_id = overrideTargetTrackId ?? undefined;
+		}
+		let ok = false;
+		try {
+			// Use AbortController timeout: server completes but client may not receive response (e.g. Docker/proxy)
+			const ac = new AbortController();
+			const t = setTimeout(() => ac.abort(), 10000);
+			const res = await fetch('/api/permission-requests', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-CSRF-TOKEN': getCsrfToken(),
+					'X-Requested-With': 'XMLHttpRequest',
+				},
+				credentials: 'same-origin',
+				body: JSON.stringify(body),
+				signal: ac.signal,
+			});
+			clearTimeout(t);
+			const data = (await res.json().catch(() => ({}))) as { message?: string };
+			ok = res.ok;
+		} catch (e) {
+			actionLoading = null;
+			const isAbort = e instanceof Error && e.name === 'AbortError';
+			error = isAbort
+				? 'Request timed out. The request may have succeeded – check Track Overrides.'
+				: 'Failed to send request';
+			return;
+		}
+		actionLoading = null;
+		if (ok) {
+			showOverrideModal = false;
+			overrideSession = null;
+			overrideTargetTrackId = null;
+			overrideIsCustom = false;
+			overrideReason = '';
+			resetAuthState();
+			window.location.href = '/track-overrides';
+		} else {
+			error = 'Failed to send request';
+		}
+	}
+
+	async function requestApprovalForceComplete() {
+		const s = forceCompleteSession;
+		if (!s || !forceCompleteReason.trim() || actionLoading) return;
+		actionLoading = 'force-complete';
+		error = '';
+		const { ok } = await api('POST', '/api/permission-requests', {
+			session_id: s.session_id,
+			action_type: 'force_complete',
+			reason: forceCompleteReason.trim(),
+		});
+		actionLoading = null;
+		if (ok) {
+			showForceCompleteModal = false;
+			forceCompleteSession = null;
+			forceCompleteReason = '';
+			resetAuthState();
+			await fetchQueue(true);
+			router.visit('/track-overrides');
+		} else {
+			error = 'Failed to send request';
 		}
 	}
 
 	async function forceComplete() {
 		const s = forceCompleteSession;
 		if (!s || !forceCompleteReason.trim() || actionLoading) return;
-		const authBody = buildAuthBody();
-		if (!authBody) return;
+		if (needsAuthForOverride && authType === 'request_approval') {
+			await requestApprovalForceComplete();
+			return;
+		}
+		const authBody = needsAuthForOverride ? buildAuthBody() : {};
+		if (needsAuthForOverride && !authBody) return;
 		actionLoading = 'force-complete';
 		error = '';
 		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/force-complete`, {
@@ -425,7 +531,7 @@
 			overridePin = '';
 			overrideSupervisorId = null;
 			resetAuthState();
-			await fetchQueue(true, () => { actionLoading = null; });
+			await fetchQueue(true);
 		} else {
 			error = (data as { message?: string })?.message ?? 'Force complete failed';
 		}
@@ -452,7 +558,7 @@
 	<title>Station — FlexiQueue</title>
 </svelte:head>
 
-<MobileLayout headerTitle={station?.name ?? 'Station'}>
+<MobileLayout headerTitle={station?.name ?? 'Station'} {queueCount} {processedToday}>
 	<div class="flex flex-col gap-4">
 		{#if !station}
 			<div class="rounded-box bg-base-100 border border-base-300 p-6 text-center text-base-content/80">
@@ -572,24 +678,22 @@
 								</button>
 							{/if}
 							<div class="flex flex-wrap gap-2">
-								{#if canSwitchStation}
-									<button
-										type="button"
-										class="btn btn-outline btn-sm"
-										disabled={!!actionLoading}
-										onclick={() => openOverrideModal(s)}
-									>
-										Override
-									</button>
-									<button
-										type="button"
-										class="btn btn-ghost btn-sm btn-warning"
-										disabled={!!actionLoading}
-										onclick={() => openForceCompleteModal(s)}
-									>
-										Force Complete
-									</button>
-								{/if}
+								<button
+									type="button"
+									class="btn btn-outline btn-sm"
+									disabled={!!actionLoading}
+									onclick={() => openOverrideModal(s)}
+								>
+									Override
+								</button>
+								<button
+									type="button"
+									class="btn btn-ghost btn-sm btn-warning"
+									disabled={!!actionLoading}
+									onclick={() => openForceCompleteModal(s)}
+								>
+									Force Complete
+								</button>
 								<button
 									type="button"
 									class="btn btn-ghost btn-sm"
@@ -690,20 +794,33 @@
 			<div class="modal-box max-w-md">
 				<h3 class="font-bold text-lg">Override standard flow</h3>
 				<p class="text-sm text-base-content/70 py-2">
-					Send client {overrideSession?.alias ?? ''} to a different station. Authorize with PIN or QR.
+					Send client {overrideSession?.alias ?? ''} to a different track.
+					{#if needsAuthForOverride}
+						Authorize with PIN or QR (get code from supervisor).
+					{/if}
 				</p>
 				<div class="form-control w-full mt-2">
-					<label for="override-target" class="label"><span class="label-text">Target station</span></label>
+					<label for="override-target" class="label"><span class="label-text">Target track</span></label>
 					<select
 						id="override-target"
 						class="select select-bordered w-full"
-						bind:value={overrideTargetStationId}
-						onchange={(e) => (overrideTargetStationId = Number((e.target as HTMLSelectElement).value))}
+						value={overrideIsCustom ? 'custom' : (overrideTargetTrackId ?? '')}
+						onchange={(e) => {
+							const v = (e.target as HTMLSelectElement).value;
+							if (v === 'custom') {
+								overrideIsCustom = true;
+								overrideTargetTrackId = null;
+							} else {
+								overrideIsCustom = false;
+								overrideTargetTrackId = v === '' ? null : Number(v);
+							}
+						}}
 					>
-						<option value={null}>Select…</option>
-						{#each stations.filter((s) => s.id !== station?.id) as s (s.id)}
-							<option value={s.id}>{s.name}</option>
+						<option value="">Select…</option>
+						{#each tracks as t (t.id)}
+							<option value={t.id}>{t.name}</option>
 						{/each}
+						<option value="custom">Custom (admin defines path)</option>
 					</select>
 				</div>
 				<div class="form-control w-full mt-2">
@@ -716,104 +833,30 @@
 						rows="2"
 					></textarea>
 				</div>
-				<!-- Auth type picker -->
+				{#if needsAuthForOverride}
+				<!-- Auth: PIN | QR | Request approval (icon toggle row) -->
 				<div class="form-control w-full mt-2">
 					<label class="label"><span class="label-text">Authorize with</span></label>
-					<div class="join join-vertical w-full">
-						<button
-							type="button"
-							class="join-item btn btn-sm {authType === 'temp_pin' ? 'btn-primary' : 'btn-ghost'}"
-							onclick={() => { authType = 'temp_pin'; tempQrDataUri = null; tempQrScanToken = ''; showQrScanner = false; }}
-						>
-							Temporary PIN
-						</button>
-						<button
-							type="button"
-							class="join-item btn btn-sm {authType === 'temp_qr' ? 'btn-primary' : 'btn-ghost'}"
-							onclick={() => { authType = 'temp_qr'; tempCodeGenerated = null; tempCodeEntered = ''; qrScanHandled = false; }}
-						>
-							Temporary QR
-						</button>
-						<button
-							type="button"
-							class="join-item btn btn-sm {authType === 'preset_pin' ? 'btn-primary' : 'btn-ghost'}"
-							onclick={() => { authType = 'preset_pin'; tempCodeGenerated = null; tempCodeEntered = ''; tempQrDataUri = null; tempQrScanToken = ''; showQrScanner = false; }}
-						>
-							Preset PIN
-						</button>
-						<button type="button" class="join-item btn btn-sm btn-ghost btn-disabled" title="Set up in Profile (coming soon)">
-							Preset QR (coming soon)
-						</button>
+					<div class="join join-horizontal w-full">
+						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'pin' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }} title="Enter 6-digit code">PIN</button>
+						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'qr' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }} title="Scan QR">QR</button>
+						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'request_approval' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'request_approval'; tempCodeEntered = ''; tempQrScanToken = ''; showQrScanner = false; }} title="Request supervisor approval">Request</button>
 					</div>
 				</div>
-				{#if authType === 'temp_pin'}
+				{#if authType === 'request_approval'}
+					<p class="text-sm text-base-content/70 mt-2">Request will be sent to supervisor. Check Track Overrides page for status.</p>
+				{:else if authType === 'pin'}
 					<div class="form-control w-full mt-2">
-						{#if !tempCodeGenerated}
-							<button type="button" class="btn btn-outline btn-sm" disabled={!!actionLoading} onclick={generateTempPin}>
-								{actionLoading === 'generate-temp-pin' ? 'Generating…' : 'Generate 6-digit code'}
-							</button>
-						{:else}
-							<p class="text-lg font-mono font-bold tracking-widest text-primary">{tempCodeGenerated}</p>
-							<p class="text-xs text-base-content/60">Enter code below (or use this if you generated it)</p>
-						{/if}
-						<input
-							type="text"
-							inputmode="numeric"
-							pattern="[0-9]*"
-							class="input input-bordered w-full mt-2 font-mono"
-							placeholder="Enter 6-digit code"
-							maxlength="6"
-							bind:value={tempCodeEntered}
-						/>
+						<label class="label"><span class="label-text">Enter 6-digit code from supervisor</span></label>
+						<input type="text" inputmode="numeric" pattern="[0-9]*" class="input input-bordered w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} />
 					</div>
-				{:else if authType === 'temp_qr'}
+				{:else if authType === 'qr'}
 					<div class="form-control w-full mt-2">
-						{#if !tempQrDataUri}
-							<button type="button" class="btn btn-outline btn-sm" disabled={!!actionLoading} onclick={generateTempQr}>
-								{actionLoading === 'generate-temp-qr' ? 'Generating…' : 'Generate QR code'}
-							</button>
-						{:else}
-							<img src={tempQrDataUri} alt="Temporary QR" class="w-40 h-40 mx-auto my-2" />
-							<p class="text-xs text-base-content/60 text-center">Scan with staff device, or</p>
-						{/if}
-						{#if !showQrScanner}
-							<button
-								type="button"
-								class="btn btn-outline btn-sm mt-2"
-								onclick={() => { showQrScanner = true; qrScanHandled = false; }}
-							>
-								Scan QR to authorize
-							</button>
-						{:else}
-							<QrScanner active={showQrScanner} onScan={handleQrScan} />
-							<button type="button" class="btn btn-ghost btn-xs mt-1" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
-						{/if}
-						{#if tempQrScanToken}
-							<p class="text-xs text-success mt-1">✓ QR scanned</p>
-						{/if}
+						<QrScanner active={showQrScanner} onScan={handleQrScan} />
+						<button type="button" class="btn btn-ghost btn-xs mt-1" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
+						{#if tempQrScanToken}<p class="text-xs text-success mt-1">✓ QR scanned</p>{/if}
 					</div>
-				{:else if authType === 'preset_pin'}
-					<div class="form-control w-full mt-2">
-						<label for="override-supervisor-id" class="label"><span class="label-text">Supervisor user ID</span></label>
-						<input
-							id="override-supervisor-id"
-							type="number"
-							class="input input-bordered w-full"
-							placeholder="e.g. 2"
-							bind:value={overrideSupervisorId}
-						/>
-					</div>
-					<div class="form-control w-full mt-2">
-						<label for="override-pin" class="label"><span class="label-text">6-digit PIN</span></label>
-						<input
-							id="override-pin"
-							type="password"
-							class="input input-bordered w-full"
-							placeholder="••••••"
-							maxlength="6"
-							bind:value={overridePin}
-						/>
-					</div>
+				{/if}
 				{/if}
 				{#if error}
 					<div class="alert alert-error mt-2 text-sm">{error}</div>
@@ -825,7 +868,8 @@
 						onclick={() => {
 							showOverrideModal = false;
 							overrideSession = null;
-							overrideTargetStationId = null;
+							overrideTargetTrackId = null;
+							overrideIsCustom = false;
 							overrideReason = '';
 							overridePin = '';
 							overrideSupervisorId = null;
@@ -838,7 +882,7 @@
 					<button
 						type="button"
 						class="btn btn-primary"
-						disabled={!overrideTargetStationId || !overrideReason.trim() || !canConfirmAuth() || !!actionLoading}
+						disabled={(!overrideTargetTrackId && !overrideIsCustom) || !overrideReason.trim() || (needsAuthForOverride && !canConfirmAuth()) || !!actionLoading}
 						onclick={override}
 					>
 						{actionLoading === 'override' ? 'Processing…' : 'Confirm Override'}
@@ -846,7 +890,7 @@
 				</div>
 			</div>
 			<form method="dialog" class="modal-backdrop">
-				<button type="button" onclick={() => { showOverrideModal = false; overrideSession = null; overrideTargetStationId = null; overrideReason = ''; overridePin = ''; overrideSupervisorId = null; resetAuthState(); error = ''; }}>
+				<button type="button" onclick={() => { showOverrideModal = false; overrideSession = null; overrideTargetTrackId = null; overrideIsCustom = false; overrideReason = ''; overridePin = ''; overrideSupervisorId = null; resetAuthState(); error = ''; }}>
 					close
 				</button>
 			</form>
@@ -858,66 +902,89 @@
 			<div class="modal-box max-w-md">
 				<h3 class="font-bold text-lg">Force complete session</h3>
 				<p class="text-sm text-base-content/70 py-2">
-					End session for <span class="font-mono font-semibold">{forceCompleteSession?.alias ?? ''}</span> without normal flow (e.g. client left). Requires authorization.
+					End session for <span class="font-mono font-semibold">{forceCompleteSession?.alias ?? ''}</span> without normal flow (e.g. client left).
+					{#if needsAuthForOverride}
+						Requires authorization (get code from supervisor).
+					{/if}
 				</p>
 				<div class="form-control w-full mt-2">
 					<label for="fc-reason" class="label"><span class="label-text">Reason (required)</span></label>
 					<textarea id="fc-reason" class="textarea textarea-bordered w-full" placeholder="e.g. Client left without completing" bind:value={forceCompleteReason} rows="2"></textarea>
 				</div>
-				<!-- Auth type picker (same as override) -->
+				{#if needsAuthForOverride}
 				<div class="form-control w-full mt-2">
 					<label class="label"><span class="label-text">Authorize with</span></label>
-					<div class="join join-vertical w-full">
-						<button type="button" class="join-item btn btn-sm {authType === 'temp_pin' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'temp_pin'; tempQrDataUri = null; tempQrScanToken = ''; showQrScanner = false; }}>Temporary PIN</button>
-						<button type="button" class="join-item btn btn-sm {authType === 'temp_qr' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'temp_qr'; tempCodeGenerated = null; tempCodeEntered = ''; qrScanHandled = false; }}>Temporary QR</button>
-						<button type="button" class="join-item btn btn-sm {authType === 'preset_pin' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'preset_pin'; tempCodeGenerated = null; tempCodeEntered = ''; tempQrDataUri = null; tempQrScanToken = ''; showQrScanner = false; }}>Preset PIN</button>
-						<button type="button" class="join-item btn btn-sm btn-ghost btn-disabled" title="Set up in Profile (coming soon)">Preset QR (coming soon)</button>
+					<div class="join join-horizontal w-full">
+						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'pin' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }}>PIN</button>
+						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'qr' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }}>QR</button>
+						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'request_approval' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'request_approval'; tempCodeEntered = ''; tempQrScanToken = ''; showQrScanner = false; }}>Request</button>
 					</div>
 				</div>
-				{#if authType === 'temp_pin'}
+				{#if authType === 'request_approval'}
+					<p class="text-sm text-base-content/70 mt-2">Request will be sent to supervisor. Check Track Overrides page for status.</p>
+				{:else if authType === 'pin'}
 					<div class="form-control w-full mt-2">
-						{#if !tempCodeGenerated}
-							<button type="button" class="btn btn-outline btn-sm" disabled={!!actionLoading} onclick={generateTempPin}>{actionLoading === 'generate-temp-pin' ? 'Generating…' : 'Generate 6-digit code'}</button>
-						{:else}
-							<p class="text-lg font-mono font-bold tracking-widest text-primary">{tempCodeGenerated}</p>
-						{/if}
-						<input type="text" inputmode="numeric" class="input input-bordered w-full mt-2 font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} />
+						<label class="label"><span class="label-text">Enter 6-digit code from supervisor</span></label>
+						<input type="text" inputmode="numeric" class="input input-bordered w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} />
 					</div>
-				{:else if authType === 'temp_qr'}
+				{:else if authType === 'qr'}
 					<div class="form-control w-full mt-2">
-						{#if !tempQrDataUri}
-							<button type="button" class="btn btn-outline btn-sm" disabled={!!actionLoading} onclick={generateTempQr}>{actionLoading === 'generate-temp-qr' ? 'Generating…' : 'Generate QR code'}</button>
-						{:else}
-							<img src={tempQrDataUri} alt="Temporary QR" class="w-40 h-40 mx-auto my-2" />
-						{/if}
-						{#if !showQrScanner}
-							<button type="button" class="btn btn-outline btn-sm mt-2" onclick={() => { showQrScanner = true; qrScanHandled = false; }}>Scan QR to authorize</button>
-						{:else}
-							<QrScanner active={showQrScanner} onScan={handleQrScan} />
-							<button type="button" class="btn btn-ghost btn-xs mt-1" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
-						{/if}
+						<QrScanner active={showQrScanner} onScan={handleQrScan} />
+						<button type="button" class="btn btn-ghost btn-xs mt-1" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
 						{#if tempQrScanToken}<p class="text-xs text-success mt-1">✓ QR scanned</p>{/if}
 					</div>
-				{:else if authType === 'preset_pin'}
-					<div class="form-control w-full mt-2">
-						<label for="fc-supervisor-id" class="label"><span class="label-text">Supervisor user ID</span></label>
-						<input id="fc-supervisor-id" type="number" class="input input-bordered w-full" placeholder="e.g. 2" bind:value={overrideSupervisorId} />
-					</div>
-					<div class="form-control w-full mt-2">
-						<label for="fc-pin" class="label"><span class="label-text">6-digit PIN</span></label>
-						<input id="fc-pin" type="password" class="input input-bordered w-full" placeholder="••••••" maxlength="6" bind:value={overridePin} />
-					</div>
+				{/if}
 				{/if}
 				{#if error}<div class="alert alert-error mt-2 text-sm">{error}</div>{/if}
 				<div class="modal-action">
 					<button type="button" class="btn btn-ghost" onclick={() => { showForceCompleteModal = false; forceCompleteSession = null; forceCompleteReason = ''; overridePin = ''; overrideSupervisorId = null; resetAuthState(); error = ''; }}>Cancel</button>
-					<button type="button" class="btn btn-primary" disabled={!forceCompleteReason.trim() || !canConfirmAuth() || !!actionLoading} onclick={forceComplete}>
+					<button type="button" class="btn btn-primary" disabled={!forceCompleteReason.trim() || (needsAuthForOverride && !canConfirmAuth()) || !!actionLoading} onclick={forceComplete}>
 						{actionLoading === 'force-complete' ? 'Processing…' : 'Force Complete'}
 					</button>
 				</div>
 			</div>
 			<form method="dialog" class="modal-backdrop">
 				<button type="button" onclick={() => { showForceCompleteModal = false; forceCompleteSession = null; forceCompleteReason = ''; overridePin = ''; overrideSupervisorId = null; resetAuthState(); error = ''; }}>close</button>
+			</form>
+		</dialog>
+	{/if}
+
+	{#if showCallNextOverrideModal}
+		<dialog open class="modal modal-open">
+			<div class="modal-box max-w-md">
+				<h3 class="font-bold text-lg">Call Next (Override Priority)</h3>
+				<p class="text-sm text-base-content/70 py-2">
+					Calling <span class="font-mono font-semibold">{callNextSession?.alias ?? ''}</span> would skip priority clients. Get authorization from supervisor.
+				</p>
+				<div class="form-control w-full mt-2">
+					<label class="label"><span class="label-text">Authorize with</span></label>
+					<div class="join join-horizontal w-full">
+						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'pin' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }}>PIN</button>
+						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'qr' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }}>QR</button>
+					</div>
+				</div>
+				{#if authType === 'pin'}
+					<div class="form-control w-full mt-2">
+						<label class="label"><span class="label-text">Enter 6-digit code from supervisor</span></label>
+						<input type="text" inputmode="numeric" class="input input-bordered w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} />
+					</div>
+				{:else if authType === 'qr'}
+					<div class="form-control w-full mt-2">
+						<QrScanner active={showQrScanner} onScan={handleQrScan} />
+						<button type="button" class="btn btn-ghost btn-xs mt-1" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
+						{#if tempQrScanToken}<p class="text-xs text-success mt-1">✓ QR scanned</p>{/if}
+					</div>
+				{/if}
+				{#if error}<div class="alert alert-error mt-2 text-sm">{error}</div>{/if}
+				<div class="modal-action">
+					<button type="button" class="btn btn-ghost" onclick={() => { showCallNextOverrideModal = false; callNextSession = null; overridePin = ''; overrideSupervisorId = null; resetAuthState(); error = ''; }}>Cancel</button>
+					<button type="button" class="btn btn-primary" disabled={!canConfirmAuth() || !!actionLoading} onclick={callNextWithAuth}>
+						{actionLoading === 'call' ? 'Calling…' : 'Call Next'}
+					</button>
+				</div>
+			</div>
+			<form method="dialog" class="modal-backdrop">
+				<button type="button" onclick={() => { showCallNextOverrideModal = false; callNextSession = null; overridePin = ''; overrideSupervisorId = null; resetAuthState(); error = ''; }}>close</button>
 			</form>
 		</dialog>
 	{/if}

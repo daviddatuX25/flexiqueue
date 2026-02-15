@@ -13,14 +13,17 @@ class TemporaryPinService
 {
     private const DEFAULT_TTL_SECONDS = 300;
 
+    private const NO_EXPIRY_SENTINEL = 315360000; // 10 years
+
     /**
      * Generate a one-time 6-digit PIN for supervisor authorization.
+     * expiresInSeconds: null = default 300, 0 = no expiry.
      *
      * @return array{code: string, expires_at: string, expires_in_seconds: int}
      */
     public function generate(User $user, ?int $programId = null, ?int $expiresInSeconds = null): array
     {
-        $ttl = $expiresInSeconds ?? self::DEFAULT_TTL_SECONDS;
+        $ttl = $expiresInSeconds === 0 ? self::NO_EXPIRY_SENTINEL : ($expiresInSeconds ?? self::DEFAULT_TTL_SECONDS);
         $code = $this->generateCode();
         $expiresAt = now()->addSeconds($ttl);
 

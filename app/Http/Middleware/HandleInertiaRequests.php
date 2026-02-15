@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\Program;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -31,9 +32,17 @@ class HandleInertiaRequests extends Middleware
     {
         return [
             ...parent::share($request),
+            'csrf_token' => csrf_token(),
             'auth' => [
                 'user' => $request->user(),
             ],
+            'activeProgram' => (function () {
+                try {
+                    return Program::where('is_active', true)->first();
+                } catch (\Throwable) {
+                    return null;
+                }
+            })(),
         ];
     }
 }

@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
-# Import granular Phase 1 tasks from PHASE-1-TASKS.md into beads (bd).
-# Section-scoped: only creates tasks in the given section.
+# DEPRECATED: The Phase 1 backlog is no longer a pre-generated list in PHASE-1-TASKS.md.
+# Tasks are added as beads only when clearly in front and strictly sure (see that file).
+# This script is kept for reference only; do not use to import BD-001–BD-052 style tasks.
 #
-# Usage:
-#   ./scripts/import-phase1-beads.sh foundation   # BD-001 to BD-007
-#   ./scripts/import-phase1-beads.sh 1-7           # same by range
-#
-# Sections: foundation(1-7), admin(8-14), triage(15-18), station(19-27),
-#           override(28-30), edge(31-32), informant(33-35), realtime(36-39),
-#           dashboard(40-42), reports(43-45), polish(46-50), misc(51-52)
+# (Original description: Import granular Phase 1 tasks from PHASE-1-TASKS.md into beads (bd).)
+
+echo "This script is deprecated. PHASE-1-TASKS.md no longer contains a pre-generated task list. Add beads when work is clear (see that file)." >&2
+exit 0
 
 set -e
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"

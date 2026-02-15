@@ -7,16 +7,20 @@ use App\Exceptions\TokenInUseException;
 use App\Exceptions\TokenUnavailableException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\BindSessionRequest;
+use App\Http\Requests\CallSessionRequest;
 use App\Http\Requests\CancelSessionRequest;
 use App\Http\Requests\ForceCompleteSessionRequest;
 use App\Http\Requests\OverrideSessionRequest;
 use App\Http\Requests\TransferSessionRequest;
 use App\Models\Session;
+use App\Models\Station;
+use App\Models\User;
 use App\Services\PinService;
 use App\Services\SessionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
+use App\Support\ClientCategory;
 
 /**
  * Per 08-API-SPEC-PHASE1 §3: Session endpoints (bind, etc.). Auth: any staff.
@@ -115,11 +119,61 @@ class SessionController extends Controller
 
     /**
      * Per plan: Call session — sets 'called' (announce). Staff clicks Serve when client shows.
+     * When program requires permission and call would skip priority (FIFO calling regular before PWD), auth required.
      */
-    public function call(Session $session): JsonResponse
+    public function call(CallSessionRequest $request, Session $session): JsonResponse
     {
+        $user = $request->user();
+        if ($this->callRequiresOverrideAuth($session) && ! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
+            $validated = $request->validated();
+            $authType = $validated['auth_type'] ?? null;
+            if (! $authType || ! in_array($authType, ['preset_pin', 'preset_qr', 'temp_pin', 'temp_qr', 'pin', 'qr'], true)) {
+                return response()->json([
+                    'message' => 'Calling this client would skip priority clients. Supervisor authorization required.',
+                ], 401);
+            }
+            $authType = $authType === 'pin' ? 'temp_pin' : ($authType === 'qr' ? 'temp_qr' : $authType);
+
+            $staffUserId = $request->user()->id;
+            if ($authType === 'preset_pin') {
+                $key = self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId;
+                if (RateLimiter::tooManyAttempts($key, self::PIN_FAIL_MAX_ATTEMPTS)) {
+                    return response()->json(['message' => 'Too many attempts. Try again in 15 minutes.'], 429);
+                }
+            }
+
+            $verified = match ($authType) {
+                'temp_pin' => $this->pinService->validateTemporaryPin($validated['temp_code'] ?? ''),
+                'temp_qr' => $this->pinService->validateTemporaryQr($validated['qr_scan_token'] ?? ''),
+                'preset_qr' => $this->pinService->validatePresetQr($validated['qr_scan_token'] ?? ''),
+                default => $this->pinService->validate((int) ($validated['supervisor_user_id'] ?? 0), $validated['supervisor_pin'] ?? ''),
+            };
+
+            if (! $verified) {
+                if ($authType === 'preset_pin') {
+                    RateLimiter::hit(self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId, self::PIN_FAIL_DECAY_MINUTES * 60);
+                }
+                $message = in_array($authType, ['temp_pin', 'temp_qr'], true)
+                    ? 'Authorization expired. Request a new one.'
+                    : 'Invalid supervisor PIN.';
+
+                return response()->json(['message' => $message], 401);
+            }
+
+            if ($authType === 'preset_pin') {
+                RateLimiter::clear(self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId);
+            }
+
+            if (in_array($authType, ['preset_pin', 'preset_qr'], true)) {
+                $authorizer = User::find($verified['user_id']);
+                if (! $authorizer || ! ($authorizer->isAdmin() || $authorizer->isSupervisorForProgram($session->program_id))) {
+                    return response()->json(['message' => 'You are not a supervisor for this program. Preset authorization cannot be used here.'], 403);
+                }
+            }
+        }
+
         try {
-            $result = $this->sessionService->call($session, $this->user()->id);
+            $result = $this->sessionService->call($session, $request->user()->id);
         } catch (\InvalidArgumentException $e) {
             $code = (int) $e->getCode();
             if ($code === 0) {
@@ -130,6 +184,70 @@ class SessionController extends Controller
         }
 
         return response()->json($result);
+    }
+
+    /**
+     * Whether calling this session would require supervisor auth (skipping priority when require_permission_before_override).
+     */
+    private function callRequiresOverrideAuth(Session $session): bool
+    {
+        if ($session->status !== 'waiting') {
+            return false;
+        }
+
+        $station = Station::find($session->current_station_id);
+        if (! $station) {
+            return false;
+        }
+
+        $station->loadMissing('program');
+        $program = $station->program;
+        if (! $program || ! $program->getRequirePermissionBeforeOverride()) {
+            return false;
+        }
+
+        $priorityFirst = $station->priority_first_override !== null
+            ? (bool) $station->priority_first_override
+            : $program->getPriorityFirst();
+        if ($priorityFirst) {
+            return false;
+        }
+
+        if (ClientCategory::isPriority($session->client_category)) {
+            return false;
+        }
+
+        $priorityWaitingCount = Session::query()
+            ->where('current_station_id', $station->id)
+            ->where('status', 'waiting')
+            ->where('id', '!=', $session->id)
+            ->get()
+            ->filter(fn (Session $s) => $s->isPriorityCategory())
+            ->count();
+
+        return $priorityWaitingCount > 0;
+    }
+
+    /**
+     * Infer auth_type from request when not explicitly sent (e.g. legacy tests send supervisor_user_id + supervisor_pin).
+     */
+    private function resolveAuthType(array $validated): ?string
+    {
+        $authType = $validated['auth_type'] ?? null;
+        if ($authType && in_array($authType, ['preset_pin', 'preset_qr', 'temp_pin', 'temp_qr', 'pin', 'qr'], true)) {
+            return $authType === 'pin' ? 'temp_pin' : ($authType === 'qr' ? 'temp_qr' : $authType);
+        }
+        if (! empty($validated['supervisor_user_id']) && ! empty($validated['supervisor_pin'])) {
+            return 'preset_pin';
+        }
+        if (! empty($validated['temp_code'])) {
+            return 'temp_pin';
+        }
+        if (! empty($validated['qr_scan_token'])) {
+            return 'temp_qr';
+        }
+
+        return null;
     }
 
     /**
@@ -250,9 +368,33 @@ class SessionController extends Controller
      */
     public function forceComplete(ForceCompleteSessionRequest $request, Session $session): JsonResponse
     {
+        $user = $request->user();
+        $staffUserId = $user->id;
+
+        if ($user->isAdmin() || $user->isSupervisorForAnyProgram()) {
+            try {
+                $result = $this->sessionService->forceComplete(
+                    $session,
+                    $request->validated('reason'),
+                    $staffUserId,
+                    $staffUserId
+                );
+            } catch (\InvalidArgumentException $e) {
+                $code = $e->getCode() ?: 409;
+                return response()->json(['message' => $e->getMessage()], (int) $code);
+            }
+
+            return response()->json([
+                'session' => $this->formatSession($result['session']),
+                'token' => $result['token'],
+            ]);
+        }
+
         $validated = $request->validated();
-        $authType = $validated['auth_type'] ?? 'preset_pin';
-        $staffUserId = $request->user()->id;
+        $authType = $this->resolveAuthType($validated);
+        if (! $authType || ! in_array($authType, ['preset_pin', 'preset_qr', 'temp_pin', 'temp_qr'], true)) {
+            return response()->json(['message' => 'Supervisor authorization required.'], 401);
+        }
 
         if ($authType === 'preset_pin') {
             $key = self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId;
@@ -264,7 +406,8 @@ class SessionController extends Controller
         $verified = match ($authType) {
             'temp_pin' => $this->pinService->validateTemporaryPin($validated['temp_code'] ?? ''),
             'temp_qr' => $this->pinService->validateTemporaryQr($validated['qr_scan_token'] ?? ''),
-            default => $this->pinService->validate((int) $validated['supervisor_user_id'], $validated['supervisor_pin'] ?? ''),
+            'preset_qr' => $this->pinService->validatePresetQr($validated['qr_scan_token'] ?? ''),
+            default => $this->pinService->validate((int) ($validated['supervisor_user_id'] ?? 0), $validated['supervisor_pin'] ?? ''),
         };
 
         if (! $verified) {
@@ -279,6 +422,13 @@ class SessionController extends Controller
 
         if ($authType === 'preset_pin') {
             RateLimiter::clear(self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId);
+        }
+
+        if (in_array($authType, ['preset_pin', 'preset_qr'], true)) {
+            $authorizer = User::find($verified['user_id']);
+            if (! $authorizer || ! ($authorizer->isAdmin() || $authorizer->isSupervisorForProgram($session->program_id))) {
+                return response()->json(['message' => 'You are not a supervisor for this program. Preset authorization cannot be used here.'], 403);
+            }
         }
 
         try {
@@ -308,9 +458,35 @@ class SessionController extends Controller
      */
     public function override(OverrideSessionRequest $request, Session $session): JsonResponse
     {
+        $user = $request->user();
+        $staffUserId = $user->id;
+
+        if ($user->isAdmin() || $user->isSupervisorForAnyProgram()) {
+            try {
+                $result = $this->sessionService->overrideByTrack(
+                    $session,
+                    (int) $request->validated('target_track_id'),
+                    $request->validated('reason'),
+                    $staffUserId,
+                    $staffUserId,
+                    $this->sanitizeCustomSteps($request->validated('custom_steps'))
+                );
+            } catch (\InvalidArgumentException $e) {
+                $code = $e->getCode() ?: 409;
+                return response()->json(['message' => $e->getMessage()], (int) $code);
+            }
+
+            return response()->json([
+                'session' => $this->formatSession($result['session']),
+                'override' => $result['override'] ?? null,
+            ]);
+        }
+
         $validated = $request->validated();
-        $authType = $validated['auth_type'] ?? 'preset_pin';
-        $staffUserId = $request->user()->id;
+        $authType = $this->resolveAuthType($validated);
+        if (! $authType || ! in_array($authType, ['preset_pin', 'preset_qr', 'temp_pin', 'temp_qr'], true)) {
+            return response()->json(['message' => 'Supervisor authorization required.'], 401);
+        }
 
         if ($authType === 'preset_pin') {
             $key = self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId;
@@ -322,7 +498,8 @@ class SessionController extends Controller
         $verified = match ($authType) {
             'temp_pin' => $this->pinService->validateTemporaryPin($validated['temp_code'] ?? ''),
             'temp_qr' => $this->pinService->validateTemporaryQr($validated['qr_scan_token'] ?? ''),
-            default => $this->pinService->validate((int) $validated['supervisor_user_id'], $validated['supervisor_pin'] ?? ''),
+            'preset_qr' => $this->pinService->validatePresetQr($validated['qr_scan_token'] ?? ''),
+            default => $this->pinService->validate((int) ($validated['supervisor_user_id'] ?? 0), $validated['supervisor_pin'] ?? ''),
         };
 
         if (! $verified) {
@@ -339,13 +516,21 @@ class SessionController extends Controller
             RateLimiter::clear(self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId);
         }
 
+        if (in_array($authType, ['preset_pin', 'preset_qr'], true)) {
+            $authorizer = User::find($verified['user_id']);
+            if (! $authorizer || ! ($authorizer->isAdmin() || $authorizer->isSupervisorForProgram($session->program_id))) {
+                return response()->json(['message' => 'You are not a supervisor for this program. Preset authorization cannot be used here.'], 403);
+            }
+        }
+
         try {
-            $result = $this->sessionService->override(
+            $result = $this->sessionService->overrideByTrack(
                 $session,
-                (int) $request->validated('target_station_id'),
+                (int) $request->validated('target_track_id'),
                 $request->validated('reason'),
                 $verified['user_id'],
-                $request->user()->id
+                $request->user()->id,
+                $this->sanitizeCustomSteps($request->validated('custom_steps'))
             );
         } catch (\InvalidArgumentException $e) {
             $code = $e->getCode() ?: 409;
@@ -392,6 +577,20 @@ class SessionController extends Controller
     private function user(): \App\Models\User
     {
         return request()->user();
+    }
+
+    /**
+     * Sanitize custom_steps to array of ints or null.
+     *
+     * @return array<int>|null
+     */
+    private function sanitizeCustomSteps(mixed $value): ?array
+    {
+        if (! is_array($value) || count($value) === 0) {
+            return null;
+        }
+
+        return array_values(array_map('intval', array_filter($value, fn ($v) => is_numeric($v))));
     }
 
     /**

@@ -4,6 +4,8 @@
 **Database:** MariaDB 10.6+
 **ORM:** Laravel Eloquent
 
+**Design assessment:** See [10-DATABASE-DESIGN-ASSESSMENT.md](10-DATABASE-DESIGN-ASSESSMENT.md) for ACID compliance and optional enhancements.
+
 ---
 
 ## Entity Hierarchy
@@ -51,7 +53,7 @@ Represents a government assistance event (e.g., "Social Pension Distribution").
 
 **Constraints:**
 - Application-level: only one row with `is_active = TRUE` at any time.
-- Cannot delete a program that has active sessions (`sessions.status IN ('waiting', 'serving')`).
+- Cannot delete a program that has active sessions (`queue_sessions.status IN ('waiting', 'serving')`).
 - Must have at least one `service_track` before activation.
 
 **Indexes:**
@@ -113,14 +115,13 @@ Ordered sequence of stations for each track. This is the routing blueprint.
 
 ## Table 4: `stations`
 
-Logical service point (desk/table) where staff serve clients.
+Flow nodes only: logical service points (desk/table) where staff serve clients. Triage is **not** a station — it is a separate flow (assign track per token at `/triage`); flow start/end are defined by track steps and stations.
 
 | Column | Type | Nullable | Default | Notes |
 |--------|------|----------|---------|-------|
 | `id` | BIGINT UNSIGNED | NO | AUTO_INCREMENT | PK |
 | `program_id` | BIGINT UNSIGNED | NO | — | FK → `programs.id` ON DELETE CASCADE |
 | `name` | VARCHAR(50) | NO | — | e.g., "Verification Desk", "Cashier" |
-| `role_type` | ENUM('triage', 'processing', 'release') | NO | 'processing' | Station purpose classification |
 | `capacity` | INT UNSIGNED | NO | 1 | Max concurrent staff operating this station |
 | `is_active` | BOOLEAN | NO | TRUE | Can be deactivated without deletion |
 | `created_at` | TIMESTAMP | NO | CURRENT_TIMESTAMP | |
@@ -147,7 +148,7 @@ Physical reusable QR card that clients carry during an event.
 | `qr_code_hash` | VARCHAR(64) | NO | — | SHA-256 of QR code contents; immutable after creation |
 | `physical_id` | VARCHAR(10) | NO | — | Human-readable label printed on card (e.g., "A1", "B15") |
 | `status` | ENUM('available', 'in_use', 'lost', 'damaged') | NO | 'available' | |
-| `current_session_id` | BIGINT UNSIGNED | YES | NULL | FK → `sessions.id`; set when bound |
+| `current_session_id` | BIGINT UNSIGNED | YES | NULL | FK → `queue_sessions.id`; set when bound |
 | `created_at` | TIMESTAMP | NO | CURRENT_TIMESTAMP | |
 | `updated_at` | TIMESTAMP | NO | CURRENT_TIMESTAMP | |
 
@@ -165,9 +166,9 @@ Physical reusable QR card that clients carry during an event.
 
 ---
 
-## Table 6: `sessions`
+## Table 6: `queue_sessions`
 
-A single client's journey through a program, bound to one token.
+A single client's journey through a program, bound to one token. Named to avoid conflict with Laravel's `sessions` (HTTP).
 
 | Column | Type | Nullable | Default | Notes |
 |--------|------|----------|---------|-------|
@@ -194,8 +195,8 @@ A single client's journey through a program, bound to one token.
 
 **Indexes:**
 - `PRIMARY KEY (id)`
-- `INDEX idx_sessions_active (status, current_station_id)` — fast queue lookups per station.
-- `INDEX idx_sessions_program (program_id, status)` — program-level stats.
+- `INDEX idx_queue_sessions_active (status, current_station_id)` — fast queue lookups per station.
+- `INDEX idx_queue_sessions_program (program_id, status)` — program-level stats.
 - Conditional unique on alias for active sessions (application-enforced; MariaDB lacks partial unique indexes, so enforce in app layer).
 
 ---
@@ -207,7 +208,7 @@ Immutable audit trail. Every significant state change writes exactly one row. **
 | Column | Type | Nullable | Default | Notes |
 |--------|------|----------|---------|-------|
 | `id` | BIGINT UNSIGNED | NO | AUTO_INCREMENT | PK |
-| `session_id` | BIGINT UNSIGNED | NO | — | FK → `sessions.id` |
+| `session_id` | BIGINT UNSIGNED | NO | — | FK → `queue_sessions.id` |
 | `station_id` | BIGINT UNSIGNED | YES | NULL | FK → `stations.id`; station where action occurred |
 | `staff_user_id` | BIGINT UNSIGNED | NO | — | FK → `users.id`; who performed the action |
 | `action_type` | ENUM('bind', 'check_in', 'transfer', 'override', 'complete', 'cancel', 'no_show', 'force_complete', 'identity_mismatch') | NO | — | |
@@ -237,6 +238,24 @@ Immutable audit trail. Every significant state change writes exactly one row. **
 - `INDEX idx_logs_session (session_id, created_at)` — chronological log per session.
 - `INDEX idx_logs_staff (staff_user_id, created_at)` — audit per staff member.
 - `INDEX idx_logs_action (action_type, created_at)` — filter by action type for reports.
+
+**Design note (program lifecycle):** Program session start/stop (activate/deactivate) are not session-level events, so they are not stored in `transaction_logs`. They are recorded in `program_audit_log` (Table 7b) to keep a single audit trail per session and a separate one for program lifecycle.
+
+---
+
+## Table 7b: `program_audit_log`
+
+Immutable audit trail for program session start/stop (activate/deactivate). Per flexiqueue-loo.
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| `id` | BIGINT UNSIGNED | NO | AUTO_INCREMENT | PK |
+| `program_id` | BIGINT UNSIGNED | NO | — | FK → `programs.id` |
+| `staff_user_id` | BIGINT UNSIGNED | NO | — | FK → `users.id`; who started/stopped |
+| `action` | ENUM('session_start', 'session_stop') | NO | — | |
+| `created_at` | TIMESTAMP | NO | CURRENT_TIMESTAMP | |
+
+**Indexes:** `(program_id, created_at)`, `(staff_user_id, created_at)`.
 
 ---
 
@@ -275,17 +294,17 @@ Staff accounts. Laravel's default `users` table extended with role and station a
 ```text
 programs (1) ──→ (M) service_tracks     ON DELETE CASCADE
 programs (1) ──→ (M) stations           ON DELETE CASCADE
-programs (1) ──→ (M) sessions           ON DELETE RESTRICT
+programs (1) ──→ (M) queue_sessions     ON DELETE RESTRICT
 
 service_tracks (1) ──→ (M) track_steps  ON DELETE CASCADE
-service_tracks (1) ──→ (M) sessions     ON DELETE RESTRICT
+service_tracks (1) ──→ (M) queue_sessions ON DELETE RESTRICT
 
 track_steps (M) ──→ (1) stations        ON DELETE RESTRICT
 
-tokens (1) ──→ (0..1) sessions          (current, via current_session_id)
-tokens (1) ──→ (M) sessions             (historical, via token_id)
+tokens (1) ──→ (0..1) queue_sessions    (current, via current_session_id)
+tokens (1) ──→ (M) queue_sessions       (historical, via token_id)
 
-sessions (1) ──→ (M) transaction_logs   ON DELETE RESTRICT
+queue_sessions (1) ──→ (M) transaction_logs ON DELETE RESTRICT
 
 users (1) ──→ (M) transaction_logs      (as staff_user_id)
 users (M) ──→ (0..1) stations           (as assigned_station_id)
