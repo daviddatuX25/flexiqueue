@@ -16,12 +16,19 @@ use App\Services\PinService;
 use App\Services\SessionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 
 /**
  * Per 08-API-SPEC-PHASE1 §3: Session endpoints (bind, etc.). Auth: any staff.
+ * Per PIN-QR-AUTHORIZATION-SYSTEM §3.2: Wrong PIN 5 times → rate limit 15 min.
  */
 class SessionController extends Controller
 {
+    private const PIN_FAIL_THROTTLE_PREFIX = 'pin_auth_fail:';
+
+    private const PIN_FAIL_MAX_ATTEMPTS = 5;
+
+    private const PIN_FAIL_DECAY_MINUTES = 15;
     public function __construct(
         private SessionService $sessionService,
         private PinService $pinService
@@ -245,6 +252,15 @@ class SessionController extends Controller
     {
         $validated = $request->validated();
         $authType = $validated['auth_type'] ?? 'preset_pin';
+        $staffUserId = $request->user()->id;
+
+        if ($authType === 'preset_pin') {
+            $key = self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId;
+            if (RateLimiter::tooManyAttempts($key, self::PIN_FAIL_MAX_ATTEMPTS)) {
+                return response()->json(['message' => 'Too many attempts. Try again in 15 minutes.'], 429);
+            }
+        }
+
         $verified = match ($authType) {
             'temp_pin' => $this->pinService->validateTemporaryPin($validated['temp_code'] ?? ''),
             'temp_qr' => $this->pinService->validateTemporaryQr($validated['qr_scan_token'] ?? ''),
@@ -252,10 +268,17 @@ class SessionController extends Controller
         };
 
         if (! $verified) {
+            if ($authType === 'preset_pin') {
+                RateLimiter::hit(self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId, self::PIN_FAIL_DECAY_MINUTES * 60);
+            }
             $message = in_array($authType, ['temp_pin', 'temp_qr'], true)
                 ? 'Authorization expired. Request a new one.'
                 : 'Invalid supervisor PIN.';
             return response()->json(['message' => $message], 401);
+        }
+
+        if ($authType === 'preset_pin') {
+            RateLimiter::clear(self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId);
         }
 
         try {
@@ -287,6 +310,15 @@ class SessionController extends Controller
     {
         $validated = $request->validated();
         $authType = $validated['auth_type'] ?? 'preset_pin';
+        $staffUserId = $request->user()->id;
+
+        if ($authType === 'preset_pin') {
+            $key = self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId;
+            if (RateLimiter::tooManyAttempts($key, self::PIN_FAIL_MAX_ATTEMPTS)) {
+                return response()->json(['message' => 'Too many attempts. Try again in 15 minutes.'], 429);
+            }
+        }
+
         $verified = match ($authType) {
             'temp_pin' => $this->pinService->validateTemporaryPin($validated['temp_code'] ?? ''),
             'temp_qr' => $this->pinService->validateTemporaryQr($validated['qr_scan_token'] ?? ''),
@@ -294,10 +326,17 @@ class SessionController extends Controller
         };
 
         if (! $verified) {
+            if ($authType === 'preset_pin') {
+                RateLimiter::hit(self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId, self::PIN_FAIL_DECAY_MINUTES * 60);
+            }
             $message = in_array($authType, ['temp_pin', 'temp_qr'], true)
                 ? 'Authorization expired. Request a new one.'
                 : 'Invalid supervisor PIN.';
             return response()->json(['message' => $message], 401);
+        }
+
+        if ($authType === 'preset_pin') {
+            RateLimiter::clear(self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId);
         }
 
         try {
