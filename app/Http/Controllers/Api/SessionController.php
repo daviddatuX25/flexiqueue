@@ -245,14 +245,17 @@ class SessionController extends Controller
     {
         $validated = $request->validated();
         $authType = $validated['auth_type'] ?? 'preset_pin';
-        $verified = $authType === 'temp_pin'
-            ? $this->pinService->validateTemporaryPin($validated['temp_code'] ?? '')
-            : $this->pinService->validate((int) $validated['supervisor_user_id'], $validated['supervisor_pin'] ?? '');
+        $verified = match ($authType) {
+            'temp_pin' => $this->pinService->validateTemporaryPin($validated['temp_code'] ?? ''),
+            'temp_qr' => $this->pinService->validateTemporaryQr($validated['qr_scan_token'] ?? ''),
+            default => $this->pinService->validate((int) $validated['supervisor_user_id'], $validated['supervisor_pin'] ?? ''),
+        };
 
         if (! $verified) {
-            return response()->json([
-                'message' => $authType === 'temp_pin' ? 'Authorization expired. Request a new one.' : 'Invalid supervisor PIN.',
-            ], 401);
+            $message = in_array($authType, ['temp_pin', 'temp_qr'], true)
+                ? 'Authorization expired. Request a new one.'
+                : 'Invalid supervisor PIN.';
+            return response()->json(['message' => $message], 401);
         }
 
         try {
@@ -284,14 +287,17 @@ class SessionController extends Controller
     {
         $validated = $request->validated();
         $authType = $validated['auth_type'] ?? 'preset_pin';
-        $verified = $authType === 'temp_pin'
-            ? $this->pinService->validateTemporaryPin($validated['temp_code'] ?? '')
-            : $this->pinService->validate((int) $validated['supervisor_user_id'], $validated['supervisor_pin'] ?? '');
+        $verified = match ($authType) {
+            'temp_pin' => $this->pinService->validateTemporaryPin($validated['temp_code'] ?? ''),
+            'temp_qr' => $this->pinService->validateTemporaryQr($validated['qr_scan_token'] ?? ''),
+            default => $this->pinService->validate((int) $validated['supervisor_user_id'], $validated['supervisor_pin'] ?? ''),
+        };
 
         if (! $verified) {
-            return response()->json([
-                'message' => $authType === 'temp_pin' ? 'Authorization expired. Request a new one.' : 'Invalid supervisor PIN.',
-            ], 401);
+            $message = in_array($authType, ['temp_pin', 'temp_qr'], true)
+                ? 'Authorization expired. Request a new one.'
+                : 'Invalid supervisor PIN.';
+            return response()->json(['message' => $message], 401);
         }
 
         try {

@@ -50,6 +50,38 @@ class PinService
 
         return null;
     }
+
+    /**
+     * Validate temporary QR scan token (single-use, expires after TTL).
+     * Per PIN-QR-AUTHORIZATION-SYSTEM §3.1: Used twice → reject; Expired → 401.
+     *
+     * @return array{verified: true, user_id: int, role: string}|null
+     */
+    public function validateTemporaryQr(string $qrScanToken): ?array
+    {
+        $auths = TemporaryAuthorization::where('type', 'qr')
+            ->whereNull('used_at')
+            ->where(function ($q) {
+                $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+            })
+            ->get();
+
+        foreach ($auths as $auth) {
+            if (Hash::check($qrScanToken, $auth->token_hash)) {
+                $auth->update(['used_at' => now()]);
+                $user = $auth->user;
+
+                return [
+                    'verified' => true,
+                    'user_id' => $user->id,
+                    'role' => $user->role->value,
+                ];
+            }
+        }
+
+        return null;
+    }
+
     /**
      * Validate supervisor PIN for override actions.
      *

@@ -21,10 +21,11 @@ class ForceCompleteSessionRequest extends FormRequest
     {
         return [
             'reason' => ['required', 'string', 'min:1'],
-            'auth_type' => ['nullable', 'string', 'in:preset_pin,temp_pin'],
-            'supervisor_user_id' => ['required_if:auth_type,preset_pin', 'required_unless:auth_type,temp_pin', 'integer', 'exists:users,id'],
-            'supervisor_pin' => ['required_if:auth_type,preset_pin', 'required_unless:auth_type,temp_pin', 'string', 'size:6'],
+            'auth_type' => ['nullable', 'string', 'in:preset_pin,temp_pin,temp_qr'],
+            'supervisor_user_id' => ['required_if:auth_type,preset_pin', 'required_unless:auth_type,temp_pin,temp_qr', 'integer', 'exists:users,id'],
+            'supervisor_pin' => ['required_if:auth_type,preset_pin', 'required_unless:auth_type,temp_pin,temp_qr', 'string', 'size:6'],
             'temp_code' => ['required_if:auth_type,temp_pin', 'string', 'size:6', 'regex:/^\d{6}$/'],
+            'qr_scan_token' => ['required_if:auth_type,temp_qr', 'string', 'min:1', 'max:128'],
         ];
     }
 }

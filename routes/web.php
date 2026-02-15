@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\CheckStatusController;
 use App\Http\Controllers\Api\SessionController as ApiSessionController;
 use App\Http\Controllers\Api\StationController as ApiStationController;
 use App\Http\Controllers\Api\TemporaryPinController;
+use App\Http\Controllers\Api\TemporaryQrController;
 use App\Http\Controllers\Api\VerifyPinController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Admin\ReportPageController;
@@ -90,9 +91,10 @@ Route::middleware(['auth', 'role:admin,supervisor,staff', 'throttle:5,1'])->grou
     Route::post('/api/auth/verify-pin', VerifyPinController::class)->name('api.auth.verify-pin');
 });
 
-// Per PIN-QR-AUTHORIZATION-SYSTEM AUTH-3: Temporary PIN generation (supervisor/admin only)
+// Per PIN-QR-AUTHORIZATION-SYSTEM AUTH-3, AUTH-4: Temporary PIN/QR generation (supervisor/admin only)
 Route::middleware(['auth', 'role:admin,supervisor'])->group(function (): void {
     Route::post('/api/auth/temporary-pin', TemporaryPinController::class)->name('api.auth.temporary-pin');
+    Route::post('/api/auth/temporary-qr', TemporaryQrController::class)->name('api.auth.temporary-qr');
 });
 
 // Per 08-API-SPEC-PHASE1 §3–4: Session and station endpoints (any staff)
