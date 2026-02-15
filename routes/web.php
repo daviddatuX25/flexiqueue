@@ -7,13 +7,17 @@ use App\Http\Controllers\Api\Admin\ProgramStaffController;
 use App\Http\Controllers\Api\Admin\ReportController as AdminReportController;
 use App\Http\Controllers\Api\Admin\StationController as AdminStationController;
 use App\Http\Controllers\Api\Admin\StepController as AdminStepController;
+use App\Http\Controllers\Api\Admin\PrintSettingsController;
 use App\Http\Controllers\Api\Admin\TokenController as AdminTokenController;
 use App\Http\Controllers\Api\Admin\TrackController as AdminTrackController;
 use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\CheckStatusController;
 use App\Http\Controllers\Api\SessionController as ApiSessionController;
+use App\Http\Controllers\Api\PermissionRequestController;
 use App\Http\Controllers\Api\StationController as ApiStationController;
+use App\Http\Controllers\Api\AuthorizationsController;
+use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\TemporaryPinController;
 use App\Http\Controllers\Api\TemporaryQrController;
 use App\Http\Controllers\Api\VerifyPinController;
@@ -22,8 +26,11 @@ use App\Http\Controllers\Admin\ReportPageController;
 use App\Http\Controllers\Admin\TokenPrintController;
 use App\Http\Controllers\Admin\UserPageController;
 use App\Http\Controllers\DisplayController;
+use App\Http\Controllers\AuthorizationPageController;
 use App\Http\Controllers\StationPageController;
 use App\Http\Controllers\TriagePageController;
+use App\Enums\UserRole;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -67,6 +74,9 @@ Route::middleware(['auth', 'role:admin'])->prefix('api/admin')->group(function (
     Route::put('/tokens/{token}', [AdminTokenController::class, 'update']);
     Route::delete('/tokens/{token}', [AdminTokenController::class, 'destroy']);
     Route::post('/tokens/batch-delete', [AdminTokenController::class, 'batchDelete']);
+    // Print template settings
+    Route::get('/print-settings', [PrintSettingsController::class, 'show']);
+    Route::put('/print-settings', [PrintSettingsController::class, 'update']);
     // Per 08-API-SPEC-PHASE1 §5.6, §5.7: User CRUD and staff assignment
     Route::get('/users', [AdminUserController::class, 'index']);
     Route::post('/users', [AdminUserController::class, 'store']);
@@ -76,6 +86,7 @@ Route::middleware(['auth', 'role:admin'])->prefix('api/admin')->group(function (
     Route::post('/users/{user}/assign-station', [AdminUserController::class, 'assignStation']);
     Route::post('/users/{user}/unassign-station', [AdminUserController::class, 'unassignStation']);
     // Per 08-API-SPEC-PHASE1 §5.8: Reports
+    Route::get('/reports/program-sessions', [AdminReportController::class, 'programSessions']);
     Route::get('/reports/audit', [AdminReportController::class, 'audit']);
     Route::get('/reports/audit/export', [AdminReportController::class, 'auditExport']);
 });
@@ -91,10 +102,27 @@ Route::middleware(['auth', 'role:admin,supervisor,staff', 'throttle:5,1'])->grou
     Route::post('/api/auth/verify-pin', VerifyPinController::class)->name('api.auth.verify-pin');
 });
 
+// Per PIN-QR-AUTHORIZATION-SYSTEM AUTH-2: Profile preset PIN/QR (authenticated user only; admin cannot view)
+Route::middleware('auth')->prefix('api/profile')->group(function (): void {
+    Route::put('/override-pin', [ProfileController::class, 'updateOverridePin'])->name('api.profile.override-pin');
+    Route::get('/override-qr', [ProfileController::class, 'showOverrideQr'])->name('api.profile.override-qr');
+    Route::post('/override-qr/regenerate', [ProfileController::class, 'regenerateOverrideQr'])->name('api.profile.override-qr.regenerate');
+    Route::put('/password', [ProfileController::class, 'updatePassword'])->name('api.profile.password');
+});
+
 // Per PIN-QR-AUTHORIZATION-SYSTEM AUTH-3, AUTH-4: Temporary PIN/QR generation (supervisor/admin only)
+// Per TRACK-OVERRIDES-REFACTOR §1.4: List generated authorizations
 Route::middleware(['auth', 'role:admin,supervisor'])->group(function (): void {
+    Route::get('/api/auth/authorizations', [AuthorizationsController::class, 'index'])->name('api.auth.authorizations');
     Route::post('/api/auth/temporary-pin', TemporaryPinController::class)->name('api.auth.temporary-pin');
     Route::post('/api/auth/temporary-qr', TemporaryQrController::class)->name('api.auth.temporary-qr');
+});
+
+// Permission requests (any staff create; supervisor/admin approve/reject)
+Route::middleware(['auth', 'role:admin,supervisor,staff'])->prefix('api')->group(function (): void {
+    Route::post('/permission-requests', [PermissionRequestController::class, 'store']);
+    Route::post('/permission-requests/{permission_request}/approve', [PermissionRequestController::class, 'approve']);
+    Route::post('/permission-requests/{permission_request}/reject', [PermissionRequestController::class, 'reject']);
 });
 
 // Per 08-API-SPEC-PHASE1 §3–4: Session and station endpoints (any staff)
@@ -139,10 +167,19 @@ Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->grou
     Route::get('/reports', [ReportPageController::class, 'index'])->name('reports');
 });
 
-// All staff (admin, supervisor, staff): station and triage
+// All staff (admin, supervisor, staff): station, triage, track-overrides, profile, dashboard
 Route::middleware(['auth', 'role:admin,supervisor,staff'])->group(function (): void {
+    Route::get('/dashboard', function () {
+        $user = Auth::user();
+        return $user && $user->role === UserRole::Admin
+            ? redirect()->route('admin.dashboard')
+            : redirect()->route('station');
+    })->name('dashboard');
     Route::get('/station/{station?}', StationPageController::class)->name('station');
     Route::get('/triage', TriagePageController::class)->name('triage');
+    Route::redirect('/authorize', '/track-overrides', 302)->name('authorize');
+    Route::get('/track-overrides', AuthorizationPageController::class)->name('track-overrides');
+    Route::get('/profile', fn () => Inertia::render('Profile/Index'))->name('profile');
 });
 
 // All other web routes require authentication

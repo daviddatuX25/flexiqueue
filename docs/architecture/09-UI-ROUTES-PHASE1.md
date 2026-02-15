@@ -20,6 +20,7 @@
 
 | Route | Page Component | Purpose | Target Device |
 |-------|---------------|---------|--------------|
+| `GET /dashboard` | Redirect | Role-based: admin → admin.dashboard, staff → station. Staff home / future staff dashboard URL. | — |
 | `GET /triage` | `Triage/Index.svelte` | QR scan + category select + bind | Mobile (375px) |
 | `GET /station` | `Station/Index.svelte` | Station operations (auto-detects assigned station) | Mobile (375px) |
 | `GET /station/{id}` | `Station/Index.svelte` | Station operations (explicit station, supervisor/admin) | Mobile (375px) |
@@ -73,15 +74,18 @@ Extends `AppShell`. Adds:
 
 ---
 
-### 2.3 `Layouts/MobileLayout.svelte` (Triage + Station)
+### 2.3 `Layouts/MobileLayout.svelte` (Live Session: Triage, Station, Track Overrides)
 
-Extends `AppShell`. Optimized for:
+Used for Station, Triage, Track Overrides, and Profile. Optimized for:
 - Full-width content (no sidebar).
 - Large touch targets.
 - Fixed header + scrollable content + fixed footer.
 
-**Header:** App name + current context (station name or "Triage") + user menu.
-**Footer:** Connection status + queue stats + clock.
+**Header:** Top-left back link (arrow + "Admin panel" for admin → `/admin/dashboard`, or "Dashboard" for staff → `/dashboard`) + page title (e.g. station name, "Triage", "Track Overrides") + user dropdown. Back link is always visible for consistent return to admin or staff home.
+
+**User dropdown:** User name, then "Admin panel" / "Dashboard" (same as back link), then **Live Session** section (Station, Triage, Track Overrides), then Log out.
+
+**Bottom dock:** Label "Live Session" above three tabs: Station | Triage | Track Overrides. Connection status + queue stats + clock below.
 
 ---
 
