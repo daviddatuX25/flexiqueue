@@ -79,14 +79,14 @@
 	<div class="flex flex-col gap-6 max-w-4xl mx-auto">
 		<!-- Scan section: tap to activate camera, on scan navigate to status. Per 09-UI-ROUTES §3.4 -->
 		<section>
-			<h2 class="text-xl font-bold text-base-content mb-3">CHECK YOUR STATUS</h2>
+			<h2 class="text-xl font-bold text-surface-950 mb-3">CHECK YOUR STATUS</h2>
 			{#if showScanner}
-				<div class="card bg-base-100 border border-base-300">
-					<div class="card-body">
+				<div class="card bg-surface-50 border border-surface-200 rounded-container">
+					<div class="p-4">
 						<QrScanner active={true} onScan={handleQrScan} />
 						<button
 							type="button"
-							class="btn btn-ghost btn-sm mt-2"
+							class="btn preset-tonal btn-sm mt-2"
 							onclick={() => (showScanner = false)}
 						>
 							Cancel
@@ -96,7 +96,7 @@
 			{:else}
 				<button
 					type="button"
-					class="btn btn-primary btn-block text-lg py-4"
+					class="btn preset-filled-primary-500 w-full text-lg py-4"
 					onclick={() => {
 						showScanner = true;
 						scanHandled = false;
@@ -109,27 +109,27 @@
 
 		<!-- Now Serving -->
 		<section>
-			<h2 class="text-xl font-bold text-base-content mb-3">NOW SERVING</h2>
+			<h2 class="text-xl font-bold text-surface-950 mb-3">NOW SERVING</h2>
 			{#if now_serving.length > 0}
 				<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
 					{#each now_serving as entry}
-						<div class="card bg-base-100 border border-base-300 shadow-sm">
-							<div class="card-body p-4 text-center">
-								<div class="text-4xl font-bold text-primary">{entry.alias}</div>
-								<div class="text-sm text-base-content/80">{entry.station_name}</div>
+						<div class="card bg-surface-50 border border-surface-200 rounded-container shadow-sm">
+							<div class="p-4 text-center">
+								<div class="text-4xl font-bold text-primary-500">{entry.alias}</div>
+								<div class="text-sm text-surface-950/80">{entry.station_name}</div>
 								<div class="flex justify-center gap-1 mt-1">
 									{#if entry.status === 'called'}
-										<span class="badge badge-warning badge-sm">Calling</span>
+										<span class="text-xs px-2 py-0.5 rounded preset-filled-warning-500">Calling</span>
 									{/if}
-									<span class="badge badge-ghost badge-sm">{entry.track}</span>
+									<span class="text-xs px-2 py-0.5 rounded preset-tonal">{entry.track}</span>
 								</div>
 							</div>
 						</div>
 					{/each}
 				</div>
 			{:else}
-				<div class="card bg-base-100 border border-base-300">
-					<div class="card-body py-8 text-center text-base-content/70">
+				<div class="card bg-surface-50 border border-surface-200 rounded-container">
+					<div class="p-4 py-8 text-center text-surface-950/70">
 						No one is being served right now.
 					</div>
 				</div>
@@ -138,20 +138,20 @@
 
 		<!-- Currently Waiting -->
 		<section>
-			<h2 class="text-xl font-bold text-base-content mb-3">CURRENTLY WAITING</h2>
+			<h2 class="text-xl font-bold text-surface-950 mb-3">CURRENTLY WAITING</h2>
 			{#if waiting_by_station.length > 0}
 				<div class="space-y-2">
 					{#each waiting_by_station as row}
-						<div class="card bg-base-100 border border-base-300 shadow-sm">
-							<div class="card-body py-3 px-4">
+						<div class="card bg-surface-50 border border-surface-200 rounded-container shadow-sm">
+							<div class="p-4 py-3 px-4">
 								<div class="flex flex-wrap items-center gap-2">
-									<span class="font-semibold text-base-content">{row.station_name}:</span>
+									<span class="font-semibold text-surface-950">{row.station_name}:</span>
 									{#if row.serving_count != null && row.client_capacity != null}
-										<span class="badge badge-sm badge-primary"
+										<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500"
 											>{row.serving_count}/{row.client_capacity} serving</span
 										>
 									{/if}
-									<span class="text-base-content/80">
+									<span class="text-surface-950/80">
 										{row.aliases.length > 0 ? row.aliases.join(', ') + ' — ' : ''}{row.count}
 										{row.count === 1 ? 'client' : 'clients'} waiting
 									</span>
@@ -160,12 +160,12 @@
 						</div>
 					{/each}
 				</div>
-				<p class="mt-2 text-sm text-base-content/70">
+				<p class="mt-2 text-sm text-surface-950/70">
 					Total in queue: <strong>{total_in_queue}</strong>
 				</p>
 			{:else}
-				<div class="card bg-base-100 border border-base-300">
-					<div class="card-body py-6 text-center text-base-content/70">
+				<div class="card bg-surface-50 border border-surface-200 rounded-container">
+					<div class="p-4 py-6 text-center text-surface-950/70">
 						No one is currently waiting.
 					</div>
 				</div>
@@ -174,23 +174,23 @@
 
 		<!-- Station activity (real-time via Reverb) -->
 		<section>
-			<h2 class="text-xl font-bold text-base-content mb-3">RECENT ACTIVITY</h2>
+			<h2 class="text-xl font-bold text-surface-950 mb-3">RECENT ACTIVITY</h2>
 			{#if activityFeed.length > 0}
-				<div class="card bg-base-100 border border-base-300">
-					<ul class="divide-y divide-base-200">
+				<div class="card bg-surface-50 border border-surface-200 rounded-container">
+					<ul class="divide-y divide-surface-200">
 						{#each activityFeed as item, i (String(i) + (item.created_at ?? '') + (item.alias ?? '') + (item.station_name ?? ''))}
 							<li class="px-4 py-2 flex justify-between items-center gap-2">
-								<span class="text-base-content/90">
-									<span class="font-semibold text-base-content">{item.station_name}:</span> {item.message}
+								<span class="text-surface-950/90">
+									<span class="font-semibold text-surface-950">{item.station_name}:</span> {item.message}
 								</span>
-								<span class="text-xs text-base-content/60 shrink-0">{formatActivityTime(item.created_at)}</span>
+								<span class="text-xs text-surface-950/60 shrink-0">{formatActivityTime(item.created_at)}</span>
 							</li>
 						{/each}
 					</ul>
 				</div>
 			{:else}
-				<div class="card bg-base-100 border border-base-300">
-					<div class="card-body py-6 text-center text-base-content/70">
+				<div class="card bg-surface-50 border border-surface-200 rounded-container">
+					<div class="p-4 py-6 text-center text-surface-950/70">
 						No recent activity.
 					</div>
 				</div>

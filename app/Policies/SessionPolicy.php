@@ -19,8 +19,9 @@ class SessionPolicy
             return true;
         }
 
-        return $user->assigned_station_id !== null
-            && $session->current_station_id === $user->assigned_station_id;
+        $assigned = $user->assignedStationForProgram($session->program_id);
+
+        return $assigned !== null && $session->current_station_id === $assigned->id;
     }
 
     /**
@@ -32,7 +33,8 @@ class SessionPolicy
             return true;
         }
 
-        return $user->assigned_station_id !== null
-            && $session->current_station_id === $user->assigned_station_id;
+        $assigned = $user->assignedStationForProgram($session->program_id);
+
+        return $assigned !== null && $session->current_station_id === $assigned->id;
     }
 }

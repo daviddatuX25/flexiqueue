@@ -202,16 +202,16 @@
 <AdminLayout>
 	<div class="flex flex-wrap items-center justify-between gap-2">
 		<div>
-			<h1 class="text-2xl font-semibold text-base-content">Staff</h1>
-			<p class="mt-2 text-base-content/80">
+			<h1 class="text-2xl font-semibold text-surface-950">Staff</h1>
+			<p class="mt-2 text-surface-950/80">
 				Manage staff accounts. Assign stations per program in Program → Staff tab.
 			</p>
 		</div>
-		<button type="button" class="btn btn-primary btn-sm" onclick={openCreate}>+ Add Staff</button>
+		<button type="button" class="btn preset-filled-primary-500 btn-sm" onclick={openCreate}>+ Add Staff</button>
 	</div>
 
 	{#if error}
-		<div class="alert alert-error mt-4">{error}</div>
+		<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 mt-4">{error}</div>
 	{/if}
 
 	<div class="overflow-x-auto mt-6">
@@ -232,24 +232,24 @@
 						<td>{user.name}</td>
 						<td>{user.email}</td>
 						<td>
-							<span class="badge badge-ghost">{user.role}</span>
+							<span class="text-xs px-2 py-0.5 rounded preset-tonal">{user.role}</span>
 						</td>
 						<td>
 							{#if user.is_active}
-								<span class="badge badge-success badge-sm">Active</span>
+								<span class="text-xs px-2 py-0.5 rounded preset-filled-success-500 badge-sm">Active</span>
 							{:else}
-								<span class="badge badge-ghost badge-sm">Inactive</span>
+								<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm">Inactive</span>
 							{/if}
 						</td>
 						<td>
-							<span class="text-base-content/70">{user.assigned_station?.name ?? '—'}</span>
+							<span class="text-surface-950/70">{user.assigned_station?.name ?? '—'}</span>
 						</td>
 						<td>
 							{#if user.is_active}
 								<div class="flex gap-1">
 									<button
 										type="button"
-										class="btn btn-ghost btn-xs"
+										class="btn preset-tonal btn-xs"
 										onclick={() => openEdit(user)}
 										disabled={submitting}
 									>
@@ -257,7 +257,7 @@
 									</button>
 									<button
 										type="button"
-										class="btn btn-ghost btn-xs"
+										class="btn preset-tonal btn-xs"
 										onclick={() => openReset(user)}
 										disabled={submitting}
 									>
@@ -265,7 +265,7 @@
 									</button>
 									<button
 										type="button"
-										class="btn btn-ghost btn-xs text-error"
+										class="btn preset-tonal btn-xs text-error"
 										onclick={() => openDeactivateConfirm(user)}
 										disabled={submitting}
 									>
@@ -275,7 +275,7 @@
 							{:else}
 								<button
 									type="button"
-									class="btn btn-ghost btn-xs"
+									class="btn preset-tonal btn-xs"
 									onclick={() => openEdit(user)}
 									disabled={submitting}
 								>
@@ -294,33 +294,33 @@
 	<div class="space-y-4">
 		<div class="form-control">
 			<label class="label"><span class="label-text">Name</span></label>
-			<input type="text" class="input input-bordered w-full" bind:value={createName} placeholder="Juan Cruz" />
+			<input type="text" class="input rounded-container border border-surface-200 px-3 py-2 w-full" bind:value={createName} placeholder="Juan Cruz" />
 		</div>
 		<div class="form-control">
 			<label class="label"><span class="label-text">Email</span></label>
-			<input type="email" class="input input-bordered w-full" bind:value={createEmail} placeholder="juan@example.com" />
+			<input type="email" class="input rounded-container border border-surface-200 px-3 py-2 w-full" bind:value={createEmail} placeholder="juan@example.com" />
 		</div>
 		<div class="form-control">
 			<label class="label"><span class="label-text">Password</span></label>
-			<input type="password" class="input input-bordered w-full" bind:value={createPassword} placeholder="Min 8 characters" />
+			<input type="password" class="input rounded-container border border-surface-200 px-3 py-2 w-full" bind:value={createPassword} placeholder="Min 8 characters" />
 		</div>
 		<div class="form-control">
 			<label class="label"><span class="label-text">Role</span></label>
-			<select class="select select-bordered w-full" bind:value={createRole}>
+			<select class="select rounded-container border border-surface-200 px-3 py-2 w-full" bind:value={createRole}>
 				<option value="staff">Staff</option>
 				<option value="admin">Admin</option>
 			</select>
 		</div>
 		<div class="form-control">
 			<label class="label"><span class="label-text">Override PIN (6 digits)</span></label>
-			<input type="text" class="input input-bordered w-full max-w-xs" bind:value={createOverridePin} placeholder="e.g. 123456" maxlength="6" inputmode="numeric" pattern="[0-9]*" />
+			<input type="text" class="input rounded-container border border-surface-200 px-3 py-2 w-full max-w-xs" bind:value={createOverridePin} placeholder="e.g. 123456" maxlength="6" inputmode="numeric" pattern="[0-9]*" />
 			<span class="label-text-alt">Required when assigning as program supervisor. Set now so the user can be added as supervisor later.</span>
 		</div>
 		<div class="flex gap-2 pt-2">
-			<button type="button" class="btn btn-primary" disabled={submitting} onclick={handleCreate}>
+			<button type="button" class="btn preset-filled-primary-500" disabled={submitting} onclick={handleCreate}>
 				{submitting ? 'Creating…' : 'Create'}
 			</button>
-			<button type="button" class="btn btn-ghost" onclick={closeModals}>Cancel</button>
+			<button type="button" class="btn preset-tonal" onclick={closeModals}>Cancel</button>
 		</div>
 	</div>
 </Modal>
@@ -330,15 +330,15 @@
 		<div class="space-y-4">
 			<div class="form-control">
 				<label class="label"><span class="label-text">Name</span></label>
-				<input type="text" class="input input-bordered w-full" bind:value={editName} />
+				<input type="text" class="input rounded-container border border-surface-200 px-3 py-2 w-full" bind:value={editName} />
 			</div>
 			<div class="form-control">
 				<label class="label"><span class="label-text">Email</span></label>
-				<input type="email" class="input input-bordered w-full" bind:value={editEmail} />
+				<input type="email" class="input rounded-container border border-surface-200 px-3 py-2 w-full" bind:value={editEmail} />
 			</div>
 			<div class="form-control">
 				<label class="label"><span class="label-text">Role</span></label>
-				<select class="select select-bordered w-full" bind:value={editRole}>
+				<select class="select rounded-container border border-surface-200 px-3 py-2 w-full" bind:value={editRole}>
 					<option value="staff">Staff</option>
 					<option value="admin">Admin</option>
 				</select>
@@ -351,18 +351,18 @@
 			</div>
 			<div class="form-control">
 				<label class="label"><span class="label-text">New password (optional)</span></label>
-				<input type="password" class="input input-bordered w-full" bind:value={editPassword} placeholder="Leave blank to keep current" />
+				<input type="password" class="input rounded-container border border-surface-200 px-3 py-2 w-full" bind:value={editPassword} placeholder="Leave blank to keep current" />
 			</div>
 			<div class="form-control">
 				<label class="label"><span class="label-text">Override PIN (6 digits)</span></label>
-				<input type="text" class="input input-bordered w-full max-w-xs" bind:value={editOverridePin} placeholder="Leave blank to keep or clear" maxlength="6" inputmode="numeric" pattern="[0-9]*" />
+				<input type="text" class="input rounded-container border border-surface-200 px-3 py-2 w-full max-w-xs" bind:value={editOverridePin} placeholder="Leave blank to keep or clear" maxlength="6" inputmode="numeric" pattern="[0-9]*" />
 				<span class="label-text-alt">Required for program supervisors. Set so the user can be added as supervisor in Program → Staff.</span>
 			</div>
 			<div class="flex gap-2 pt-2">
-				<button type="button" class="btn btn-primary" disabled={submitting} onclick={handleEdit}>
+				<button type="button" class="btn preset-filled-primary-500" disabled={submitting} onclick={handleEdit}>
 					{submitting ? 'Saving…' : 'Save'}
 				</button>
-				<button type="button" class="btn btn-ghost" onclick={closeModals}>Cancel</button>
+				<button type="button" class="btn preset-tonal" onclick={closeModals}>Cancel</button>
 			</div>
 		</div>
 	{/if}
@@ -371,16 +371,16 @@
 <Modal open={showResetModal} title={resetUser ? `Reset password for ${resetUser.name}` : 'Reset password'} onClose={closeModals}>
 	{#if resetUser}
 		<div class="space-y-4">
-			<p class="text-sm text-base-content/70">Set a new password. The user will need to use this to log in.</p>
+			<p class="text-sm text-surface-950/70">Set a new password. The user will need to use this to log in.</p>
 			<div class="form-control">
 				<label class="label"><span class="label-text">New password</span></label>
-				<input type="password" class="input input-bordered w-full" bind:value={resetPassword} placeholder="Min 8 characters" />
+				<input type="password" class="input rounded-container border border-surface-200 px-3 py-2 w-full" bind:value={resetPassword} placeholder="Min 8 characters" />
 			</div>
 			<div class="flex gap-2 pt-2">
-				<button type="button" class="btn btn-primary" disabled={submitting || resetPassword.length < 8} onclick={handleReset}>
+				<button type="button" class="btn preset-filled-primary-500" disabled={submitting || resetPassword.length < 8} onclick={handleReset}>
 					{submitting ? 'Resetting…' : 'Reset'}
 				</button>
-				<button type="button" class="btn btn-ghost" onclick={closeModals}>Cancel</button>
+				<button type="button" class="btn preset-tonal" onclick={closeModals}>Cancel</button>
 			</div>
 		</div>
 	{/if}

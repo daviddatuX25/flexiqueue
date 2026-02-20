@@ -594,17 +594,24 @@ class SessionController extends Controller
     }
 
     /**
-     * Look up token by physical_id for manual triage entry. Returns qr_hash for bind.
+     * Look up token by physical_id or qr_hash for triage entry. Returns physical_id, qr_hash, status.
      */
     public function tokenLookup(Request $request): JsonResponse
     {
         $physicalId = $request->query('physical_id');
-        if (! is_string($physicalId) || $physicalId === '') {
-            return response()->json(['message' => 'physical_id is required.'], 422);
+        $qrHash = $request->query('qr_hash');
+
+        $token = null;
+        if (is_string($qrHash) && $qrHash !== '') {
+            $token = \App\Models\Token::where('qr_code_hash', $qrHash)->first();
+        } elseif (is_string($physicalId) && $physicalId !== '') {
+            $token = \App\Models\Token::where('physical_id', $physicalId)->first();
         }
 
-        $token = \App\Models\Token::where('physical_id', $physicalId)->first();
         if (! $token) {
+            if (! is_string($physicalId) && ! is_string($qrHash)) {
+                return response()->json(['message' => 'physical_id or qr_hash is required.'], 422);
+            }
             return response()->json(['message' => 'Token not found.'], 404);
         }
 

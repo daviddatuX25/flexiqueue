@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\PermissionRequestController;
 use App\Http\Controllers\Api\StationController as ApiStationController;
 use App\Http\Controllers\Api\AuthorizationsController;
 use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\UserAvailabilityController;
 use App\Http\Controllers\Api\TemporaryPinController;
 use App\Http\Controllers\Api\TemporaryQrController;
 use App\Http\Controllers\Api\VerifyPinController;
@@ -100,6 +101,11 @@ Route::middleware(['auth', 'role:admin,supervisor'])->prefix('api/dashboard')->g
 // Per 08-API-SPEC-PHASE1 §1.3: Supervisor PIN verification (any staff, rate limited)
 Route::middleware(['auth', 'role:admin,supervisor,staff', 'throttle:5,1'])->group(function (): void {
     Route::post('/api/auth/verify-pin', VerifyPinController::class)->name('api.auth.verify-pin');
+});
+
+// Per staff-availability-status plan: PATCH /api/users/me/availability (any authenticated staff)
+Route::middleware('auth')->group(function (): void {
+    Route::patch('/api/users/me/availability', [UserAvailabilityController::class, 'update'])->name('api.users.me.availability');
 });
 
 // Per PIN-QR-AUTHORIZATION-SYSTEM AUTH-2: Profile preset PIN/QR (authenticated user only; admin cannot view)

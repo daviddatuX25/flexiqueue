@@ -22,33 +22,33 @@ test.describe('Mobile layout (Station / Triage / Track Overrides)', () => {
     await expect(page.getByRole('link', { name: /station/i }).first()).toBeVisible();
     await expect(page.getByRole('link', { name: /triage/i }).first()).toBeVisible();
     await expect(page.getByRole('link', { name: /track overrides/i }).first()).toBeVisible();
-    const dock = page.locator('.bg-base-100.border-t.border-base-300');
+    const dock = page.locator('.bg-surface-50.border-t.border-surface-200');
     await expect(dock).toBeVisible();
   });
 
   test('bottom nav Station link is active on /station', async ({ page }) => {
     const stationLink = page.getByRole('link', { name: /station/i }).first();
-    await expect(stationLink).toHaveClass(/text-primary|font-semibold/);
+    await expect(stationLink).toHaveClass(/text-primary-500|font-semibold/);
   });
 
   test('bottom nav Triage link becomes active after navigating to /triage', async ({ page }) => {
     await page.getByRole('link', { name: /triage/i }).first().click();
     await expect(page).toHaveURL(/\/triage/);
     const triageLink = page.getByRole('link', { name: /triage/i }).first();
-    await expect(triageLink).toHaveClass(/text-primary|font-semibold/);
+    await expect(triageLink).toHaveClass(/text-primary-500|font-semibold/);
   });
 
-  test('bottom nav Track Overrides link becomes active after navigating to /authorize', async ({ page }) => {
+  test('bottom nav Track Overrides link becomes active after navigating to track-overrides', async ({ page }) => {
     await page.getByRole('link', { name: /track overrides/i }).first().click();
-    await expect(page).toHaveURL(/\/authorize/);
+    await expect(page).toHaveURL(/\/track-overrides/);
     const authLink = page.getByRole('link', { name: /track overrides/i }).first();
-    await expect(authLink).toHaveClass(/text-primary|font-semibold/);
+    await expect(authLink).toHaveClass(/text-primary-500|font-semibold/);
   });
 
-  test('StatusFooter is visible with Online, Queue, Processed, and time', async ({ page }) => {
-    const footer = page.locator('.bg-base-300').last();
+  test('StatusFooter is visible with network + availability, Queue, Processed, and time', async ({ page }) => {
+    const footer = page.locator('.bg-surface-200').last();
     await expect(footer).toBeVisible();
-    await expect(page.getByText(/online|offline/i)).toBeVisible();
+    await expect(footer.getByText(/connected|offline|available|on break|away/i).first()).toBeVisible();
     await expect(page.getByText(/queue:/i)).toBeVisible();
     await expect(page.getByText(/processed:/i)).toBeVisible();
     // Clock is font-mono and shows HH:MM
@@ -56,7 +56,7 @@ test.describe('Mobile layout (Station / Triage / Track Overrides)', () => {
   });
 
   test('footer shows Queue and Processed values (may be 0 if not passed)', async ({ page }) => {
-    const footer = page.locator('.bg-base-300').last();
+    const footer = page.locator('.bg-surface-200').last();
     await expect(footer).toContainText(/Queue:/);
     await expect(footer).toContainText(/Processed:/);
   });
@@ -71,8 +71,8 @@ test.describe('Mobile layout (Station / Triage / Track Overrides)', () => {
 
   test('header shows station context and user menu', async ({ page }) => {
     await expect(page.getByRole('banner')).toBeVisible();
-    await expect(page.locator('.navbar')).toBeVisible();
-    await page.locator('.navbar-end [role="button"]').click();
+    await expect(page.getByRole('banner')).toBeVisible();
+    await page.getByRole('banner').locator('[role="button"]').last().click();
     await expect(page.getByRole('menu').getByRole('link', { name: /station/i })).toBeVisible();
     await expect(page.getByRole('menu').getByRole('link', { name: /triage/i })).toBeVisible();
     await expect(page.getByRole('menu').getByRole('link', { name: /track overrides/i })).toBeVisible();
@@ -80,7 +80,7 @@ test.describe('Mobile layout (Station / Triage / Track Overrides)', () => {
   });
 
   test('footer Queue and Processed show numeric values (currently 0 when not passed from page)', async ({ page }) => {
-    const footer = page.locator('.bg-base-300').last();
+    const footer = page.locator('.bg-surface-200').last();
     await expect(footer).toContainText(/Queue: \d+/);
     await expect(footer).toContainText(/Processed: \d+/);
   });

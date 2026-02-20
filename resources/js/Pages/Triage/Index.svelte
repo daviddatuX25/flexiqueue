@@ -102,22 +102,35 @@
 		scannedToken = t;
 	}
 
-	function handleQrScan(decodedText: string) {
+	async function handleQrScan(decodedText: string) {
 		if (scanHandled) return;
 		scanHandled = true;
 		error = '';
-		// If it looks like a short physical_id (e.g. A1, B12), look up; else treat as qr_hash
 		const trimmed = decodedText.trim();
-		if (trimmed.length <= 10 && /^[A-Za-z0-9]+$/.test(trimmed)) {
+		const branchA = trimmed.length <= 10 && /^[A-Za-z0-9]+$/.test(trimmed);
+		const branchB = trimmed.length === 64 && /^[a-f0-9]+$/.test(trimmed);
+		// If URL (e.g. .../display/status/HASH), extract last path segment as qr_hash (strip query string)
+		const lastSegment = trimmed.includes('/') ? (trimmed.split('/').pop() ?? '').split('?')[0].trim() : '';
+		const branchUrl = lastSegment.length === 64 && /^[a-f0-9]+$/.test(lastSegment);
+
+		if (branchA) {
 			manualPhysicalId = trimmed;
 			handleLookup();
 			return;
 		}
-		if (trimmed.length === 64 && /^[a-f0-9]+$/.test(trimmed)) {
-			scannedToken = { physical_id: 'Scanned', qr_hash: trimmed, status: 'available' };
+		if (branchB || branchUrl) {
+			const hashToUse = branchUrl ? lastSegment : trimmed;
+			const { ok, data } = await api('GET', `/api/sessions/token-lookup?qr_hash=${encodeURIComponent(hashToUse)}`);
+			const t = data as { physical_id?: string; qr_hash?: string; status?: string } | undefined;
+			if (ok && t?.physical_id && t?.qr_hash && t?.status === 'available') {
+				scannedToken = { physical_id: t.physical_id, qr_hash: t.qr_hash, status: 'available' };
+			} else if (t?.status === 'in_use') {
+				error = 'Token is already in use.';
+			} else {
+				error = 'Token not found.';
+			}
 			return;
 		}
-		// Assume it could be physical_id anyway
 		manualPhysicalId = trimmed.slice(0, 10);
 		handleLookup();
 	}
@@ -163,22 +176,22 @@
 </svelte:head>
 
 <MobileLayout headerTitle="Triage" {queueCount} {processedToday}>
-	<div class="flex flex-col gap-4">
+	<div class="flex flex-col gap-4 text-surface-950">
 		{#if !activeProgram}
-			<div class="rounded-box bg-base-100 border border-base-300 p-6 text-center text-base-content/80">
+			<div class="rounded-container bg-surface-50 border border-surface-200 p-6 text-center text-surface-950/80">
 				<p class="font-medium">No active program</p>
 				<p class="mt-1 text-sm">Activate a program from Admin → Programs.</p>
 			</div>
 		{:else}
-			<h1 class="text-xl font-semibold text-base-content">Triage</h1>
+			<h1 class="text-xl font-semibold text-surface-950">Triage</h1>
 
 			{#if !scannedToken}
 				<!-- Get token: scan or enter ID (unified) -->
-				<div class="rounded-box border border-base-300 bg-base-100 p-4 flex flex-col gap-4">
-					<p class="text-sm font-medium text-base-content">Scan or enter token ID</p>
+				<div class="rounded-container border border-surface-200 bg-surface-50 p-4 flex flex-col gap-4">
+					<p class="text-sm font-medium text-surface-950">Scan or enter token ID</p>
 					<button
 						type="button"
-						class="btn {showCamera ? 'btn-ghost' : 'btn-primary'}"
+						class="btn {showCamera ? 'preset-tonal' : 'preset-filled-primary-500'}"
 						onclick={() => {
 							showCamera = !showCamera;
 							error = '';
@@ -189,38 +202,38 @@
 						{showCamera ? 'Stop camera' : 'Start camera'}
 					</button>
 					{#if showCamera}
-						<QrScanner active={true} onScan={handleQrScan} />
+						<QrScanner active={true} onScan={handleQrScan} soundOnScan={true} />
 					{/if}
 					<div class="flex items-center gap-2">
-						<span class="text-xs text-base-content/60 shrink-0">or enter token ID</span>
-						<div class="flex-1 border-t border-base-300"></div>
+						<span class="text-xs text-surface-950/60 shrink-0">or enter token ID</span>
+						<div class="flex-1 border-t border-surface-200"></div>
 					</div>
 					<div class="flex gap-2">
 						<input
 							type="text"
-							class="input input-bordered flex-1"
+							class="input flex-1 rounded-container border border-surface-200 px-3 py-2"
 							placeholder="e.g. A1"
 							bind:value={manualPhysicalId}
 							onkeydown={(e) => e.key === 'Enter' && handleLookup()}
 						/>
-						<button type="button" class="btn btn-primary" onclick={handleLookup}>Look up</button>
+						<button type="button" class="btn preset-filled-primary-500" onclick={handleLookup}>Look up</button>
 					</div>
 					{#if error}
-						<div class="alert alert-error text-sm">{error}</div>
+						<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-2 text-sm">{error}</div>
 					{/if}
 				</div>
 			{:else}
 				<!-- Category + track + confirm -->
-				<div class="rounded-box border border-base-300 bg-base-100 p-4 space-y-4">
-					<p class="font-medium text-base-content">Token: <span class="font-mono text-primary">{scannedToken.physical_id}</span></p>
+				<div class="rounded-container border border-surface-200 bg-surface-50 p-4 space-y-4">
+					<p class="font-medium text-surface-950">Token: <span class="font-mono text-primary-500">{scannedToken.physical_id}</span></p>
 
 					<div>
-						<p class="label-text mb-1">Client category</p>
+						<p class="text-sm font-medium text-surface-950 mb-1">Client category</p>
 						<div class="flex flex-wrap gap-2">
 							{#each CATEGORIES as cat}
 								<button
 									type="button"
-									class="btn btn-sm {selectedCategory === cat.value ? 'btn-primary' : 'btn-ghost'}"
+									class="btn btn-sm {selectedCategory === cat.value ? 'preset-filled-primary-500' : 'preset-tonal'}"
 									onclick={() => (selectedCategory = cat.value)}
 								>
 									{cat.label}
@@ -230,8 +243,8 @@
 					</div>
 
 					<div>
-						<label for="triage-track" class="label"><span class="label-text">Track</span></label>
-						<select id="triage-track" class="select select-bordered w-full" bind:value={selectedTrackId}>
+						<label for="triage-track" class="block text-sm font-medium text-surface-950 mb-1">Track</label>
+						<select id="triage-track" class="w-full rounded-container border border-surface-200 px-3 py-2" bind:value={selectedTrackId}>
 							{#each activeProgram?.tracks ?? [] as track (track.id)}
 								<option value={track.id}>{track.name}</option>
 							{/each}
@@ -239,16 +252,16 @@
 					</div>
 
 					{#if error}
-						<div class="alert alert-error text-sm">{error}</div>
+						<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-2 text-sm">{error}</div>
 					{/if}
 
 					<div class="flex gap-2 pt-2">
-						<button type="button" class="btn btn-ghost flex-1" onclick={resetScan} disabled={isSubmitting}>
+						<button type="button" class="btn preset-tonal flex-1" onclick={resetScan} disabled={isSubmitting}>
 							Cancel
 						</button>
 						<button
 							type="button"
-							class="btn btn-primary flex-1"
+							class="btn preset-filled-primary-500 flex-1"
 							onclick={handleConfirm}
 							disabled={isSubmitting || selectedCategory === null || selectedTrackId === null}
 						>

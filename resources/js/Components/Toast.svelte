@@ -4,23 +4,23 @@
 	 */
 	import { toasts, dismiss } from '../stores/toastStore.js';
 
-	const alertClass = (type) => {
+	function alertClasses(type) {
 		switch (type) {
 			case 'success':
-				return 'alert-success';
+				return 'bg-success-100 text-success-900 border border-success-300';
 			case 'error':
-				return 'alert-error';
+				return 'bg-error-100 text-error-900 border border-error-300';
 			case 'info':
 			default:
-				return 'alert-info';
+				return 'bg-primary-100 text-primary-900 border border-primary-300';
 		}
-	};
+	}
 </script>
 
-<div class="toast toast-top toast-end z-50 gap-2">
+<div class="fixed top-4 right-4 z-50 flex flex-col gap-2">
 	{#each $toasts as t (t.id)}
 		<div
-			class="alert {alertClass(t.type)} shadow-lg text-sm py-2 px-4 flex items-center gap-2"
+			class="rounded-container shadow-lg text-sm py-2 px-4 flex items-center gap-2 {alertClasses(t.type)}"
 			role="alert"
 		>
 			{#if t.type === 'success'}
@@ -34,7 +34,7 @@
 			{#if t.type === 'error'}
 				<button
 					type="button"
-					class="btn btn-ghost btn-xs btn-square ml-auto"
+					class="btn btn-icon btn-icon-sm preset-tonal ml-auto"
 					aria-label="Dismiss"
 					onclick={() => dismiss(t.id)}
 				>

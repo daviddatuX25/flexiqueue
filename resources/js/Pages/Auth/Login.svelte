@@ -14,17 +14,16 @@
 	<title>Login — FlexiQueue</title>
 </svelte:head>
 
-<main class="min-h-screen bg-base-200 flex flex-col items-center justify-center p-6">
-	<div class="card bg-base-100 shadow-xl max-w-md w-full">
-		<div class="card-body">
-			<h1 class="card-title text-2xl text-primary justify-center">FlexiQueue</h1>
-			<p class="text-center text-base-content/80 text-sm">Sign in with your email and password.</p>
+<main class="min-h-screen bg-surface-100 flex flex-col items-center justify-center p-6">
+	<div class="card bg-surface-50 rounded-container shadow-xl max-w-md w-full p-6">
+		<h1 class="text-2xl font-bold text-primary-500 text-center">FlexiQueue</h1>
+		<p class="text-center text-surface-950/80 text-sm mt-1">Sign in with your email and password.</p>
 
-			{#if error}
-				<div class="alert alert-error" role="alert">
-					<span>{error}</span>
-				</div>
-			{/if}
+		{#if error}
+			<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-3 mt-4" role="alert">
+				<span>{error}</span>
+			</div>
+		{/if}
 
 			<form
 				class="flex flex-col gap-4 mt-4"
@@ -35,58 +34,49 @@
 				method="post"
 				action="/login"
 			>
-				<div class="form-control w-full">
-					<label for="email" class="label">
-						<span class="label-text">Email</span>
-					</label>
+				<div class="w-full">
+					<label for="email" class="block text-sm font-medium text-surface-950 mb-1">Email</label>
 					<input
 						id="email"
 						type="email"
 						name="email"
 						autocomplete="email"
 						required
-						class="input input-bordered w-full {$form.errors?.email ? 'input-error' : ''}"
+						class="input w-full rounded-container border border-surface-200 px-3 py-2 {$form.errors?.email ? 'border-error-500 bg-error-50' : ''}"
 						bind:value={$form.email}
 						aria-invalid={!!$form.errors?.email}
 						aria-describedby={$form.errors?.email ? 'email-error' : undefined}
 					/>
 					{#if $form.errors?.email}
-						<label id="email-error" class="label text-error" for="email">
-							<span class="label-text-alt">{$form.errors.email}</span>
-						</label>
+						<span id="email-error" class="text-error-600 text-sm">{$form.errors.email}</span>
 					{/if}
 				</div>
 
-				<div class="form-control w-full">
-					<label for="password" class="label">
-						<span class="label-text">Password</span>
-					</label>
+				<div class="w-full">
+					<label for="password" class="block text-sm font-medium text-surface-950 mb-1">Password</label>
 					<input
 						id="password"
 						type="password"
 						name="password"
 						autocomplete="current-password"
 						required
-						class="input input-bordered w-full {$form.errors?.password ? 'input-error' : ''}"
+						class="input w-full rounded-container border border-surface-200 px-3 py-2 {$form.errors?.password ? 'border-error-500 bg-error-50' : ''}"
 						bind:value={$form.password}
 						aria-invalid={!!$form.errors?.password}
 						aria-describedby={$form.errors?.password ? 'password-error' : undefined}
 					/>
 					{#if $form.errors?.password}
-						<label id="password-error" class="label text-error" for="password">
-							<span class="label-text-alt">{$form.errors.password}</span>
-						</label>
+						<span id="password-error" class="text-error-600 text-sm">{$form.errors.password}</span>
 					{/if}
 				</div>
 
 				<button
 					type="submit"
-					class="btn btn-primary w-full mt-2"
+					class="btn preset-filled-primary-500 w-full mt-2"
 					disabled={$form.processing}
 				>
 					{$form.processing ? 'Signing in…' : 'Sign in'}
 				</button>
 			</form>
-		</div>
 	</div>
 </main>

@@ -6,19 +6,19 @@
 	let { children, programName = null, date = '' } = $props();
 </script>
 
-<div class="flex flex-col min-h-screen bg-base-200">
-	<header class="navbar bg-primary text-primary-content px-4 py-2 shrink-0">
-		<div class="navbar-start">
+<div class="flex flex-col min-h-screen bg-surface-100">
+	<header class="flex items-center justify-between bg-primary-500 text-primary-contrast-500 px-4 py-2 shrink-0">
+		<div>
 			<span class="text-lg font-bold">FlexiQueue</span>
 		</div>
-		<div class="navbar-center">
+		<div class="flex-1 flex justify-center">
 			{#if programName}
 				<span class="text-base font-semibold">{programName}</span>
 			{:else}
-				<span class="text-base-content/70">No active program</span>
+				<span class="text-primary-contrast-500/70">No active program</span>
 			{/if}
 		</div>
-		<div class="navbar-end">
+		<div>
 			<span class="text-sm opacity-90">{date}</span>
 		</div>
 	</header>

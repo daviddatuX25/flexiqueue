@@ -6,22 +6,20 @@
 	<title>{appName}</title>
 </svelte:head>
 
-<main class="min-h-screen bg-base-200 flex flex-col items-center justify-center p-6">
-	<div class="card bg-base-100 shadow-xl max-w-md w-full">
-		<div class="card-body items-center text-center">
-			<h1 class="card-title text-4xl text-primary">{appName}</h1>
-			<p class="text-base-content/80 mt-2">
-				Laravel 12 + Svelte 5 + Inertia.js + TailwindCSS 4 + DaisyUI 5
-			</p>
-			<div class="flex flex-wrap gap-2 mt-4">
-				<button type="button" class="btn btn-primary">Primary</button>
-				<button type="button" class="btn btn-success">Success</button>
-				<button type="button" class="btn btn-outline">Outline</button>
-				<a href="/broadcast-test" class="btn btn-outline btn-sm">Reverb test</a>
-			</div>
-			<p class="text-sm text-neutral mt-4">
-				Test page — FlexiQueue theme applied. If you see styled buttons and primary blue, setup is correct.
-			</p>
+<main class="min-h-screen bg-surface-100 flex flex-col items-center justify-center p-6">
+	<div class="card bg-surface-50 shadow-xl max-w-md w-full rounded-container p-6 flex flex-col items-center text-center">
+		<h1 class="font-bold text-4xl text-primary-500">{appName}</h1>
+		<p class="text-surface-950/80 mt-2">
+			Laravel 12 + Svelte 5 + Inertia.js + TailwindCSS 4 + Skeleton UI
+		</p>
+		<div class="flex flex-wrap gap-2 mt-4">
+			<button type="button" class="btn preset-filled-primary-500">Primary</button>
+			<button type="button" class="btn preset-filled-success-500">Success</button>
+			<button type="button" class="btn preset-outlined">Outline</button>
+			<a href="/broadcast-test" class="btn btn-sm preset-outlined">Reverb test</a>
 		</div>
+		<p class="text-sm text-surface-600 mt-4">
+			Test page — FlexiQueue theme applied. If you see styled buttons and primary blue, setup is correct.
+		</p>
 	</div>
 </main>

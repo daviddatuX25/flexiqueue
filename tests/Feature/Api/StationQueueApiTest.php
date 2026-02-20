@@ -3,6 +3,7 @@
 namespace Tests\Feature\Api;
 
 use App\Models\Program;
+use App\Models\ProgramStationAssignment;
 use App\Models\ServiceTrack;
 use App\Models\Session;
 use App\Models\Station;
@@ -322,6 +323,21 @@ class StationQueueApiTest extends TestCase
 
         $response->assertStatus(403);
         $response->assertJsonPath('message', 'You are not assigned to this station.');
+    }
+
+    public function test_staff_with_program_station_assignment_but_null_assigned_station_id_can_fetch_queue(): void
+    {
+        $staffWithPsaOnly = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        ProgramStationAssignment::create([
+            'program_id' => $this->program->id,
+            'user_id' => $staffWithPsaOnly->id,
+            'station_id' => $this->station1->id,
+        ]);
+
+        $response = $this->actingAs($staffWithPsaOnly)->getJson("/api/stations/{$this->station1->id}/queue");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('station.id', $this->station1->id);
     }
 
     public function test_supervisor_can_fetch_any_station_queue(): void

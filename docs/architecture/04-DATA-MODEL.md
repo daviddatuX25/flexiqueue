@@ -273,6 +273,8 @@ Staff accounts. Laravel's default `users` table extended with role and station a
 | `override_pin` | VARCHAR(255) | YES | NULL | Bcrypt-hashed 6-digit PIN; required for supervisor/admin |
 | `assigned_station_id` | BIGINT UNSIGNED | YES | NULL | FK → `stations.id`; current station assignment |
 | `is_active` | BOOLEAN | NO | TRUE | Soft disable without deletion |
+| `availability_status` | VARCHAR(20) | NO | 'offline' | User availability: `available`, `on_break`, `away`, `offline` (per staff-availability-status plan) |
+| `availability_updated_at` | TIMESTAMP | YES | NULL | Last status change |
 | `email_verified_at` | TIMESTAMP | YES | NULL | Laravel default (unused in Phase 1 but kept for compat) |
 | `remember_token` | VARCHAR(100) | YES | NULL | Laravel default |
 | `created_at` | TIMESTAMP | NO | CURRENT_TIMESTAMP | |

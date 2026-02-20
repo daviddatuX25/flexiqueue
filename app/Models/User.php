@@ -25,6 +25,7 @@ class User extends Authenticatable
         'override_qr_token',
         'assigned_station_id',
         'is_active',
+        'availability_status',
     ];
 
     protected $hidden = [
@@ -41,8 +42,14 @@ class User extends Authenticatable
             'password' => 'hashed',
             'role' => UserRole::class,
             'is_active' => 'boolean',
+            'availability_updated_at' => 'datetime',
         ];
     }
+
+    public const AVAILABILITY_AVAILABLE = 'available';
+    public const AVAILABILITY_ON_BREAK = 'on_break';
+    public const AVAILABILITY_AWAY = 'away';
+    public const AVAILABILITY_OFFLINE = 'offline';
 
     public function assignedStation(): BelongsTo
     {

@@ -2,7 +2,7 @@
 	/**
 	 * ConfirmModal — reusable confirmation dialog (danger/warning/neutral).
 	 * Per REPLACE-CONFIRM-ALERT-WITH-MODALS.md and 07-UI-UX-SPECS.md 6.3, 9.2.
-	 * Uses Modal.svelte + modal-action for confirm/cancel.
+	 * Uses Modal.svelte + Skeleton button presets.
 	 */
 	import Modal from './Modal.svelte';
 
@@ -18,8 +18,8 @@
 		onCancel = () => {},
 	} = $props();
 
-	const confirmButtonClass = $derived(
-		variant === 'danger' ? 'btn-error' : variant === 'warning' ? 'btn-warning' : 'btn-primary'
+	const confirmButtonPreset = $derived(
+		variant === 'danger' ? 'preset-filled-error-500' : variant === 'warning' ? 'preset-filled-warning-500' : 'preset-filled-primary-500'
 	);
 
 	function handleCancel() {
@@ -35,11 +35,11 @@
 
 <Modal {open} {title} onClose={handleCancel}>
 	{#snippet children()}
-		<p class="text-base-content/90">{message}</p>
-		<div class="modal-action mt-4">
+		<p class="text-surface-950/90">{message}</p>
+		<div class="flex justify-end gap-2 mt-4">
 			<button
 				type="button"
-				class="btn btn-ghost"
+				class="btn preset-tonal"
 				disabled={loading}
 				onclick={handleCancel}
 			>
@@ -47,12 +47,12 @@
 			</button>
 			<button
 				type="button"
-				class="btn {confirmButtonClass}"
+				class="btn {confirmButtonPreset}"
 				disabled={loading}
 				onclick={handleConfirm}
 			>
 				{#if loading}
-					<span class="loading loading-spinner loading-sm"></span>
+					<span class="inline-block h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" aria-hidden="true"></span>
 				{/if}
 				{confirmLabel}
 			</button>

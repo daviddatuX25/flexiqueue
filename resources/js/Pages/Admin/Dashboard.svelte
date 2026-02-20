@@ -113,18 +113,18 @@
 	<div class="flex flex-col gap-6">
 		<div class="flex flex-wrap items-center justify-between gap-4">
 			<div>
-				<h1 class="text-2xl font-bold text-base-content">Admin Dashboard</h1>
-				<p class="text-sm text-base-content/60 mt-1">Live system status for {formatDate()}</p>
+				<h1 class="text-2xl font-bold text-surface-950">Admin Dashboard</h1>
+				<p class="text-sm text-surface-950/60 mt-1">Live system status for {formatDate()}</p>
 			</div>
 			<button
 				type="button"
-				class="btn btn-sm btn-primary gap-2"
+				class="btn preset-filled-primary-500 btn-sm gap-2"
 				onclick={refresh}
 				disabled={loading}
 				aria-label="Refresh dashboard"
 			>
 				{#if loading}
-					<span class="loading loading-spinner loading-sm"></span>
+					<span class="loading-spinner loading-sm"></span>
 				{:else}
 					<svg
 						xmlns="http://www.w3.org/2000/svg"
@@ -146,19 +146,19 @@
 		</div>
 
 		{#if error}
-			<div class="alert alert-error">{error}</div>
+			<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4">{error}</div>
 		{/if}
 
 		{#if loading && !stats}
 			<div class="flex justify-center py-12">
-				<span class="loading loading-spinner loading-lg text-primary"></span>
+				<span class="loading-spinner loading-lg text-primary-500"></span>
 			</div>
 		{:else if stats}
 			<!-- Health Cards -->
 			<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-				<div class="stats shadow bg-base-100 border border-base-200">
+				<div class="stats shadow bg-surface-50 border border-surface-200">
 					<div class="stat p-4">
-						<div class="stat-figure text-primary bg-primary/10 p-2 rounded-lg">
+						<div class="stat-figure text-primary-500 bg-primary-100 p-2 rounded-lg">
 							<svg
 								xmlns="http://www.w3.org/2000/svg"
 								class="h-6 w-6"
@@ -174,19 +174,19 @@
 								/>
 							</svg>
 						</div>
-						<div class="stat-title text-xs font-medium uppercase tracking-wider opacity-60">
+						<div class="stat-title text-xs font-medium uppercase tracking-wider">
 							Active Sessions
 						</div>
-						<div class="stat-value text-primary text-3xl">{stats.sessions.active}</div>
+						<div class="stat-value text-primary-500 text-3xl">{stats.sessions.active}</div>
 						<div class="stat-desc text-xs mt-1">
 							{stats.sessions.waiting} waiting &middot; {stats.sessions.serving} serving
 						</div>
 					</div>
 				</div>
 
-				<div class="stats shadow bg-base-100 border border-base-200">
+				<div class="stats shadow bg-surface-50 border border-surface-200">
 					<div class="stat p-4">
-						<div class="stat-figure text-warning bg-warning/10 p-2 rounded-lg">
+						<div class="stat-figure text-warning-500 bg-warning-100 p-2 rounded-lg">
 							<svg
 								xmlns="http://www.w3.org/2000/svg"
 								class="h-6 w-6"
@@ -202,17 +202,17 @@
 								/>
 							</svg>
 						</div>
-						<div class="stat-title text-xs font-medium uppercase tracking-wider opacity-60">
+						<div class="stat-title text-xs font-medium uppercase tracking-wider">
 							Queue Waiting
 						</div>
-						<div class="stat-value text-warning text-3xl">{stats.sessions.waiting}</div>
+						<div class="stat-value text-warning-500 text-3xl">{stats.sessions.waiting}</div>
 						<div class="stat-desc text-xs mt-1">Clients in queue</div>
 					</div>
 				</div>
 
-				<div class="stats shadow bg-base-100 border border-base-200">
+				<div class="stats shadow bg-surface-50 border border-surface-200">
 					<div class="stat p-4">
-						<div class="stat-figure text-success bg-success/10 p-2 rounded-lg">
+						<div class="stat-figure text-success-500 bg-success-100 p-2 rounded-lg">
 							<svg
 								xmlns="http://www.w3.org/2000/svg"
 								class="h-6 w-6"
@@ -228,11 +228,11 @@
 								/>
 							</svg>
 						</div>
-						<div class="stat-title text-xs font-medium uppercase tracking-wider opacity-60">
+						<div class="stat-title text-xs font-medium uppercase tracking-wider">
 							Stations Online
 						</div>
-						<div class="stat-value text-success text-3xl">
-							{stats.stations.active}<span class="text-sm text-base-content/40 font-normal">/{stats.stations.total}</span>
+						<div class="stat-value text-success-500 text-3xl">
+							{stats.stations.active}<span class="text-sm text-surface-950/40 font-normal">/{stats.stations.total}</span>
 						</div>
 						<div class="stat-desc text-xs mt-1">
 							{stats.stations.with_queue} with queue
@@ -240,9 +240,9 @@
 					</div>
 				</div>
 
-				<div class="stats shadow bg-base-100 border border-base-200">
+				<div class="stats shadow bg-surface-50 border border-surface-200">
 					<div class="stat p-4">
-						<div class="stat-figure text-base-content bg-base-200 p-2 rounded-lg">
+						<div class="stat-figure text-surface-950 bg-surface-100 p-2 rounded-lg">
 							<svg
 								xmlns="http://www.w3.org/2000/svg"
 								class="h-6 w-6"
@@ -258,7 +258,7 @@
 								/>
 							</svg>
 						</div>
-						<div class="stat-title text-xs font-medium uppercase tracking-wider opacity-60">
+						<div class="stat-title text-xs font-medium uppercase tracking-wider">
 							Completed Today
 						</div>
 						<div class="stat-value text-3xl">{stats.sessions.completed_today}</div>
@@ -272,20 +272,32 @@
 			<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 				<div class="lg:col-span-2 space-y-6">
 					<!-- Active Program -->
-					<div class="card bg-base-100 shadow-sm border border-base-200">
+					<div class="card bg-surface-50 shadow-sm border border-surface-200">
 						<div class="card-body py-5 px-6">
-							<div class="flex justify-between items-start mb-4">
+							<div class="flex flex-wrap justify-between items-start gap-3 mb-4">
 								<div>
 									<h2 class="card-title text-base">Active Program</h2>
-									<p class="text-sm text-base-content/60">
+									<p class="text-sm text-surface-950/60">
 										{stats.active_program?.name ?? 'No active program'}
 									</p>
 								</div>
 								{#if stats.active_program}
-									<span class="badge badge-success badge-sm gap-1">
-										<div class="w-1.5 h-1.5 bg-white rounded-full"></div>
-										Live
-									</span>
+									<div class="flex items-center gap-2">
+										<span class="text-xs px-2 py-0.5 rounded preset-filled-success-500 badge-sm gap-1">
+											<div class="w-1.5 h-1.5 bg-white rounded-full"></div>
+											Live
+										</span>
+										<Link
+											href="/admin/programs/{stats.active_program.id}"
+											class="btn preset-filled-primary-500 btn-sm gap-1.5"
+										>
+											<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+											</svg>
+											View Program
+										</Link>
+									</div>
 								{/if}
 							</div>
 
@@ -306,27 +318,27 @@
 									{/each}
 								</div>
 							{:else if stats.active_program}
-								<p class="text-sm text-base-content/60">No active sessions.</p>
+								<p class="text-sm text-surface-950/60">No active sessions.</p>
 							{:else}
-								<p class="text-sm text-base-content/60">Activate a program from Programs.</p>
+								<p class="text-sm text-surface-950/60">Activate a program from Programs.</p>
 							{/if}
 						</div>
 					</div>
 
 					<!-- Station Status Table -->
-					<div class="card bg-base-100 shadow-sm border border-base-200">
+					<div class="card bg-surface-50 shadow-sm border border-surface-200">
 						<div class="card-body p-0">
-							<div class="px-6 py-4 border-b border-base-200">
+							<div class="px-6 py-4 border-b border-surface-200">
 								<h2 class="card-title text-base">Station Status</h2>
 							</div>
 							<div class="overflow-x-auto">
 								{#if stations.length === 0}
-									<div class="px-6 py-8 text-center text-base-content/60 text-sm">
+									<div class="px-6 py-8 text-center text-surface-950/60 text-sm">
 										No stations. Add stations to the active program.
 									</div>
 								{:else}
 									<table class="table table-zebra table-sm">
-										<thead class="bg-base-200/50">
+										<thead class="bg-surface-100/50">
 											<tr>
 												<th class="pl-6">Station</th>
 												<th>Staff</th>
@@ -337,27 +349,27 @@
 										</thead>
 										<tbody>
 											{#each stations as s (s.id)}
-												<tr class="hover:bg-base-200/30">
+												<tr class="hover:bg-surface-100/30">
 													<td class="pl-6 font-medium">{s.name}</td>
 													<td class="text-sm">{staffNames(s)}</td>
 													<td>
 														{#if s.queue_count > 0}
 															<span class="font-bold">{s.queue_count}</span>
-															<span class="text-xs text-base-content/50"> waiting</span>
+															<span class="text-xs text-surface-950/50"> waiting</span>
 														{:else}
-															<span class="text-base-content/40 italic text-xs">None</span>
+															<span class="text-surface-950/40 italic text-xs">None</span>
 														{/if}
 													</td>
 													<td>
 														{#if s.current_client}
-															<span class="badge badge-lg badge-ghost font-bold">{s.current_client}</span>
+															<span class="badge preset-tonal font-bold text-base">{s.current_client}</span>
 														{:else}
-															<span class="text-base-content/40 italic text-xs">—</span>
+															<span class="text-surface-950/40 italic text-xs">—</span>
 														{/if}
 													</td>
 													<td class="pr-6">
 														<span
-															class="badge badge-xs {s.is_active ? 'badge-success' : 'badge-ghost'}"
+															class="badge text-xs {s.is_active ? 'preset-filled-success-500' : 'preset-tonal'}"
 														>
 															{s.is_active ? 'active' : 'inactive'}
 														</span>
@@ -374,70 +386,45 @@
 
 				<!-- Quick Actions -->
 				<div class="space-y-4">
-					<div class="card bg-base-100 shadow-sm border border-base-200">
-						<div class="card-body">
+					<div class="card bg-surface-50 shadow-sm border border-surface-200">
+						<div class="card-body space-y-4">
 							<h2 class="card-title text-base">Quick Actions</h2>
-							<div class="flex flex-col gap-2">
-								<Link href="/admin/programs" class="btn btn-outline btn-sm justify-start">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										class="h-4 w-4"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-										/>
+
+							<div>
+								<p class="text-xs font-medium uppercase tracking-wider text-surface-600 mb-2">Program & Setup</p>
+								<Link href="/admin/programs" class="btn preset-tonal btn-sm justify-start w-full gap-2">
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
 									</svg>
 									Manage Program
 								</Link>
-								<Link href="/admin/users" class="btn btn-outline btn-sm justify-start">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										class="h-4 w-4"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
-										/>
-									</svg>
-									Manage Staff
-								</Link>
-								<Link href="/admin/reports" class="btn btn-outline btn-sm justify-start">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										class="h-4 w-4"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-										/>
-									</svg>
-									View Reports
-								</Link>
+							</div>
+
+							<div>
+								<p class="text-xs font-medium uppercase tracking-wider text-surface-600 mb-2">People & Reports</p>
+								<div class="flex flex-col gap-2">
+									<Link href="/admin/users" class="btn preset-tonal btn-sm justify-start w-full gap-2">
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+										</svg>
+										Manage Staff
+									</Link>
+									<Link href="/admin/reports" class="btn preset-tonal btn-sm justify-start w-full gap-2">
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+										</svg>
+										View Reports
+									</Link>
+								</div>
 							</div>
 						</div>
 					</div>
 
 					<!-- Staff Online -->
 					{#if stats}
-						<div class="stats shadow bg-base-100 border border-base-200 w-full">
+						<div class="stats shadow bg-surface-50 border border-surface-200 w-full">
 							<div class="stat py-4 px-4">
-								<div class="stat-title text-xs font-medium uppercase tracking-wider opacity-60">
+								<div class="stat-title text-xs font-medium uppercase tracking-wider">
 									Staff Assigned
 								</div>
 								<div class="stat-value text-2xl">{stats.staff_online}</div>

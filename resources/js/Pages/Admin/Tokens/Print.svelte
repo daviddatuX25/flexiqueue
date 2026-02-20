@@ -139,22 +139,22 @@
 	}
 </style>
 
-<div class="min-h-screen bg-base-200 p-4">
+<div class="min-h-screen bg-surface-100 p-4">
 	<!-- Screen-only toolbar: Back + Print + Instructions -->
 	<div class="screen-only mb-4 space-y-2">
 		<div class="flex flex-wrap items-center gap-3">
 			<Link
 				href="/admin/tokens"
-				class="btn btn-ghost btn-sm"
+				class="btn preset-tonal btn-sm"
 			>
 				← Back to Tokens
 			</Link>
-			<button type="button" class="btn btn-primary btn-sm" onclick={printPage}>
+			<button type="button" class="btn preset-filled-primary-500 btn-sm" onclick={printPage}>
 				Print
 			</button>
 			<button
 				type="button"
-				class="btn btn-ghost btn-sm"
+				class="btn preset-tonal btn-sm"
 				aria-expanded={showInstructions}
 				aria-controls="print-instructions"
 				onclick={() => (showInstructions = !showInstructions)}
@@ -165,11 +165,11 @@
 		{#if showInstructions}
 			<div
 				id="print-instructions"
-				class="rounded-box border border-base-300 bg-base-100 p-4 text-sm"
+				class="rounded-box border border-surface-200 bg-surface-50 p-4 text-sm"
 				role="region"
 				aria-label="Print instructions"
 			>
-				<ul class="space-y-2 text-base-content/90">
+				<ul class="space-y-2 text-surface-950/90">
 					<li>
 						<strong>Cut lines:</strong> The dashed borders around each card are cut lines. Cut along them to separate individual token cards.
 					</li>
@@ -188,7 +188,7 @@
 	</div>
 
 	{#if cards.length === 0}
-		<div class="rounded-lg bg-base-100 p-8 text-center text-base-content/70">
+		<div class="rounded-lg bg-surface-50 p-8 text-center text-surface-950/70">
 			<p class="font-medium">No tokens to print.</p>
 			{#if skipped > 0}
 				<p class="mt-2 text-sm">
@@ -199,7 +199,7 @@
 	{:else}
 		{#each pages as pageCards}
 			<div
-				class="print-sheet rounded-lg bg-base-100 shadow-sm"
+				class="print-sheet rounded-lg bg-surface-50 shadow-sm"
 				class:print-sheet--no-cutlines={!showCutLines}
 				style="--cols: {cardsPerRow}; --rows: {cardsPerColumn};"
 			>

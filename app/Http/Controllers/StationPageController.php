@@ -28,9 +28,9 @@ class StationPageController extends Controller
         $footerStats = $this->stationQueueService->getProgramFooterStats($program);
 
         $resolvedStation = $station;
-        if (! $resolvedStation && $user->assigned_station_id && $program) {
-            $assigned = Station::find($user->assigned_station_id);
-            if ($assigned && (int) $assigned->program_id === (int) $program->id) {
+        if (! $resolvedStation && $program) {
+            $assigned = $user->assignedStationForProgram($program->id);
+            if ($assigned) {
                 $resolvedStation = $assigned;
             }
         }

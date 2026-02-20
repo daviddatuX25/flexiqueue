@@ -4,6 +4,7 @@ namespace Tests\Feature\Api\Admin;
 
 use App\Models\Program;
 use App\Models\ProgramAuditLog;
+use App\Models\ProgramStationAssignment;
 use App\Models\ServiceTrack;
 use App\Models\Session;
 use App\Models\Station;
@@ -167,6 +168,33 @@ class ProgramControllerTest extends TestCase
             'action' => 'session_start',
         ]);
         $this->assertDatabaseCount('program_audit_log', 1);
+    }
+
+    public function test_activate_syncs_assigned_station_id_from_program_station_assignments(): void
+    {
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        $program = Program::create([
+            'name' => 'To Activate',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Verification',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        ProgramStationAssignment::create([
+            'program_id' => $program->id,
+            'user_id' => $staff->id,
+            'station_id' => $station->id,
+        ]);
+
+        $this->actingAs($this->admin)->postJson("/api/admin/programs/{$program->id}/activate");
+
+        $staff->refresh();
+        $this->assertSame($station->id, $staff->assigned_station_id);
     }
 
     public function test_deactivate_fails_when_active_sessions_exist(): void

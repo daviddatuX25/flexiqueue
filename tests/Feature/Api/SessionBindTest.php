@@ -202,4 +202,16 @@ class SessionBindTest extends TestCase
         $response->assertStatus(404);
         $response->assertJsonPath('message', 'Token not found.');
     }
+
+    public function test_token_lookup_by_qr_hash_returns_physical_id(): void
+    {
+        $response = $this->actingAs($this->staff)->getJson(
+            '/api/sessions/token-lookup?qr_hash='.urlencode($this->token->qr_code_hash)
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('physical_id', 'A1');
+        $response->assertJsonPath('qr_hash', $this->token->qr_code_hash);
+        $response->assertJsonPath('status', 'available');
+    }
 }

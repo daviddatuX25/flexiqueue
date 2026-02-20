@@ -14,7 +14,7 @@ alwaysApply: true
 | Frontend | Svelte | 5.x |
 | Bridge | Inertia.js | v2 (`@inertiajs/svelte` ^2.x) |
 | Styling | TailwindCSS | 4.x |
-| Components | DaisyUI | 5 |
+| Components | Skeleton UI | 4.x |
 | Database | MariaDB | 10.6+ |
 | Real-time | Laravel Reverb | Latest |
 | JS Runtime | Node.js | 20+ |
@@ -23,7 +23,7 @@ alwaysApply: true
 
 1. **SvelteKit patterns** — No `+page.svelte`, `+layout.svelte`, load functions, `$app/*` imports, or form actions. This is an Inertia app.
 2. **Svelte 4 syntax** — No `on:click`, `createEventDispatcher`, `<slot>`, or `export let`. Use Svelte 5 runes.
-3. **DaisyUI in tailwind.config.js** — Use `@plugin "daisyui"` in CSS, not JS config.
+3. **Skeleton theme** — Use `@import '@skeletonlabs/skeleton'` and custom theme in `resources/css/app.css`; set `data-theme="flexiqueue"` on `<html>`. Do not configure Skeleton in tailwind.config.js.
 4. **Business logic in controllers** — Controllers are thin. Use Service classes in `app/Services/`.
 5. **Skipping Form Requests** — All API endpoints use Form Request classes for validation.
 6. **Raw DB facade** — Use Eloquent models, not `DB::table()` for domain queries.
@@ -44,7 +44,7 @@ alwaysApply: true
 
 ## Component System
 
-- **Theme**: FlexiQueue custom DaisyUI theme defined in `resources/css/app.css`
+- **Theme**: FlexiQueue custom Skeleton theme in `resources/css/themes/flexiqueue.css`; see `docs/architecture/07-UI-UX-SPECS.md` and `SKELETON-COMPONENT-MAPPING.md`
 - **Reference**: See `public/dev/components.html` for live component examples
 - **Spec**: See `docs/architecture/07-UI-UX-SPECS.md` for design tokens and patterns
 - **Touch targets**: Minimum 48x48px for mobile (staff phones)

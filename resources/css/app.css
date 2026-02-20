@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@plugin '@tailwindcss/forms';
 
 /* Inter font — bundled locally for offline (per 07-UI-UX-SPECS) */
 @import '@fontsource/inter/400.css';
@@ -11,65 +12,58 @@
 @source '../**/*.js';
 @source '../**/*.svelte';
 
-/* FlexiQueue custom theme — per 07-UI-UX-SPECS.md Section 2.2 */
-@plugin "daisyui" {
-  themes: flexiqueue --default;
-}
+/* Skeleton UI — per migration plan; theme in themes/flexiqueue.css */
+@import '@skeletonlabs/skeleton';
+@import './themes/flexiqueue.css';
 
-@plugin "daisyui/theme" {
-  name: "flexiqueue";
-  default: true;
-  color-scheme: light;
-
-  /* Primary: #2563EB */
-  --color-primary: oklch(54.56% 0.2031 264.05);
-  --color-primary-content: oklch(100% 0 0);
-
-  /* Secondary: #4B5563 (gray-600) */
-  --color-secondary: oklch(44.64% 0.0146 264.36);
-  --color-secondary-content: oklch(100% 0 0);
-
-  /* Accent: #F59E0B (gold, for priority/express) */
-  --color-accent: oklch(76.18% 0.1617 75.37);
-  --color-accent-content: oklch(100% 0 0);
-
-  /* Neutral: #6B7280 */
-  --color-neutral: oklch(51.06% 0.013 255.71);
-  --color-neutral-content: oklch(100% 0 0);
-
-  /* Base (backgrounds) */
-  --color-base-100: oklch(100% 0 0);
-  --color-base-200: oklch(98.5% 0.002 240);
-  --color-base-300: oklch(92% 0.004 240);
-  --color-base-content: oklch(14.57% 0.014 285.82);
-
-  /* Semantic status colors */
-  --color-info: oklch(60.59% 0.1843 261.36);
-  --color-info-content: oklch(100% 0 0);
-  --color-success: oklch(58.58% 0.1686 149.48);
-  --color-success-content: oklch(100% 0 0);
-  --color-warning: oklch(59.30% 0.2037 38.37);
-  --color-warning-content: oklch(100% 0 0);
-  --color-error: oklch(52.35% 0.2109 27.33);
-  --color-error-content: oklch(100% 0 0);
-
-  /* Border radius */
-  --radius-selector: 0.5rem;
-  --radius-field: 0.5rem;
-  --radius-box: 0.75rem;
-
-  /* Base sizing */
-  --size-selector: 0.25rem;
-  --size-field: 0.25rem;
-
-  /* Border */
-  --border: 1px;
-
-  /* Effects */
-  --depth: 1;
-  --noise: 0;
+/* Skeleton forms: explicit background/text for cross-platform consistency */
+.select,
+.input,
+.textarea,
+.input-group {
+	background-color: var(--color-surface-50-950);
+	color: var(--color-surface-950-50);
 }
 
 @theme {
-  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+	--font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+}
+
+/* Native <dialog> centering — only when OPEN (per 07-UI-UX-SPECS 6.3). Must not style closed dialogs or they all show. */
+dialog[open] {
+	position: fixed;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	margin: 0;
+	padding: 0;
+	width: 100%;
+	max-width: 100vw;
+	min-height: 100vh;
+	min-height: 100dvh;
+	box-sizing: border-box;
+}
+
+/* Class-based override so centering wins on admin/layout pages — only when open */
+dialog[open].modal-dialog-center {
+	position: fixed !important;
+	inset: 0 !important;
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+	margin: 0 !important;
+	padding: 0 !important;
+	width: 100% !important;
+	max-width: 100vw !important;
+	min-height: 100vh !important;
+	min-height: 100dvh !important;
+	box-sizing: border-box !important;
+}
+
+/* modal-backdrop: form fills dialog for click-to-close (DaisyUI migration per SKELETON-COMPONENT-MAPPING) */
+.modal-backdrop {
+	position: absolute;
+	inset: 0;
+	z-index: -1;
 }

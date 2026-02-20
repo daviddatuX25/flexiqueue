@@ -48,7 +48,7 @@ Wraps all authenticated pages. Provides:
 - Header bar (role-aware navigation).
 - Offline detection banner.
 - Toast notification area.
-- Footer with connection status.
+- Footer with connection status (network + user availability).
 
 **Props:**
 - `user` — current authenticated user object.
@@ -76,7 +76,7 @@ Extends `AppShell`. Adds:
 
 ### 2.3 `Layouts/MobileLayout.svelte` (Live Session: Triage, Station, Track Overrides)
 
-Used for Station, Triage, Track Overrides, and Profile. Optimized for:
+Used for Station, Triage, and Track Overrides. Profile uses AppShell (not Live Session). Optimized for:
 - Full-width content (no sidebar).
 - Large touch targets.
 - Fixed header + scrollable content + fixed footer.
@@ -85,7 +85,7 @@ Used for Station, Triage, Track Overrides, and Profile. Optimized for:
 
 **User dropdown:** User name, then "Admin panel" / "Dashboard" (same as back link), then **Live Session** section (Station, Triage, Track Overrides), then Log out.
 
-**Bottom dock:** Label "Live Session" above three tabs: Station | Triage | Track Overrides. Connection status + queue stats + clock below.
+**Bottom dock:** Label "Live Session" above three tabs: Station | Triage | Track Overrides. StatusFooter below (network + user availability, queue stats, clock).
 
 ---
 
@@ -159,7 +159,7 @@ Triage/Index.svelte [MobileLayout]
 │   ├── CancelButton
 │   └── ConfirmButton
 │
-└── StatusFooter (online/offline, queue count, processed today, clock)
+└── StatusFooter (network Connected/Offline + user availability Available|On break|Away — dual indicator, tap to cycle, queue count, processed today, clock)
 ```
 
 **State:**

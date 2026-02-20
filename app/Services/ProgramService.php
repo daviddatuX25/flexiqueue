@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\Program;
 use App\Models\ProgramAuditLog;
+use App\Models\ProgramStationAssignment;
+use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
@@ -39,8 +41,30 @@ class ProgramService
                 ]);
             }
 
+            $this->syncAssignedStationForProgram($program);
+
             return $program->fresh();
         });
+    }
+
+    /**
+     * Sync users.assigned_station_id for all staff based on ProgramStationAssignment for this program.
+     * Staff with assignment get their station; staff whose assigned_station_id is in this program
+     * but have no assignment get nulled.
+     */
+    private function syncAssignedStationForProgram(Program $program): void
+    {
+        foreach (ProgramStationAssignment::where('program_id', $program->id)->get() as $a) {
+            User::where('id', $a->user_id)->update(['assigned_station_id' => $a->station_id]);
+        }
+
+        $stationIds = $program->stations()->pluck('id')->all();
+        $assignedUserIds = ProgramStationAssignment::where('program_id', $program->id)->pluck('user_id')->all();
+
+        User::where('role', 'staff')
+            ->whereIn('assigned_station_id', $stationIds)
+            ->whereNotIn('id', $assignedUserIds)
+            ->update(['assigned_station_id' => null]);
     }
 
     /**

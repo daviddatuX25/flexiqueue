@@ -3,7 +3,7 @@
 	 * Profile: password, preset PIN, preset QR. Preset is per-user; any staff can set it.
 	 * Preset authorization only works when the user is a supervisor for the program where it's used.
 	 */
-	import MobileLayout from '../../Layouts/MobileLayout.svelte';
+	import AppShell from '../../Layouts/AppShell.svelte';
 	import { usePage } from '@inertiajs/svelte';
 
 	const page = usePage();
@@ -169,16 +169,16 @@
 	<title>Profile — FlexiQueue</title>
 </svelte:head>
 
-<MobileLayout>
-	<div class="p-4 max-w-lg mx-auto">
-		<h1 class="text-xl font-semibold text-base-content mb-4">Profile</h1>
+<AppShell>
+	<div class="profile-page-content p-4 max-w-lg mx-auto">
+		<h1 class="text-xl font-semibold mb-4">Profile</h1>
 		{#if user}
-			<span class="text-sm text-base-content/70">{user.name}</span>
-			<span class="badge badge-primary badge-sm ml-2">{user.role}</span>
+			<span class="text-sm text-surface-950/70">{user.name}</span>
+			<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500 badge-sm ml-2">{user.role}</span>
 		{/if}
 
 		<!-- Password -->
-		<section class="card bg-base-100 shadow-sm mt-4 mb-6">
+		<section class="card bg-surface-50 shadow-sm mt-4 mb-6">
 			<div class="card-body">
 				<h2 class="card-title text-base">Change password</h2>
 				<form onsubmit={submitPassword} class="space-y-3">
@@ -187,7 +187,7 @@
 						<input
 							id="current_password"
 							type="password"
-							class="input input-bordered w-full"
+							class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 							bind:value={passwordCurrent}
 							required
 							autocomplete="current-password"
@@ -198,7 +198,7 @@
 						<input
 							id="password_new"
 							type="password"
-							class="input input-bordered w-full"
+							class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 							bind:value={passwordNew}
 							required
 							autocomplete="new-password"
@@ -209,16 +209,16 @@
 						<input
 							id="password_confirm"
 							type="password"
-							class="input input-bordered w-full"
+							class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 							bind:value={passwordConfirm}
 							required
 							autocomplete="new-password"
 						/>
 					</div>
 					{#if passwordMessage}
-						<p class="text-sm {passwordMessage.type === 'error' ? 'text-error' : 'text-success'}">{passwordMessage.text}</p>
+						<p class="text-sm {passwordMessage.type === 'error' ? 'text-error-500' : 'text-success-500'}">{passwordMessage.text}</p>
 					{/if}
-					<button type="submit" class="btn btn-primary btn-sm" disabled={passwordSubmitting}>
+					<button type="submit" class="btn preset-filled-primary-500 btn-sm" disabled={passwordSubmitting}>
 						{passwordSubmitting ? 'Updating…' : 'Update password'}
 					</button>
 				</form>
@@ -226,17 +226,17 @@
 		</section>
 
 		<!-- Preset PIN & QR (any user; only works when you're a supervisor for that program) -->
-		<section class="card bg-base-100 shadow-sm mb-6">
+		<section class="card bg-surface-50 shadow-sm mb-6">
 			<div class="card-body">
 				<h2 class="card-title text-base">Override PIN</h2>
-				<p class="text-sm text-base-content/70">Set or change your 6-digit PIN for authorizing overrides and force-complete. Not visible to admins. <strong>Only works when you are a supervisor for the program</strong> where it’s used; otherwise staff will see: “You are not a supervisor for this program.”</p>
+				<p class="text-sm text-surface-950/70">Set or change your 6-digit PIN for authorizing overrides and force-complete. Not visible to admins. <strong>Only works when you are a supervisor for the program</strong> where it’s used; otherwise staff will see: “You are not a supervisor for this program.”</p>
 				<form onsubmit={submitPin} class="space-y-3">
 					<div>
 						<label for="pin_current_password" class="label label-text">Current password</label>
 						<input
 							id="pin_current_password"
 							type="password"
-							class="input input-bordered w-full"
+							class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 							bind:value={currentPassword}
 							required
 							autocomplete="current-password"
@@ -250,7 +250,7 @@
 							inputmode="numeric"
 							pattern="[0-9]{6}"
 							maxlength="6"
-							class="input input-bordered w-full"
+							class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 							bind:value={newPin}
 							required
 							placeholder="000000"
@@ -258,40 +258,40 @@
 						/>
 					</div>
 					{#if pinMessage}
-						<p class="text-sm {pinMessage.type === 'error' ? 'text-error' : 'text-success'}">{pinMessage.text}</p>
+						<p class="text-sm {pinMessage.type === 'error' ? 'text-error-500' : 'text-success-500'}">{pinMessage.text}</p>
 					{/if}
-					<button type="submit" class="btn btn-primary btn-sm" disabled={pinSubmitting}>
+					<button type="submit" class="btn preset-filled-primary-500 btn-sm" disabled={pinSubmitting}>
 						{pinSubmitting ? 'Saving…' : 'Update PIN'}
 					</button>
 				</form>
 			</div>
 		</section>
 
-		<section class="card bg-base-100 shadow-sm mb-6">
+		<section class="card bg-surface-50 shadow-sm mb-6">
 			<div class="card-body">
 				<h2 class="card-title text-base">Preset QR</h2>
-				<p class="text-sm text-base-content/70">Staff can scan your preset QR to authorize overrides. Preset is per-user; <strong>it only works when you are a supervisor for that program</strong>. Regenerating invalidates the previous QR. The QR is shown only once after regeneration.</p>
+				<p class="text-sm text-surface-950/70">Staff can scan your preset QR to authorize overrides. Preset is per-user; <strong>it only works when you are a supervisor for that program</strong>. Regenerating invalidates the previous QR. The QR is shown only once after regeneration.</p>
 				{#if qrLoading}
-					<p class="text-sm text-base-content/60">Loading…</p>
+					<p class="text-sm text-surface-950/60">Loading…</p>
 				{:else}
 					{#if hasPresetQr && !qrDataUri}
-						<p class="text-sm text-base-content/70">You have a preset QR set. Regenerate to get a new one (current one will stop working).</p>
+						<p class="text-sm text-surface-950/70">You have a preset QR set. Regenerate to get a new one (current one will stop working).</p>
 					{/if}
 					{#if qrDataUri}
 						<div class="flex flex-col items-center gap-2 my-2">
-							<img src={qrDataUri} alt="Preset QR code" class="w-48 h-48 object-contain border border-base-300 rounded-lg" />
-							<p class="text-xs text-warning">Save or print this; it will not be shown again.</p>
-							<button type="button" class="btn btn-outline btn-sm" onclick={printPresetQr}>
+							<img src={qrDataUri} alt="Preset QR code" class="w-48 h-48 object-contain border border-surface-200 rounded-lg" />
+							<p class="text-xs text-warning-500">Save or print this; it will not be shown again.</p>
+							<button type="button" class="btn preset-outlined btn-sm" onclick={printPresetQr}>
 								Print
 							</button>
 						</div>
 					{/if}
 					{#if qrMessage}
-						<p class="text-sm {qrMessage.type === 'error' ? 'text-error' : 'text-success'}">{qrMessage.text}</p>
+						<p class="text-sm {qrMessage.type === 'error' ? 'text-error-500' : 'text-success-500'}">{qrMessage.text}</p>
 					{/if}
 					<button
 						type="button"
-						class="btn btn-outline btn-sm"
+						class="btn preset-outlined btn-sm"
 						disabled={qrRegenerating}
 						onclick={regenerateQr}
 					>
@@ -302,11 +302,11 @@
 		</section>
 
 		<!-- Profile photo placeholder -->
-		<section class="card bg-base-100 shadow-sm">
+		<section class="card bg-surface-50 shadow-sm">
 			<div class="card-body">
 				<h2 class="card-title text-base">Profile photo</h2>
-				<p class="text-sm text-base-content/70">Photo upload will be available in a future update.</p>
+				<p class="text-sm text-surface-950/70">Photo upload will be available in a future update.</p>
 			</div>
 		</section>
 	</div>
-</MobileLayout>
+</AppShell>

@@ -59,7 +59,8 @@ test.describe('Admin Program Steps', () => {
     await expect(list.first()).toContainText(secondStationName ?? '', { timeout: 3000 });
     await expect(list.nth(1)).toContainText(firstStationName ?? '');
 
-    await dialog.locator('button:has-text("Close")').first().click();
-    await expect(page.getByRole('heading', { name: 'Programs' }).or(page.getByText(/E2E Test Program/))).toBeVisible();
+    await dialog.locator('button[aria-label="Close"]').click();
+    await expect(dialog).toBeHidden({ timeout: 3000 });
+    await expect(page.getByRole('button', { name: /Manage steps/i })).toBeVisible({ timeout: 5000 });
   });
 });

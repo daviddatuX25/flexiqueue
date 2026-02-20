@@ -228,16 +228,16 @@
 </svelte:head>
 
 <MobileLayout headerTitle="Track Overrides" {queueCount} {processedToday}>
-	<div class="flex flex-col gap-6">
+	<div class="flex flex-col gap-6 text-surface-950">
 		{#if canApprove}
 			<!-- Generate PIN/QR for staff -->
-			<div class="rounded-box bg-base-100 border border-base-300 p-4">
-				<p class="text-sm font-medium text-base-content/80 mb-3">Generate for staff</p>
-				<p class="text-xs text-base-content/60 mb-4">Create temporary PIN or QR for staff to authorize override or force-complete.</p>
+			<div class="rounded-box bg-surface-50 border border-surface-200 p-4">
+				<p class="text-sm font-medium text-surface-950/80 mb-3">Generate for staff</p>
+				<p class="text-xs text-surface-950/60 mb-4">Create temporary PIN or QR for staff to authorize override or force-complete.</p>
 				<div class="form-control w-full max-w-xs mb-4">
 					<label class="label"><span class="label-text">Expiry</span></label>
 					<select
-						class="select select-bordered select-sm"
+						class="select rounded-container border border-surface-200 px-3 py-2 select-sm"
 						bind:value={selectedTtlSeconds}
 						onchange={(e) => (selectedTtlSeconds = Number((e.target as HTMLSelectElement).value))}
 					>
@@ -250,21 +250,21 @@
 					<div class="flex flex-col gap-2">
 						<button
 							type="button"
-							class="btn btn-outline btn-sm"
+							class="btn preset-outlined btn-sm"
 							disabled={!!actionLoading}
 							onclick={generateTempPin}
 						>
 							{actionLoading === 'generate-temp-pin' ? 'Generating…' : 'Generate 6-digit PIN'}
 						</button>
 						{#if tempCodeGenerated}
-							<p class="text-xl font-mono font-bold tracking-widest text-primary">{tempCodeGenerated}</p>
-							<p class="text-xs text-base-content/60">{formatExpiry(tempCodeExpiresAt)}</p>
+							<p class="text-xl font-mono font-bold tracking-widest text-primary-500">{tempCodeGenerated}</p>
+							<p class="text-xs text-surface-950/60">{formatExpiry(tempCodeExpiresAt)}</p>
 						{/if}
 					</div>
 					<div class="flex flex-col gap-2">
 						<button
 							type="button"
-							class="btn btn-outline btn-sm"
+							class="btn preset-outlined btn-sm"
 							disabled={!!actionLoading}
 							onclick={generateTempQr}
 						>
@@ -272,7 +272,7 @@
 						</button>
 						{#if tempQrDataUri}
 							<img src={tempQrDataUri} alt="Temporary QR" class="w-28 h-28" />
-							<p class="text-xs text-base-content/60">{formatExpiry(tempQrExpiresAt)}</p>
+							<p class="text-xs text-surface-950/60">{formatExpiry(tempQrExpiresAt)}</p>
 						{/if}
 					</div>
 				</div>
@@ -280,19 +280,19 @@
 
 			<!-- Recent generated auths -->
 			{#if authorizations.length > 0}
-				<div class="rounded-box bg-base-100 border border-base-300 p-4">
-					<p class="text-sm font-medium text-base-content/80 mb-3">Recent authorizations</p>
+				<div class="rounded-box bg-surface-50 border border-surface-200 p-4">
+					<p class="text-sm font-medium text-surface-950/80 mb-3">Recent authorizations</p>
 					<ul class="space-y-1 text-xs">
 						{#each authorizations as a (a.id)}
 							<li class="flex justify-between items-center py-1">
-								<span class="font-mono">{a.type === 'pin' ? 'PIN' : 'QR'}</span>
-								<span class="text-base-content/60">{new Date(a.created_at ?? 0).toLocaleString()}</span>
+								<span class="font-mono text-surface-950">{a.type === 'pin' ? 'PIN' : 'QR'}</span>
+								<span class="text-surface-950/60">{new Date(a.created_at ?? 0).toLocaleString()}</span>
 								{#if a.used_at}
-									<span class="badge badge-ghost badge-sm">Used</span>
+									<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm text-surface-950">Used</span>
 								{:else if a.expires_at}
-									<span class="text-base-content/50">{formatExpiry(a.expires_at)}</span>
+									<span class="text-surface-950/50">{formatExpiry(a.expires_at)}</span>
 								{:else}
-									<span class="badge badge-ghost badge-sm">No expiry</span>
+									<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm text-surface-950">No expiry</span>
 								{/if}
 							</li>
 						{/each}
@@ -302,46 +302,46 @@
 		{/if}
 
 		<!-- Pending requests -->
-		<div class="rounded-box bg-base-100 border border-base-300 p-4">
-			<p class="text-sm font-medium text-base-content/80 mb-3">
+		<div class="rounded-box bg-surface-50 border border-surface-200 p-4">
+			<p class="text-sm font-medium text-surface-950/80 mb-3">
 				{canApprove ? 'Pending requests' : 'Your pending requests'}
 			</p>
 			{#if error}
-				<div class="alert alert-error text-sm mb-3">{error}</div>
+				<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 text-sm mb-3">{error}</div>
 			{/if}
 			{#if pendingRequests.length === 0}
-				<p class="text-sm text-base-content/60 py-4">
+				<p class="text-sm text-surface-950/60 py-4">
 					{canApprove ? 'No pending requests.' : 'No pending requests. Request approval from the Override or Force Complete modal on the Station page.'}
 				</p>
 			{:else}
 				<ul class="space-y-3">
 					{#each pendingRequests as pr (pr.id)}
-						<li class="rounded-box bg-base-200 p-3 space-y-2">
+						<li class="rounded-box bg-surface-100 p-3 space-y-2">
 							<div class="flex justify-between items-start gap-2">
 								<div>
-									<span class="badge badge-sm {pr.action_type === 'override' ? 'badge-info' : 'badge-warning'}">{pr.action_type.replace('_', ' ')}</span>
-									<span class="font-mono font-semibold ml-1">{pr.session.alias}</span>
+									<span class="badge text-xs {pr.action_type === 'override' ? 'preset-filled-primary-500' : 'preset-filled-warning-500'}">{pr.action_type.replace('_', ' ')}</span>
+									<span class="font-mono font-semibold ml-1 text-surface-950">{pr.session.alias}</span>
 								</div>
 								{#if canApprove}
-									<span class="text-xs text-base-content/60">{pr.requester.name}</span>
+									<span class="text-xs text-surface-950/60">{pr.requester.name}</span>
 								{/if}
 							</div>
-							<p class="text-xs text-base-content/70">{pr.reason}</p>
+							<p class="text-xs text-surface-950/70">{pr.reason}</p>
 							{#if pr.action_type === 'override'}
 								{#if pr.target_track}
-									<p class="text-xs text-base-content/60">→ {pr.target_track.name}</p>
+									<p class="text-xs text-surface-950/60">→ {pr.target_track.name}</p>
 								{:else if pr.target_station}
-									<p class="text-xs text-base-content/60">→ {pr.target_station.name}</p>
+									<p class="text-xs text-surface-950/60">→ {pr.target_station.name}</p>
 								{:else}
-									<p class="text-xs text-base-content/60">→ Custom (define path below)</p>
+									<p class="text-xs text-surface-950/60">→ Custom (define path below)</p>
 								{/if}
 							{/if}
-							<p class="text-xs text-base-content/50">{new Date(pr.created_at).toLocaleString()}</p>
+							<p class="text-xs text-surface-950/50">{new Date(pr.created_at).toLocaleString()}</p>
 							{#if canApprove}
 								<div class="flex gap-2 pt-2">
 									<button
 										type="button"
-										class="btn btn-primary btn-sm"
+										class="btn preset-filled-primary-500 btn-sm"
 										disabled={!!actionLoading}
 										onclick={() => openApproveModal(pr)}
 									>
@@ -350,7 +350,7 @@
 									{#if pr.action_type === 'override'}
 										<button
 											type="button"
-											class="btn btn-ghost btn-sm btn-error"
+											class="btn preset-filled-error-500 btn-sm"
 											disabled={!!actionLoading}
 											onclick={() => openRejectModal(pr.id)}
 										>
@@ -359,7 +359,7 @@
 									{:else}
 										<button
 											type="button"
-											class="btn btn-ghost btn-sm btn-error"
+											class="btn preset-filled-error-500 btn-sm"
 											disabled={!!actionLoading}
 											onclick={() => rejectRequest(pr.id)}
 										>
@@ -368,7 +368,7 @@
 									{/if}
 								</div>
 							{:else}
-								<p class="text-xs text-warning">Waiting for supervisor approval…</p>
+								<p class="text-xs text-warning-500">Waiting for supervisor approval…</p>
 							{/if}
 						</li>
 					{/each}
@@ -378,15 +378,15 @@
 	</div>
 
 	{#if approveModalRequestId}
-		<dialog open class="modal modal-open">
-			<div class="modal-box max-w-sm">
+		<dialog open class="modal-dialog-center rounded-container">
+			<div class="card bg-surface-50 rounded-container shadow-xl p-6 max-w-sm text-surface-950">
 				<h3 class="font-bold text-lg">Define custom path</h3>
-				<p class="text-sm text-base-content/70 py-2">Add stations in the order the client should visit. Admin defines the one-off path.</p>
+				<p class="text-sm text-surface-950/70 py-2">Add stations in the order the client should visit. Admin defines the one-off path.</p>
 				<div class="form-control w-full mt-2">
 					<label class="label"><span class="label-text">Add station</span></label>
 					<div class="flex gap-2">
 						<select
-							class="select select-bordered select-sm flex-1"
+							class="select rounded-container border border-surface-200 px-3 py-2 select-sm flex-1"
 							bind:value={approveCustomAddStationId}
 							onchange={(e) => { approveCustomAddStationId = (e.target as HTMLSelectElement).value === '' ? '' : Number((e.target as HTMLSelectElement).value); }}
 						>
@@ -395,28 +395,28 @@
 								<option value={st.id}>{st.name}</option>
 							{/each}
 						</select>
-						<button type="button" class="btn btn-outline btn-sm" onclick={addStationToCustomPath} disabled={approveCustomAddStationId === ''}>Add</button>
+						<button type="button" class="btn preset-outlined btn-sm" onclick={addStationToCustomPath} disabled={approveCustomAddStationId === ''}>Add</button>
 					</div>
 				</div>
 				{#if approveCustomPath.length > 0}
 					<div class="mt-3">
-						<p class="text-xs font-medium text-base-content/70 mb-2">Path (order):</p>
+						<p class="text-xs font-medium text-surface-950/70 mb-2">Path (order):</p>
 						<ul class="space-y-1">
 							{#each approveCustomPath as stationId, i}
 								{@const st = stations.find(s => s.id === stationId)}
-								<li class="flex justify-between items-center text-sm">
+								<li class="flex justify-between items-center text-sm text-surface-950">
 									<span>{i + 1}. {st?.name ?? stationId}</span>
-									<button type="button" class="btn btn-ghost btn-xs" onclick={() => removeStationFromCustomPath(i)}>×</button>
+									<button type="button" class="btn preset-tonal btn-xs" onclick={() => removeStationFromCustomPath(i)}>×</button>
 								</li>
 							{/each}
 						</ul>
 					</div>
 				{/if}
-				<div class="modal-action">
-					<button type="button" class="btn btn-ghost" onclick={closeApproveModal}>Cancel</button>
+				<div class="flex justify-end gap-2 mt-4">
+					<button type="button" class="btn preset-tonal" onclick={closeApproveModal}>Cancel</button>
 					<button
 						type="button"
-						class="btn btn-primary"
+						class="btn preset-filled-primary-500"
 						disabled={approveCustomPath.length === 0 || !!actionLoading}
 						onclick={() => approveRequest(approveModalRequestId!, { custom_steps: approveCustomPath })}
 					>
@@ -431,14 +431,14 @@
 	{/if}
 
 	{#if rejectModalRequestId}
-		<dialog open class="modal modal-open">
-			<div class="modal-box max-w-sm">
+		<dialog open class="modal-dialog-center rounded-container">
+			<div class="card bg-surface-50 rounded-container shadow-xl p-6 max-w-sm text-surface-950">
 				<h3 class="font-bold text-lg">Reject and reassign?</h3>
-				<p class="text-sm text-base-content/70 py-2">Optionally reassign the session to a track instead of leaving it awaiting approval.</p>
+				<p class="text-sm text-surface-950/70 py-2">Optionally reassign the session to a track instead of leaving it awaiting approval.</p>
 				<div class="form-control w-full mt-2">
 					<label class="label"><span class="label-text">Reassign to track (optional)</span></label>
 					<select
-						class="select select-bordered w-full"
+						class="select rounded-container border border-surface-200 px-3 py-2 w-full"
 						value={rejectReassignTrackId ?? ''}
 						onchange={(e) => {
 							const v = (e.target as HTMLSelectElement).value;
@@ -451,11 +451,11 @@
 						{/each}
 					</select>
 				</div>
-				<div class="modal-action">
-					<button type="button" class="btn btn-ghost" onclick={closeRejectModal}>Cancel</button>
+				<div class="flex justify-end gap-2 mt-4">
+					<button type="button" class="btn preset-tonal" onclick={closeRejectModal}>Cancel</button>
 					<button
 						type="button"
-						class="btn btn-error"
+						class="btn preset-filled-error-500"
 						disabled={!!actionLoading}
 						onclick={() => rejectRequest(rejectModalRequestId!, rejectReassignTrackId ? { reassign_track_id: rejectReassignTrackId } : undefined)}
 					>

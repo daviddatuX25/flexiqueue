@@ -1,52 +1,50 @@
 # FlexiQueue — Phase 1 UI/UX Specifications
 
 **Framework:** Svelte 5 + Inertia.js (via Laravel)
-**Styling:** TailwindCSS 4 + DaisyUI 5
+**Styling:** TailwindCSS 4 + Skeleton UI
 **Layout:** Mobile-first (375px primary), desktop for admin (1440px)
 **Font:** Inter, sans-serif
 
 ---
 
-## 1. Component Library: DaisyUI 5
+## 1. Component Library: Skeleton UI
 
-FlexiQueue uses [DaisyUI 5](https://daisyui.com/) as its component library on top of TailwindCSS 4. DaisyUI provides **65 semantic CSS components** (buttons, cards, modals, tables, etc.) with zero JavaScript dependencies.
+FlexiQueue uses [Skeleton](https://www.skeleton.dev/) as its UI toolkit on top of TailwindCSS 4. Skeleton provides a design system with CSS custom properties (themes), utility-based components (`btn`, `card`, presets), and optional Svelte components.
 
-### 1.1 Why DaisyUI
+### 1.1 Why Skeleton
 
-- **Consistent design system** — Semantic class names (`btn`, `card`, `modal`, `badge`) instead of raw utility-heavy HTML.
-- **Accessible by default** — Built with ARIA patterns and keyboard navigation.
-- **Custom theming** — Full control over colors, border radius, and sizing via CSS variables (OKLCH color space).
-- **TailwindCSS 4 native** — Imports via `@plugin "daisyui"`, no config file needed.
-- **Zero JS** — Pure CSS components; no runtime overhead. Svelte handles all interactivity.
-- **65 components** — Covers ~80% of FlexiQueue's UI needs out of the box.
+- **Consistent design system** — Theme variables and presets (`preset-filled-primary-500`, `preset-tonal`, `preset-outlined`) for buttons, cards, and surfaces.
+- **Accessible** — Works with semantic HTML and ARIA; Svelte components (when used) built with Zag.js.
+- **Custom theming** — Full control via CSS custom properties in theme files (OKLCH color space). FlexiQueue theme: `resources/css/themes/flexiqueue.css`.
+- **TailwindCSS 4 native** — Imports in `resources/css/app.css`; no JS config required for core styles.
+- **Presets + utilities** — Use Skeleton presets and theme colors (`bg-surface-50`, `text-primary-500`) first; override with Tailwind when needed.
 
 ### 1.2 Installation
 
 In `resources/css/app.css`:
 
 ```css
-@import "tailwindcss";
-@plugin "daisyui";
+@import 'tailwindcss';
+@import '@skeletonlabs/skeleton';
+@import './themes/flexiqueue.css';
 ```
 
-Package install (during BD-001):
+Set active theme in `resources/views/app.blade.php`: `<html ... data-theme="flexiqueue">`.
 
-```bash
-npm install -D daisyui@latest
-```
+Packages: `@skeletonlabs/skeleton`, `@skeletonlabs/skeleton-svelte` (optional, for Svelte components).
 
 ### 1.3 Convention
 
-- **Use DaisyUI semantic classes first** — e.g., `btn btn-primary` not `bg-blue-600 text-white py-4 px-6 rounded-lg`.
-- **Override with Tailwind utilities when needed** — e.g., `btn btn-primary h-20` for the 80px tall mobile buttons.
-- **Never duplicate** what DaisyUI already provides. If DaisyUI has a `table`, `badge`, `modal`, use it.
-- **Custom components** only for domain-specific UI that has no DaisyUI equivalent (QR scanner, flow diagrams).
+- **Use Skeleton presets and theme colors first** — e.g., `btn preset-filled-primary-500`, `text-surface-950`, `bg-surface-50`.
+- **Override with Tailwind when needed** — e.g., `btn preset-filled-primary-500 min-h-[48px]` for touch targets.
+- **Component mapping** — See `docs/architecture/SKELETON-COMPONENT-MAPPING.md` for DaisyUI-to-Skeleton equivalents.
+- **Custom components** only for domain-specific UI with no Skeleton equivalent (QR scanner, flow diagrams).
 
 ---
 
 ## 2. Custom Theme: "flexiqueue"
 
-DaisyUI supports custom themes via `@plugin "daisyui/theme"`. FlexiQueue defines one custom theme that maps our design palette to DaisyUI's semantic color system.
+Skeleton themes are defined in CSS with `[data-theme='flexiqueue']`. FlexiQueue's theme is in `resources/css/themes/flexiqueue.css` and maps our design palette to Skeleton's color system (primary, secondary, tertiary, success, warning, error, surface). Activate with `data-theme="flexiqueue"` on `<html>` in `resources/views/app.blade.php`.
 
 ### 2.1 Color Mapping
 
@@ -69,7 +67,7 @@ DaisyUI supports custom themes via `@plugin "daisyui/theme"`. FlexiQueue defines
 
 ### 2.2 Theme Definition
 
-Add to `resources/css/app.css` after the DaisyUI plugin import:
+Legacy DaisyUI theme reference (superseded by `resources/css/themes/flexiqueue.css` for Skeleton). Old app.css snippet:
 
 ```css
 @import "tailwindcss";
@@ -350,15 +348,15 @@ A standalone HTML page at `public/dev/components.html` serves as a living style 
 - Verify color palette, spacing, and sizing before building Svelte components.
 - Shareable with stakeholders for early UI feedback.
 
-**Implementation:** Pure HTML + TailwindCSS CDN + DaisyUI CDN. No build step required.
+**Implementation:** Pure HTML + TailwindCSS CDN + Skeleton (or link to app theme). No build step required.
 **Task:** BD-051 (see Phase 1 backlog).
 
 ---
 
 ## 12. Design References
 
-- **DaisyUI Component Catalog:** https://daisyui.com/components/
-- **DaisyUI Theme Generator:** https://daisyui.com/theme-generator/
-- **DaisyUI Documentation:** https://daisyui.com/docs/
+- **Skeleton UI:** https://www.skeleton.dev/
+- **Skeleton Docs (themes, presets, colors):** https://www.skeleton.dev/docs/design/themes
+- **FlexiQueue component mapping (DaisyUI → Skeleton):** `docs/architecture/SKELETON-COMPONENT-MAPPING.md`
 - **TailwindCSS 4 Docs:** https://tailwindcss.com/docs
 - **Original Design Specs:** `docs v1/07-ui-ux-specs.md` (superseded by this document for implementation)

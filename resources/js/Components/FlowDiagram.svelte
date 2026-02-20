@@ -29,35 +29,35 @@
 
 <div class="space-y-6">
 	{#each tracks as track (track.id)}
-		<div class="rounded-box bg-base-100 border border-base-300 p-4">
+		<div class="rounded-container bg-surface-50 border border-surface-200 p-4">
 			<div class="flex items-center gap-2 mb-3">
 				{#if track.color_code}
 					<span
-						class="inline-block h-4 w-4 rounded-full border border-base-300 shrink-0"
+						class="inline-block h-4 w-4 rounded-full border border-surface-200 shrink-0"
 						style="background-color: {track.color_code}"
 						title="{track.color_code}"
 					></span>
 				{/if}
-				<h3 class="font-semibold text-base-content">{track.name}</h3>
+				<h3 class="font-semibold text-surface-950">{track.name}</h3>
 				{#if track.is_default}
-					<span class="badge badge-primary badge-sm">Default</span>
+					<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500">Default</span>
 				{/if}
 			</div>
 			{#if sortedSteps(track).length === 0}
-				<p class="text-sm text-base-content/60">No steps defined.</p>
+				<p class="text-sm text-surface-950/60">No steps defined.</p>
 			{:else}
 				<div class="flex flex-wrap items-center gap-1 min-h-[2.5rem]">
 					{#each sortedSteps(track) as step, i (step.id)}
 						<span
-							class="inline-flex items-center px-3 py-1.5 rounded-lg bg-base-200 text-sm font-medium text-base-content"
+							class="inline-flex items-center px-3 py-1.5 rounded-lg bg-surface-100 text-sm font-medium text-surface-950"
 						>
 							{step.station_name}
 							{#if step.is_required}
-								<span class="text-base-content/50 text-xs ml-1">*</span>
+								<span class="text-surface-950/50 text-xs ml-1">*</span>
 							{/if}
 						</span>
 						{#if i < sortedSteps(track).length - 1}
-							<span class="text-base-content/40 font-bold" aria-hidden="true">→</span>
+							<span class="text-surface-950/40 font-bold" aria-hidden="true">→</span>
 						{/if}
 					{/each}
 				</div>

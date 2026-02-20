@@ -68,7 +68,7 @@
 		stats?: ProgramStats;
 	} = $props();
 
-	let activeTab = $state<'tracks' | 'stations' | 'overview' | 'settings' | 'staff'>('tracks');
+	let activeTab = $state<'tracks' | 'stations' | 'overview' | 'settings' | 'staff'>('overview');
 	let showCreateModal = $state(false);
 	let editTrack = $state<TrackItem | null>(null);
 	let createName = $state('');
@@ -206,6 +206,15 @@
 		submitting = false;
 		if (ok) router.reload();
 		else error = message ?? 'Failed to resume.';
+	}
+
+	async function handleActivate() {
+		submitting = true;
+		error = '';
+		const { ok, message } = await api('POST', `/api/admin/programs/${program.id}/activate`);
+		submitting = false;
+		if (ok) router.reload();
+		else error = message ?? 'Failed to start session.';
 	}
 
 	function openStopConfirm() {
@@ -662,61 +671,95 @@
 </svelte:head>
 
 <AdminLayout>
-	<div class="flex flex-col gap-4">
-		{#if program.is_active && !program.is_paused}
-			<div class="alert alert-success flex flex-wrap items-center justify-between gap-2">
-				<span class="font-medium min-w-0">Program is LIVE — Queue times are being recorded.</span>
-				<div class="flex gap-2 shrink-0">
-					<button type="button" class="btn btn-sm btn-ghost" disabled={submitting} onclick={handlePause}>Pause</button>
-					<button type="button" class="btn btn-sm btn-ghost" disabled={submitting} onclick={openStopConfirm} aria-label="Stop session">Stop session</button>
-				</div>
-			</div>
-		{:else if program.is_active && program.is_paused}
-			<div class="alert alert-warning flex flex-wrap items-center justify-between gap-2">
-				<span class="font-medium min-w-0">Program is paused. Queue times are not being recorded.</span>
-				<button type="button" class="btn btn-sm btn-primary" disabled={submitting} onclick={handleResume}>Resume</button>
-			</div>
-		{/if}
-		<div class="flex flex-wrap items-center gap-2">
-			<Link href="/admin/programs" class="btn btn-ghost btn-sm">← Programs</Link>
+	<div class="flex flex-col gap-6">
+		<!-- Back link -->
+		<div>
+			<Link href="/admin/programs" class="btn preset-tonal btn-sm gap-1.5 text-surface-950">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+				</svg>
+				Programs
+			</Link>
 		</div>
-		<div class="flex flex-wrap items-start justify-between gap-4">
+
+		<!-- Program header -->
+		<div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
 			<div>
-				<h1 class="text-2xl font-semibold text-base-content">{program.name}</h1>
-				<p class="text-sm text-base-content/70 mt-1">
+				<h1 class="text-2xl font-semibold text-surface-950">{program.name}</h1>
+				<p class="text-sm text-surface-600 mt-1 flex items-center gap-2 flex-wrap">
 					{#if program.is_active}
-						<span class="badge badge-success badge-sm">Active</span>
+						<span class="text-xs px-2 py-0.5 rounded preset-filled-success-500">Active</span>
 					{:else}
-						<span class="badge badge-ghost badge-sm">Inactive</span>
+						<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950">Inactive</span>
 					{/if}
-					Created {formatDate(program.created_at)}
+					<span>Created {formatDate(program.created_at)}</span>
 				</p>
 				{#if program.description}
-					<p class="mt-2 text-base-content/80">{program.description}</p>
+					<p class="mt-2 text-surface-600">{program.description}</p>
 				{/if}
 			</div>
 		</div>
 
-		<!-- Triage entry (BD-018b): route clients when program is active -->
-		{#if program.is_active}
-			<Link
-				href="/triage"
-				class="btn btn-primary gap-2"
-				title="Open triage to scan tokens and assign tracks"
-			>
-				Open Triage — Start routing
-			</Link>
+		<!-- Status banner + primary actions -->
+		{#if program.is_active && !program.is_paused}
+			<div class="rounded-container border border-success-300 bg-success-50 p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+				<p class="font-medium text-success-900">
+					Program is LIVE — Queue times are being recorded.
+				</p>
+				<div class="flex flex-wrap gap-3">
+					<Link
+						href="/triage"
+						class="btn preset-filled-primary-500 gap-2"
+						title="Open triage to scan tokens and assign tracks"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+						</svg>
+						Open Triage
+					</Link>
+					<button type="button" class="btn preset-tonal gap-2" disabled={submitting} onclick={handlePause}>
+						Pause
+					</button>
+					<button type="button" class="btn preset-tonal gap-2" disabled={submitting} onclick={openStopConfirm} aria-label="Stop session">
+						Stop session
+					</button>
+				</div>
+			</div>
+		{:else if program.is_active && program.is_paused}
+			<div class="rounded-container border border-warning-300 bg-warning-50 p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+				<p class="font-medium text-warning-900">
+					Program is paused. Queue times are not being recorded.
+				</p>
+				<button type="button" class="btn preset-filled-primary-500 gap-2 shrink-0" disabled={submitting} onclick={handleResume}>
+					Resume
+				</button>
+			</div>
 		{:else}
-			<span
-				class="btn btn-primary btn-disabled gap-2"
-				title="Start session to start routing"
-			>
-				Open Triage — Start routing
-			</span>
+			<div class="rounded-container border border-surface-200 bg-surface-50 p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+				<p class="font-medium text-surface-950">
+					Program is inactive. Start a session to begin routing clients.
+				</p>
+				<button type="button" class="btn preset-filled-primary-500 gap-2 shrink-0" disabled={submitting} onclick={handleActivate}>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+					</svg>
+					Start session
+				</button>
+			</div>
 		{/if}
 
-		<!-- Tab navigation (BD-009, BD-010) -->
-		<div role="tablist" class="tabs tabs-boxed bg-base-200 p-1 rounded-lg w-fit">
+		<!-- Tab navigation (BD-009, BD-010) — Skeleton-compatible tabs, Overview first -->
+		<div role="tablist" class="tabs">
+			<button
+				type="button"
+				role="tab"
+				class="tab"
+				class:tab-active={activeTab === 'overview'}
+				onclick={() => (activeTab = 'overview')}
+			>
+				Overview
+			</button>
 			<button
 				type="button"
 				role="tab"
@@ -739,15 +782,6 @@
 				type="button"
 				role="tab"
 				class="tab"
-				class:tab-active={activeTab === 'overview'}
-				onclick={() => (activeTab = 'overview')}
-			>
-				Overview
-			</button>
-			<button
-				type="button"
-				role="tab"
-				class="tab"
 				class:tab-active={activeTab === 'staff'}
 				onclick={() => (activeTab = 'staff')}
 			>
@@ -765,31 +799,55 @@
 		</div>
 
 		{#if error}
-			<div class="alert alert-error" role="alert">
+			<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4" role="alert">
 				<span>{error}</span>
-				<button type="button" class="btn btn-ghost btn-sm" onclick={() => (error = '')}>Dismiss</button>
+				<button type="button" class="btn preset-tonal btn-sm" onclick={() => (error = '')}>Dismiss</button>
 			</div>
 		{/if}
 
-		{#if activeTab === 'tracks'}
+		{#if activeTab === 'overview'}
+			<div class="space-y-8">
+				<section>
+					<h2 class="text-lg font-semibold text-surface-950 mb-4">Program stats</h2>
+					<div class="grid gap-4 sm:grid-cols-3">
+						<div class="rounded-container bg-surface-50 border border-surface-200 p-4">
+							<p class="text-2xl font-bold text-surface-950">{stats.total_sessions}</p>
+							<p class="text-sm text-surface-600">Total sessions</p>
+						</div>
+						<div class="rounded-container bg-surface-50 border border-surface-200 p-4">
+							<p class="text-2xl font-bold text-primary-500">{stats.active_sessions}</p>
+							<p class="text-sm text-surface-600">Active in queue</p>
+						</div>
+						<div class="rounded-container bg-surface-50 border border-surface-200 p-4">
+							<p class="text-2xl font-bold text-surface-950">{stats.completed_sessions}</p>
+							<p class="text-sm text-surface-600">Completed / Cancelled / No-show</p>
+						</div>
+					</div>
+				</section>
+				<section>
+					<h2 class="text-lg font-semibold text-surface-950 mb-4">Track flow</h2>
+					<FlowDiagram {tracks} />
+				</section>
+			</div>
+		{:else if activeTab === 'tracks'}
 			<div class="flex flex-wrap items-center justify-between gap-2">
-				<h2 class="text-lg font-semibold text-base-content">Tracks</h2>
-				<button type="button" class="btn btn-primary btn-sm" onclick={openCreate}>+ Add Track</button>
+				<h2 class="text-lg font-semibold text-surface-950">Tracks</h2>
+				<button type="button" class="btn preset-filled-primary-500 btn-sm" onclick={openCreate}>+ Add Track</button>
 			</div>
 			{#if tracks.length === 0}
-				<div class="rounded-box bg-base-100 border border-base-300 p-8 text-center text-base-content/70">
+				<div class="rounded-box bg-surface-50 border border-surface-200 p-8 text-center text-surface-950/70">
 					<p>No tracks yet. Add a track to define a service lane (e.g. Regular, Priority).</p>
 				</div>
 			{:else}
 				<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 					{#each tracks as track (track.id)}
-						<div class="card bg-base-100 border border-base-300 shadow-sm">
+						<div class="card bg-surface-50 border border-surface-200 shadow-sm">
 							<div class="card-body">
 								<div class="flex items-start justify-between gap-2">
 									<div class="flex items-center gap-2">
 										{#if track.color_code}
 											<span
-												class="inline-block h-4 w-4 rounded-full border border-base-300 shrink-0"
+												class="inline-block h-4 w-4 rounded-full border border-surface-200 shrink-0"
 												style="background-color: {track.color_code}"
 												title="{track.color_code}"
 											></span>
@@ -797,21 +855,21 @@
 										<h3 class="card-title text-base">{track.name}</h3>
 									</div>
 									{#if track.is_default}
-										<span class="badge badge-primary badge-sm">Default</span>
+										<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500 badge-sm">Default</span>
 									{/if}
 								</div>
 								{#if track.description}
-									<p class="text-sm text-base-content/70 line-clamp-2">{track.description}</p>
+									<p class="text-sm text-surface-950/70 line-clamp-2">{track.description}</p>
 								{/if}
 								{#if (track.steps ?? []).length > 0}
-									<p class="text-sm text-base-content/70">
+									<p class="text-sm text-surface-950/70">
 										Steps: {(track.steps ?? []).map((s) => s.station_name).join(' → ')}
 									</p>
 								{/if}
 								<div class="card-actions mt-2 justify-end flex-wrap gap-1">
 									<button
 										type="button"
-										class="btn btn-ghost btn-sm"
+										class="btn preset-tonal btn-sm"
 										onclick={() => openStepModal(track)}
 										disabled={submitting}
 									>
@@ -819,7 +877,7 @@
 									</button>
 									<button
 										type="button"
-										class="btn btn-ghost btn-sm"
+										class="btn preset-tonal btn-sm"
 										onclick={() => openEdit(track)}
 										disabled={submitting}
 									>
@@ -827,7 +885,7 @@
 									</button>
 									<button
 										type="button"
-										class="btn btn-ghost btn-sm text-error"
+										class="btn preset-tonal btn-sm text-error"
 										onclick={() => openDeleteTrackConfirm(track)}
 										disabled={submitting}
 									>
@@ -839,79 +897,60 @@
 					{/each}
 				</div>
 			{/if}
-		{:else if activeTab === 'overview'}
-			<!-- Overview: program stats + track flow diagram. Per 09-UI-ROUTES-PHASE1 §3.8 -->
-			<div class="space-y-8">
-				<section>
-					<h2 class="text-lg font-semibold text-base-content mb-4">Program stats</h2>
-					<div class="grid gap-4 sm:grid-cols-3">
-						<div class="rounded-box bg-base-100 border border-base-300 p-4">
-							<p class="text-2xl font-bold text-base-content">{stats.total_sessions}</p>
-							<p class="text-sm text-base-content/70">Total sessions</p>
-						</div>
-						<div class="rounded-box bg-base-100 border border-base-300 p-4">
-							<p class="text-2xl font-bold text-primary">{stats.active_sessions}</p>
-							<p class="text-sm text-base-content/70">Active in queue</p>
-						</div>
-						<div class="rounded-box bg-base-100 border border-base-300 p-4">
-							<p class="text-2xl font-bold text-base-content">{stats.completed_sessions}</p>
-							<p class="text-sm text-base-content/70">Completed / Cancelled / No-show</p>
-						</div>
-					</div>
-				</section>
-				<section>
-					<h2 class="text-lg font-semibold text-base-content mb-4">Track flow</h2>
-					<FlowDiagram {tracks} />
-				</section>
-			</div>
 		{:else if activeTab === 'settings'}
-			<!-- Settings tab -->
-			<div class="rounded-box bg-base-100 border border-base-300 p-6 max-w-xl">
-				<h2 class="text-lg font-semibold text-base-content mb-4">Program settings</h2>
-				<div class="space-y-4">
+			<!-- Settings tab — Skeleton theme colors, UI-friendly help text -->
+			<div class="rounded-container bg-surface-50 border border-surface-200 p-6 max-w-xl">
+				<h2 class="text-lg font-semibold text-surface-950 mb-4">Program settings</h2>
+				<div class="space-y-6">
 					<div class="form-control w-full">
-						<label for="no-show-timer" class="label"><span class="label-text">No-show timer (seconds)</span></label>
+						<label for="no-show-timer" class="label"><span class="label-text text-surface-950">No-show timer (seconds)</span></label>
 						<input
 							id="no-show-timer"
 							type="number"
-							class="input input-bordered w-full"
+							class="input rounded-container border border-surface-200 px-3 py-2 w-full text-surface-950 bg-surface-50"
 							min="5"
 							max="120"
 							bind:value={settingsNoShowTimer}
 						/>
-						<span class="label-text-alt">How long to wait before staff can mark no-show (default 10)</span>
+						<p class="mt-1.5 text-sm text-surface-600 pl-1 border-l-2 border-surface-300">
+							How long to wait before staff can mark no-show. Default: 10 seconds.
+						</p>
 					</div>
 					<div class="form-control">
 						<label class="label cursor-pointer justify-start gap-2">
 							<input type="checkbox" class="checkbox" bind:checked={settingsPriorityFirst} />
-							<span class="label-text">Priority first (default)</span>
+							<span class="label-text text-surface-950">Priority first (default)</span>
 						</label>
-						<span class="label-text-alt">When on, PWD/Senior/Pregnant are called before Regular. Stations can override.</span>
+						<p class="mt-1.5 text-sm text-surface-600 pl-1 border-l-2 border-surface-300">
+							PWD / Senior / Pregnant clients are called before Regular. Individual stations can override.
+						</p>
 					</div>
 					<div class="form-control w-full">
-						<label for="balance-mode" class="label"><span class="label-text">When priority first is off: balance mode</span></label>
-						<select id="balance-mode" class="select select-bordered w-full" bind:value={settingsBalanceMode}>
+						<label for="balance-mode" class="label"><span class="label-text text-surface-950">When priority first is off: balance mode</span></label>
+						<select id="balance-mode" class="select rounded-container border border-surface-200 px-3 py-2 w-full text-surface-950 bg-surface-50" bind:value={settingsBalanceMode}>
 							<option value="fifo">FIFO — strict arrival order</option>
 							<option value="alternate">Alternate — ratio of priority to regular</option>
 						</select>
 					</div>
 					{#if settingsBalanceMode === 'alternate'}
-						<div class="form-control w-full flex-row gap-2 items-center">
-							<label class="label"><span class="label-text">Alternate ratio (priority : regular)</span></label>
-							<input type="number" class="input input-bordered w-16" min="1" max="10" bind:value={settingsAlternateRatioP} />
-							<span>:</span>
-							<input type="number" class="input input-bordered w-16" min="1" max="10" bind:value={settingsAlternateRatioR} />
+						<div class="form-control w-full flex flex-row flex-wrap gap-2 items-center">
+							<label class="label w-full"><span class="label-text text-surface-950">Alternate ratio (priority : regular)</span></label>
+							<input type="number" class="input rounded-container border border-surface-200 px-3 py-2 w-16 text-surface-950 bg-surface-50" min="1" max="10" bind:value={settingsAlternateRatioP} />
+							<span class="text-surface-950 font-medium">:</span>
+							<input type="number" class="input rounded-container border border-surface-200 px-3 py-2 w-16 text-surface-950 bg-surface-50" min="1" max="10" bind:value={settingsAlternateRatioR} />
 						</div>
 					{/if}
 					<div class="form-control">
 						<label class="label cursor-pointer justify-start gap-2">
 							<input type="checkbox" class="checkbox" bind:checked={settingsRequireOverride} />
-							<span class="label-text">Require supervisor PIN before override (flow redirection)</span>
+							<span class="label-text text-surface-950">Require supervisor PIN before override (flow redirection)</span>
 						</label>
-						<span class="label-text-alt">When enabled, override requires supervisor PIN (default on)</span>
+						<p class="mt-1.5 text-sm text-surface-600 pl-1 border-l-2 border-surface-300">
+							When enabled, staff must enter a supervisor PIN to redirect a client to a different station. Default: on.
+						</p>
 					</div>
 					<div class="pt-2">
-						<button type="button" class="btn btn-primary" disabled={submitting} onclick={handleSaveSettings}>
+						<button type="button" class="btn preset-filled-primary-500" disabled={submitting} onclick={handleSaveSettings}>
 							{submitting ? 'Saving…' : 'Save settings'}
 						</button>
 					</div>
@@ -921,18 +960,18 @@
 			<!-- Staff tab: station assignments + supervisors -->
 			<div class="space-y-8">
 				<section>
-					<h2 class="text-lg font-semibold text-base-content mb-4">Station assignments</h2>
-					<p class="text-sm text-base-content/70 mb-4">
+					<h2 class="text-lg font-semibold text-surface-950 mb-4">Station assignments</h2>
+					<p class="text-sm text-surface-950/70 mb-4">
 						Assign staff to stations for this program. Only staff role can be assigned.
 					</p>
 					{#if staffLoading}
-						<div class="rounded-box bg-base-100 border border-base-300 p-8 text-center">Loading…</div>
+						<div class="rounded-box bg-surface-50 border border-surface-200 p-8 text-center">Loading…</div>
 					{:else if staffAssignments.length === 0}
-						<div class="rounded-box bg-base-100 border border-base-300 p-8 text-center text-base-content/70">
+						<div class="rounded-box bg-surface-50 border border-surface-200 p-8 text-center text-surface-950/70">
 							No staff yet. Add staff accounts from the Staff page.
 						</div>
 					{:else if staffStations.length === 0}
-						<div class="alert alert-warning">
+						<div class="bg-warning-100 text-warning-900 border border-warning-300 rounded-container p-4">
 							No stations in this program. Add stations first, then assign staff.
 						</div>
 					{:else}
@@ -951,14 +990,14 @@
 												<div class="flex items-center gap-2 flex-wrap">
 													<span class="font-medium">{a.user.name}</span>
 													{#if staffSupervisors.some((s) => s.id === a.user_id)}
-														<span class="badge badge-primary badge-sm">Supervisor</span>
+														<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500 badge-sm">Supervisor</span>
 													{/if}
 												</div>
-												<span class="text-sm text-base-content/60 block">{a.user.email}</span>
+												<span class="text-sm text-surface-950/60 block">{a.user.email}</span>
 											</td>
 											<td>
 												<select
-													class="select select-bordered select-sm max-w-xs"
+													class="select rounded-container border border-surface-200 px-3 py-2 select-sm max-w-xs"
 													value={a.station_id ?? ''}
 													disabled={staffAssigningUserId === a.user_id}
 													onchange={(e) => {
@@ -973,7 +1012,7 @@
 													{/each}
 												</select>
 												{#if (a.station_id == null) && staffSupervisors.some((s) => s.id === a.user_id)}
-													<p class="text-xs text-base-content/60 mt-1">Supervisor — can take charge without a station</p>
+													<p class="text-xs text-surface-950/60 mt-1">Supervisor — can take charge without a station</p>
 												{/if}
 											</td>
 										</tr>
@@ -985,26 +1024,26 @@
 				</section>
 
 				<section>
-					<h2 class="text-lg font-semibold text-base-content mb-4">Supervisors</h2>
-					<p class="text-sm text-base-content/70 mb-4">
+					<h2 class="text-lg font-semibold text-surface-950 mb-4">Supervisors</h2>
+					<p class="text-sm text-surface-950/70 mb-4">
 						Supervisors can approve flow overrides.
 					</p>
 					{#if staffLoading}
-						<div class="rounded-box bg-base-100 border border-base-300 p-4 text-center">Loading…</div>
+						<div class="rounded-box bg-surface-50 border border-surface-200 p-4 text-center">Loading…</div>
 					{:else}
 						<div class="space-y-4">
-							<div class="rounded-box bg-base-100 border border-base-300 p-4">
-								<h3 class="font-medium text-base-content mb-2">Current supervisors</h3>
+							<div class="rounded-box bg-surface-50 border border-surface-200 p-4">
+								<h3 class="font-medium text-surface-950 mb-2">Current supervisors</h3>
 								{#if staffSupervisors.length === 0}
-									<p class="text-sm text-base-content/70">None. Add staff with override PINs below.</p>
+									<p class="text-sm text-surface-950/70">None. Add staff with override PINs below.</p>
 								{:else}
 									<ul class="flex flex-wrap gap-2">
 										{#each staffSupervisors as s (s.id)}
-											<li class="badge badge-primary badge-lg gap-1">
+											<li class="text-xs px-2 py-0.5 rounded preset-filled-primary-500 badge-lg gap-1">
 												{s.name}
 												<button
 													type="button"
-													class="btn btn-ghost btn-xs"
+													class="btn preset-tonal btn-xs"
 													aria-label="Remove {s.name}"
 													onclick={() => handleRemoveSupervisor(s.id)}
 													disabled={submitting}
@@ -1016,17 +1055,17 @@
 									</ul>
 								{/if}
 							</div>
-							<div class="rounded-box bg-base-100 border border-base-300 p-4">
-								<h3 class="font-medium text-base-content mb-2">Add supervisor (staff with PIN)</h3>
+							<div class="rounded-box bg-surface-50 border border-surface-200 p-4">
+								<h3 class="font-medium text-surface-950 mb-2">Add supervisor (staff with PIN)</h3>
 								{#if staffWithPin.filter((u) => !u.is_supervisor).length === 0}
-									<p class="text-sm text-base-content/70">No staff with override PIN left to add.</p>
+									<p class="text-sm text-surface-950/70">No staff with override PIN left to add.</p>
 								{:else}
 									<ul class="flex flex-wrap gap-2">
 										{#each staffWithPin.filter((u) => !u.is_supervisor) as u (u.id)}
 											<li>
 												<button
 													type="button"
-													class="btn btn-outline btn-sm"
+													class="btn preset-outlined btn-sm"
 													onclick={() => handleAddSupervisor(u.id)}
 													disabled={submitting}
 												>
@@ -1044,35 +1083,35 @@
 		{:else}
 			<!-- Stations tab (BD-010) -->
 			<div class="flex flex-wrap items-center justify-between gap-2">
-				<h2 class="text-lg font-semibold text-base-content">Stations</h2>
-				<button type="button" class="btn btn-primary btn-sm" onclick={openCreateStation}>+ Add Station</button>
+				<h2 class="text-lg font-semibold text-surface-950">Stations</h2>
+				<button type="button" class="btn preset-filled-primary-500 btn-sm" onclick={openCreateStation}>+ Add Station</button>
 			</div>
 			{#if stations.length === 0}
-				<div class="rounded-box bg-base-100 border border-base-300 p-8 text-center text-base-content/70">
+				<div class="rounded-box bg-surface-50 border border-surface-200 p-8 text-center text-surface-950/70">
 					<p>No stations yet. Add a station (e.g. Verification Desk, Cashier) for staff to serve clients.</p>
 				</div>
 			{:else}
 				<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 					{#each stations as station (station.id)}
-						<div class="card bg-base-100 border border-base-300 shadow-sm">
+						<div class="card bg-surface-50 border border-surface-200 shadow-sm">
 							<div class="card-body">
 								<div class="flex items-start justify-between gap-2">
 									<h3 class="card-title text-base">{station.name}</h3>
 								</div>
-								<p class="text-sm text-base-content/70">
+								<p class="text-sm text-surface-950/70">
 									Staff: {station.capacity} · Clients: {station.client_capacity ?? 1}
 								</p>
 								<div class="flex items-center gap-2">
 									{#if station.is_active}
-										<span class="badge badge-success badge-sm">Active</span>
+										<span class="text-xs px-2 py-0.5 rounded preset-filled-success-500 badge-sm">Active</span>
 									{:else}
-										<span class="badge badge-ghost badge-sm">Inactive</span>
+										<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm">Inactive</span>
 									{/if}
 								</div>
 								<div class="card-actions mt-2 justify-end flex-wrap gap-1">
 									<button
 										type="button"
-										class="btn btn-ghost btn-sm"
+										class="btn preset-tonal btn-sm"
 										onclick={() => handleToggleStationActive(station)}
 										disabled={submitting}
 										title={station.is_active ? 'Deactivate' : 'Activate'}
@@ -1081,7 +1120,7 @@
 									</button>
 									<button
 										type="button"
-										class="btn btn-ghost btn-sm"
+										class="btn preset-tonal btn-sm"
 										onclick={() => openEditStation(station)}
 										disabled={submitting}
 									>
@@ -1089,7 +1128,7 @@
 									</button>
 									<button
 										type="button"
-										class="btn btn-ghost btn-sm text-error"
+										class="btn preset-tonal btn-sm text-error"
 										onclick={() => openDeleteStationConfirm(station)}
 										disabled={submitting}
 									>
@@ -1119,7 +1158,7 @@
 				<input
 					id="create-track-name"
 					type="text"
-					class="input input-bordered w-full"
+					class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 					placeholder="e.g. Priority Lane"
 					maxlength="50"
 					bind:value={createName}
@@ -1130,7 +1169,7 @@
 				<label for="create-track-desc" class="label"><span class="label-text">Description (optional)</span></label>
 				<textarea
 					id="create-track-desc"
-					class="textarea textarea-bordered w-full"
+					class="textarea rounded-container border border-surface-200 w-full"
 					rows="2"
 					placeholder="Brief description"
 					bind:value={createDescription}
@@ -1141,7 +1180,7 @@
 				<input
 					id="create-track-color"
 					type="text"
-					class="input input-bordered w-full"
+					class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 					placeholder="#F59E0B"
 					maxlength="7"
 					bind:value={createColorCode}
@@ -1154,8 +1193,8 @@
 				</label>
 			</div>
 			<div class="flex justify-end gap-2">
-				<button type="button" class="btn btn-ghost" onclick={closeModals}>Cancel</button>
-				<button type="submit" class="btn btn-primary" disabled={submitting || !createName.trim()}>
+				<button type="button" class="btn preset-tonal" onclick={closeModals}>Cancel</button>
+				<button type="submit" class="btn preset-filled-primary-500" disabled={submitting || !createName.trim()}>
 					{submitting ? 'Creating…' : 'Create'}
 				</button>
 			</div>
@@ -1182,7 +1221,7 @@
 					<input
 						id="edit-track-name"
 						type="text"
-						class="input input-bordered w-full"
+						class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 						maxlength="50"
 						bind:value={editName}
 						required
@@ -1192,7 +1231,7 @@
 					<label for="edit-track-desc" class="label"><span class="label-text">Description (optional)</span></label>
 					<textarea
 						id="edit-track-desc"
-						class="textarea textarea-bordered w-full"
+						class="textarea rounded-container border border-surface-200 w-full"
 						rows="2"
 						bind:value={editDescription}
 					></textarea>
@@ -1202,7 +1241,7 @@
 					<input
 						id="edit-track-color"
 						type="text"
-						class="input input-bordered w-full"
+						class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 						placeholder="#F59E0B"
 						maxlength="7"
 						bind:value={editColorCode}
@@ -1215,8 +1254,8 @@
 					</label>
 				</div>
 				<div class="flex justify-end gap-2">
-					<button type="button" class="btn btn-ghost" onclick={closeModals}>Cancel</button>
-					<button type="submit" class="btn btn-primary" disabled={submitting || !editName.trim()}>
+					<button type="button" class="btn preset-tonal" onclick={closeModals}>Cancel</button>
+					<button type="submit" class="btn preset-filled-primary-500" disabled={submitting || !editName.trim()}>
 						{submitting ? 'Saving…' : 'Save'}
 					</button>
 				</div>
@@ -1239,7 +1278,7 @@
 				<input
 					id="create-station-name"
 					type="text"
-					class="input input-bordered w-full"
+					class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 					placeholder="e.g. Verification Desk"
 					maxlength="50"
 					bind:value={createStationName}
@@ -1252,7 +1291,7 @@
 					id="create-station-capacity"
 					type="number"
 					min="1"
-					class="input input-bordered w-full"
+					class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 					bind:value={createStationCapacity}
 					required
 				/>
@@ -1263,15 +1302,15 @@
 					id="create-station-client-capacity"
 					type="number"
 					min="1"
-					class="input input-bordered w-full"
+					class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 					placeholder="Chairs/seats at station"
 					bind:value={createStationClientCapacity}
 					required
 				/>
 			</div>
 			<div class="flex justify-end gap-2">
-				<button type="button" class="btn btn-ghost" onclick={closeModals}>Cancel</button>
-				<button type="submit" class="btn btn-primary" disabled={submitting || !createStationName.trim()}>
+				<button type="button" class="btn preset-tonal" onclick={closeModals}>Cancel</button>
+				<button type="submit" class="btn preset-filled-primary-500" disabled={submitting || !createStationName.trim()}>
 					{submitting ? 'Creating…' : 'Create'}
 				</button>
 			</div>
@@ -1294,7 +1333,7 @@
 					<input
 						id="edit-station-name"
 						type="text"
-						class="input input-bordered w-full"
+						class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 						maxlength="50"
 						bind:value={editStationName}
 						required
@@ -1306,7 +1345,7 @@
 						id="edit-station-capacity"
 						type="number"
 						min="1"
-						class="input input-bordered w-full"
+						class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 						bind:value={editStationCapacity}
 						required
 					/>
@@ -1317,7 +1356,7 @@
 						id="edit-station-client-capacity"
 						type="number"
 						min="1"
-						class="input input-bordered w-full"
+						class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 						bind:value={editStationClientCapacity}
 						required
 					/>
@@ -1326,7 +1365,7 @@
 					<label for="edit-priority-override" class="label"><span class="label-text">Priority first override</span></label>
 					<select
 						id="edit-priority-override"
-						class="select select-bordered w-full"
+						class="select rounded-container border border-surface-200 px-3 py-2 w-full"
 						value={editStationPriorityFirstOverride === null ? 'default' : editStationPriorityFirstOverride ? 'true' : 'false'}
 						onchange={(e) => {
 							const v = (e.target as HTMLSelectElement).value;
@@ -1346,8 +1385,8 @@
 					</label>
 				</div>
 				<div class="flex justify-end gap-2">
-					<button type="button" class="btn btn-ghost" onclick={closeModals}>Cancel</button>
-					<button type="submit" class="btn btn-primary" disabled={submitting || !editStationName.trim()}>
+					<button type="button" class="btn preset-tonal" onclick={closeModals}>Cancel</button>
+					<button type="submit" class="btn preset-filled-primary-500" disabled={submitting || !editStationName.trim()}>
 						{submitting ? 'Saving…' : 'Save'}
 					</button>
 				</div>
@@ -1361,27 +1400,27 @@
 		{#snippet children()}
 			<div class="flex flex-col gap-4">
 				{#if error}
-					<div class="alert alert-error text-sm" role="alert">
+					<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 text-sm" role="alert">
 						<span>{error}</span>
-						<button type="button" class="btn btn-ghost btn-xs" onclick={() => (error = '')}>Dismiss</button>
+						<button type="button" class="btn preset-tonal btn-xs" onclick={() => (error = '')}>Dismiss</button>
 					</div>
 				{/if}
-				<div class="text-sm text-base-content/70">Define the station sequence for this track. Clients will follow this order.</div>
+				<div class="text-sm text-surface-950/70">Define the station sequence for this track. Clients will follow this order.</div>
 				<ul class="flex flex-col gap-2">
 					{#each modalSteps as step, i (step.id)}
-						<li class="rounded-lg border border-base-300 bg-base-200 p-2">
+						<li class="rounded-lg border border-surface-200 bg-surface-100 p-2">
 							{#if editingStepId === step.id}
 								<div class="flex flex-col gap-2">
 									<div class="flex items-center gap-2">
-										<span class="font-medium text-base-content/80">{step.step_order}.</span>
-										<span class="text-sm text-base-content/70">Edit step</span>
+										<span class="font-medium text-surface-950/80">{step.step_order}.</span>
+										<span class="text-sm text-surface-950/70">Edit step</span>
 									</div>
 									<div class="grid gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
 										<div class="form-control min-w-0">
 											<label for="edit-step-station-{step.id}" class="label py-0"><span class="label-text text-xs">Station</span></label>
 											<select
 												id="edit-step-station-{step.id}"
-												class="select select-bordered select-sm w-full"
+												class="select rounded-container border border-surface-200 px-3 py-2 select-sm w-full"
 												bind:value={editStepStationId}
 												aria-label="Station"
 											>
@@ -1397,7 +1436,7 @@
 												type="number"
 												min="0"
 												max="120"
-												class="input input-bordered input-sm w-full"
+												class="input rounded-container border border-surface-200 px-3 py-2 input-sm w-full"
 												placeholder="Optional"
 												bind:value={editStepEstimatedMinutes}
 												aria-label="Estimated time in minutes"
@@ -1416,40 +1455,40 @@
 											</label>
 										</div>
 										<div class="flex items-end gap-1">
-											<button type="button" class="btn btn-primary btn-sm" onclick={handleUpdateStep} disabled={submitting || editStepStationId === ''}>Save</button>
-											<button type="button" class="btn btn-ghost btn-sm" onclick={cancelEditStep} disabled={submitting}>Cancel</button>
+											<button type="button" class="btn preset-filled-primary-500 btn-sm" onclick={handleUpdateStep} disabled={submitting || editStepStationId === ''}>Save</button>
+											<button type="button" class="btn preset-tonal btn-sm" onclick={cancelEditStep} disabled={submitting}>Cancel</button>
 										</div>
 									</div>
 								</div>
 							{:else}
 								<div class="flex items-center gap-2">
-									<span class="font-medium text-base-content/80">{step.step_order}.</span>
+									<span class="font-medium text-surface-950/80">{step.step_order}.</span>
 									<span class="flex-1">{step.station_name}</span>
 									{#if step.estimated_minutes != null}
-										<span class="text-xs text-base-content/60" title="Estimated time">~{step.estimated_minutes} min</span>
+										<span class="text-xs text-surface-950/60" title="Estimated time">~{step.estimated_minutes} min</span>
 									{:else}
-										<span class="text-xs text-base-content/50">—</span>
+										<span class="text-xs text-surface-950/50">—</span>
 									{/if}
 									{#if step.is_required}
-										<span class="badge badge-ghost badge-xs">Required</span>
+										<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-xs">Required</span>
 									{/if}
 									<div class="flex gap-1">
-										<button type="button" class="btn btn-ghost btn-xs" onclick={() => openEditStep(step)} disabled={submitting || editingStepId != null} title="Edit step">Edit</button>
-										<button type="button" class="btn btn-ghost btn-xs" onclick={() => handleMoveStepUp(step)} disabled={submitting || i === 0} title="Move up">↑</button>
-										<button type="button" class="btn btn-ghost btn-xs" onclick={() => handleMoveStepDown(step)} disabled={submitting || i === modalSteps.length - 1} title="Move down">↓</button>
-										<button type="button" class="btn btn-ghost btn-xs text-error" onclick={() => openRemoveStepConfirm(step)} disabled={submitting} title="Remove step">Delete</button>
+										<button type="button" class="btn preset-tonal btn-xs" onclick={() => openEditStep(step)} disabled={submitting || editingStepId != null} title="Edit step">Edit</button>
+										<button type="button" class="btn preset-tonal btn-xs" onclick={() => handleMoveStepUp(step)} disabled={submitting || i === 0} title="Move up">↑</button>
+										<button type="button" class="btn preset-tonal btn-xs" onclick={() => handleMoveStepDown(step)} disabled={submitting || i === modalSteps.length - 1} title="Move down">↓</button>
+										<button type="button" class="btn preset-tonal btn-xs text-error" onclick={() => openRemoveStepConfirm(step)} disabled={submitting} title="Remove step">Delete</button>
 									</div>
 								</div>
 							{/if}
 						</li>
 					{/each}
 				</ul>
-				<div class="border-t border-base-300 pt-3">
+				<div class="border-t border-surface-200 pt-3">
 					<p class="label-text mb-2">Add step</p>
 					<div class="flex flex-wrap items-end gap-3">
 						<div class="form-control min-w-[180px]">
 							<label for="add-step-station" class="label py-0"><span class="label-text text-xs">Station</span></label>
-							<select id="add-step-station" class="select select-bordered select-sm w-full" bind:value={addStepStationId} aria-label="Station">
+							<select id="add-step-station" class="select rounded-container border border-surface-200 px-3 py-2 select-sm w-full" bind:value={addStepStationId} aria-label="Station">
 								<option value="">Select station</option>
 								{#each stations as st}
 									<option value={st.id}>{st.name}</option>
@@ -1463,18 +1502,18 @@
 								type="number"
 								min="0"
 								max="120"
-								class="input input-bordered input-sm w-full"
+								class="input rounded-container border border-surface-200 px-3 py-2 input-sm w-full"
 								placeholder="Optional"
 								bind:value={addStepEstimatedMinutes}
 								aria-label="Estimated time in minutes for queue estimates"
 							/>
 						</div>
-						<button type="button" class="btn btn-primary btn-sm" onclick={handleAddStep} disabled={submitting || addStepStationId === ''}>Add</button>
+						<button type="button" class="btn preset-filled-primary-500 btn-sm" onclick={handleAddStep} disabled={submitting || addStepStationId === ''}>Add</button>
 					</div>
-					<p class="text-xs text-base-content/50 mt-1">Estimated time is optional and used for queue time estimates.</p>
+					<p class="text-xs text-surface-950/50 mt-1">Estimated time is optional and used for queue time estimates.</p>
 				</div>
 				<div class="flex justify-end">
-					<button type="button" class="btn btn-ghost" onclick={closeStepModal}>Close</button>
+					<button type="button" class="btn preset-tonal" onclick={closeStepModal}>Close</button>
 				</div>
 			</div>
 		{/snippet}
@@ -1485,29 +1524,29 @@
 	<Modal open={showReorderConfirm} title="Reorder steps" onClose={closeReorderConfirm}>
 		{#snippet children()}
 			<div class="flex flex-col gap-4">
-				<p class="text-sm text-base-content/80">
+				<p class="text-sm text-surface-950/80">
 					This track has <strong>{stepModalTrack.active_sessions_count ?? 0} active session(s)</strong>.
 					How should the new order apply?
 				</p>
 				<div class="form-control gap-2">
-					<label class="label cursor-pointer justify-start gap-3 rounded-lg border border-base-300 bg-base-200 p-3">
+					<label class="label cursor-pointer justify-start gap-3 rounded-lg border border-surface-200 bg-surface-100 p-3">
 						<input type="radio" name="reorder_scope" class="radio radio-primary radio-sm" bind:group={reorderScope} value="new_only" />
 						<div>
 							<span class="font-medium">New sessions only</span>
-							<p class="text-xs text-base-content/60">Future check-ins follow the new order. Existing sessions keep their current position.</p>
+							<p class="text-xs text-surface-950/60">Future check-ins follow the new order. Existing sessions keep their current position.</p>
 						</div>
 					</label>
-					<label class="label cursor-pointer justify-start gap-3 rounded-lg border border-base-300 bg-base-200 p-3">
+					<label class="label cursor-pointer justify-start gap-3 rounded-lg border border-surface-200 bg-surface-100 p-3">
 						<input type="radio" name="reorder_scope" class="radio radio-primary radio-sm" bind:group={reorderScope} value="migrate" />
 						<div>
 							<span class="font-medium">Migrate existing sessions</span>
-							<p class="text-xs text-base-content/60">Update active sessions to match the new step order (remap their position).</p>
+							<p class="text-xs text-surface-950/60">Update active sessions to match the new step order (remap their position).</p>
 						</div>
 					</label>
 				</div>
 				<div class="flex justify-end gap-2">
-					<button type="button" class="btn btn-ghost" onclick={closeReorderConfirm}>Cancel</button>
-					<button type="button" class="btn btn-primary" onclick={confirmReorderApply} disabled={submitting}>Apply</button>
+					<button type="button" class="btn preset-tonal" onclick={closeReorderConfirm}>Cancel</button>
+					<button type="button" class="btn preset-filled-primary-500" onclick={confirmReorderApply} disabled={submitting}>Apply</button>
 				</div>
 			</div>
 		{/snippet}

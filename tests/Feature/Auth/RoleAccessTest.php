@@ -3,6 +3,9 @@
 namespace Tests\Feature\Auth;
 
 use App\Models\Program;
+use App\Models\ProgramStationAssignment;
+use App\Models\ServiceTrack;
+use App\Models\Station;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -84,6 +87,39 @@ class RoleAccessTest extends TestCase
 
         $this->actingAs($staff)->get(route('station'))->assertStatus(200);
         $this->actingAs($staff)->get(route('triage'))->assertStatus(200);
+    }
+
+    public function test_staff_with_program_station_assignment_sees_station_on_station_page(): void
+    {
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        $admin = User::factory()->admin()->create();
+        $program = Program::create([
+            'name' => 'Relief Distribution',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $admin->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Verification',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        ProgramStationAssignment::create([
+            'program_id' => $program->id,
+            'user_id' => $staff->id,
+            'station_id' => $station->id,
+        ]);
+
+        $response = $this->actingAs($staff)->get(route('station'));
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->component('Station/Index')
+            ->has('station')
+            ->where('station.id', $station->id)
+            ->where('station.name', 'Verification')
+        );
     }
 
     public function test_admin_can_access_station_and_triage(): void

@@ -2,6 +2,7 @@
 	import MobileLayout from '../../Layouts/MobileLayout.svelte';
 	import QrScanner from '../../Components/QrScanner.svelte';
 	import { get } from 'svelte/store';
+	import { tick } from 'svelte';
 	import { usePage } from '@inertiajs/svelte';
 	import { router } from '@inertiajs/svelte';
 
@@ -184,19 +185,33 @@
 		return () => clearInterval(iv);
 	});
 
+	// #region agent log
+	$effect(() => {
+		const open = !!noShowModalSession || showOverrideModal || showForceCompleteModal || !!callNextSession;
+		if (!open) return;
+		tick().then(() => {
+			const dialog = document.querySelector('dialog[open]');
+			if (!dialog) return;
+			const cs = getComputedStyle(dialog);
+			const rect = dialog.getBoundingClientRect();
+			fetch('http://127.0.0.1:7245/ingest/315b3bef-aa43-40ce-b2fe-4cd06d9bf0f1',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b03ec3'},body:JSON.stringify({sessionId:'b03ec3',location:'Station/Index.svelte:inline-dialog',message:'inline dialog open',data:{display:cs.display,alignItems:cs.alignItems,justifyContent:cs.justifyContent,position:cs.position,width:cs.width,height:cs.height,margin:cs.margin,rect:{top:rect.top,left:rect.left,width:rect.width,height:rect.height},viewport:{w:window.innerWidth,h:window.innerHeight},childCount:dialog.children.length},timestamp:Date.now(),hypothesisId:'H1-H5'})}).catch(()=>{});
+		});
+	});
+	// #endregion
+
 	function formatDuration(iso: string): string {
 		const d = new Date(iso);
 		const now = new Date();
 		const mins = Math.floor((now.getTime() - d.getTime()) / 60000);
-		if (mins < 1) return '< 1 min';
+		if (mins < 1) return '\u003C 1 min';
 		if (mins < 60) return `${mins} min`;
 		return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 	}
 
 	function categoryBadgeClass(cat: string): string {
 		const c = (cat || 'Regular').toLowerCase();
-		if (c === 'pwd' || c === 'senior' || c === 'pregnant') return 'badge-warning';
-		return 'badge-ghost';
+		if (c === 'pwd' || c === 'senior' || c === 'pregnant') return 'preset-filled-warning-500';
+		return 'preset-tonal text-surface-950';
 	}
 
 	function switchStation(s: StationInfo) {
@@ -559,14 +574,14 @@
 </svelte:head>
 
 <MobileLayout headerTitle={station?.name ?? 'Station'} {queueCount} {processedToday}>
-	<div class="flex flex-col gap-4">
+	<div class="flex flex-col gap-4 text-surface-950">
 		{#if !station}
-			<div class="rounded-box bg-base-100 border border-base-300 p-6 text-center text-base-content/80">
+			<div class="rounded-box bg-surface-50 border border-surface-200 p-6 text-center text-surface-950/80">
 				{#if canSwitchStation && stations.length > 0}
 					<p class="font-medium mb-3">Select a station</p>
 					<div class="flex flex-col gap-2">
 						{#each stations as s (s.id)}
-							<button type="button" class="btn btn-outline btn-block" onclick={() => switchStation(s)}>
+							<button type="button" class="btn preset-outlined btn-block" onclick={() => switchStation(s)}>
 								{s.name}
 							</button>
 						{/each}
@@ -578,17 +593,17 @@
 			</div>
 		{:else if loading}
 			<div class="flex justify-center py-12">
-				<span class="loading loading-spinner loading-lg text-primary"></span>
+				<span class="loading-spinner loading-lg text-primary-500"></span>
 			</div>
 		{:else if error}
-			<div class="alert alert-error">{error}</div>
+			<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4">{error}</div>
 		{:else if queue}
 			{#if canSwitchStation && stations.length > 1}
 				<div class="flex gap-2 overflow-x-auto pb-2">
 					{#each stations as s (s.id)}
 						<button
 							type="button"
-							class="btn btn-sm shrink-0 {s.id === station.id ? 'btn-primary' : 'btn-ghost'}"
+							class="btn btn-sm shrink-0 {s.id === station.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
 							onclick={() => switchStation(s)}
 						>
 							{s.name}
@@ -599,7 +614,7 @@
 
 			<!-- Capacity indicator and Priority first toggle -->
 			<div class="flex flex-wrap items-center justify-between gap-2">
-				<div class="text-sm text-base-content/70">
+				<div class="text-sm text-surface-950/70">
 					Serving {servingCount}/{clientCapacity}
 				</div>
 				{#if canSwitchStation}
@@ -607,7 +622,7 @@
 						<span class="label-text text-sm">Priority first</span>
 						<input
 							type="checkbox"
-							class="toggle toggle-sm toggle-primary"
+							class="rounded border border-surface-200"
 							checked={queue?.priority_first ?? true}
 							disabled={actionLoading === 'toggle'}
 							onchange={(e) => togglePriorityFirst((e.target as HTMLInputElement).checked)}
@@ -618,19 +633,19 @@
 
 			<!-- Serving / Called cards (one per client) -->
 			{#each queue.serving as s (s.session_id)}
-				<div class="rounded-box bg-base-100 border border-base-300 p-4 space-y-3">
-					<p class="text-xs font-medium text-base-content/70 uppercase tracking-wide">
+				<div class="rounded-box bg-surface-50 border border-surface-200 p-4 space-y-3">
+					<p class="text-xs font-medium text-surface-950/70 uppercase tracking-wide">
 						{s.status === 'called' ? 'Calling' : 'Now Serving'}
 					</p>
-					<p class="text-4xl font-bold text-primary tabular-nums">{s.alias}</p>
+					<p class="text-4xl font-bold text-primary-500 tabular-nums">{s.alias}</p>
 					<!-- Client type prominent -->
 					<div class="flex flex-wrap gap-2">
-						<span class="badge badge-outline">{s.track}</span>
-						<span class="badge {categoryBadgeClass(s.client_category)} text-sm font-semibold">
+						<span class="text-xs px-2 py-0.5 rounded preset-outlined text-surface-950">{s.track}</span>
+						<span class="badge {categoryBadgeClass(s.client_category)} text-sm font-semibold text-surface-950">
 							{s.client_category ?? 'Regular'}
 						</span>
 					</div>
-					<p class="text-sm text-base-content/70">
+					<p class="text-sm text-surface-950/70">
 						Step {s.current_step_order} of {s.total_steps}
 						{#if s.status === 'serving'}
 							· Started {formatDuration(s.started_at)} ago
@@ -642,7 +657,7 @@
 							<!-- Called: Serve + No-show (No-show disabled until timer) -->
 							<button
 								type="button"
-								class="btn btn-primary btn-lg"
+								class="btn preset-filled-primary-500 btn-lg"
 								disabled={!!actionLoading}
 								onclick={() => serve(s)}
 							>
@@ -650,7 +665,7 @@
 							</button>
 							<button
 								type="button"
-								class="btn btn-ghost btn-sm {s.no_show_attempts >= 2 ? 'btn-warning' : ''}"
+								class="btn btn-sm {s.no_show_attempts >= 2 ? 'preset-filled-warning-500' : 'preset-tonal'}"
 								disabled={!!actionLoading || !canNoShow(s)}
 								onclick={() => openNoShowModal(s)}
 							>
@@ -661,7 +676,7 @@
 							{#if isLastStep(s)}
 								<button
 									type="button"
-									class="btn btn-primary btn-lg"
+									class="btn preset-filled-primary-500 btn-lg"
 									disabled={!!actionLoading}
 									onclick={() => complete(s)}
 								>
@@ -670,7 +685,7 @@
 							{:else}
 								<button
 									type="button"
-									class="btn btn-primary btn-lg"
+									class="btn preset-filled-primary-500 btn-lg"
 									disabled={!!actionLoading}
 									onclick={() => transfer(s)}
 								>
@@ -680,7 +695,7 @@
 							<div class="flex flex-wrap gap-2">
 								<button
 									type="button"
-									class="btn btn-outline btn-sm"
+									class="btn preset-outlined btn-sm"
 									disabled={!!actionLoading}
 									onclick={() => openOverrideModal(s)}
 								>
@@ -688,7 +703,7 @@
 								</button>
 								<button
 									type="button"
-									class="btn btn-ghost btn-sm btn-warning"
+									class="btn preset-filled-warning-500 btn-sm"
 									disabled={!!actionLoading}
 									onclick={() => openForceCompleteModal(s)}
 								>
@@ -696,7 +711,7 @@
 								</button>
 								<button
 									type="button"
-									class="btn btn-ghost btn-sm"
+									class="btn preset-tonal btn-sm"
 									disabled={!!actionLoading}
 									onclick={() => cancel(s)}
 								>
@@ -710,30 +725,30 @@
 
 			<!-- Call Next (when capacity allows) -->
 			{#if queue.serving.length === 0 || !atCapacity}
-				<div class="rounded-box bg-base-100 border border-base-300 p-6 text-center">
-					<p class="text-base-content/70 font-medium mb-4">
+				<div class="rounded-box bg-surface-50 border border-surface-200 p-6 text-center">
+					<p class="text-surface-950/70 font-medium mb-4">
 						{queue.serving.length > 0 ? 'Call another client' : 'No client active'}
 					</p>
 					{#if queue.waiting.length > 0 && !atCapacity}
 						{@const nextSession = queue.next_to_call ? queue.waiting.find((w) => w.session_id === queue.next_to_call!.session_id) ?? queue.waiting[0] : queue.waiting[0]}
-						<p class="text-sm text-base-content/60 mb-3">
-							Next: <span class="font-mono font-semibold">{nextSession.alias}</span>
-							<span class="badge badge-ghost badge-sm ml-1">{nextSession.client_category ?? 'Regular'}</span>
+						<p class="text-sm text-surface-950/60 mb-3">
+							Next: <span class="font-mono font-semibold text-surface-950">{nextSession.alias}</span>
+							<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm ml-1 text-surface-950">{nextSession.client_category ?? 'Regular'}</span>
 							({nextSession.track})
 						</p>
 						<button
 							type="button"
-							class="btn btn-primary btn-lg"
+							class="btn preset-filled-primary-500 btn-lg"
 							disabled={!!actionLoading}
 							onclick={callNext}
 						>
 							{actionLoading === 'call' ? 'Calling…' : 'Call Next'}
 						</button>
 					{:else if atCapacity}
-						<p class="text-sm text-base-content/60">At capacity ({servingCount}/{clientCapacity}). Transfer or complete a client first.</p>
+						<p class="text-sm text-surface-950/60">At capacity ({servingCount}/{clientCapacity}). Transfer or complete a client first.</p>
 					{:else}
-						<p class="text-sm text-base-content/60">Queue is empty</p>
-						<p class="text-xs text-base-content/50 mt-1">
+						<p class="text-sm text-surface-950/60">Queue is empty</p>
+						<p class="text-xs text-surface-950/50 mt-1">
 							Tip: Sessions from triage go to the track's first station. Assign staff to that station in Admin → Users.
 						</p>
 					{/if}
@@ -742,43 +757,43 @@
 
 			<!-- Queue preview with client type -->
 			{#if queue.waiting.length > 0}
-				<div class="rounded-box bg-base-100 border border-base-300 p-4">
-					<p class="text-xs font-medium text-base-content/70 uppercase tracking-wide mb-2">
+				<div class="rounded-box bg-surface-50 border border-surface-200 p-4">
+					<p class="text-xs font-medium text-surface-950/70 uppercase tracking-wide mb-2">
 						Queue — Next {queue.waiting.length}
 					</p>
 					<ul class="space-y-2">
 						{#each queue.waiting as w (w.session_id)}
-							<li class="flex justify-between items-center text-sm gap-2">
+							<li class="flex justify-between items-center text-sm gap-2 text-surface-950">
 								<div class="flex items-center gap-2 min-w-0">
 									<span class="font-mono font-medium">{w.alias}</span>
 									<span class="badge {categoryBadgeClass(w.client_category)} badge-sm">{w.client_category ?? 'Regular'}</span>
 								</div>
-								<span class="text-base-content/60 shrink-0">{w.track} · {formatDuration(w.queued_at)}</span>
+								<span class="text-surface-950/60 shrink-0">{w.track} · {formatDuration(w.queued_at)}</span>
 							</li>
 						{/each}
 					</ul>
 				</div>
 			{/if}
 
-			<div class="rounded-box bg-base-100 border border-base-300 p-3 text-center text-sm text-base-content/70">
+			<div class="rounded-box bg-surface-50 border border-surface-200 p-3 text-center text-sm text-surface-950/70">
 				Today: {queue.stats.total_served_today} served · Avg {queue.stats.avg_service_time_minutes} min
 			</div>
 		{/if}
 	</div>
 
 	{#if noShowModalSession}
-		<dialog open class="modal modal-open">
-			<div class="modal-box">
+		<dialog open class="modal-dialog-center rounded-container">
+			<div class="card bg-surface-50 rounded-container shadow-xl p-6 text-surface-950">
 				<h3 class="font-bold text-lg">Mark No-Show</h3>
 				<p class="py-2">
-					Mark <span class="font-mono font-semibold">{noShowModalSession.alias}</span> as no-show?
+					Mark <span class="font-mono font-semibold text-surface-950">{noShowModalSession.alias}</span> as no-show?
 					{noShowModalSession.no_show_attempts >= 2
 						? 'This will end the session and free the token (3/3).'
 						: 'Client can be called again.'}
 				</p>
-				<div class="modal-action">
-					<button type="button" class="btn btn-ghost" onclick={() => (noShowModalSession = null)}>Cancel</button>
-					<button type="button" class="btn btn-warning" onclick={noShow} disabled={!!actionLoading}>
+				<div class="flex justify-end gap-2 mt-4">
+					<button type="button" class="btn preset-tonal" onclick={() => (noShowModalSession = null)}>Cancel</button>
+					<button type="button" class="btn preset-filled-warning-500" onclick={noShow} disabled={!!actionLoading}>
 						{actionLoading === 'noShow' ? 'Processing…' : 'Mark No-Show'}
 					</button>
 				</div>
@@ -790,11 +805,11 @@
 	{/if}
 
 	{#if showOverrideModal}
-		<dialog open class="modal modal-open">
-			<div class="modal-box max-w-md">
+		<dialog open class="modal-dialog-center rounded-container">
+			<div class="card bg-surface-50 rounded-container shadow-xl p-6 max-w-md text-surface-950">
 				<h3 class="font-bold text-lg">Override standard flow</h3>
-				<p class="text-sm text-base-content/70 py-2">
-					Send client {overrideSession?.alias ?? ''} to a different track.
+				<p class="text-sm text-surface-950/70 py-2">
+					Send client <span class="font-mono font-semibold text-surface-950">{overrideSession?.alias ?? ''}</span> to a different track.
 					{#if needsAuthForOverride}
 						Authorize with PIN or QR (get code from supervisor).
 					{/if}
@@ -803,7 +818,7 @@
 					<label for="override-target" class="label"><span class="label-text">Target track</span></label>
 					<select
 						id="override-target"
-						class="select select-bordered w-full"
+						class="select rounded-container border border-surface-200 px-3 py-2 w-full"
 						value={overrideIsCustom ? 'custom' : (overrideTargetTrackId ?? '')}
 						onchange={(e) => {
 							const v = (e.target as HTMLSelectElement).value;
@@ -827,7 +842,7 @@
 					<label for="override-reason" class="label"><span class="label-text">Reason (required)</span></label>
 					<textarea
 						id="override-reason"
-						class="textarea textarea-bordered w-full"
+						class="textarea rounded-container border border-surface-200 w-full"
 						placeholder="e.g. Needs legal assistance first"
 						bind:value={overrideReason}
 						rows="2"
@@ -838,33 +853,33 @@
 				<div class="form-control w-full mt-2">
 					<label class="label"><span class="label-text">Authorize with</span></label>
 					<div class="join join-horizontal w-full">
-						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'pin' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }} title="Enter 6-digit code">PIN</button>
-						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'qr' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }} title="Scan QR">QR</button>
-						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'request_approval' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'request_approval'; tempCodeEntered = ''; tempQrScanToken = ''; showQrScanner = false; }} title="Request supervisor approval">Request</button>
+						<button type="button" class="btn btn-sm flex-1 {authType === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }} title="Enter 6-digit code">PIN</button>
+						<button type="button" class="btn btn-sm flex-1 {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }} title="Scan QR">QR</button>
+						<button type="button" class="btn btn-sm flex-1 {authType === 'request_approval' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'request_approval'; tempCodeEntered = ''; tempQrScanToken = ''; showQrScanner = false; }} title="Request supervisor approval">Request</button>
 					</div>
 				</div>
 				{#if authType === 'request_approval'}
-					<p class="text-sm text-base-content/70 mt-2">Request will be sent to supervisor. Check Track Overrides page for status.</p>
+					<p class="text-sm text-surface-950/70 mt-2">Request will be sent to supervisor. Check Track Overrides page for status.</p>
 				{:else if authType === 'pin'}
 					<div class="form-control w-full mt-2">
 						<label class="label"><span class="label-text">Enter 6-digit code from supervisor</span></label>
-						<input type="text" inputmode="numeric" pattern="[0-9]*" class="input input-bordered w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} />
+						<input type="text" inputmode="numeric" pattern="[0-9]*" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} />
 					</div>
 				{:else if authType === 'qr'}
 					<div class="form-control w-full mt-2">
-						<QrScanner active={showQrScanner} onScan={handleQrScan} />
-						<button type="button" class="btn btn-ghost btn-xs mt-1" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
-						{#if tempQrScanToken}<p class="text-xs text-success mt-1">✓ QR scanned</p>{/if}
+						<QrScanner active={showQrScanner} onScan={handleQrScan} soundOnScan={true} />
+						<button type="button" class="btn preset-tonal btn-xs mt-1" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
+						{#if tempQrScanToken}<p class="text-xs text-success-500 mt-1">✓ QR scanned</p>{/if}
 					</div>
 				{/if}
 				{/if}
 				{#if error}
-					<div class="alert alert-error mt-2 text-sm">{error}</div>
+					<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 mt-2 text-sm">{error}</div>
 				{/if}
-				<div class="modal-action">
+				<div class="flex justify-end gap-2 mt-4">
 					<button
 						type="button"
-						class="btn btn-ghost"
+						class="btn preset-tonal"
 						onclick={() => {
 							showOverrideModal = false;
 							overrideSession = null;
@@ -881,7 +896,7 @@
 					</button>
 					<button
 						type="button"
-						class="btn btn-primary"
+						class="btn preset-filled-primary-500"
 						disabled={(!overrideTargetTrackId && !overrideIsCustom) || !overrideReason.trim() || (needsAuthForOverride && !canConfirmAuth()) || !!actionLoading}
 						onclick={override}
 					>
@@ -898,47 +913,47 @@
 	{/if}
 
 	{#if showForceCompleteModal}
-		<dialog open class="modal modal-open">
-			<div class="modal-box max-w-md">
+		<dialog open class="modal-dialog-center rounded-container">
+			<div class="card bg-surface-50 rounded-container shadow-xl p-6 max-w-md text-surface-950">
 				<h3 class="font-bold text-lg">Force complete session</h3>
-				<p class="text-sm text-base-content/70 py-2">
-					End session for <span class="font-mono font-semibold">{forceCompleteSession?.alias ?? ''}</span> without normal flow (e.g. client left).
+				<p class="text-sm text-surface-950/70 py-2">
+					End session for <span class="font-mono font-semibold text-surface-950">{forceCompleteSession?.alias ?? ''}</span> without normal flow (e.g. client left).
 					{#if needsAuthForOverride}
 						Requires authorization (get code from supervisor).
 					{/if}
 				</p>
 				<div class="form-control w-full mt-2">
 					<label for="fc-reason" class="label"><span class="label-text">Reason (required)</span></label>
-					<textarea id="fc-reason" class="textarea textarea-bordered w-full" placeholder="e.g. Client left without completing" bind:value={forceCompleteReason} rows="2"></textarea>
+					<textarea id="fc-reason" class="textarea rounded-container border border-surface-200 w-full" placeholder="e.g. Client left without completing" bind:value={forceCompleteReason} rows="2"></textarea>
 				</div>
 				{#if needsAuthForOverride}
 				<div class="form-control w-full mt-2">
 					<label class="label"><span class="label-text">Authorize with</span></label>
 					<div class="join join-horizontal w-full">
-						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'pin' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }}>PIN</button>
-						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'qr' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }}>QR</button>
-						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'request_approval' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'request_approval'; tempCodeEntered = ''; tempQrScanToken = ''; showQrScanner = false; }}>Request</button>
+						<button type="button" class="btn btn-sm flex-1 {authType === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }}>PIN</button>
+						<button type="button" class="btn btn-sm flex-1 {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }}>QR</button>
+						<button type="button" class="btn btn-sm flex-1 {authType === 'request_approval' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'request_approval'; tempCodeEntered = ''; tempQrScanToken = ''; showQrScanner = false; }}>Request</button>
 					</div>
 				</div>
 				{#if authType === 'request_approval'}
-					<p class="text-sm text-base-content/70 mt-2">Request will be sent to supervisor. Check Track Overrides page for status.</p>
+					<p class="text-sm text-surface-950/70 mt-2">Request will be sent to supervisor. Check Track Overrides page for status.</p>
 				{:else if authType === 'pin'}
 					<div class="form-control w-full mt-2">
 						<label class="label"><span class="label-text">Enter 6-digit code from supervisor</span></label>
-						<input type="text" inputmode="numeric" class="input input-bordered w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} />
+						<input type="text" inputmode="numeric" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} />
 					</div>
 				{:else if authType === 'qr'}
 					<div class="form-control w-full mt-2">
-						<QrScanner active={showQrScanner} onScan={handleQrScan} />
-						<button type="button" class="btn btn-ghost btn-xs mt-1" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
-						{#if tempQrScanToken}<p class="text-xs text-success mt-1">✓ QR scanned</p>{/if}
+						<QrScanner active={showQrScanner} onScan={handleQrScan} soundOnScan={true} />
+						<button type="button" class="btn preset-tonal btn-xs mt-1" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
+						{#if tempQrScanToken}<p class="text-xs text-success-500 mt-1">✓ QR scanned</p>{/if}
 					</div>
 				{/if}
 				{/if}
-				{#if error}<div class="alert alert-error mt-2 text-sm">{error}</div>{/if}
-				<div class="modal-action">
-					<button type="button" class="btn btn-ghost" onclick={() => { showForceCompleteModal = false; forceCompleteSession = null; forceCompleteReason = ''; overridePin = ''; overrideSupervisorId = null; resetAuthState(); error = ''; }}>Cancel</button>
-					<button type="button" class="btn btn-primary" disabled={!forceCompleteReason.trim() || (needsAuthForOverride && !canConfirmAuth()) || !!actionLoading} onclick={forceComplete}>
+				{#if error}<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 mt-2 text-sm">{error}</div>{/if}
+				<div class="flex justify-end gap-2 mt-4">
+					<button type="button" class="btn preset-tonal" onclick={() => { showForceCompleteModal = false; forceCompleteSession = null; forceCompleteReason = ''; overridePin = ''; overrideSupervisorId = null; resetAuthState(); error = ''; }}>Cancel</button>
+					<button type="button" class="btn preset-filled-primary-500" disabled={!forceCompleteReason.trim() || (needsAuthForOverride && !canConfirmAuth()) || !!actionLoading} onclick={forceComplete}>
 						{actionLoading === 'force-complete' ? 'Processing…' : 'Force Complete'}
 					</button>
 				</div>
@@ -950,35 +965,35 @@
 	{/if}
 
 	{#if showCallNextOverrideModal}
-		<dialog open class="modal modal-open">
-			<div class="modal-box max-w-md">
+		<dialog open class="modal-dialog-center rounded-container">
+			<div class="card bg-surface-50 rounded-container shadow-xl p-6 max-w-md text-surface-950">
 				<h3 class="font-bold text-lg">Call Next (Override Priority)</h3>
-				<p class="text-sm text-base-content/70 py-2">
-					Calling <span class="font-mono font-semibold">{callNextSession?.alias ?? ''}</span> would skip priority clients. Get authorization from supervisor.
+				<p class="text-sm text-surface-950/70 py-2">
+					Calling <span class="font-mono font-semibold text-surface-950">{callNextSession?.alias ?? ''}</span> would skip priority clients. Get authorization from supervisor.
 				</p>
 				<div class="form-control w-full mt-2">
 					<label class="label"><span class="label-text">Authorize with</span></label>
 					<div class="join join-horizontal w-full">
-						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'pin' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }}>PIN</button>
-						<button type="button" class="join-item btn btn-sm flex-1 {authType === 'qr' ? 'btn-primary' : 'btn-ghost'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }}>QR</button>
+						<button type="button" class="btn btn-sm flex-1 {authType === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }}>PIN</button>
+						<button type="button" class="btn btn-sm flex-1 {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }}>QR</button>
 					</div>
 				</div>
 				{#if authType === 'pin'}
 					<div class="form-control w-full mt-2">
 						<label class="label"><span class="label-text">Enter 6-digit code from supervisor</span></label>
-						<input type="text" inputmode="numeric" class="input input-bordered w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} />
+						<input type="text" inputmode="numeric" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} />
 					</div>
 				{:else if authType === 'qr'}
 					<div class="form-control w-full mt-2">
-						<QrScanner active={showQrScanner} onScan={handleQrScan} />
-						<button type="button" class="btn btn-ghost btn-xs mt-1" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
-						{#if tempQrScanToken}<p class="text-xs text-success mt-1">✓ QR scanned</p>{/if}
+						<QrScanner active={showQrScanner} onScan={handleQrScan} soundOnScan={true} />
+						<button type="button" class="btn preset-tonal btn-xs mt-1" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
+						{#if tempQrScanToken}<p class="text-xs text-success-500 mt-1">✓ QR scanned</p>{/if}
 					</div>
 				{/if}
-				{#if error}<div class="alert alert-error mt-2 text-sm">{error}</div>{/if}
-				<div class="modal-action">
-					<button type="button" class="btn btn-ghost" onclick={() => { showCallNextOverrideModal = false; callNextSession = null; overridePin = ''; overrideSupervisorId = null; resetAuthState(); error = ''; }}>Cancel</button>
-					<button type="button" class="btn btn-primary" disabled={!canConfirmAuth() || !!actionLoading} onclick={callNextWithAuth}>
+				{#if error}<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 mt-2 text-sm">{error}</div>{/if}
+				<div class="flex justify-end gap-2 mt-4">
+					<button type="button" class="btn preset-tonal" onclick={() => { showCallNextOverrideModal = false; callNextSession = null; overridePin = ''; overrideSupervisorId = null; resetAuthState(); error = ''; }}>Cancel</button>
+					<button type="button" class="btn preset-filled-primary-500" disabled={!canConfirmAuth() || !!actionLoading} onclick={callNextWithAuth}>
 						{actionLoading === 'call' ? 'Calling…' : 'Call Next'}
 					</button>
 				</div>

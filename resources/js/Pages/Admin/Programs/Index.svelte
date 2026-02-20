@@ -194,45 +194,51 @@
 <AdminLayout>
 	<div class="flex flex-col gap-4">
 		<div class="flex flex-wrap items-center justify-between gap-2">
-			<h1 class="text-2xl font-semibold text-base-content">Programs</h1>
-			<button type="button" class="btn btn-primary" onclick={openCreate}>+ Create Program</button>
+			<h1 class="text-2xl font-semibold text-surface-950">Programs</h1>
+			<button type="button" class="btn preset-filled-primary-500" onclick={openCreate}>+ Create Program</button>
 		</div>
 
 		{#if error}
-			<div class="alert alert-error" role="alert">
+			<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4" role="alert">
 				<span>{error}</span>
-				<button type="button" class="btn btn-ghost btn-sm" onclick={() => (error = '')}>Dismiss</button>
+				<button type="button" class="btn preset-tonal btn-sm" onclick={() => (error = '')}>Dismiss</button>
 			</div>
 		{/if}
 
 		{#if programs.length === 0}
-			<div class="rounded-box bg-base-100 border border-base-300 p-8 text-center text-base-content/70">
+			<div class="rounded-box bg-surface-50 border border-surface-200 p-8 text-center text-surface-950/70">
 				<p>No programs yet. Create one to get started.</p>
 			</div>
 		{:else}
 			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 				{#each programs as program (program.id)}
-					<div class="card bg-base-100 border border-base-300 shadow-sm">
+					<div class="card bg-surface-50 border border-surface-200 shadow-sm">
 						<div class="card-body">
 							<div class="flex items-start justify-between gap-2">
 								<Link href="/admin/programs/{program.id}" class="card-title text-lg link link-hover">{program.name}</Link>
 								<div class="flex gap-1 items-center">
 									{#if program.is_active && !program.is_paused}
-										<span class="badge badge-success badge-sm animate-pulse">LIVE</span>
+										<span class="text-xs px-2 py-0.5 rounded preset-filled-success-500 badge-sm animate-pulse">LIVE</span>
 									{:else if program.is_active && program.is_paused}
-										<span class="badge badge-warning badge-sm">Paused</span>
+										<span class="text-xs px-2 py-0.5 rounded preset-filled-warning-500 badge-sm">Paused</span>
 									{:else}
-										<span class="badge badge-ghost badge-sm">Inactive</span>
+										<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm">Inactive</span>
 									{/if}
 								</div>
 							</div>
 							{#if program.description}
-								<p class="text-sm text-base-content/70 line-clamp-2">{program.description}</p>
+								<p class="text-sm text-surface-950/70 line-clamp-2">{program.description}</p>
 							{/if}
 							<div class="card-actions mt-2 justify-end flex-wrap gap-1">
+								<Link
+									href="/admin/programs/{program.id}"
+									class="btn preset-filled-primary-500 btn-sm"
+								>
+									View
+								</Link>
 								<button
 									type="button"
-									class="btn btn-ghost btn-sm"
+									class="btn preset-tonal btn-sm"
 									onclick={() => openEdit(program)}
 									disabled={submitting}
 								>
@@ -242,7 +248,7 @@
 									{#if program.is_paused}
 										<button
 											type="button"
-											class="btn btn-primary btn-sm"
+											class="btn preset-filled-primary-500 btn-sm"
 											onclick={() => handleResume(program)}
 											disabled={submitting}
 										>
@@ -251,7 +257,7 @@
 									{:else}
 										<button
 											type="button"
-											class="btn btn-ghost btn-sm"
+											class="btn preset-tonal btn-sm"
 											onclick={() => handlePause(program)}
 											disabled={submitting}
 										>
@@ -260,7 +266,7 @@
 									{/if}
 									<button
 										type="button"
-										class="btn btn-ghost btn-sm"
+										class="btn preset-tonal btn-sm"
 										onclick={() => handleDeactivate(program)}
 										disabled={submitting}
 										aria-label="Stop session"
@@ -270,7 +276,7 @@
 								{:else}
 									<button
 										type="button"
-										class="btn btn-primary btn-sm"
+										class="btn preset-filled-primary-500 btn-sm"
 										onclick={() => handleActivate(program)}
 										disabled={submitting}
 										aria-label="Start session"
@@ -280,7 +286,7 @@
 								{/if}
 								<button
 									type="button"
-									class="btn btn-ghost btn-sm text-error"
+									class="btn preset-tonal btn-sm text-error"
 									onclick={() => openDeleteConfirm(program)}
 									disabled={submitting}
 								>
@@ -308,7 +314,7 @@
 			<input
 				id="create-name"
 				type="text"
-				class="input input-bordered w-full"
+				class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 				placeholder="e.g. Cash Assistance Q1 2026"
 				maxlength="100"
 				bind:value={createName}
@@ -319,15 +325,15 @@
 			<label for="create-desc" class="label"><span class="label-text">Description (optional)</span></label>
 			<textarea
 				id="create-desc"
-				class="textarea textarea-bordered w-full"
+				class="textarea rounded-container border border-surface-200 w-full"
 				rows="3"
 				placeholder="Brief description"
 				bind:value={createDescription}
 			></textarea>
 		</div>
 		<div class="flex justify-end gap-2">
-			<button type="button" class="btn btn-ghost" onclick={closeModals}>Cancel</button>
-			<button type="submit" class="btn btn-primary" disabled={submitting || !createName.trim()}>
+			<button type="button" class="btn preset-tonal" onclick={closeModals}>Cancel</button>
+			<button type="submit" class="btn preset-filled-primary-500" disabled={submitting || !createName.trim()}>
 				{submitting ? 'Creating…' : 'Create'}
 			</button>
 		</div>
@@ -352,7 +358,7 @@
 				<input
 					id="edit-name"
 					type="text"
-					class="input input-bordered w-full"
+					class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 					maxlength="100"
 					bind:value={editName}
 					required
@@ -362,14 +368,14 @@
 				<label for="edit-desc" class="label"><span class="label-text">Description (optional)</span></label>
 				<textarea
 					id="edit-desc"
-					class="textarea textarea-bordered w-full"
+					class="textarea rounded-container border border-surface-200 w-full"
 					rows="3"
 					bind:value={editDescription}
 				></textarea>
 			</div>
 			<div class="flex justify-end gap-2">
-				<button type="button" class="btn btn-ghost" onclick={closeModals}>Cancel</button>
-				<button type="submit" class="btn btn-primary" disabled={submitting || !editName.trim()}>
+				<button type="button" class="btn preset-tonal" onclick={closeModals}>Cancel</button>
+				<button type="submit" class="btn preset-filled-primary-500" disabled={submitting || !editName.trim()}>
 					{submitting ? 'Saving…' : 'Save'}
 				</button>
 			</div>

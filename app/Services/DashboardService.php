@@ -79,6 +79,7 @@ class DashboardService
         $staffOnline = User::query()
             ->whereNotNull('assigned_station_id')
             ->where('is_active', true)
+            ->where('availability_status', 'available')
             ->count();
 
         $byTrack = $this->getByTrack($programId);

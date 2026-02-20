@@ -316,34 +316,34 @@
 <AdminLayout>
 	<div class="flex flex-col gap-4">
 		<div class="flex flex-wrap items-center justify-between gap-2">
-			<h1 class="text-2xl font-semibold text-base-content">Token Management</h1>
+			<h1 class="text-2xl font-semibold text-surface-950">Token Management</h1>
 			<div class="flex gap-2">
-				<button type="button" class="btn btn-outline btn-sm" onclick={() => openPrintModal([])}>
+				<button type="button" class="btn preset-outlined btn-sm" onclick={() => openPrintModal([])}>
 					Print settings
 				</button>
-				<button type="button" class="btn btn-primary" onclick={openBatchModal}>Create Batch</button>
+				<button type="button" class="btn preset-filled-primary-500" onclick={openBatchModal}>Create Batch</button>
 			</div>
 		</div>
 
 		{#if someSelected}
 			<div
-				class="flex flex-wrap items-center gap-3 rounded-box border border-primary/30 bg-primary/10 px-4 py-2"
+				class="flex flex-wrap items-center gap-3 rounded-container border border-primary-300 bg-primary-100 px-4 py-2"
 				role="toolbar"
 				aria-label="Bulk actions"
 			>
-				<span class="text-sm font-medium text-base-content">
+				<span class="text-sm font-medium text-surface-950">
 					{selectedIds.size} selected
 				</span>
 				<button
 					type="button"
-					class="btn btn-primary btn-sm"
+					class="btn preset-filled-primary-500 btn-sm"
 					onclick={() => openPrintModal([...selectedIds])}
 				>
 					Print selected
 				</button>
 				<button
 					type="button"
-					class="btn btn-error btn-sm"
+					class="btn preset-filled-error-500 btn-sm"
 					onclick={handleBatchDelete}
 					disabled={submitting || selectedForPrint.some((t) => t.status === 'in_use')}
 					title={selectedForPrint.some((t) => t.status === 'in_use')
@@ -354,7 +354,7 @@
 				</button>
 				<button
 					type="button"
-					class="btn btn-ghost btn-sm"
+					class="btn preset-tonal btn-sm"
 					onclick={() => (selectedIds = new Set())}
 				>
 					Clear selection
@@ -365,7 +365,7 @@
 		<!-- Filter bar per 09-UI-ROUTES §3.9 -->
 		<div class="flex flex-wrap items-center gap-3">
 			<select
-				class="select select-bordered select-sm w-40"
+				class="select rounded-container border border-surface-200 px-3 py-2 select-sm w-40"
 				bind:value={filterStatus}
 				aria-label="Filter by status"
 			>
@@ -375,34 +375,34 @@
 			</select>
 			<input
 				type="text"
-				class="input input-bordered input-sm w-48"
+				class="input rounded-container border border-surface-200 px-3 py-2 input-sm w-48"
 				placeholder="Search by ID (e.g. A1)"
 				bind:value={searchQuery}
 				onkeydown={(e) => e.key === 'Enter' && onFilterApply()}
 			/>
-			<button type="button" class="btn btn-primary btn-sm" onclick={onFilterApply} disabled={loading}>
+			<button type="button" class="btn preset-filled-primary-500 btn-sm" onclick={onFilterApply} disabled={loading}>
 				{loading ? 'Loading…' : 'Apply'}
 			</button>
 		</div>
 
 		{#if error}
-			<div class="alert alert-error" role="alert">
+			<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4" role="alert">
 				<span>{error}</span>
-				<button type="button" class="btn btn-ghost btn-sm" onclick={() => (error = '')}>Dismiss</button>
+				<button type="button" class="btn preset-tonal btn-sm" onclick={() => (error = '')}>Dismiss</button>
 			</div>
 		{/if}
 
 		{#if loading && tokens.length === 0}
-			<div class="rounded-box bg-base-100 border border-base-300 p-8 text-center text-base-content/70">
-				<span class="loading loading-spinner loading-lg"></span>
+			<div class="rounded-box bg-surface-50 border border-surface-200 p-8 text-center text-surface-950/70">
+				<span class="loading-spinner loading-lg"></span>
 				<p class="mt-2">Loading tokens…</p>
 			</div>
 		{:else if tokens.length === 0}
-			<div class="rounded-box bg-base-100 border border-base-300 p-8 text-center text-base-content/70">
+			<div class="rounded-box bg-surface-50 border border-surface-200 p-8 text-center text-surface-950/70">
 				<p>No tokens found. Create a batch to get started.</p>
 			</div>
 		{:else}
-			<div class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
+			<div class="overflow-x-auto rounded-box border border-surface-200 bg-surface-50">
 				<table class="table table-zebra">
 					<thead>
 						<tr>
@@ -436,61 +436,69 @@
 											aria-label="Select {token.physical_id}"
 										/>
 									{:else}
-										<span class="text-base-content/40" title="In-use tokens cannot be selected for delete"
+										<span class="text-surface-950/40" title="In-use tokens cannot be selected for delete"
 											>—</span
 										>
 									{/if}
 								</td>
 								<td class="font-mono font-medium">{token.physical_id}</td>
-								<td class="font-mono text-sm text-base-content/70" title={token.qr_code_hash}>
+								<td class="font-mono text-sm text-surface-950/70" title={token.qr_code_hash}>
 									{token.qr_code_hash.slice(0, 12)}…
 								</td>
 								<td>
 									{#if token.status === 'available'}
-										<span class="badge badge-success">Available</span>
+										<span class="text-xs px-2 py-0.5 rounded preset-filled-success-500">Available</span>
 									{:else if token.status === 'in_use'}
-										<span class="badge badge-info">In use</span>
+										<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500">In use</span>
 									{:else}
-										<span class="badge badge-ghost">{token.status}</span>
+										<span class="text-xs px-2 py-0.5 rounded preset-tonal">{token.status}</span>
 									{/if}
 								</td>
-								<td>
-									<div class="dropdown dropdown-end" class:dropdown-open={openDropdownId === token.id}>
+								<td class="relative">
+									<button
+										type="button"
+										class="btn preset-tonal btn-sm text-surface-950"
+										onclick={() => toggleDropdown(token.id)}
+										disabled={submitting}
+										aria-haspopup="true"
+										aria-expanded={openDropdownId === token.id}
+									>
+										Actions ▾
+									</button>
+									{#if openDropdownId === token.id}
+										<!-- Backdrop to close on outside click -->
+										<button
+											type="button"
+											class="fixed inset-0 z-10 cursor-default"
+											aria-label="Close menu"
+											onclick={() => (openDropdownId = null)}
+										></button>
+										<div
+											class="absolute right-0 top-full z-20 mt-1 w-48 rounded-container border border-surface-200 bg-surface-50 p-1 shadow-lg text-surface-950"
+											role="menu"
+										>
+											{#if token.status === 'in_use'}
+												<button
+													type="button"
+													class="block w-full rounded px-3 py-2 text-left text-sm text-surface-950 hover:bg-surface-200"
+													role="menuitem"
+													onclick={() => setTokenStatus(token, 'available')}
+													disabled={submitting}
+												>
+													Mark Available
+												</button>
+											{/if}
 											<button
 												type="button"
-												class="btn btn-ghost btn-sm"
-												onclick={() => toggleDropdown(token.id)}
-												disabled={submitting}
-												aria-haspopup="true"
-												aria-expanded={openDropdownId === token.id}
+												class="block w-full rounded px-3 py-2 text-left text-sm text-error-600 hover:bg-error-100"
+												role="menuitem"
+												onclick={() => handleDeleteToken(token)}
+												disabled={submitting || token.status === 'in_use'}
 											>
-												Actions ▾
+												Delete
 											</button>
-											<ul class="dropdown-content menu bg-base-100 border border-base-300 rounded-box z-10 mt-1 w-48 p-1 shadow">
-												{#if token.status === 'in_use'}
-													<li>
-														<button
-															type="button"
-															class="btn btn-ghost btn-sm justify-start"
-															onclick={() => setTokenStatus(token, 'available')}
-															disabled={submitting}
-														>
-															Mark Available
-														</button>
-													</li>
-												{/if}
-												<li>
-													<button
-														type="button"
-														class="btn btn-ghost btn-sm justify-start text-error"
-														onclick={() => handleDeleteToken(token)}
-														disabled={submitting || token.status === 'in_use'}
-													>
-														Delete
-													</button>
-												</li>
-											</ul>
 										</div>
+									{/if}
 								</td>
 							</tr>
 						{/each}
@@ -515,7 +523,7 @@
 				<input
 					id="batch-prefix"
 					type="text"
-					class="input input-bordered w-full"
+					class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 					placeholder="e.g. A"
 					maxlength="10"
 					bind:value={batchPrefix}
@@ -527,7 +535,7 @@
 				<input
 					id="batch-start"
 					type="number"
-					class="input input-bordered w-full"
+					class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 					min="0"
 					bind:value={batchStart}
 					required
@@ -538,19 +546,19 @@
 				<input
 					id="batch-count"
 					type="number"
-					class="input input-bordered w-full"
+					class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 					min="1"
 					max="500"
 					bind:value={batchCount}
 					required
 				/>
-				<p class="label-text-alt text-base-content/70">Preview: {batchPrefix}{batchStart} … {batchPrefix}{Number(batchStart) + Number(batchCount) - 1}</p>
+				<p class="label-text-alt text-surface-950/70">Preview: {batchPrefix}{batchStart} … {batchPrefix}{Number(batchStart) + Number(batchCount) - 1}</p>
 			</div>
 			<div class="flex justify-end gap-2">
-				<button type="button" class="btn btn-ghost" onclick={closeBatchModal}>Cancel</button>
+				<button type="button" class="btn preset-tonal" onclick={closeBatchModal}>Cancel</button>
 				<button
 					type="submit"
-					class="btn btn-primary"
+					class="btn preset-filled-primary-500"
 					disabled={submitting || batchCount < 1 || batchCount > 500 || !batchPrefix.trim()}
 				>
 					{submitting ? 'Creating…' : 'Create'}
@@ -564,18 +572,18 @@
 	{#snippet children()}
 		<div class="flex flex-col gap-4">
 			{#if printTargetIds.length > 0}
-				<p class="text-sm text-base-content/80">
+				<p class="text-sm text-surface-950/80">
 					Printing {printTargetIds.length} token(s). Adjust template options below.
 				</p>
 			{:else}
-				<p class="text-sm text-base-content/80">
+				<p class="text-sm text-surface-950/80">
 					Edit print template defaults. Select tokens and click Print selected to print.
 				</p>
 			{/if}
 			<div class="grid grid-cols-2 gap-4">
 				<div class="form-control">
 					<label for="print-cards" class="label"><span class="label-text">Cards per page</span></label>
-					<select id="print-cards" class="select select-bordered w-full" bind:value={printSettings.cards_per_page}>
+					<select id="print-cards" class="select rounded-container border border-surface-200 px-3 py-2 w-full" bind:value={printSettings.cards_per_page}>
 						{#each [4, 5, 6, 7, 8] as n}
 							<option value={n}>{n}</option>
 						{/each}
@@ -583,14 +591,14 @@
 				</div>
 				<div class="form-control">
 					<label for="print-paper" class="label"><span class="label-text">Paper</span></label>
-					<select id="print-paper" class="select select-bordered w-full" bind:value={printSettings.paper}>
+					<select id="print-paper" class="select rounded-container border border-surface-200 px-3 py-2 w-full" bind:value={printSettings.paper}>
 						<option value="a4">A4</option>
 						<option value="letter">Letter</option>
 					</select>
 				</div>
 				<div class="form-control">
 					<label for="print-orientation" class="label"><span class="label-text">Orientation</span></label>
-					<select id="print-orientation" class="select select-bordered w-full" bind:value={printSettings.orientation}>
+					<select id="print-orientation" class="select rounded-container border border-surface-200 px-3 py-2 w-full" bind:value={printSettings.orientation}>
 						<option value="portrait">Portrait</option>
 						<option value="landscape">Landscape</option>
 					</select>
@@ -611,7 +619,7 @@
 				<input
 					id="print-logo"
 					type="url"
-					class="input input-bordered w-full"
+					class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 					placeholder="https://example.com/logo.png"
 					bind:value={printSettings.logo_url}
 				/>
@@ -620,7 +628,7 @@
 				<label for="print-footer" class="label"><span class="label-text">Footer text (optional)</span></label>
 				<textarea
 					id="print-footer"
-					class="textarea textarea-bordered w-full"
+					class="textarea rounded-container border border-surface-200 w-full"
 					placeholder="Shown on each card, centered. e.g. Premise rules, office hours"
 					rows="2"
 					bind:value={printSettings.footer_text}
@@ -631,19 +639,19 @@
 				<input
 					id="print-bg"
 					type="text"
-					class="input input-bordered w-full"
+					class="input rounded-container border border-surface-200 px-3 py-2 w-full"
 					placeholder="https://example.com/bg.png"
 					bind:value={printSettings.bg_image_url}
 				/>
-				<p class="label-text-alt text-base-content/70 mt-1">
+				<p class="label-text-alt text-surface-950/70 mt-1">
 					Use 6:5 aspect ratio (e.g. 60×50mm, 300×250px) for best fit per token card.
 				</p>
 			</div>
 			<div class="flex justify-end gap-2">
-				<button type="button" class="btn btn-ghost" onclick={closePrintModal}>Cancel</button>
+				<button type="button" class="btn preset-tonal" onclick={closePrintModal}>Cancel</button>
 				<button
 					type="button"
-					class="btn btn-outline"
+					class="btn preset-outlined"
 					onclick={() => savePrintSettings()}
 					disabled={submitting}
 				>
@@ -651,7 +659,7 @@
 				</button>
 				<button
 					type="button"
-					class="btn btn-primary"
+					class="btn preset-filled-primary-500"
 					onclick={doPrint}
 					disabled={printTargetIds.length === 0}
 					title={printTargetIds.length === 0 ? 'Select tokens first' : ''}

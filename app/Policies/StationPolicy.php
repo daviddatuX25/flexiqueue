@@ -21,7 +21,8 @@ class StationPolicy
             return Response::allow();
         }
 
-        if ($user->assigned_station_id === $station->id) {
+        $assigned = $user->assignedStationForProgram($station->program_id);
+        if ($assigned && $assigned->id === $station->id) {
             return Response::allow();
         }
 

@@ -69,6 +69,34 @@
 
 ---
 
+### 1.4 `PATCH /api/users/me/availability`
+
+**Purpose:** Update the authenticated user's availability status (staff-availability-status plan).
+**Auth:** Authenticated.
+**Request:**
+```json
+{
+  "status": "available"
+}
+```
+**Valid values for `status`:** `available` | `on_break` | `away`.
+**Success (200):**
+```json
+{
+  "availability_status": "available",
+  "availability_updated_at": "2026-02-19T10:35:00Z"
+}
+```
+**Validation (422):**
+```json
+{
+  "message": "The given data was invalid.",
+  "errors": { "status": ["The selected status is invalid."] }
+}
+```
+
+---
+
 ## 2. Public Endpoints `[PUBLIC]`
 
 ### 2.1 `GET /api/check-status/{qr_hash}`
