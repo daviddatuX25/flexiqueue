@@ -81,11 +81,23 @@
 		border: none;
 	}
 
+	.print-logo img {
+		height: 12mm;
+		width: auto;
+		object-fit: contain;
+	}
+
 	.print-physical-id {
-		font-size: 18pt;
+		font-size: 32pt;
 		font-weight: 700;
 		margin-bottom: 2mm;
 		line-height: 1.2;
+		color: #000;
+		/* Dark letter shadow for readability over bg image */
+		text-shadow:
+			0 0 1px rgba(0, 0, 0, 0.9),
+			0 1px 2px rgba(0, 0, 0, 0.5),
+			0 2px 4px rgba(0, 0, 0, 0.25);
 	}
 
 	.print-qr-container {
@@ -98,12 +110,17 @@
 		display: block;
 	}
 
-	.print-hint,
+	/* Footer (premise rules etc.): semi-opaque background so text stays readable over card bg image */
 	.print-footer {
 		font-size: 8pt;
-		color: #666;
+		color: #000;
 		margin-top: 2mm;
 		text-align: center;
+		background: rgba(255, 255, 255, 0.8);
+		padding: 1.5mm 3mm;
+		border-radius: 1mm;
+		display: inline-block;
+		max-width: 100%;
 	}
 
 	@media print {
@@ -124,6 +141,13 @@
 			min-height: unset;
 			padding: 0;
 			background: transparent;
+		}
+
+		/* Force backgrounds and colors to print (match screen preview) */
+		.print-sheet,
+		.print-card {
+			print-color-adjust: exact;
+			-webkit-print-color-adjust: exact;
 		}
 
 		.print-sheet {
@@ -206,11 +230,12 @@
 				{#each pageCards as card}
 					<div
 						class="print-card"
+						class:print-card--has-bg={!!bgImageUrl}
 						style={bgImageUrl ? `background-image: url(${bgImageUrl});` : ''}
 					>
 						{#if logoUrl}
 							<div class="print-logo mb-1">
-								<img src={logoUrl} alt="" class="h-6 w-auto object-contain" />
+								<img src={logoUrl} alt="" />
 							</div>
 						{/if}
 						<div class="print-physical-id">{card.physical_id}</div>
@@ -222,9 +247,6 @@
 								height="120"
 							/>
 						</div>
-						{#if showHint}
-							<div class="print-hint">Scan for status</div>
-						{/if}
 						{#if footerText}
 							<div class="print-footer">{footerText}</div>
 						{/if}

@@ -241,7 +241,7 @@
 	{/if}
 
 	<!-- Filter panel -->
-	<div class="card bg-surface-50 shadow mt-6">
+	<div class="card bg-surface-50 rounded-container elevation-card mt-6">
 		<div class="card-body">
 			<h2 class="card-title text-lg">Filters</h2>
 			<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4">
@@ -352,14 +352,14 @@
 	</div>
 
 	<!-- Audit log table -->
-	<div class="overflow-x-auto mt-4">
-		{#if loading}
-			<div class="flex justify-center py-12">
-				<span class="loading-spinner loading-lg text-primary-500"></span>
-			</div>
-		{:else if data.length === 0}
-			<div class="text-center py-12 text-surface-950/70">No audit log entries match the current filters.</div>
-		{:else}
+	{#if loading}
+		<div class="flex justify-center py-12 mt-4">
+			<span class="loading-spinner loading-lg text-primary-500"></span>
+		</div>
+	{:else if data.length === 0}
+		<div class="text-center py-12 text-surface-950/70 mt-4">No audit log entries match the current filters.</div>
+	{:else}
+		<div class="table-container mt-4">
 			<table class="table table-zebra">
 				<thead>
 					<tr>
@@ -389,8 +389,8 @@
 					{/each}
 				</tbody>
 			</table>
-		{/if}
-	</div>
+		</div>
+	{/if}
 
 	<!-- Pagination -->
 	{#if meta && totalPages > 1}

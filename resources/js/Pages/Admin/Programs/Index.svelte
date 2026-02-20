@@ -212,7 +212,7 @@
 		{:else}
 			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 				{#each programs as program (program.id)}
-					<div class="card bg-surface-50 border border-surface-200 shadow-sm">
+					<div class="card bg-surface-50 rounded-container elevation-card transition-shadow hover:shadow-[var(--shadow-raised)]">
 						<div class="card-body">
 							<div class="flex items-start justify-between gap-2">
 								<Link href="/admin/programs/{program.id}" class="card-title text-lg link link-hover">{program.name}</Link>

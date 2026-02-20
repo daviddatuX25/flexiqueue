@@ -841,7 +841,7 @@
 			{:else}
 				<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 					{#each tracks as track (track.id)}
-						<div class="card bg-surface-50 border border-surface-200 shadow-sm">
+						<div class="card bg-surface-50 rounded-container elevation-card">
 							<div class="card-body">
 								<div class="flex items-start justify-between gap-2">
 									<div class="flex items-center gap-2">
@@ -975,7 +975,7 @@
 							No stations in this program. Add stations first, then assign staff.
 						</div>
 					{:else}
-						<div class="overflow-x-auto">
+						<div class="table-container">
 							<table class="table table-zebra">
 								<thead>
 									<tr>
@@ -1093,7 +1093,7 @@
 			{:else}
 				<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 					{#each stations as station (station.id)}
-						<div class="card bg-surface-50 border border-surface-200 shadow-sm">
+						<div class="card bg-surface-50 rounded-container elevation-card">
 							<div class="card-body">
 								<div class="flex items-start justify-between gap-2">
 									<h3 class="card-title text-base">{station.name}</h3>

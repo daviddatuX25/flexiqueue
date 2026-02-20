@@ -41,7 +41,7 @@
 	onclick={(e) => e.target === dialogEl && handleClose()}
 >
 	<div
-		class="card bg-surface-50 rounded-container shadow-xl p-6 relative max-h-[90vh] overflow-y-auto"
+		class="card bg-surface-50 rounded-container elevation-modal p-6 relative max-h-[90vh] overflow-y-auto"
 		role="document"
 		aria-label={title || 'Dialog'}
 		onclick={(e) => e.stopPropagation()}

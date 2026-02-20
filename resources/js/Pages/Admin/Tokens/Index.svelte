@@ -402,7 +402,7 @@
 				<p>No tokens found. Create a batch to get started.</p>
 			</div>
 		{:else}
-			<div class="overflow-x-auto rounded-box border border-surface-200 bg-surface-50">
+			<div class="table-container">
 				<table class="table table-zebra">
 					<thead>
 						<tr>
@@ -474,7 +474,7 @@
 											onclick={() => (openDropdownId = null)}
 										></button>
 										<div
-											class="absolute right-0 top-full z-20 mt-1 w-48 rounded-container border border-surface-200 bg-surface-50 p-1 shadow-lg text-surface-950"
+											class="absolute right-0 top-full z-20 mt-1 w-48 rounded-container bg-surface-50 p-1 elevation-raised text-surface-950"
 											role="menu"
 										>
 											{#if token.status === 'in_use'}

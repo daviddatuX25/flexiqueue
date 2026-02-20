@@ -12,6 +12,7 @@
     "@fontsource/inter": "^5.0.0",
     "html5-qrcode": "^2.3.8",
     "laravel-echo": "^1.16.1",
+    "lucide-svelte": "^0.575.0",
     "pusher-js": "^8.4.0-rc2"
   },
   "devDependencies": {

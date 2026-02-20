@@ -48,7 +48,7 @@ Skeleton themes are defined in CSS with `[data-theme='flexiqueue']`. FlexiQueue'
 
 ### 2.1 Color Mapping
 
-| Design Token | Hex | DaisyUI Variable | Usage |
+| Design Token | Hex | Theme variable | Usage |
 |---|---|---|---|
 | Primary (blue) | `#2563EB` | `--color-primary` | Main CTAs, headers, links, active states |
 | Primary content | `#FFFFFF` | `--color-primary-content` | Text on primary backgrounds |
@@ -130,7 +130,19 @@ Legacy DaisyUI theme reference (superseded by `resources/css/themes/flexiqueue.c
 }
 ```
 
-> **Note:** OKLCH values are approximate conversions from the hex palette. Fine-tune using the [DaisyUI Theme Generator](https://daisyui.com/theme-generator/) before implementation.
+> **Note:** OKLCH values are approximate conversions from the hex palette. The live theme is in `resources/css/themes/flexiqueue.css`.
+
+### 2.3 Visual hierarchy (elevation)
+
+Elevation is controlled by CSS custom properties in the flexiqueue theme so cards, tables, and overlays have a consistent visual hierarchy.
+
+| Token | Variable | Usage |
+|-------|----------|--------|
+| Card | `--shadow-card` | Cards, table containers, filter panels |
+| Raised | `--shadow-raised` | Dropdowns, popovers, hover emphasis |
+| Modal | `--shadow-modal` | Modal dialogs |
+
+Use the utility classes `elevation-card`, `elevation-raised`, and `elevation-modal` on containers (e.g. `card bg-surface-50 rounded-container elevation-card`). Prefer elevation over borders for separating content. Data tables use the shared `.table-container` wrapper (rounded, elevation-card, sticky header, consistent cell padding, row hover). See `resources/css/themes/flexiqueue.css` for definitions.
 
 ---
 
@@ -173,79 +185,73 @@ For offline-first deployment, bundle Inter as a local asset instead.
 
 FlexiQueue is a mobile-first queue system used by staff on phones. Large touch targets are critical.
 
-| Element | Height | DaisyUI Class | Notes |
+| Element | Height | Skeleton / Class | Notes |
 |---|---|---|---|
-| Primary action button | 80px | `btn btn-primary h-20 text-lg` | "SEND TO CASHIER", "CALL NEXT" |
-| Secondary action button | 48px | `btn btn-ghost h-12` | "Re-queue", "Override", "Cancel" |
+| Primary action button | 80px | `btn preset-filled-primary-500 h-20 text-lg` | "SEND TO CASHIER", "CALL NEXT" |
+| Secondary action button | 48px | `btn preset-tonal h-12` | "Re-queue", "Override", "Cancel" |
 | Category selection button | ~120px | `btn h-30 w-full` + custom | Triage category cards |
-| Standard form button | 44px | `btn btn-primary` (default size) | Login, modal confirms |
-| Icon button | 44x44px min | `btn btn-ghost btn-square` | Logout, menu toggles |
+| Standard form button | 44px | `btn preset-filled-primary-500` (default size) | Login, modal confirms |
+| Icon button | 44x44px min | `btn preset-tonal btn-icon` | Logout, menu toggles |
 
 **WCAG minimum:** All interactive targets >= 44x44px.
 
 ---
 
-## 6. Component Mapping: FlexiQueue to DaisyUI
+## 6. Component Mapping: FlexiQueue to Skeleton
 
-This table maps every planned FlexiQueue component to its DaisyUI implementation.
+The app uses Skeleton UI as the component toolkit. This table maps FlexiQueue components to Skeleton classes and patterns. See `docs/architecture/SKELETON-COMPONENT-MAPPING.md` for preset and utility details.
 
 ### 6.1 Layout Components
 
-| FlexiQueue Component | DaisyUI Components | Implementation Notes |
+| FlexiQueue Component | Skeleton / Implementation | Notes |
 |---|---|---|
-| `AppShell.svelte` | `navbar` + `footer` | Navbar for header, custom footer for status bar |
-| `AdminLayout.svelte` | `drawer` + `menu` | Drawer sidebar (240px) with vertical menu items |
-| `MobileLayout.svelte` | `navbar` + `dock` | Fixed navbar top, dock component for bottom bar |
-| `DisplayLayout.svelte` | `navbar` (minimal) | Blue header only, no navigation, kiosk mode |
+| `AppShell.svelte` | Custom layout | Header + footer with theme surfaces |
+| `AdminLayout.svelte` | Custom drawer + nav | Sidebar 240px, `bg-surface-800`, active `bg-primary-500` |
+| `MobileLayout.svelte` | Custom navbar + dock | Fixed top bar, bottom nav with theme buttons |
+| `DisplayLayout.svelte` | Minimal header | Blue header, kiosk mode |
 
 ### 6.2 Data Display
 
-| FlexiQueue Component | DaisyUI Components | Class Example |
+| FlexiQueue Component | Skeleton / Class Example | Notes |
 |---|---|---|
-| `StatusBadge.svelte` | `badge` | `badge badge-success`, `badge badge-warning`, `badge badge-info` |
-| `CategoryBadge.svelte` | `badge` | `badge badge-accent` (gold for priority), `badge badge-warning` (incomplete) |
-| `StatCard.svelte` | `stat` | `stats shadow` → `stat` → `stat-title`, `stat-value`, `stat-desc` |
-| `DataTable.svelte` | `table` | `table table-zebra` with sortable headers |
-| `ProgressBar.svelte` | `progress` | `progress progress-primary` with label |
-| `ProgressSteps.svelte` | `steps` | `steps steps-vertical` → `step step-primary` (completed), `step` (pending) |
-| `LoadingSkeleton.svelte` | `skeleton` | `skeleton h-4 w-full`, `skeleton h-32 w-full` |
-| `EmptyState.svelte` | Custom (simple) | Centered `div` with icon + text, no DaisyUI equivalent |
+| Status badges | `preset-filled-success-500`, `preset-filled-warning-500`, `preset-filled-primary-500` | `text-xs px-2 py-0.5 rounded` on span |
+| Stat cards | `stats`, `stat`, `stat-title`, `stat-value`, `stat-desc` | Theme utilities in flexiqueue.css; use `elevation-card` |
+| Data tables | `table-container` + `table table-zebra` | Wrapper in theme: sticky header, padding, row hover |
+| Progress bar | `progress progress-primary` | Theme `.progress-primary` in flexiqueue.css |
+| Tabs | `.tabs`, `.tab`, `.tab-active` | Theme utilities in flexiqueue.css |
+| Empty state | Custom | `rounded-box bg-surface-50 border border-surface-200 p-8` or elevation-card |
 
 ### 6.3 Actions & Feedback
 
-| FlexiQueue Component | DaisyUI Components | Class Example |
+| FlexiQueue Component | Skeleton / Class Example | Notes |
 |---|---|---|
-| Buttons (all variants) | `btn` | `btn-primary`, `btn-success`, `btn-error`, `btn-ghost`, `btn-outline` |
-| `Modal.svelte` | `modal` | `modal` + `modal-box` + `modal-action`. Use `<dialog>` element. |
-| `ConfirmDialog.svelte` | `modal` | Same as Modal, with confirm/cancel `modal-action` buttons |
-| `Toast.svelte` | `toast` + `alert` | `toast toast-end` wrapping `alert alert-success` etc. |
-| `OfflineBanner.svelte` | `alert` | `alert alert-warning` fixed to top of page |
-| `SupervisorPinModal.svelte` | `modal` + `fieldset` + `input` | Modal with PIN fieldset, textarea, action buttons |
+| Buttons | `btn preset-filled-primary-500`, `btn preset-tonal`, `btn preset-outlined` | Danger: `preset-filled-error-500` |
+| `Modal.svelte` | `<dialog>` + `card rounded-container elevation-modal` | Native dialog, theme elevation |
+| `ConfirmModal.svelte` | Uses Modal + preset buttons | Confirm/cancel with variant (danger/warning/neutral) |
+| `Toast.svelte` | Custom | Position and alert-style feedback |
+| `OfflineBanner.svelte` | Custom | Fixed top, warning styling |
 
 ### 6.4 Navigation
 
-| FlexiQueue Component | DaisyUI Components | Class Example |
+| FlexiQueue Component | Skeleton / Implementation | Notes |
 |---|---|---|
-| Admin sidebar | `menu` | `menu bg-base-200 w-60` with `menu-title` and active items |
-| Tab navigation (Program detail) | `tab` | `tabs tabs-lifted` or `tabs tabs-boxed` |
-| Pagination | `join` + `btn` | `join` wrapping `btn` elements for page numbers |
-| Breadcrumbs | `breadcrumbs` | `breadcrumbs` → `li` items |
-| Mobile bottom nav | `dock` | `dock` with icon + label items |
+| Admin sidebar | Custom nav + `Link` | Active: `bg-primary-500 text-primary-contrast-500` |
+| Tab navigation (Program detail) | `.tabs`, `.tab`, `.tab-active` | Theme in flexiqueue.css |
+| Pagination | `btn preset-tonal btn-sm` | Custom layout with buttons |
+| Mobile bottom nav | Custom | Icon + label, theme buttons |
 
 ### 6.5 Form Inputs
 
-| FlexiQueue Component | DaisyUI Components | Class Example |
+| FlexiQueue Component | Skeleton / Class Example | Notes |
 |---|---|---|
-| Text input | `input` + `label` | `input input-bordered w-full` |
-| Select dropdown | `select` | `select select-bordered w-full` |
-| Textarea | `textarea` | `textarea textarea-bordered` |
-| Checkbox | `checkbox` | `checkbox checkbox-primary` |
-| Toggle switch | `toggle` | `toggle toggle-primary` |
-| PIN input (6 digits) | `input` + `join` | 6 joined `input` fields, or single `input` with maxlength |
-| Fieldset group | `fieldset` | `fieldset` with `fieldset-legend` and `label` |
-| Form validation | `validator` | DaisyUI 5 validator class for error/success states |
+| Text input | `input rounded-container border border-surface-200 px-3 py-2 w-full` | Skeleton input + theme |
+| Select | `select rounded-container border border-surface-200 px-3 py-2 w-full` | |
+| Textarea | `textarea rounded-container border border-surface-200 w-full` | |
+| Checkbox | `checkbox checkbox-sm` | Skeleton checkbox |
+| Label | `label`, `label-text`, `label-text-alt` | Theme ensures dark text in main/dialog |
+| Form validation | Custom | Error state via border/background and `form.errors` |
 
-### 6.6 Custom Components (No DaisyUI Equivalent)
+### 6.6 Custom Components (No Skeleton Equivalent)
 
 These remain as fully custom Svelte components:
 
@@ -275,9 +281,9 @@ These remain as fully custom Svelte components:
 
 | Requirement | Implementation |
 |---|---|
-| Color contrast | All text meets WCAG AA (4.5:1 body, 3:1 large text). DaisyUI themes handle this. |
+| Color contrast | All text meets WCAG AA (4.5:1 body, 3:1 large text). Theme palette and presets ensure contrast. |
 | No color-only indicators | Always pair color with text and/or icon (e.g., badge says "Priority" not just gold dot) |
-| Keyboard navigation | All interactive elements focusable. DaisyUI modals trap focus. |
+| Keyboard navigation | All interactive elements focusable. Native `<dialog>` traps focus when modal is open. |
 | Screen reader | Semantic HTML + `aria-label` on icon-only buttons |
 | Touch targets | >= 44x44px on all interactive elements (WCAG 2.5.8) |
 | Large text option | Future: 18px+ body text mode (Phase 2) |
@@ -288,30 +294,28 @@ These remain as fully custom Svelte components:
 
 ### 9.1 Buttons
 
-- **Hover:** DaisyUI handles darker shade automatically.
-- **Active/Pressed:** DaisyUI applies subtle scale-down.
-- **Disabled:** `btn-disabled` or `disabled` attribute — reduced opacity, `cursor-not-allowed`.
-- **Loading:** `btn` with `loading loading-spinner` child element.
+- **Hover:** Skeleton presets provide darker shade on hover.
+- **Active/Pressed:** Use `disabled` or loading state during submit.
+- **Disabled:** `disabled` attribute — reduced opacity, `cursor-not-allowed`.
+- **Loading:** `btn` with `loading-spinner loading-sm` (or `loading-lg`) child; theme in flexiqueue.css.
 
 ### 9.2 Modals
 
-- Use `<dialog>` element with DaisyUI `modal` class.
+- Use native `<dialog>` element. Inner content: `card bg-surface-50 rounded-container elevation-modal`.
 - Open via `element.showModal()`, close via `element.close()` or form method="dialog".
-- Dark backdrop via DaisyUI's built-in `modal-backdrop`.
+- Backdrop: `backdrop:bg-black/50` on dialog.
 - Always include a close mechanism (X button, Cancel, or backdrop click).
 
 ### 9.3 Toasts
 
-- Position: `toast toast-top toast-end` (top-right corner).
+- Custom toast component; position top-right or as implemented.
 - Stack: Multiple toasts stack vertically.
 - Auto-dismiss: Success/Info after 3–5 seconds. Errors persist until dismissed.
-- Use `alert` inside `toast` for color-coded variants.
 
 ### 9.4 Loading States
 
-- Skeleton screens for initial page loads (DaisyUI `skeleton`).
-- Spinner for async actions (DaisyUI `loading loading-spinner`).
-- Button loading state: add `loading` class to `btn` during submission.
+- Spinner: `loading-spinner` utility (theme in flexiqueue.css). Use `loading-sm` or `loading-lg` for size.
+- Button loading state: show spinner inside button during submission.
 
 ### 9.5 Empty States
 
@@ -320,36 +324,15 @@ These remain as fully custom Svelte components:
 
 ---
 
-## 10. DaisyUI Components NOT Used
+## 10. Components Not Used in Phase 1
 
-These DaisyUI components are available but not planned for Phase 1:
-
-| Component | Reason |
-|---|---|
-| `carousel` | No image galleries in Phase 1 |
-| `chat` | No messaging feature |
-| `diff` | No comparison views |
-| `hover-3d`, `hover-gallery` | Not needed for utility app |
-| `rating` | No rating feature |
-| `range` | No slider inputs |
-| `text-rotate` | No animated text |
-| `countdown` | Using custom timer component with `$effect` instead |
-| `calendar` | Date range picker handled by native `<input type="date">` or lightweight lib |
-| Mockup components | Development-only, not in production |
+The following are not in scope for Phase 1: carousel, chat, diff, rating, range sliders, countdown (custom timer used instead), calendar (native date input or lightweight lib). Mockup components are development-only.
 
 ---
 
 ## 11. Component Preview Page
 
-A standalone HTML page at `public/dev/components.html` serves as a living style guide. It loads DaisyUI via CDN and applies the FlexiQueue custom theme, showcasing every DaisyUI component used in the project.
-
-**Purpose:**
-- Visual reference during development — see all components with FlexiQueue theming.
-- Verify color palette, spacing, and sizing before building Svelte components.
-- Shareable with stakeholders for early UI feedback.
-
-**Implementation:** Pure HTML + TailwindCSS CDN + Skeleton (or link to app theme). No build step required.
-**Task:** BD-051 (see Phase 1 backlog).
+A standalone HTML page at `public/dev/components.html` exists as a legacy reference; it currently loads DaisyUI via CDN. **The app uses Skeleton UI.** For Skeleton components and FlexiQueue theming, use the running app and `docs/architecture/SKELETON-COMPONENT-MAPPING.md`. Optionally, the preview page can be updated to Skeleton + flexiqueue theme to match the app.
 
 ---
 

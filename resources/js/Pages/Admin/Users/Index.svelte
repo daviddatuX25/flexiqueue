@@ -214,7 +214,7 @@
 		<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 mt-4">{error}</div>
 	{/if}
 
-	<div class="overflow-x-auto mt-6">
+	<div class="table-container mt-6">
 		<table class="table table-zebra">
 			<thead>
 				<tr>
