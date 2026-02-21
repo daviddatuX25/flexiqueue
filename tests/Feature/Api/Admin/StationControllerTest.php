@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api\Admin;
 
+use App\Models\Process;
 use App\Models\Program;
 use App\Models\ServiceTrack;
 use App\Models\Station;
@@ -11,7 +12,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * Per 08-API-SPEC-PHASE1 §5.3: Station CRUD. List/create under program; update/delete by station id.
+ * Per 08-API-SPEC-PHASE1 §5.3: Station CRUD. Per PROCESS-STATION-REFACTOR §9.2: process_ids required.
  */
 class StationControllerTest extends TestCase
 {
@@ -20,6 +21,8 @@ class StationControllerTest extends TestCase
     private User $admin;
 
     private Program $program;
+
+    private Process $process;
 
     protected function setUp(): void
     {
@@ -30,6 +33,11 @@ class StationControllerTest extends TestCase
             'description' => null,
             'is_active' => false,
             'created_by' => $this->admin->id,
+        ]);
+        $this->process = Process::create([
+            'program_id' => $this->program->id,
+            'name' => 'Verification',
+            'description' => null,
         ]);
     }
 
@@ -54,14 +62,20 @@ class StationControllerTest extends TestCase
         $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$this->program->id}/stations", [
             'name' => 'Cashier',
             'capacity' => 2,
+            'process_ids' => [$this->process->id],
         ]);
 
         $response->assertStatus(201);
         $response->assertJsonPath('station.name', 'Cashier');
         $response->assertJsonPath('station.capacity', 2);
+        $response->assertJsonPath('station.process_ids', [$this->process->id]);
         $this->assertDatabaseHas('stations', [
             'program_id' => $this->program->id,
             'name' => 'Cashier',
+        ]);
+        $this->assertDatabaseHas('station_process', [
+            'station_id' => $response->json('station.id'),
+            'process_id' => $this->process->id,
         ]);
     }
 
@@ -76,6 +90,7 @@ class StationControllerTest extends TestCase
         $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$this->program->id}/stations", [
             'name' => 'Desk One',
             'capacity' => 1,
+            'process_ids' => [$this->process->id],
         ]);
 
         $response->assertStatus(422);
@@ -90,11 +105,13 @@ class StationControllerTest extends TestCase
             'capacity' => 1,
             'is_active' => true,
         ]);
+        $station->processes()->attach($this->process->id);
 
         $response = $this->actingAs($this->admin)->putJson("/api/admin/stations/{$station->id}", [
             'name' => 'Updated Name',
             'capacity' => 2,
             'is_active' => false,
+            'process_ids' => [$this->process->id],
         ]);
 
         $response->assertStatus(200);
@@ -151,5 +168,61 @@ class StationControllerTest extends TestCase
         $response = $this->actingAs($staff)->getJson("/api/admin/programs/{$this->program->id}/stations");
 
         $response->assertStatus(403);
+    }
+
+    public function test_store_requires_process_ids_returns_422(): void
+    {
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$this->program->id}/stations", [
+            'name' => 'No Processes',
+            'capacity' => 1,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('process_ids');
+    }
+
+    public function test_list_processes_returns_assigned_process_ids(): void
+    {
+        $station = Station::create([
+            'program_id' => $this->program->id,
+            'name' => 'Desk',
+            'capacity' => 1,
+        ]);
+        $station->processes()->attach($this->process->id);
+
+        $response = $this->actingAs($this->admin)->getJson(
+            "/api/admin/programs/{$this->program->id}/stations/{$station->id}/processes"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('process_ids', [$this->process->id]);
+    }
+
+    public function test_set_processes_updates_assignment(): void
+    {
+        $station = Station::create([
+            'program_id' => $this->program->id,
+            'name' => 'Desk',
+            'capacity' => 1,
+        ]);
+        $station->processes()->attach($this->process->id);
+
+        $process2 = Process::create([
+            'program_id' => $this->program->id,
+            'name' => 'Cash Release',
+            'description' => null,
+        ]);
+
+        $response = $this->actingAs($this->admin)->putJson(
+            "/api/admin/programs/{$this->program->id}/stations/{$station->id}/processes",
+            ['process_ids' => [$this->process->id, $process2->id]]
+        );
+
+        $response->assertStatus(200);
+        $ids = $response->json('station.process_ids');
+        $this->assertCount(2, $ids);
+        $this->assertContains($this->process->id, $ids);
+        $this->assertContains($process2->id, $ids);
+        $this->assertCount(2, $station->fresh()->processes);
     }
 }

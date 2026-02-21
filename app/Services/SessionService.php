@@ -757,9 +757,9 @@ class SessionService
             ->where('is_required', true)
             ->where('step_order', '>', $session->current_step_order)
             ->orderBy('step_order')
-            ->with('station')
+            ->with('process')
             ->get()
-            ->map(fn ($s) => ['step_order' => $s->step_order, 'station' => $s->station->name, 'is_required' => true])
+            ->map(fn ($s) => ['step_order' => $s->step_order, 'station' => $s->process?->name ?? '—', 'is_required' => true])
             ->values()
             ->toArray();
     }

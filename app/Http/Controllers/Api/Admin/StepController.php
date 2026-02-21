@@ -97,31 +97,40 @@ class StepController extends Controller
 
     /**
      * Remap active sessions' current_step_order to match new step order.
-     * Each session keeps current_station_id; we update step_order to the step that now has that station.
+     * Per PROCESS-STATION-REFACTOR: session keeps current_station_id; map to step whose process includes that station.
      */
     private function migrateSessionsToNewOrder(ServiceTrack $track): void
     {
-        $stepsByStation = $track->trackSteps()->get()->keyBy('station_id');
+        // Build station_id => step_order map via station_process pivot
+        $stepsByStation = [];
+        $rows = \Illuminate\Support\Facades\DB::table('track_steps')
+            ->join('station_process', 'track_steps.process_id', '=', 'station_process.process_id')
+            ->where('track_steps.track_id', $track->id)
+            ->select('track_steps.step_order', 'station_process.station_id')
+            ->get();
+        foreach ($rows as $row) {
+            $stepsByStation[(int) $row->station_id] = (int) $row->step_order;
+        }
 
         Session::active()
             ->where('track_id', $track->id)
             ->each(function (Session $session) use ($stepsByStation): void {
-                $step = $stepsByStation->get($session->current_station_id);
-                if ($step) {
-                    $session->update(['current_step_order' => $step->step_order]);
+                $stepOrder = $stepsByStation[(int) $session->current_station_id] ?? null;
+                if ($stepOrder !== null) {
+                    $session->update(['current_step_order' => $stepOrder]);
                 }
             });
     }
 
     private function stepResource(TrackStep $step): array
     {
-        $step->load('station');
+        $step->load('process');
 
         return [
             'id' => $step->id,
             'track_id' => $step->track_id,
-            'station_id' => $step->station_id,
-            'station_name' => $step->station?->name,
+            'process_id' => $step->process_id,
+            'process_name' => $step->process?->name,
             'step_order' => $step->step_order,
             'is_required' => $step->is_required,
             'estimated_minutes' => $step->estimated_minutes,

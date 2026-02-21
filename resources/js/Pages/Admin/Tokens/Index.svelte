@@ -38,6 +38,7 @@
     // Selection for bulk actions
     let selectedIds = $state<Set<number>>(new Set());
     let selectAllCheckbox = $state<HTMLInputElement | null>(null);
+    let selectAllCheckboxMobile = $state<HTMLInputElement | null>(null);
     // Print modal (uniform flow: select template then print)
     let showPrintModal = $state(false);
     let printSettings = $state({
@@ -389,10 +390,10 @@
 
     // Sync select-all checkbox indeterminate state
     $effect(() => {
-        const el = selectAllCheckbox;
-        if (el) {
-            el.indeterminate = someSelected && !allSelected;
-        }
+        const ind = someSelected && !allSelected;
+        if (selectAllCheckbox) selectAllCheckbox.indeterminate = ind;
+        if (selectAllCheckboxMobile)
+            selectAllCheckboxMobile.indeterminate = ind;
     });
 </script>
 
@@ -593,7 +594,8 @@
                 </p>
             </div>
         {:else}
-            <div class="table-container mt-2">
+            <!-- Desktop Table View -->
+            <div class="table-container mt-2 hidden md:block max-w-5xl">
                 <table class="table table-zebra relative w-full">
                     <thead>
                         <tr>
@@ -608,10 +610,10 @@
                                     disabled={selectableForDelete.length === 0}
                                 />
                             </th>
-                            <th>Physical ID</th>
+                            <th class="w-48 text-left">Physical ID</th>
                             <th>QR Hash</th>
-                            <th>Status</th>
-                            <th class="text-right">Actions</th>
+                            <th class="w-32">Status</th>
+                            <th class="w-64 text-right">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -654,25 +656,27 @@
                                 <td>
                                     {#if token.status === "available"}
                                         <span
-                                            class="badge preset-filled-success-500 shadow-sm font-semibold uppercase tracking-wide text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 w-max"
+                                            class="badge preset-filled-success-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 w-max"
                                         >
-                                            <CheckCircle2 class="w-3 h-3" /> Available
+                                            <CheckCircle2 class="w-3.5 h-3.5" />
+                                            Available
                                         </span>
                                     {:else if token.status === "in_use"}
                                         <span
-                                            class="badge preset-filled-primary-500 shadow-sm font-semibold uppercase tracking-wide text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 w-max"
+                                            class="badge preset-filled-primary-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 w-max"
                                         >
-                                            <PlayCircle class="w-3 h-3" /> In use
+                                            <PlayCircle class="w-3.5 h-3.5" /> In
+                                            use
                                         </span>
                                     {:else if token.status === "deactivated"}
                                         <span
-                                            class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 w-max text-surface-600"
+                                            class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 w-max text-surface-600"
                                         >
-                                            <Ban class="w-3 h-3" /> Deactivated
+                                            <Ban class="w-3.5 h-3.5" /> Deactivated
                                         </span>
                                     {:else}
                                         <span
-                                            class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[10px] px-2 py-0.5 rounded-full"
+                                            class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
                                         >
                                             {token.status}
                                         </span>
@@ -686,7 +690,7 @@
                                             {#if token.status === "in_use"}
                                                 <button
                                                     type="button"
-                                                    class="btn btn-sm preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1.5 shadow-sm transition-colors"
+                                                    class="btn btn-sm preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
                                                     onclick={() =>
                                                         setTokenStatus(
                                                             token,
@@ -702,7 +706,7 @@
                                             {:else if token.status === "available"}
                                                 <button
                                                     type="button"
-                                                    class="btn btn-sm preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1.5 shadow-sm transition-colors"
+                                                    class="btn btn-sm preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
                                                     onclick={() =>
                                                         setTokenStatus(
                                                             token,
@@ -716,7 +720,7 @@
                                             {:else if token.status === "deactivated"}
                                                 <button
                                                     type="button"
-                                                    class="btn btn-sm preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1.5 shadow-sm transition-colors"
+                                                    class="btn btn-sm preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
                                                     onclick={() =>
                                                         setTokenStatus(
                                                             token,
@@ -732,7 +736,7 @@
                                             {/if}
                                             <button
                                                 type="button"
-                                                class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center gap-1.5 shadow-sm transition-colors"
+                                                class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
                                                 onclick={() =>
                                                     handleDeleteToken(token)}
                                                 disabled={submitting ||
@@ -750,6 +754,141 @@
                         {/each}
                     </tbody>
                 </table>
+            </div>
+
+            <!-- Mobile Card View -->
+            <div
+                class="md:hidden mt-4 mb-2 flex items-center justify-between px-1"
+            >
+                <label
+                    class="flex items-center gap-2 text-sm font-medium text-surface-700 cursor-pointer"
+                >
+                    <input
+                        type="checkbox"
+                        class="checkbox checkbox-sm"
+                        bind:this={selectAllCheckboxMobile}
+                        checked={allSelected}
+                        onchange={toggleSelectAll}
+                        disabled={selectableForDelete.length === 0}
+                    />
+                    Select All
+                </label>
+            </div>
+            <div class="grid grid-cols-1 gap-4 md:hidden">
+                {#each tokens as token (token.id)}
+                    <div
+                        class="card bg-surface-50 border border-surface-200 shadow-sm p-4 flex flex-col gap-3"
+                    >
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-3">
+                                {#if token.status === "available" || token.status === "deactivated"}
+                                    <input
+                                        type="checkbox"
+                                        class="checkbox checkbox-sm"
+                                        checked={selectedIds.has(token.id)}
+                                        onchange={() => toggleSelect(token.id)}
+                                        aria-label="Select {token.physical_id}"
+                                    />
+                                {:else}
+                                    <Ban
+                                        class="w-4 h-4 text-surface-300"
+                                        title="In use"
+                                    />
+                                {/if}
+                                <div>
+                                    <span
+                                        class="font-mono font-bold text-surface-900 block"
+                                        >{token.physical_id}</span
+                                    >
+                                    <span
+                                        class="font-mono text-xs text-surface-500"
+                                        >{token.qr_code_hash.slice(
+                                            0,
+                                            12,
+                                        )}…</span
+                                    >
+                                </div>
+                            </div>
+                            <div>
+                                {#if token.status === "available"}
+                                    <span
+                                        class="badge preset-filled-success-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5"
+                                    >
+                                        <CheckCircle2 class="w-3.5 h-3.5" /> Available
+                                    </span>
+                                {:else if token.status === "in_use"}
+                                    <span
+                                        class="badge preset-filled-primary-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5"
+                                    >
+                                        <PlayCircle class="w-3.5 h-3.5" /> In use
+                                    </span>
+                                {:else if token.status === "deactivated"}
+                                    <span
+                                        class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 text-surface-600"
+                                    >
+                                        <Ban class="w-3.5 h-3.5" /> Deactivated
+                                    </span>
+                                {:else}
+                                    <span
+                                        class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
+                                    >
+                                        {token.status}
+                                    </span>
+                                {/if}
+                            </div>
+                        </div>
+
+                        {#if !someSelected}
+                            <div
+                                class="pt-3 border-t border-surface-200 flex flex-wrap items-center justify-end gap-2"
+                            >
+                                {#if token.status === "in_use"}
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm flex-1 preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1 px-3 py-1.5 shadow-sm transition-colors hover:bg-surface-50"
+                                        onclick={() =>
+                                            setTokenStatus(token, "available")}
+                                        disabled={submitting}
+                                    >
+                                        <CheckCircle2 class="w-3.5 h-3.5" /> Available
+                                    </button>
+                                {:else if token.status === "available"}
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm flex-1 preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1 px-3 py-1.5 shadow-sm transition-colors hover:bg-surface-50"
+                                        onclick={() =>
+                                            setTokenStatus(
+                                                token,
+                                                "deactivated",
+                                            )}
+                                        disabled={submitting}
+                                    >
+                                        <Ban class="w-3.5 h-3.5" /> Deactivate
+                                    </button>
+                                {:else if token.status === "deactivated"}
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm flex-1 preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1 px-3 py-1.5 shadow-sm transition-colors hover:bg-surface-50"
+                                        onclick={() =>
+                                            setTokenStatus(token, "available")}
+                                        disabled={submitting}
+                                    >
+                                        <CheckCircle2 class="w-3.5 h-3.5" /> Activate
+                                    </button>
+                                {/if}
+                                <button
+                                    type="button"
+                                    class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center justify-center gap-1 px-3 py-1.5 w-full shadow-sm"
+                                    onclick={() => handleDeleteToken(token)}
+                                    disabled={submitting ||
+                                        token.status === "in_use"}
+                                >
+                                    <Trash2 class="w-3.5 h-3.5" /> Delete
+                                </button>
+                            </div>
+                        {/if}
+                    </div>
+                {/each}
             </div>
         {/if}
     </div>

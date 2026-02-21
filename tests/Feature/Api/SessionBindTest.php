@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api;
 
+use App\Models\Process;
 use App\Models\Program;
 use App\Models\ServiceTrack;
 use App\Models\Station;
@@ -45,6 +46,11 @@ class SessionBindTest extends TestCase
             'capacity' => 1,
             'is_active' => true,
         ]);
+        $process = Process::create(['program_id' => $this->program->id, 'name' => 'First Station', 'description' => null]);
+        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+            'station_id' => $this->station->id,
+            'process_id' => $process->id,
+        ]);
         $this->track = ServiceTrack::create([
             'program_id' => $this->program->id,
             'name' => 'Default',
@@ -53,7 +59,7 @@ class SessionBindTest extends TestCase
         ]);
         TrackStep::create([
             'track_id' => $this->track->id,
-            'station_id' => $this->station->id,
+            'process_id' => $process->id,
             'step_order' => 1,
             'is_required' => true,
         ]);
@@ -172,6 +178,64 @@ class SessionBindTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonPath('errors.qr_hash.0', 'Token not found.');
+    }
+
+    /**
+     * Per PROCESS-STATION-REFACTOR: Bind with process-based track step routes via StationSelectionService.
+     */
+    /**
+     * Per PROCESS-STATION-REFACTOR Edge 11: Bind fails when first process has 0 stations.
+     */
+    public function test_bind_first_process_has_no_stations_returns_422(): void
+    {
+        $process = Process::create([
+            'program_id' => $this->program->id,
+            'name' => 'Orphan Process',
+            'description' => null,
+        ]);
+        // No stations attached to process; resolveFirstStationForStep uses StationSelectionService → null
+
+        $step = $this->track->trackSteps()->first();
+        $step->update(['process_id' => $process->id]);
+
+        $response = $this->actingAs($this->staff)->postJson('/api/sessions/bind', [
+            'qr_hash' => $this->token->qr_code_hash,
+            'track_id' => $this->track->id,
+            'client_category' => 'PWD',
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('no stations', strtolower($response->json('message') ?? ''));
+    }
+
+    /**
+     * Per PROCESS-STATION-REFACTOR: Bind with process-based track step routes via StationSelectionService.
+     */
+    public function test_bind_with_process_based_track_routes_to_station(): void
+    {
+        $process = Process::create([
+            'program_id' => $this->program->id,
+            'name' => 'Verification',
+            'description' => null,
+        ]);
+        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+            'station_id' => $this->station->id,
+            'process_id' => $process->id,
+        ]);
+
+        $step = $this->track->trackSteps()->first();
+        $step->update(['process_id' => $process->id]);
+
+        $response = $this->actingAs($this->staff)->postJson('/api/sessions/bind', [
+            'qr_hash' => $this->token->qr_code_hash,
+            'track_id' => $this->track->id,
+            'client_category' => 'PWD',
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('session.current_station.id', $this->station->id);
+        $response->assertJsonPath('session.current_step_order', 1);
+        $this->assertDatabaseHas('queue_sessions', ['current_station_id' => $this->station->id]);
     }
 
     public function test_bind_no_active_program_returns_400(): void

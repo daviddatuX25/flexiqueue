@@ -51,11 +51,19 @@
     interface StepItem {
         id: number;
         track_id: number;
-        station_id: number;
-        station_name: string;
+        process_id: number;
+        process_name: string;
         step_order: number;
         is_required: boolean;
         estimated_minutes: number | null;
+    }
+
+    interface ProcessItem {
+        id: number;
+        program_id: number;
+        name: string;
+        description: string | null;
+        created_at: string | null;
     }
 
     interface TrackItem {
@@ -79,6 +87,7 @@
         priority_first_override?: boolean | null;
         is_active: boolean;
         created_at: string | null;
+        process_ids?: number[];
     }
 
     interface ProgramStats {
@@ -90,6 +99,7 @@
     let {
         program,
         tracks = [],
+        processes = [],
         stations = [],
         stats = {
             total_sessions: 0,
@@ -99,12 +109,13 @@
     }: {
         program: ProgramItem;
         tracks: TrackItem[];
+        processes?: ProcessItem[];
         stations: StationItem[];
         stats?: ProgramStats;
     } = $props();
 
     let activeTab = $state<
-        "tracks" | "stations" | "overview" | "settings" | "staff"
+        "tracks" | "processes" | "stations" | "overview" | "settings" | "staff"
     >("overview");
     let showCreateModal = $state(false);
     let editTrack = $state<TrackItem | null>(null);
@@ -121,21 +132,26 @@
     let createStationName = $state("");
     let createStationCapacity = $state(1);
     let createStationClientCapacity = $state(1);
+    let createStationProcessIds = $state<number[]>([]);
     let editStationName = $state("");
     let editStationCapacity = $state(1);
     let editStationClientCapacity = $state(1);
     let editStationPriorityFirstOverride = $state<boolean | null>(null);
     let editStationIsActive = $state(true);
+    let editStationProcessIds = $state<number[]>([]);
     let showStepModal = $state(false);
     let stepModalTrack = $state<TrackItem | null>(null);
     /** Steps shown in the modal; updated in place on add/delete/reorder so modal stays realtime */
     let modalSteps = $state<StepItem[]>([]);
-    let addStepStationId = $state<number | "">("");
+    let addStepProcessId = $state<number | "">("");
     let addStepEstimatedMinutes = $state<number | "">("");
     let editingStepId = $state<number | null>(null);
-    let editStepStationId = $state<number | "">("");
+    let editStepProcessId = $state<number | "">("");
     let editStepEstimatedMinutes = $state<number | "">("");
     let editStepIsRequired = $state(true);
+    let createProcessName = $state("");
+    let createProcessDescription = $state("");
+    let creatingProcess = $state(false);
     let submitting = $state(false);
     let error = $state("");
     let settingsNoShowTimer = $state(10);
@@ -361,7 +377,7 @@
     function openStepModal(t: TrackItem) {
         stepModalTrack = t;
         modalSteps = stepList(t);
-        addStepStationId = "";
+        addStepProcessId = "";
         addStepEstimatedMinutes = "";
         editingStepId = null;
         error = "";
@@ -370,7 +386,7 @@
 
     function openEditStep(step: StepItem) {
         editingStepId = step.id;
-        editStepStationId = step.station_id;
+        editStepProcessId = step.process_id;
         editStepEstimatedMinutes = step.estimated_minutes ?? "";
         editStepIsRequired = step.is_required;
         error = "";
@@ -385,12 +401,12 @@
         submitting = true;
         error = "";
         const body: {
-            station_id?: number;
+            process_id?: number;
             estimated_minutes?: number | null;
             is_required?: boolean;
         } = {};
-        if (editStepStationId !== "")
-            body.station_id = editStepStationId as number;
+        if (editStepProcessId !== "")
+            body.process_id = editStepProcessId as number;
         body.estimated_minutes =
             editStepEstimatedMinutes === ""
                 ? null
@@ -513,6 +529,7 @@
         createStationName = "";
         createStationCapacity = 1;
         createStationClientCapacity = 1;
+        createStationProcessIds = [];
         error = "";
         showCreateStationModal = true;
     }
@@ -524,20 +541,42 @@
         editStationClientCapacity = s.client_capacity ?? 1;
         editStationPriorityFirstOverride = s.priority_first_override ?? null;
         editStationIsActive = s.is_active;
+        editStationProcessIds = [...(s.process_ids ?? [])];
         error = "";
+    }
+
+    function toggleCreateProcess(id: number) {
+        if (createStationProcessIds.includes(id)) {
+            createStationProcessIds = createStationProcessIds.filter((x) => x !== id);
+        } else {
+            createStationProcessIds = [...createStationProcessIds, id];
+        }
+    }
+
+    function toggleEditProcess(id: number) {
+        if (editStationProcessIds.includes(id)) {
+            editStationProcessIds = editStationProcessIds.filter((x) => x !== id);
+        } else {
+            editStationProcessIds = [...editStationProcessIds, id];
+        }
     }
 
     async function handleCreateStation() {
         if (!createStationName.trim()) return;
+        if (createStationProcessIds.length === 0) {
+            error = "Select at least one process.";
+            return;
+        }
         submitting = true;
         error = "";
-        const { ok, message } = await api(
+        const { ok, data, message } = await api(
             "POST",
             `/api/admin/programs/${program.id}/stations`,
             {
                 name: createStationName.trim(),
                 capacity: createStationCapacity,
                 client_capacity: createStationClientCapacity,
+                process_ids: createStationProcessIds,
             },
         );
         submitting = false;
@@ -545,15 +584,47 @@
             closeModals();
             router.reload();
         } else {
-            error = message ?? "Failed to create station.";
+            const d = data as { message?: string; errors?: Record<string, string[]> };
+            const firstErr = d?.errors ? Object.values(d.errors).flat()[0] : null;
+            error = firstErr ?? message ?? "Failed to create station.";
+        }
+    }
+
+    async function handleCreateProcess() {
+        if (!createProcessName.trim()) return;
+        creatingProcess = true;
+        submitting = true;
+        error = "";
+        const { ok, data, message } = await api(
+            "POST",
+            `/api/admin/programs/${program.id}/processes`,
+            {
+                name: createProcessName.trim(),
+                description: createProcessDescription.trim() || null,
+            },
+        );
+        creatingProcess = false;
+        submitting = false;
+        if (ok) {
+            createProcessName = "";
+            createProcessDescription = "";
+            router.reload();
+        } else {
+            const d = data as { message?: string; errors?: Record<string, string[]> };
+            const firstErr = d?.errors ? Object.values(d.errors).flat()[0] : null;
+            error = firstErr ?? d?.message ?? message ?? "Failed to create process.";
         }
     }
 
     async function handleUpdateStation() {
         if (!editStation || !editStationName.trim()) return;
+        if (editStationProcessIds.length === 0) {
+            error = "Select at least one process.";
+            return;
+        }
         submitting = true;
         error = "";
-        const { ok, message } = await api(
+        const { ok, data, message } = await api(
             "PUT",
             `/api/admin/stations/${editStation.id}`,
             {
@@ -562,6 +633,7 @@
                 client_capacity: editStationClientCapacity,
                 priority_first_override: editStationPriorityFirstOverride,
                 is_active: editStationIsActive,
+                process_ids: editStationProcessIds,
             },
         );
         submitting = false;
@@ -569,7 +641,9 @@
             closeModals();
             router.reload();
         } else {
-            error = message ?? "Failed to update station.";
+            const d = data as { message?: string; errors?: Record<string, string[]> };
+            const firstErr = d?.errors ? Object.values(d.errors).flat()[0] : null;
+            error = firstErr ?? message ?? "Failed to update station.";
         }
     }
 
@@ -622,11 +696,11 @@
     }
 
     async function handleAddStep() {
-        if (!stepModalTrack || addStepStationId === "") return;
+        if (!stepModalTrack || addStepProcessId === "") return;
         submitting = true;
         error = "";
-        const body: { station_id: number; estimated_minutes?: number } = {
-            station_id: addStepStationId as number,
+        const body: { process_id: number; estimated_minutes?: number } = {
+            process_id: addStepProcessId as number,
         };
         if (addStepEstimatedMinutes !== "")
             body.estimated_minutes = addStepEstimatedMinutes as number;
@@ -641,7 +715,7 @@
             modalSteps = [...modalSteps, s].sort(
                 (a, b) => a.step_order - b.step_order,
             );
-            addStepStationId = "";
+            addStepProcessId = "";
             addStepEstimatedMinutes = "";
         } else {
             error = message ?? "Failed to add step.";
@@ -1094,6 +1168,15 @@
                 type="button"
                 role="tab"
                 class="tab"
+                class:tab-active={activeTab === "processes"}
+                onclick={() => (activeTab = "processes")}
+            >
+                Processes
+            </button>
+            <button
+                type="button"
+                role="tab"
+                class="tab"
                 class:tab-active={activeTab === "stations"}
                 onclick={() => (activeTab = "stations")}
             >
@@ -1301,7 +1384,7 @@
                                             {#each track.steps ?? [] as step, i}
                                                 <span
                                                     class="inline-block px-2 py-0.5 bg-white border border-surface-200 rounded text-xs shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-                                                    >{step.station_name}</span
+                                                    >{step.process_name}</span
                                                 >
                                                 {#if i < (track.steps ?? []).length - 1}
                                                     <ArrowRight
@@ -1604,6 +1687,81 @@
                         </button>
                     </div>
                 </div>
+            </div>
+        {:else if activeTab === "processes"}
+            <div class="space-y-6">
+                <section>
+                    <h2 class="text-lg font-semibold text-surface-950 mb-2">
+                        Processes
+                    </h2>
+                    <p class="text-sm text-surface-600 mb-4">
+                        Define logical work types (e.g. Verification, Cash Release). Each track step references a process. Create processes before adding steps to tracks.
+                    </p>
+                    <div class="flex flex-wrap items-end gap-3 mb-6">
+                        <div class="form-control min-w-[200px]">
+                            <label for="create-process-name" class="label py-0"
+                                ><span class="label-text text-xs">Name</span
+                                ></label
+                            >
+                            <input
+                                id="create-process-name"
+                                type="text"
+                                class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                                placeholder="e.g. Verification"
+                                bind:value={createProcessName}
+                                maxlength="50"
+                            />
+                        </div>
+                        <div class="form-control min-w-[200px]">
+                            <label for="create-process-desc" class="label py-0"
+                                ><span class="label-text text-xs">Description (optional)</span
+                                ></label
+                            >
+                            <input
+                                id="create-process-desc"
+                                type="text"
+                                class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                                placeholder="Optional"
+                                bind:value={createProcessDescription}
+                            />
+                        </div>
+                        <button
+                            type="button"
+                            class="btn preset-filled-primary-500 flex items-center gap-2"
+                            disabled={submitting || !createProcessName.trim()}
+                            onclick={handleCreateProcess}
+                        >
+                            {#if submitting && creatingProcess}
+                                <span class="loading-spinner loading-sm"></span>
+                                Adding...
+                            {:else}
+                                <Plus class="w-4 h-4" /> Add Process
+                            {/if}
+                        </button>
+                    </div>
+                    {#if processes.length === 0}
+                        <div
+                            class="rounded-container bg-surface-50 border border-surface-200 p-8 text-center text-surface-600"
+                        >
+                            No processes yet. Add one above to use in track steps.
+                        </div>
+                    {:else}
+                        <div class="flex flex-wrap gap-2">
+                            {#each processes as proc (proc.id)}
+                                <span
+                                    class="inline-flex items-center px-3 py-1.5 rounded-lg bg-surface-100 border border-surface-200 text-sm font-medium text-surface-950"
+                                >
+                                    {proc.name}
+                                    {#if proc.description}
+                                        <span class="text-surface-500 text-xs ml-2"
+                                            >— {proc.description}</span
+                                        >
+                                    {/if}
+                                </span>
+                            {/each}
+                        </div>
+                    {/if}
+                </section>
             </div>
         {:else if activeTab === "staff"}
             <!-- Staff tab: station assignments + supervisors -->
@@ -2177,6 +2335,29 @@
                     required
                 />
             </div>
+            <div class="form-control w-full">
+                <label class="label"><span class="label-text">Processes</span></label>
+                <p class="text-xs text-surface-500 mb-2">Select which work types this station handles. At least one required.</p>
+                {#if processes.length === 0}
+                    <p class="text-sm text-warning-600">Create processes in the Processes tab first.</p>
+                {:else}
+                    <div class="flex flex-wrap gap-3">
+                        {#each processes as proc (proc.id)}
+                            <label
+                                class="label cursor-pointer justify-start gap-2 w-fit p-2 rounded-lg border border-surface-200 hover:bg-surface-50"
+                            >
+                                <input
+                                    type="checkbox"
+                                    class="checkbox checkbox-sm"
+                                    checked={createStationProcessIds.includes(proc.id)}
+                                    onchange={() => toggleCreateProcess(proc.id)}
+                                />
+                                <span class="label-text">{proc.name}</span>
+                            </label>
+                        {/each}
+                    </div>
+                {/if}
+            </div>
             <div class="flex justify-end gap-2">
                 <button
                     type="button"
@@ -2186,7 +2367,7 @@
                 <button
                     type="submit"
                     class="btn preset-filled-primary-500"
-                    disabled={submitting || !createStationName.trim()}
+                    disabled={submitting || !createStationName.trim() || createStationProcessIds.length === 0 || processes.length === 0}
                 >
                     {submitting ? "Creating…" : "Create"}
                 </button>
@@ -2244,6 +2425,29 @@
                         required
                     />
                 </div>
+                <div class="form-control w-full">
+                    <label class="label"><span class="label-text">Processes</span></label>
+                    <p class="text-xs text-surface-500 mb-2">Select which work types this station handles. At least one required.</p>
+                    {#if processes.length === 0}
+                        <p class="text-sm text-warning-600">Create processes in the Processes tab first.</p>
+                    {:else}
+                        <div class="flex flex-wrap gap-3">
+                            {#each processes as proc (proc.id)}
+                                <label
+                                    class="label cursor-pointer justify-start gap-2 w-fit p-2 rounded-lg border border-surface-200 hover:bg-surface-50"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        class="checkbox checkbox-sm"
+                                        checked={editStationProcessIds.includes(proc.id)}
+                                        onchange={() => toggleEditProcess(proc.id)}
+                                    />
+                                    <span class="label-text">{proc.name}</span>
+                                </label>
+                            {/each}
+                        </div>
+                    {/if}
+                </div>
                 <div class="form-control">
                     <label for="edit-priority-override" class="label"
                         ><span class="label-text">Priority first override</span
@@ -2291,7 +2495,7 @@
                     <button
                         type="submit"
                         class="btn preset-filled-primary-500"
-                        disabled={submitting || !editStationName.trim()}
+                        disabled={submitting || !editStationName.trim() || editStationProcessIds.length === 0 || processes.length === 0}
                     >
                         {submitting ? "Saving…" : "Save"}
                     </button>
@@ -2348,22 +2552,22 @@
                                     >
                                         <div class="form-control min-w-0">
                                             <label
-                                                for="edit-step-station-{step.id}"
+                                                for="edit-step-process-{step.id}"
                                                 class="label py-0"
                                                 ><span
                                                     class="label-text text-xs"
-                                                    >Station</span
+                                                    >Process</span
                                                 ></label
                                             >
                                             <select
-                                                id="edit-step-station-{step.id}"
+                                                id="edit-step-process-{step.id}"
                                                 class="select rounded-container border border-surface-200 px-3 py-2 select-sm w-full"
-                                                bind:value={editStepStationId}
-                                                aria-label="Station"
+                                                bind:value={editStepProcessId}
+                                                aria-label="Process"
                                             >
-                                                {#each stations as st}
-                                                    <option value={st.id}
-                                                        >{st.name}</option
+                                                {#each processes as proc}
+                                                    <option value={proc.id}
+                                                        >{proc.name}</option
                                                     >
                                                 {/each}
                                             </select>
@@ -2415,7 +2619,7 @@
                                                 class="btn preset-filled-primary-500 btn-sm"
                                                 onclick={handleUpdateStep}
                                                 disabled={submitting ||
-                                                    editStepStationId === ""}
+                                                    editStepProcessId === ""}
                                                 >Save</button
                                             >
                                             <button
@@ -2435,7 +2639,7 @@
                                         >{step.step_order}.</span
                                     >
                                     <span class="flex-1"
-                                        >{step.station_name}</span
+                                        >{step.process_name}</span
                                     >
                                     {#if step.estimated_minutes != null}
                                         <span
@@ -2499,19 +2703,19 @@
                     <p class="label-text mb-2">Add step</p>
                     <div class="flex flex-wrap items-end gap-3">
                         <div class="form-control min-w-[180px]">
-                            <label for="add-step-station" class="label py-0"
-                                ><span class="label-text text-xs">Station</span
+                            <label for="add-step-process" class="label py-0"
+                                ><span class="label-text text-xs">Process</span
                                 ></label
                             >
                             <select
-                                id="add-step-station"
+                                id="add-step-process"
                                 class="select rounded-container border border-surface-200 px-3 py-2 select-sm w-full"
-                                bind:value={addStepStationId}
-                                aria-label="Station"
+                                bind:value={addStepProcessId}
+                                aria-label="Process"
                             >
-                                <option value="">Select station</option>
-                                {#each stations as st}
-                                    <option value={st.id}>{st.name}</option>
+                                <option value="">Select process</option>
+                                {#each processes as proc}
+                                    <option value={proc.id}>{proc.name}</option>
                                 {/each}
                             </select>
                         </div>
@@ -2536,7 +2740,7 @@
                             type="button"
                             class="btn preset-filled-primary-500 btn-sm"
                             onclick={handleAddStep}
-                            disabled={submitting || addStepStationId === ""}
+                            disabled={submitting || addStepProcessId === ""}
                             >Add</button
                         >
                     </div>
@@ -2672,7 +2876,7 @@
     open={!!confirmRemoveStep}
     title="Remove step?"
     message={confirmRemoveStep
-        ? `Remove step "${confirmRemoveStep.step.station_name}" from this track?`
+        ? `Remove step "${confirmRemoveStep.step.process_name}" from this track?`
         : ""}
     confirmLabel="Remove"
     cancelLabel="Cancel"

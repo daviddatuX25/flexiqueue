@@ -27,14 +27,14 @@ class FlowEngine
 
         $nextStep = TrackStep::where('track_id', $session->track_id)
             ->where('step_order', $session->current_step_order + 1)
-            ->with(['station', 'process'])
+            ->with(['process'])
             ->first();
 
         if (! $nextStep) {
             return null;
         }
 
-        // Per PROCESS-STATION-REFACTOR: process_id path → caller uses StationSelectionService
+        // Per PROCESS-STATION-REFACTOR Phase 3: process_id required; caller uses StationSelectionService
         if ($nextStep->process_id !== null) {
             return [
                 'process_id' => $nextStep->process_id,
@@ -42,16 +42,8 @@ class FlowEngine
             ];
         }
 
-        // Dual-read fallback: station_id when process_id null
-        $station = $nextStep->station;
-        if (! $station || ! $station->is_active) {
-            return null;
-        }
-
-        return [
-            'station_id' => $nextStep->station_id,
-            'step_order' => $nextStep->step_order,
-        ];
+        // No process_id: no next station (Phase 3 removed station_id fallback)
+        return null;
     }
 
     /**

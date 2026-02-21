@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\Admin\ProgramController as AdminProgramController;
 use App\Http\Controllers\Api\Admin\ProgramStaffController;
 use App\Http\Controllers\Api\Admin\ReportController as AdminReportController;
 use App\Http\Controllers\Api\Admin\StationController as AdminStationController;
+use App\Http\Controllers\Api\Admin\ProcessController as AdminProcessController;
 use App\Http\Controllers\Api\Admin\StepController as AdminStepController;
 use App\Http\Controllers\Api\Admin\PrintSettingsController;
 use App\Http\Controllers\Api\Admin\TokenController as AdminTokenController;
@@ -53,8 +54,12 @@ Route::middleware(['auth', 'role:admin'])->prefix('api/admin')->group(function (
     Route::put('/tracks/{service_track}', [AdminTrackController::class, 'update']);
     Route::delete('/tracks/{service_track}', [AdminTrackController::class, 'destroy']);
     // Per 08-API-SPEC-PHASE1 §5.3: Station CRUD
+    Route::get('/programs/{program}/processes', [AdminProcessController::class, 'index']);
+    Route::post('/programs/{program}/processes', [AdminProcessController::class, 'store']);
     Route::get('/programs/{program}/stations', [AdminStationController::class, 'index']);
     Route::post('/programs/{program}/stations', [AdminStationController::class, 'store']);
+    Route::get('/programs/{program}/stations/{station}/processes', [AdminStationController::class, 'listProcesses']);
+    Route::put('/programs/{program}/stations/{station}/processes', [AdminStationController::class, 'setProcesses']);
     Route::put('/stations/{station}', [AdminStationController::class, 'update']);
     Route::delete('/stations/{station}', [AdminStationController::class, 'destroy']);
     // Per 08-API-SPEC-PHASE1 §5.4: Track Steps

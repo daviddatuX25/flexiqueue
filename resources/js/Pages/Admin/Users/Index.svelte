@@ -289,7 +289,8 @@
         </div>
     {/if}
 
-    <div class="table-container mt-6">
+    <!-- Desktop Table View -->
+    <div class="table-container mt-6 hidden md:block">
         <table class="table table-zebra relative w-full">
             <thead>
                 <tr>
@@ -307,8 +308,10 @@
                     <tr>
                         <td>
                             <div class="flex items-center gap-2">
-                                <UserAvatar user={user} size="sm" />
-                                <span class="font-medium text-surface-900">{user.name}</span>
+                                <UserAvatar {user} size="sm" />
+                                <span class="font-medium text-surface-900"
+                                    >{user.name}</span
+                                >
                             </div>
                         </td>
                         <td class="text-surface-700">{user.email}</td>
@@ -316,42 +319,42 @@
                             <span
                                 class="badge {user.role === 'admin'
                                     ? 'preset-filled-primary-500'
-                                    : 'preset-tonal'} shadow-sm font-semibold uppercase tracking-wide text-[10px] px-2 py-0.5 rounded-full"
+                                    : 'preset-tonal'} shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
                                 >{user.role}</span
                             >
                         </td>
                         <td>
                             {#if user.is_active}
                                 <span
-                                    class="badge preset-filled-success-500 shadow-sm font-semibold uppercase tracking-wide text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 w-max"
-                                    ><CheckCircle2 class="w-3 h-3" /> Active</span
+                                    class="badge preset-filled-success-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 w-max"
+                                    ><CheckCircle2 class="w-3.5 h-3.5" /> Active</span
                                 >
                             {:else}
                                 <span
-                                    class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 w-max"
-                                    ><XCircle class="w-3 h-3" /> Inactive</span
+                                    class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 w-max"
+                                    ><XCircle class="w-3.5 h-3.5" /> Inactive</span
                                 >
                             {/if}
                         </td>
                         <td>
                             {#if user.availability_status === "available"}
                                 <span
-                                    class="badge preset-filled-success-500 shadow-sm font-semibold uppercase tracking-wide text-[10px] px-2 py-0.5 rounded-full"
+                                    class="badge preset-filled-success-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
                                     >Available</span
                                 >
                             {:else if user.availability_status === "on_break"}
                                 <span
-                                    class="badge preset-filled-warning-500 shadow-sm font-semibold uppercase tracking-wide text-[10px] px-2 py-0.5 rounded-full"
+                                    class="badge preset-filled-warning-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
                                     >On break</span
                                 >
                             {:else if user.availability_status === "away"}
                                 <span
-                                    class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[10px] px-2 py-0.5 rounded-full"
+                                    class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
                                     >Away</span
                                 >
                             {:else}
                                 <span
-                                    class="badge preset-tonal text-surface-500 shadow-sm font-semibold uppercase tracking-wide text-[10px] px-2 py-0.5 rounded-full border border-surface-200"
+                                    class="badge preset-tonal text-surface-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full border border-surface-200"
                                     >Offline</span
                                 >
                             {/if}
@@ -405,6 +408,139 @@
                 {/each}
             </tbody>
         </table>
+    </div>
+
+    <!-- Mobile Card View -->
+    <div class="grid grid-cols-1 gap-4 mt-4 md:hidden">
+        {#each users as user (user.id)}
+            <div
+                class="card bg-surface-50 border border-surface-200 shadow-sm p-4 flex flex-col gap-4"
+            >
+                <div class="flex items-start justify-between gap-2">
+                    <div class="flex items-center gap-3">
+                        <UserAvatar {user} size="md" />
+                        <div>
+                            <span class="font-semibold text-surface-950 block"
+                                >{user.name}</span
+                            >
+                            <span class="text-sm text-surface-950/70 block"
+                                >{user.email}</span
+                            >
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end gap-1.5 min-w-max">
+                        {#if user.role === "admin"}
+                            <span
+                                class="badge preset-filled-primary-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
+                            >
+                                Admin
+                            </span>
+                        {:else}
+                            <span
+                                class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
+                            >
+                                Staff
+                            </span>
+                        {/if}
+                        {#if user.is_active}
+                            <span
+                                class="badge preset-filled-success-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5"
+                            >
+                                <CheckCircle2 class="w-3.5 h-3.5" /> Active
+                            </span>
+                        {:else}
+                            <span
+                                class="badge preset-tonal text-surface-600 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5"
+                            >
+                                <Ban class="w-3.5 h-3.5" /> Disabled
+                            </span>
+                        {/if}
+                    </div>
+                </div>
+
+                <div
+                    class="grid grid-cols-2 gap-2 text-sm bg-surface-100/50 p-3 rounded-container border border-surface-200"
+                >
+                    <div>
+                        <span
+                            class="text-xs text-surface-500 block mb-0.5 uppercase tracking-wider font-semibold"
+                            >Availability</span
+                        >
+                        {#if user.availability_status === "available"}
+                            <span
+                                class="badge preset-filled-success-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full inline-flex items-center gap-1.5"
+                            >
+                                <CheckCircle class="w-3.5 h-3.5" /> Available
+                            </span>
+                        {:else if user.availability_status === "on_break"}
+                            <span
+                                class="badge preset-filled-warning-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full inline-flex items-center gap-1.5"
+                            >
+                                <Clock class="w-3.5 h-3.5" /> Away
+                            </span>
+                        {:else}
+                            <span
+                                class="badge preset-tonal text-surface-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full border border-surface-200 inline-block"
+                            >
+                                Offline
+                            </span>
+                        {/if}
+                    </div>
+                    <div>
+                        <span
+                            class="text-xs text-surface-500 block mb-0.5 uppercase tracking-wider font-semibold"
+                            >Station</span
+                        >
+                        <span
+                            class="text-surface-950 font-medium truncate block"
+                            title={user.assigned_station?.name ?? "—"}
+                        >
+                            {user.assigned_station?.name ?? "—"}
+                        </span>
+                    </div>
+                </div>
+
+                <div
+                    class="pt-1 border-t border-surface-200 flex flex-wrap items-center justify-end gap-2"
+                >
+                    {#if user.is_active}
+                        <button
+                            type="button"
+                            class="btn btn-sm flex-1 preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                            onclick={() => openEdit(user)}
+                            disabled={submitting}
+                        >
+                            <Edit2 class="w-3.5 h-3.5" /> Edit
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm flex-1 preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                            onclick={() => openReset(user)}
+                            disabled={submitting}
+                        >
+                            <Key class="w-3.5 h-3.5" /> PW
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm flex-1 preset-outlined bg-white text-error-600 hover:bg-error-50 border-error-200 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                            onclick={() => openDeactivateConfirm(user)}
+                            disabled={submitting}
+                        >
+                            <Ban class="w-3.5 h-3.5" /> Disable
+                        </button>
+                    {:else}
+                        <button
+                            type="button"
+                            class="btn btn-sm flex-1 preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                            onclick={() => openEdit(user)}
+                            disabled={submitting}
+                        >
+                            <Edit2 class="w-3.5 h-3.5" /> Edit
+                        </button>
+                    {/if}
+                </div>
+            </div>
+        {/each}
     </div>
 </AdminLayout>
 

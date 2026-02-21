@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api\Admin;
 
+use App\Models\Process;
 use App\Models\Program;
 use App\Models\Session;
 use App\Models\ServiceTrack;
@@ -9,6 +10,7 @@ use App\Models\Station;
 use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -47,34 +49,42 @@ class StepControllerTest extends TestCase
     {
         $station1 = Station::create(['program_id' => $this->program->id, 'name' => 'S1', 'capacity' => 1]);
         $station2 = Station::create(['program_id' => $this->program->id, 'name' => 'S2', 'capacity' => 1]);
-        TrackStep::create(['track_id' => $this->track->id, 'station_id' => $station2->id, 'step_order' => 2, 'is_required' => true]);
-        TrackStep::create(['track_id' => $this->track->id, 'station_id' => $station1->id, 'step_order' => 1, 'is_required' => true]);
+        $process1 = Process::create(['program_id' => $this->program->id, 'name' => 'S1', 'description' => null]);
+        $process2 = Process::create(['program_id' => $this->program->id, 'name' => 'S2', 'description' => null]);
+        DB::table('station_process')->insert([
+            ['station_id' => $station1->id, 'process_id' => $process1->id],
+            ['station_id' => $station2->id, 'process_id' => $process2->id],
+        ]);
+        TrackStep::create(['track_id' => $this->track->id, 'process_id' => $process2->id, 'step_order' => 2, 'is_required' => true]);
+        TrackStep::create(['track_id' => $this->track->id, 'process_id' => $process1->id, 'step_order' => 1, 'is_required' => true]);
 
         $response = $this->actingAs($this->admin)->getJson("/api/admin/tracks/{$this->track->id}/steps");
 
         $response->assertStatus(200);
         $response->assertJsonPath('steps.0.step_order', 1);
-        $response->assertJsonPath('steps.0.station_name', 'S1');
+        $response->assertJsonPath('steps.0.process_name', 'S1');
         $response->assertJsonPath('steps.1.step_order', 2);
-        $response->assertJsonPath('steps.1.station_name', 'S2');
+        $response->assertJsonPath('steps.1.process_name', 'S2');
     }
 
     public function test_store_creates_step_returns_201(): void
     {
         $station = Station::create(['program_id' => $this->program->id, 'name' => 'Desk', 'capacity' => 1]);
+        $process = Process::create(['program_id' => $this->program->id, 'name' => 'Desk', 'description' => null]);
+        DB::table('station_process')->insert(['station_id' => $station->id, 'process_id' => $process->id]);
 
         $response = $this->actingAs($this->admin)->postJson("/api/admin/tracks/{$this->track->id}/steps", [
-            'station_id' => $station->id,
+            'process_id' => $process->id,
             'is_required' => true,
         ]);
 
         $response->assertStatus(201);
-        $response->assertJsonPath('step.station_id', $station->id);
+        $response->assertJsonPath('step.process_id', $process->id);
         $response->assertJsonPath('step.step_order', 1);
-        $this->assertDatabaseHas('track_steps', ['track_id' => $this->track->id, 'station_id' => $station->id]);
+        $this->assertDatabaseHas('track_steps', ['track_id' => $this->track->id, 'process_id' => $process->id]);
     }
 
-    public function test_store_rejects_station_from_other_program(): void
+    public function test_store_rejects_process_from_other_program(): void
     {
         $otherProgram = Program::create([
             'name' => 'Other',
@@ -82,42 +92,54 @@ class StepControllerTest extends TestCase
             'is_active' => false,
             'created_by' => $this->admin->id,
         ]);
-        $otherStation = Station::create(['program_id' => $otherProgram->id, 'name' => 'Other Station', 'capacity' => 1]);
+        $otherProcess = Process::create(['program_id' => $otherProgram->id, 'name' => 'Other', 'description' => null]);
 
         $response = $this->actingAs($this->admin)->postJson("/api/admin/tracks/{$this->track->id}/steps", [
-            'station_id' => $otherStation->id,
+            'process_id' => $otherProcess->id,
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonValidationErrors('station_id');
+        $response->assertJsonValidationErrors('process_id');
     }
 
     public function test_update_modifies_step(): void
     {
         $station1 = Station::create(['program_id' => $this->program->id, 'name' => 'S1', 'capacity' => 1]);
         $station2 = Station::create(['program_id' => $this->program->id, 'name' => 'S2', 'capacity' => 1]);
-        $step = TrackStep::create(['track_id' => $this->track->id, 'station_id' => $station1->id, 'step_order' => 1, 'is_required' => true]);
+        $process1 = Process::create(['program_id' => $this->program->id, 'name' => 'S1', 'description' => null]);
+        $process2 = Process::create(['program_id' => $this->program->id, 'name' => 'S2', 'description' => null]);
+        DB::table('station_process')->insert([
+            ['station_id' => $station1->id, 'process_id' => $process1->id],
+            ['station_id' => $station2->id, 'process_id' => $process2->id],
+        ]);
+        $step = TrackStep::create(['track_id' => $this->track->id, 'process_id' => $process1->id, 'step_order' => 1, 'is_required' => true]);
 
         $response = $this->actingAs($this->admin)->putJson("/api/admin/steps/{$step->id}", [
-            'station_id' => $station2->id,
+            'process_id' => $process2->id,
             'is_required' => false,
             'estimated_minutes' => 5,
         ]);
 
         $response->assertStatus(200);
-        $response->assertJsonPath('step.station_id', $station2->id);
+        $response->assertJsonPath('step.process_id', $process2->id);
         $response->assertJsonPath('step.is_required', false);
         $response->assertJsonPath('step.estimated_minutes', 5);
         $step->refresh();
-        $this->assertSame($station2->id, $step->station_id);
+        $this->assertSame($process2->id, $step->process_id);
     }
 
     public function test_destroy_deletes_and_renumbers(): void
     {
         $station1 = Station::create(['program_id' => $this->program->id, 'name' => 'S1', 'capacity' => 1]);
         $station2 = Station::create(['program_id' => $this->program->id, 'name' => 'S2', 'capacity' => 1]);
-        $step1 = TrackStep::create(['track_id' => $this->track->id, 'station_id' => $station1->id, 'step_order' => 1, 'is_required' => true]);
-        TrackStep::create(['track_id' => $this->track->id, 'station_id' => $station2->id, 'step_order' => 2, 'is_required' => true]);
+        $process1 = Process::create(['program_id' => $this->program->id, 'name' => 'S1', 'description' => null]);
+        $process2 = Process::create(['program_id' => $this->program->id, 'name' => 'S2', 'description' => null]);
+        DB::table('station_process')->insert([
+            ['station_id' => $station1->id, 'process_id' => $process1->id],
+            ['station_id' => $station2->id, 'process_id' => $process2->id],
+        ]);
+        $step1 = TrackStep::create(['track_id' => $this->track->id, 'process_id' => $process1->id, 'step_order' => 1, 'is_required' => true]);
+        TrackStep::create(['track_id' => $this->track->id, 'process_id' => $process2->id, 'step_order' => 2, 'is_required' => true]);
 
         $response = $this->actingAs($this->admin)->deleteJson("/api/admin/steps/{$step1->id}");
 
@@ -131,8 +153,14 @@ class StepControllerTest extends TestCase
     {
         $station1 = Station::create(['program_id' => $this->program->id, 'name' => 'S1', 'capacity' => 1]);
         $station2 = Station::create(['program_id' => $this->program->id, 'name' => 'S2', 'capacity' => 1]);
-        $step1 = TrackStep::create(['track_id' => $this->track->id, 'station_id' => $station1->id, 'step_order' => 1, 'is_required' => true]);
-        $step2 = TrackStep::create(['track_id' => $this->track->id, 'station_id' => $station2->id, 'step_order' => 2, 'is_required' => true]);
+        $process1 = Process::create(['program_id' => $this->program->id, 'name' => 'S1', 'description' => null]);
+        $process2 = Process::create(['program_id' => $this->program->id, 'name' => 'S2', 'description' => null]);
+        DB::table('station_process')->insert([
+            ['station_id' => $station1->id, 'process_id' => $process1->id],
+            ['station_id' => $station2->id, 'process_id' => $process2->id],
+        ]);
+        $step1 = TrackStep::create(['track_id' => $this->track->id, 'process_id' => $process1->id, 'step_order' => 1, 'is_required' => true]);
+        $step2 = TrackStep::create(['track_id' => $this->track->id, 'process_id' => $process2->id, 'step_order' => 2, 'is_required' => true]);
 
         $response = $this->actingAs($this->admin)->postJson("/api/admin/tracks/{$this->track->id}/steps/reorder", [
             'step_ids' => [$step2->id, $step1->id],
@@ -149,8 +177,14 @@ class StepControllerTest extends TestCase
     {
         $station1 = Station::create(['program_id' => $this->program->id, 'name' => 'S1', 'capacity' => 1]);
         $station2 = Station::create(['program_id' => $this->program->id, 'name' => 'S2', 'capacity' => 1]);
-        $step1 = TrackStep::create(['track_id' => $this->track->id, 'station_id' => $station1->id, 'step_order' => 1, 'is_required' => true]);
-        $step2 = TrackStep::create(['track_id' => $this->track->id, 'station_id' => $station2->id, 'step_order' => 2, 'is_required' => true]);
+        $process1 = Process::create(['program_id' => $this->program->id, 'name' => 'S1', 'description' => null]);
+        $process2 = Process::create(['program_id' => $this->program->id, 'name' => 'S2', 'description' => null]);
+        DB::table('station_process')->insert([
+            ['station_id' => $station1->id, 'process_id' => $process1->id],
+            ['station_id' => $station2->id, 'process_id' => $process2->id],
+        ]);
+        $step1 = TrackStep::create(['track_id' => $this->track->id, 'process_id' => $process1->id, 'step_order' => 1, 'is_required' => true]);
+        $step2 = TrackStep::create(['track_id' => $this->track->id, 'process_id' => $process2->id, 'step_order' => 2, 'is_required' => true]);
 
         $token = new Token;
         $token->qr_code_hash = hash('sha256', Str::random(32));
@@ -183,8 +217,14 @@ class StepControllerTest extends TestCase
     {
         $station1 = Station::create(['program_id' => $this->program->id, 'name' => 'S1', 'capacity' => 1]);
         $station2 = Station::create(['program_id' => $this->program->id, 'name' => 'S2', 'capacity' => 1]);
-        $step1 = TrackStep::create(['track_id' => $this->track->id, 'station_id' => $station1->id, 'step_order' => 1, 'is_required' => true]);
-        $step2 = TrackStep::create(['track_id' => $this->track->id, 'station_id' => $station2->id, 'step_order' => 2, 'is_required' => true]);
+        $process1 = Process::create(['program_id' => $this->program->id, 'name' => 'S1', 'description' => null]);
+        $process2 = Process::create(['program_id' => $this->program->id, 'name' => 'S2', 'description' => null]);
+        DB::table('station_process')->insert([
+            ['station_id' => $station1->id, 'process_id' => $process1->id],
+            ['station_id' => $station2->id, 'process_id' => $process2->id],
+        ]);
+        $step1 = TrackStep::create(['track_id' => $this->track->id, 'process_id' => $process1->id, 'step_order' => 1, 'is_required' => true]);
+        $step2 = TrackStep::create(['track_id' => $this->track->id, 'process_id' => $process2->id, 'step_order' => 2, 'is_required' => true]);
 
         $token = new Token;
         $token->qr_code_hash = hash('sha256', Str::random(32));

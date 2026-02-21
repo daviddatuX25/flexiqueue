@@ -567,35 +567,17 @@
             </div>
         {:else}
             <div
-                class="rounded-container border border-surface-200 overflow-x-auto shadow-sm mt-4 bg-white"
+                class="table-container mt-2 hidden md:block border border-surface-200 rounded-container overflow-hidden shadow-sm bg-white"
             >
                 <table class="table table-zebra w-full relative">
                     <thead class="bg-surface-50 border-b border-surface-200">
                         <tr>
-                            <th
-                                class="text-xs uppercase tracking-wider font-semibold text-surface-600 px-4 py-3"
-                                >Time</th
-                            >
-                            <th
-                                class="text-xs uppercase tracking-wider font-semibold text-surface-600 px-4 py-3"
-                                >Session</th
-                            >
-                            <th
-                                class="text-xs uppercase tracking-wider font-semibold text-surface-600 px-4 py-3"
-                                >Action</th
-                            >
-                            <th
-                                class="text-xs uppercase tracking-wider font-semibold text-surface-600 px-4 py-3"
-                                >Station</th
-                            >
-                            <th
-                                class="text-xs uppercase tracking-wider font-semibold text-surface-600 px-4 py-3"
-                                >Staff</th
-                            >
-                            <th
-                                class="text-xs uppercase tracking-wider font-semibold text-surface-600 px-4 py-3"
-                                >Remarks</th
-                            >
+                            <th>Time</th>
+                            <th>Session</th>
+                            <th>Action</th>
+                            <th>Station</th>
+                            <th>Staff</th>
+                            <th>Remarks</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-surface-100">
@@ -603,19 +585,17 @@
                             <tr
                                 class="hover:bg-surface-50/50 transition-colors"
                             >
-                                <td
-                                    class="whitespace-nowrap px-4 py-3 text-sm text-surface-700"
+                                <td class="whitespace-nowrap text-surface-700"
                                     >{formatDate(entry.created_at)}</td
                                 >
-                                <td
-                                    class="px-4 py-3 text-sm font-medium text-surface-900"
+                                <td class="font-medium text-surface-900"
                                     >{entry.session_alias}</td
                                 >
-                                <td class="px-4 py-3">
+                                <td>
                                     <span
                                         class="{actionBadgeClass(
                                             entry.action_type,
-                                        )} shadow-sm font-semibold capitalize tracking-wide text-[11px] px-2 py-0.5 rounded-full"
+                                        )} shadow-sm font-semibold capitalize tracking-wide text-[11px] px-2.5 py-1 rounded-full"
                                         >{entry.action_type.replace(
                                             /_/g,
                                             " ",
@@ -628,14 +608,11 @@
                                         >
                                     {/if}
                                 </td>
-                                <td class="px-4 py-3 text-sm text-surface-700"
-                                    >{entry.station}</td
+                                <td class="text-surface-700">{entry.station}</td
                                 >
-                                <td class="px-4 py-3 text-sm text-surface-700"
-                                    >{entry.staff}</td
-                                >
+                                <td class="text-surface-700">{entry.staff}</td>
                                 <td
-                                    class="max-w-xs truncate px-4 py-3 text-sm text-surface-600"
+                                    class="max-w-xs truncate text-surface-600"
                                     title={entry.remarks ?? ""}
                                     >{entry.remarks ?? "—"}</td
                                 >
@@ -643,6 +620,80 @@
                         {/each}
                     </tbody>
                 </table>
+            </div>
+
+            <!-- Mobile Card View -->
+            <div class="grid grid-cols-1 gap-4 mt-4 md:hidden">
+                {#each data as entry (String(entry.id))}
+                    <div
+                        class="card bg-surface-50 border border-surface-200 shadow-sm p-4 flex flex-col gap-3"
+                    >
+                        <div class="flex items-start justify-between gap-2">
+                            <div>
+                                <span
+                                    class="font-semibold text-surface-950 block"
+                                    >{entry.session_alias}</span
+                                >
+                                <span class="text-sm text-surface-500 block"
+                                    >{formatDate(entry.created_at)}</span
+                                >
+                            </div>
+                            <div
+                                class="flex flex-col items-end gap-1.5 min-w-max"
+                            >
+                                <span
+                                    class="{actionBadgeClass(
+                                        entry.action_type,
+                                    )} shadow-sm font-semibold capitalize tracking-wide text-[11px] px-2.5 py-1 rounded-full"
+                                >
+                                    {entry.action_type.replace(/_/g, " ")}
+                                </span>
+                                {#if entry.source === "program_session"}
+                                    <span
+                                        class="text-[10px] px-1.5 py-0.5 rounded preset-tonal text-surface-500 border border-surface-200 uppercase tracking-wider font-bold"
+                                    >
+                                        program
+                                    </span>
+                                {/if}
+                            </div>
+                        </div>
+                        <div
+                            class="grid grid-cols-2 gap-2 text-sm bg-surface-100/50 p-3 rounded-container border border-surface-200"
+                        >
+                            <div>
+                                <span
+                                    class="text-xs text-surface-500 block mb-0.5 uppercase tracking-wider font-semibold"
+                                    >Station</span
+                                >
+                                <span
+                                    class="text-surface-950 font-medium truncate block"
+                                    title={entry.station}>{entry.station}</span
+                                >
+                            </div>
+                            <div>
+                                <span
+                                    class="text-xs text-surface-500 block mb-0.5 uppercase tracking-wider font-semibold"
+                                    >Staff</span
+                                >
+                                <span
+                                    class="text-surface-950 font-medium truncate block"
+                                    title={entry.staff}>{entry.staff}</span
+                                >
+                            </div>
+                        </div>
+                        {#if entry.remarks}
+                            <div
+                                class="text-sm text-surface-600 bg-surface-50 p-3 rounded-container border border-surface-200"
+                            >
+                                <span
+                                    class="block text-[10px] font-semibold uppercase tracking-wider text-surface-500 mb-1"
+                                    >Remarks</span
+                                >
+                                {entry.remarks}
+                            </div>
+                        {/if}
+                    </div>
+                {/each}
             </div>
         {/if}
 

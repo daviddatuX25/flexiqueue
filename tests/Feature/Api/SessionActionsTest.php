@@ -3,6 +3,7 @@
 namespace Tests\Feature\Api;
 
 use App\Events\StationActivity;
+use App\Models\Process;
 use App\Models\Program;
 use App\Models\ServiceTrack;
 use App\Models\Session;
@@ -11,6 +12,7 @@ use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -60,6 +62,12 @@ class SessionActionsTest extends TestCase
             'capacity' => 1,
             'is_active' => true,
         ]);
+        $process1 = Process::create(['program_id' => $this->program->id, 'name' => 'First Station', 'description' => null]);
+        $process2 = Process::create(['program_id' => $this->program->id, 'name' => 'Second Station', 'description' => null]);
+        DB::table('station_process')->insert([
+            ['station_id' => $this->station1->id, 'process_id' => $process1->id],
+            ['station_id' => $this->station2->id, 'process_id' => $process2->id],
+        ]);
         $this->track = ServiceTrack::create([
             'program_id' => $this->program->id,
             'name' => 'Default',
@@ -68,13 +76,13 @@ class SessionActionsTest extends TestCase
         ]);
         TrackStep::create([
             'track_id' => $this->track->id,
-            'station_id' => $this->station1->id,
+            'process_id' => $process1->id,
             'step_order' => 1,
             'is_required' => true,
         ]);
         TrackStep::create([
             'track_id' => $this->track->id,
-            'station_id' => $this->station2->id,
+            'process_id' => $process2->id,
             'step_order' => 2,
             'is_required' => true,
         ]);
@@ -86,7 +94,7 @@ class SessionActionsTest extends TestCase
         ]);
         TrackStep::create([
             'track_id' => $this->trackToStation2->id,
-            'station_id' => $this->station2->id,
+            'process_id' => $process2->id,
             'step_order' => 1,
             'is_required' => true,
         ]);

@@ -7,7 +7,7 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 /**
- * Per 08-API-SPEC-PHASE1 §5.4: add step to track. station_id must belong to track's program.
+ * Per 08-API-SPEC-PHASE1 §5.4, PROCESS-STATION-REFACTOR Phase 3: add step to track. process_id must belong to track's program.
  */
 class StoreTrackStepRequest extends FormRequest
 {
@@ -25,7 +25,7 @@ class StoreTrackStepRequest extends FormRequest
         $track = $this->route('track');
 
         return [
-            'station_id' => ['required', 'integer', Rule::in($track->program->stations()->pluck('id')->all())],
+            'process_id' => ['required', 'integer', Rule::in($track->program->processes()->pluck('id')->all())],
             'step_order' => ['nullable', 'integer', 'min:1'],
             'is_required' => ['nullable', 'boolean'],
             'estimated_minutes' => ['nullable', 'integer', 'min:0'],

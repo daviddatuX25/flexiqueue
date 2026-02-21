@@ -6,7 +6,7 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 /**
- * Per 08-API-SPEC-PHASE1 §5.3: update station. Unique name per program (excluding self).
+ * Per 08-API-SPEC-PHASE1 §5.3: update station. Per PROCESS-STATION-REFACTOR §9.2: process_ids required.
  */
 class UpdateStationRequest extends FormRequest
 {
@@ -35,6 +35,15 @@ class UpdateStationRequest extends FormRequest
             'client_capacity' => ['sometimes', 'integer', 'min:1'],
             'priority_first_override' => ['sometimes', 'nullable', 'boolean'],
             'is_active' => ['boolean'],
+            'process_ids' => [
+                'required',
+                'array',
+                'min:1',
+            ],
+            'process_ids.*' => [
+                'integer',
+                Rule::exists('processes', 'id')->where('program_id', $station->program_id),
+            ],
         ];
     }
 

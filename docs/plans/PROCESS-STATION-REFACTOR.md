@@ -10,7 +10,7 @@
 |-------|--------|------|-------|
 | **Phase 1** | Done | flexiqueue-6rt (closed) | Migrations: `processes`, `station_process`, `track_steps.process_id` + backfill. Models: Process, Station.processes(), TrackStep.process(), Program.processes(), Program.getStationSelectionMode(). All existing track steps backfilled via station name → process. `station_id` kept for dual-read. |
 | **Phase 2** | Done | flexiqueue-hde (closed) | FlowEngine, StationSelectionService, SessionService wiring; station_selection_mode in program settings |
-| **Phase 3** | Pending | flexiqueue-tpb | Drop station_id from track_steps, Step CRUD process_id (depends on flexiqueue-hde) |
+| **Phase 3** | Done | flexiqueue-tpb (closed) | Step CRUD process_id, FlowEngine no fallback, migrateSessions via station_process, UI process select; station_id nullable (drop deferred) |
 
 **Cases to be worked on / adjusted in higher-level plan:**
 - `track_steps.process_id` left nullable for SQLite test compatibility; Phase 3 migration will enforce NOT NULL when dropping `station_id`
@@ -209,7 +209,7 @@ Add to `programs.settings` JSON:
 | Queue | `StationQueueService` | No change |
 | Display | `DisplayBoardService` | No change |
 | Dashboard | `DashboardService` | No change |
-| Tests | `FlowEngineTest`, `SessionBindTest`, `SessionActionsTest`, `StepControllerTest`, etc. | Update assertions |
+| Tests | `FlowEngineTest`, `StationSelectionServiceTest`, `SessionBindTest`, `SessionActionsTest`, etc. | FlowEngine process_id; StationSelectionService fixed/shortest_queue/round_robin; bind process-based, bind first process no stations |
 
 ---
 
@@ -376,15 +376,15 @@ Use this checklist when creating beads or tickets:
 - [x] Service: FlowEngine process_id return
 - [x] Service: SessionService bind/transfer wiring
 - [x] Program settings: station_selection_mode (UpdateProgramRequest, API, UI)
-- [ ] Controller: ProcessController CRUD
-- [ ] Controller: StepController process_id
-- [ ] Controller: StationController process assignment
-- [ ] Request: StoreProcessRequest, UpdateProcessRequest
-- [ ] Request: StoreTrackStepRequest, UpdateTrackStepRequest process_id
-- [ ] UI: Processes tab/section
-- [ ] UI: Station process multi-select
-- [ ] UI: Step modal process select
+- [x] Controller: ProcessController index, store (list/create processes)
+- [x] Controller: StepController process_id
+- [x] Controller: StationController process assignment (store/update process_ids, GET/PUT station processes)
+- [x] Request: StoreProcessRequest; UpdateProcessRequest (deferred)
+- [x] Request: StoreTrackStepRequest, UpdateTrackStepRequest process_id
+- [x] UI: Processes tab/section (create only)
+- [x] UI: Station process multi-select (create/edit modals)
+- [x] UI: Step modal process select (Show.svelte, FlowDiagram)
 - [ ] UI: FlowDiagram process display
-- [ ] Tests: Unit and feature per matrix
-- [ ] Migration: drop station_id from track_steps (Phase 3)
+- [x] Tests: FlowEngine process_id; StationSelectionService; bind process-based, bind first process no stations
+- [x] Migration: station_id nullable (2026_02_22_000004); drop station_id deferred
 - [ ] Docs: 04, 03, 08, 09 updates

@@ -5,8 +5,8 @@
 	 */
 	interface StepItem {
 		id: number;
-		station_id: number;
-		station_name: string;
+		process_id: number;
+		process_name: string;
 		step_order: number;
 		is_required: boolean;
 	}
@@ -51,7 +51,7 @@
 						<span
 							class="inline-flex items-center px-3 py-1.5 rounded-lg bg-surface-100 text-sm font-medium text-surface-950"
 						>
-							{step.station_name}
+							{step.process_name}
 							{#if step.is_required}
 								<span class="text-surface-950/50 text-xs ml-1">*</span>
 							{/if}

@@ -25,7 +25,7 @@ class Process extends Model
     public function stations(): BelongsToMany
     {
         return $this->belongsToMany(Station::class, 'station_process')
-            ->withTimestamps(false);
+            ->withTimestamps();
     }
 
     public function trackSteps(): \Illuminate\Database\Eloquent\Relations\HasMany

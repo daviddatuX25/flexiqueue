@@ -20,7 +20,8 @@ class StoreStationRequest extends FormRequest
      */
     public function rules(): array
     {
-        $programId = $this->route('program')?->id;
+        $program = $this->route('program');
+        $programId = $program?->id;
 
         return [
             'name' => [
@@ -31,6 +32,15 @@ class StoreStationRequest extends FormRequest
             ],
             'capacity' => ['required', 'integer', 'min:1'],
             'client_capacity' => ['sometimes', 'integer', 'min:1'],
+            'process_ids' => [
+                'required',
+                'array',
+                'min:1',
+            ],
+            'process_ids.*' => [
+                'integer',
+                $program ? Rule::exists('processes', 'id')->where('program_id', $program->id) : 'exists:processes,id',
+            ],
         ];
     }
 

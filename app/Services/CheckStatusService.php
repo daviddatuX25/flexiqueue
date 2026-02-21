@@ -39,7 +39,7 @@ class CheckStatusService
         }
 
         $session = $token->currentSession;
-        $session->load(['serviceTrack.trackSteps.station', 'currentStation']);
+        $session->load(['serviceTrack.trackSteps.process', 'serviceTrack.trackSteps.station', 'currentStation']);
         $track = $session->serviceTrack;
         $steps = $track ? $track->trackSteps->sortBy('step_order') : collect();
         $currentOrder = $session->current_step_order ?? 1;
@@ -63,6 +63,8 @@ class CheckStatusService
     }
 
     /**
+     * Per PROCESS-STATION-REFACTOR: use process_name; fallback to station_name for dual-read.
+     *
      * @param  Collection<int, \App\Models\TrackStep>  $steps
      * @return array<int, array{name: string, station_name: string, status: string}>
      */
@@ -78,9 +80,11 @@ class CheckStatusService
                 $status = 'pending';
             }
 
+            $displayName = $step->process?->name ?? $step->station?->name ?? 'Step '.$order;
+
             return [
-                'name' => $step->station?->name ?? 'Step '.$order,
-                'station_name' => $step->station?->name ?? '—',
+                'name' => $displayName,
+                'station_name' => $displayName,
                 'status' => $status,
             ];
         })->all();

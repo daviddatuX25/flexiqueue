@@ -7,7 +7,7 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 /**
- * Per 08-API-SPEC-PHASE1 §5.4: update step. station_id must belong to step's track program.
+ * Per 08-API-SPEC-PHASE1 §5.4, PROCESS-STATION-REFACTOR Phase 3: update step. process_id must belong to step's track program.
  */
 class UpdateTrackStepRequest extends FormRequest
 {
@@ -23,10 +23,10 @@ class UpdateTrackStepRequest extends FormRequest
     {
         /** @var TrackStep $step */
         $step = $this->route('step');
-        $stationIds = $step->serviceTrack->program->stations()->pluck('id')->all();
+        $processIds = $step->serviceTrack->program->processes()->pluck('id')->all();
 
         return [
-            'station_id' => ['sometimes', 'integer', Rule::in($stationIds)],
+            'process_id' => ['sometimes', 'integer', Rule::in($processIds)],
             'step_order' => ['sometimes', 'integer', 'min:1'],
             'is_required' => ['sometimes', 'boolean'],
             'estimated_minutes' => ['nullable', 'integer', 'min:0'],

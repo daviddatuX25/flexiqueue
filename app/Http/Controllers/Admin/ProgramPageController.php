@@ -40,7 +40,7 @@ class ProgramPageController extends Controller
     public function show(Program $program): Response
     {
         $tracks = $program->serviceTracks()
-            ->with(['trackSteps.station'])
+            ->with(['trackSteps.process'])
             ->orderBy('name')
             ->get()
             ->map(fn (ServiceTrack $t) => [
@@ -55,15 +55,27 @@ class ProgramPageController extends Controller
                 'steps' => $t->trackSteps->map(fn ($s) => [
                     'id' => $s->id,
                     'track_id' => $s->track_id,
-                    'station_id' => $s->station_id,
-                    'station_name' => $s->station?->name,
+                    'process_id' => $s->process_id,
+                    'process_name' => $s->process?->name,
                     'step_order' => $s->step_order,
                     'is_required' => $s->is_required,
                     'estimated_minutes' => $s->estimated_minutes,
                 ])->values()->all(),
             ]);
 
+        $processes = $program->processes()
+            ->orderBy('name')
+            ->get()
+            ->map(fn ($p) => [
+                'id' => $p->id,
+                'program_id' => $p->program_id,
+                'name' => $p->name,
+                'description' => $p->description,
+                'created_at' => $p->created_at?->toIso8601String(),
+            ]);
+
         $stations = $program->stations()
+            ->with('processes')
             ->orderBy('name')
             ->get()
             ->map(fn (Station $s) => [
@@ -75,6 +87,7 @@ class ProgramPageController extends Controller
                 'priority_first_override' => $s->priority_first_override,
                 'is_active' => $s->is_active,
                 'created_at' => $s->created_at?->toIso8601String(),
+                'process_ids' => $s->processes->pluck('id')->values()->all(),
             ]);
 
         $settings = $program->settings ?? [];
@@ -106,6 +119,7 @@ class ProgramPageController extends Controller
                 ],
             ],
             'tracks' => $tracks,
+            'processes' => $processes,
             'stations' => $stations,
             'stats' => $stats,
         ]);

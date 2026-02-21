@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\SetStationProcessesRequest;
 use App\Http\Requests\StoreStationRequest;
 use App\Http\Requests\UpdateStationRequest;
 use App\Models\Program;
@@ -11,7 +12,7 @@ use App\Models\TrackStep;
 use Illuminate\Http\JsonResponse;
 
 /**
- * Per 08-API-SPEC-PHASE1 §5.3: Station CRUD. List/create under program; update/delete by station id.
+ * Per 08-API-SPEC-PHASE1 §5.3: Station CRUD. Per PROCESS-STATION-REFACTOR §9.2: process assignment.
  */
 class StationController extends Controller
 {
@@ -33,10 +34,18 @@ class StationController extends Controller
      */
     public function store(StoreStationRequest $request, Program $program): JsonResponse
     {
-        $data = array_merge($request->validated(), ['is_active' => true]);
+        $data = $request->validated();
+        $processIds = $data['process_ids'] ?? [];
+        unset($data['process_ids']);
+
+        $data = array_merge($data, ['is_active' => true]);
         $station = $program->stations()->create($data);
 
-        return response()->json(['station' => $this->stationResource($station)], 201);
+        if (! empty($processIds)) {
+            $station->processes()->sync($processIds);
+        }
+
+        return response()->json(['station' => $this->stationResource($station->fresh())], 201);
     }
 
     /**
@@ -44,7 +53,43 @@ class StationController extends Controller
      */
     public function update(UpdateStationRequest $request, Station $station): JsonResponse
     {
-        $station->update($request->validated());
+        $data = $request->validated();
+        $processIds = $data['process_ids'] ?? null;
+        unset($data['process_ids']);
+
+        $station->update($data);
+
+        if ($processIds !== null) {
+            $station->processes()->sync($processIds);
+        }
+
+        return response()->json(['station' => $this->stationResource($station->fresh())]);
+    }
+
+    /**
+     * List processes assigned to station. Per PROCESS-STATION-REFACTOR §9.2.
+     */
+    public function listProcesses(Program $program, Station $station): JsonResponse
+    {
+        if ($station->program_id !== $program->id) {
+            return response()->json(['message' => 'Station does not belong to program.'], 404);
+        }
+
+        $processIds = $station->processes()->pluck('processes.id')->all();
+
+        return response()->json(['process_ids' => $processIds]);
+    }
+
+    /**
+     * Set processes for station. Per PROCESS-STATION-REFACTOR §9.2. Must have ≥1.
+     */
+    public function setProcesses(SetStationProcessesRequest $request, Program $program, Station $station): JsonResponse
+    {
+        if ($station->program_id !== $program->id) {
+            return response()->json(['message' => 'Station does not belong to program.'], 404);
+        }
+
+        $station->processes()->sync($request->validated()['process_ids']);
 
         return response()->json(['station' => $this->stationResource($station->fresh())]);
     }
@@ -72,6 +117,8 @@ class StationController extends Controller
 
     private function stationResource(Station $station): array
     {
+        $station->loadMissing('processes');
+
         return [
             'id' => $station->id,
             'program_id' => $station->program_id,
@@ -81,6 +128,7 @@ class StationController extends Controller
             'priority_first_override' => $station->priority_first_override,
             'is_active' => $station->is_active,
             'created_at' => $station->created_at?->toIso8601String(),
+            'process_ids' => $station->processes->pluck('id')->values()->all(),
         ];
     }
 }
