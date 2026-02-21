@@ -19,10 +19,10 @@
     const currentPath = $derived($pageStore.url ?? "");
 </script>
 
-<div class="flex flex-col min-h-screen bg-surface-100">
+<div class="flex flex-col h-screen overflow-hidden bg-surface-100">
     <OfflineBanner />
 
-    <div class="flex flex-col min-h-screen lg:flex-row">
+    <div class="flex flex-1 min-h-0 lg:flex-row">
         <input
             id="admin-drawer"
             type="checkbox"
@@ -30,9 +30,9 @@
             aria-hidden="true"
         />
 
-        <div class="flex flex-col min-h-screen flex-1 min-w-0 lg:order-1">
+        <div class="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden lg:order-1">
             <header
-                class="flex items-center justify-between bg-surface-50 border-b border-surface-200 px-4 h-14 lg:hidden"
+                class="flex shrink-0 items-center justify-between bg-surface-50 border-b border-surface-200 px-4 h-14 lg:hidden"
             >
                 <label
                     for="admin-drawer"
@@ -63,7 +63,7 @@
                 </div>
             </header>
 
-            <main class="flex-1 p-6 max-w-7xl">
+            <main class="flex-1 min-h-0 overflow-y-auto p-6 max-w-7xl">
                 {#if children}
                     {@render children()}
                 {/if}

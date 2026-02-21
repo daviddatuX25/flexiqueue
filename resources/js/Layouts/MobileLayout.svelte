@@ -25,7 +25,7 @@
 	const backLabel = $derived(isAdmin ? 'Admin panel' : 'Dashboard');
 </script>
 
-<div class="flex flex-col min-h-screen bg-surface-100">
+<div class="flex flex-col h-screen overflow-hidden bg-surface-100">
 	<OfflineBanner />
 
 	<header class="flex items-center justify-between gap-2 bg-surface-50 border-b border-surface-200 px-3 min-h-0 h-14 shrink-0">
@@ -62,13 +62,13 @@
 		</div>
 	</header>
 
-	<main class="flex-1 overflow-y-auto p-4">
+	<main class="flex-1 min-h-0 overflow-y-auto p-4">
 		{#if children}
 			{@render children()}
 		{/if}
 	</main>
 
-	<div class="bg-surface-50 border-t border-surface-200 shrink-0">
+	<div class="shrink-0 bg-surface-50 border-t border-surface-200">
 		<p class="text-[0.65rem] text-surface-950/50 text-center py-1 font-medium uppercase tracking-wide">Live Session</p>
 		<div class="flex justify-around py-2">
 		<Link

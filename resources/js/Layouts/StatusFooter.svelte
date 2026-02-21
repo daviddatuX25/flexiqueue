@@ -89,8 +89,10 @@
     }
 </script>
 
-<div
-    class="bg-white border-t border-surface-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-y-3 text-xs font-medium text-surface-600 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)] z-40 relative"
+<footer
+    class="shrink-0 bg-white border-t border-surface-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-y-3 text-xs font-medium text-surface-600 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)] z-40"
+    role="status"
+    aria-live="polite"
 >
     <div class="flex items-center gap-3">
         <!-- Network Status -->
@@ -185,4 +187,4 @@
             >
         </div>
     </div>
-</div>
+</footer>

@@ -18,10 +18,10 @@
 	const roleLabel = $derived(user?.role ?? '');
 </script>
 
-<div class="flex flex-col min-h-screen bg-surface-100">
+<div class="flex flex-col h-screen overflow-hidden bg-surface-100">
 	<OfflineBanner />
 
-	<header class="flex items-center justify-between bg-surface-50 border-b border-surface-200 px-4 h-14">
+	<header class="flex shrink-0 items-center justify-between bg-surface-50 border-b border-surface-200 px-4 h-14">
 		<div>
 			<a href="/" class="text-lg font-semibold text-surface-950">FlexiQueue</a>
 		</div>
@@ -36,7 +36,7 @@
 		</div>
 	</header>
 
-	<main class="flex-1">
+	<main class="flex-1 min-h-0 overflow-y-auto">
 		{#if children}
 			{@render children()}
 		{/if}
