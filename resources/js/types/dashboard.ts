@@ -19,5 +19,5 @@ export interface DashboardStation {
 	is_active: boolean;
 	queue_count: number;
 	current_client: string | null;
-	assigned_staff: Array<{ id: number; name: string }>;
+	assigned_staff: Array<{ id: number; name: string; avatar_url?: string | null; availability_status?: string }>;
 }

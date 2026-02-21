@@ -9,6 +9,7 @@
 	import StatusFooter from './StatusFooter.svelte';
 	import Toast from '../Components/Toast.svelte';
 	import OfflineBanner from '../Components/OfflineBanner.svelte';
+	import UserAvatar from '../Components/UserAvatar.svelte';
 
 	let { children, headerTitle = 'FlexiQueue', queueCount = 0, processedToday = 0 } = $props();
 
@@ -44,10 +45,8 @@
 		<div class="flex items-center gap-1.5 shrink-0">
 			<span class="text-xs px-2 py-0.5 rounded preset-filled-tertiary-500">{roleLabel}</span>
 			<div class="relative group">
-				<div tabindex="0" role="button" class="btn preset-tonal btn-icon min-h-[44px] min-w-[44px] rounded-full">
-					<div class="w-8 h-8 rounded-full bg-primary-500 text-primary-contrast-500 flex items-center justify-center text-xs font-bold">
-						{user?.name?.charAt(0) ?? '?'}
-					</div>
+				<div tabindex="0" role="button" class="btn preset-tonal btn-icon min-h-[44px] min-w-[44px] rounded-full p-0">
+					<UserAvatar user={user} size="sm" />
 				</div>
 				<ul role="menu" tabindex="0" class="absolute right-0 top-full mt-1 z-50 w-48 p-2 rounded-container shadow-xl border border-surface-200 bg-surface-50 hidden group-focus-within:block">
 					<li><span class="text-xs text-surface-950/60 block py-1">{user?.name ?? '—'}</span></li>

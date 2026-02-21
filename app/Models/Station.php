@@ -44,4 +44,9 @@ class Station extends Model
     {
         return $this->hasMany(User::class, 'assigned_station_id');
     }
+
+    public function note(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(StationNote::class);
+    }
 }

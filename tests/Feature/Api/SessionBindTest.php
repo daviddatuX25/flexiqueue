@@ -84,6 +84,20 @@ class SessionBindTest extends TestCase
         $this->assertDatabaseHas('transaction_logs', ['action_type' => 'bind']);
     }
 
+    public function test_bind_deactivated_token_returns_422(): void
+    {
+        $this->token->update(['status' => 'deactivated']);
+
+        $response = $this->actingAs($this->staff)->postJson('/api/sessions/bind', [
+            'qr_hash' => $this->token->qr_code_hash,
+            'track_id' => $this->track->id,
+            'client_category' => 'PWD',
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('deactivated', $response->json('message') ?? '');
+    }
+
     public function test_bind_token_not_found_returns_422(): void
     {
         $response = $this->actingAs($this->staff)->postJson('/api/sessions/bind', [

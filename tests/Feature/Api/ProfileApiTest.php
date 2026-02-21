@@ -4,7 +4,9 @@ namespace Tests\Feature\Api;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 /**
@@ -118,6 +120,49 @@ class ProfileApiTest extends TestCase
         $response->assertJsonValidationErrors('current_password');
     }
 
+    public function test_update_avatar_succeeds_with_valid_image(): void
+    {
+        Storage::fake('public');
+        $user = User::factory()->admin()->create();
+        $file = UploadedFile::fake()->image('avatar.jpg', 100, 100)->size(100);
+
+        $response = $this->actingAs($user)->post('/api/profile/avatar', [
+            'avatar' => $file,
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonStructure(['avatar_url', 'message']);
+        $user->refresh();
+        $this->assertNotNull($user->avatar_path);
+        $this->assertStringContainsString('avatars/', $response->json('avatar_url'));
+    }
+
+    public function test_update_avatar_validates_file_type(): void
+    {
+        Storage::fake('public');
+        $user = User::factory()->admin()->create();
+        $file = UploadedFile::fake()->create('document.pdf', 100, 'application/pdf');
+
+        $response = $this->actingAs($user)->post('/api/profile/avatar', [
+            'avatar' => $file,
+        ], ['Accept' => 'application/json']);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('avatar');
+    }
+
+    public function test_update_avatar_requires_auth(): void
+    {
+        Storage::fake('public');
+        $file = UploadedFile::fake()->image('avatar.jpg', 100, 100);
+
+        $response = $this->post('/api/profile/avatar', [
+            'avatar' => $file,
+        ], ['Accept' => 'application/json']);
+
+        $response->assertStatus(401);
+    }
+
     public function test_profile_endpoints_require_auth(): void
     {
         $this->putJson('/api/profile/override-pin', [
@@ -132,5 +177,9 @@ class ProfileApiTest extends TestCase
             'password' => 'newpass',
             'password_confirmation' => 'newpass',
         ])->assertStatus(401);
+
+        Storage::fake('public');
+        $file = UploadedFile::fake()->image('avatar.jpg', 100, 100);
+        $this->post('/api/profile/avatar', ['avatar' => $file], ['Accept' => 'application/json'])->assertStatus(401);
     }
 }

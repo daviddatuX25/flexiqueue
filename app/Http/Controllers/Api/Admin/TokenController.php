@@ -55,11 +55,23 @@ class TokenController extends Controller
     }
 
     /**
-     * Update token status (available only; in_use set by bind flow).
+     * Update token status. Admin can set available (reactivate) or deactivated.
+     * Cannot deactivate a token that is in_use.
      */
     public function update(UpdateTokenRequest $request, Token $token): JsonResponse
     {
-        $token->update(['status' => $request->validated('status')]);
+        $status = $request->validated('status');
+
+        if ($status === 'deactivated' && $token->status === 'in_use') {
+            return response()->json([
+                'message' => 'Cannot deactivate token in use. Mark it available first.',
+            ], 409);
+        }
+
+        $token->update([
+            'status' => $status,
+            'current_session_id' => $status !== 'in_use' ? null : $token->current_session_id,
+        ]);
         $token->refresh();
 
         return response()->json(['token' => $this->tokenResource($token)]);

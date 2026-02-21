@@ -32,9 +32,20 @@ class DisplayBoardTest extends TestCase
             ->has('waiting_by_station')
             ->has('total_in_queue')
             ->has('station_activity')
+            ->has('staff_at_stations')
+            ->has('staff_online')
         );
         $props = $response->viewData('page')['props'];
         $this->assertIsArray($props['station_activity']);
+        $this->assertIsArray($props['staff_at_stations']);
+        foreach ($props['staff_at_stations'] as $row) {
+            $this->assertArrayHasKey('station_name', $row);
+            $this->assertArrayHasKey('staff', $row);
+            foreach ($row['staff'] as $staff) {
+                $this->assertArrayHasKey('name', $staff);
+                $this->assertArrayNotHasKey('id', $staff);
+            }
+        }
     }
 
     public function test_display_board_shows_program_and_serving_when_active(): void

@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\CheckStatusController;
 use App\Http\Controllers\Api\SessionController as ApiSessionController;
 use App\Http\Controllers\Api\PermissionRequestController;
 use App\Http\Controllers\Api\StationController as ApiStationController;
+use App\Http\Controllers\Api\StationNoteController;
 use App\Http\Controllers\Api\AuthorizationsController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\UserAvailabilityController;
@@ -114,6 +115,7 @@ Route::middleware('auth')->prefix('api/profile')->group(function (): void {
     Route::get('/override-qr', [ProfileController::class, 'showOverrideQr'])->name('api.profile.override-qr');
     Route::post('/override-qr/regenerate', [ProfileController::class, 'regenerateOverrideQr'])->name('api.profile.override-qr.regenerate');
     Route::put('/password', [ProfileController::class, 'updatePassword'])->name('api.profile.password');
+    Route::post('/avatar', [ProfileController::class, 'updateAvatar'])->name('api.profile.avatar');
 });
 
 // Per PIN-QR-AUTHORIZATION-SYSTEM AUTH-3, AUTH-4: Temporary PIN/QR generation (supervisor/admin only)
@@ -147,6 +149,8 @@ Route::middleware(['auth', 'role:admin,supervisor,staff'])->prefix('api')->group
     Route::get('/stations', [ApiStationController::class, 'index']);
     Route::get('/stations/{station}/queue', [ApiStationController::class, 'queue']);
     Route::post('/stations/{station}/priority-first', [ApiStationController::class, 'setPriorityFirst']);
+    Route::get('/stations/{station}/notes', [StationNoteController::class, 'show']);
+    Route::put('/stations/{station}/notes', [StationNoteController::class, 'update']);
 });
 
 // Per 05-SECURITY-CONTROLS §2.4: public routes (no auth)

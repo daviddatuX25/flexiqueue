@@ -8,6 +8,7 @@
 	import StatusFooter from './StatusFooter.svelte';
 	import Toast from '../Components/Toast.svelte';
 	import OfflineBanner from '../Components/OfflineBanner.svelte';
+	import UserAvatar from '../Components/UserAvatar.svelte';
 
 	let { children, showFooter = true, queueCount = 0, processedToday = 0 } = $props();
 
@@ -26,6 +27,7 @@
 		</div>
 		<div class="flex items-center gap-2">
 			{#if user}
+				<UserAvatar user={user} size="sm" />
 				<span class="text-sm text-surface-950/60 hidden sm:inline">{user.name}</span>
 				<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500">{roleLabel}</span>
 				<a href="/profile" class="btn preset-tonal btn-sm">Profile</a>

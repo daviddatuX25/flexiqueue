@@ -3,12 +3,14 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\UpdateAvatarRequest;
 use App\Http\Requests\UpdateOverridePinRequest;
 use App\Http\Requests\UpdatePasswordRequest;
 use App\Services\TokenPrintService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
@@ -72,5 +74,32 @@ class ProfileController extends Controller
         ]);
 
         return response()->json(['message' => 'Password updated.']);
+    }
+
+    /**
+     * POST /api/profile/avatar — Upload profile photo. Replaces existing avatar.
+     */
+    public function updateAvatar(UpdateAvatarRequest $request): JsonResponse
+    {
+        $user = $request->user();
+        $file = $request->file('avatar');
+
+        $ext = $file->getClientOriginalExtension() ?: 'jpg';
+        $filename = $user->id.'_'.Str::random(8).'.'.$ext;
+
+        Storage::disk('public')->makeDirectory('avatars');
+        $path = $file->storeAs('avatars', $filename, 'public');
+
+        $oldPath = $user->avatar_path;
+        $user->update(['avatar_path' => $filename]);
+
+        if ($oldPath) {
+            Storage::disk('public')->delete('avatars/'.$oldPath);
+        }
+
+        return response()->json([
+            'avatar_url' => Storage::disk('public')->url($path),
+            'message' => 'Avatar updated.',
+        ]);
     }
 }

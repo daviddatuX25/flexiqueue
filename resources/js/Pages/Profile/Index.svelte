@@ -1,10 +1,12 @@
 <script lang="ts">
 	/**
-	 * Profile: password, preset PIN, preset QR. Preset is per-user; any staff can set it.
+	 * Profile: password, preset PIN, preset QR, profile photo. Preset is per-user; any staff can set it.
 	 * Preset authorization only works when the user is a supervisor for the program where it's used.
 	 */
 	import AppShell from '../../Layouts/AppShell.svelte';
+	import UserAvatar from '../../Components/UserAvatar.svelte';
 	import { usePage } from '@inertiajs/svelte';
+	import { router } from '@inertiajs/svelte';
 
 	const page = usePage();
 	const user = $derived($page.props?.auth?.user ?? null);
@@ -21,6 +23,10 @@
 	let newPin = $state('');
 	let pinSubmitting = $state(false);
 	let pinMessage = $state<{ type: 'success' | 'error'; text: string } | null>(null);
+
+	// Profile photo
+	let avatarSubmitting = $state(false);
+	let avatarMessage = $state<{ type: 'success' | 'error'; text: string } | null>(null);
 
 	// Preset QR
 	let hasPresetQr = $state(false);
@@ -120,6 +126,40 @@
 			}
 		} finally {
 			qrRegenerating = false;
+		}
+	}
+
+	async function submitAvatar(e: Event) {
+		e.preventDefault();
+		const form = e.target as HTMLFormElement;
+		const fileInput = form.querySelector<HTMLInputElement>('input[type="file"][name="avatar"]');
+		if (!fileInput?.files?.length) {
+			avatarMessage = { type: 'error', text: 'Please select an image.' };
+			return;
+		}
+		avatarMessage = null;
+		avatarSubmitting = true;
+		try {
+			const fd = new FormData();
+			fd.append('avatar', fileInput.files[0]);
+			const r = await fetch('/api/profile/avatar', {
+				method: 'POST',
+				headers: { Accept: 'application/json', 'X-XSRF-TOKEN': getCsrfToken() },
+				credentials: 'include',
+				body: fd,
+			});
+			const data = await r.json().catch(() => ({}));
+			if (r.ok) {
+				avatarMessage = { type: 'success', text: data.message ?? 'Avatar updated.' };
+				router.reload();
+			} else {
+				avatarMessage = {
+					type: 'error',
+					text: data.message ?? (data.errors ? Object.values(data.errors).flat().join(' ') : 'Failed to update avatar.'),
+				};
+			}
+		} finally {
+			avatarSubmitting = false;
 		}
 	}
 
@@ -301,11 +341,28 @@
 			</div>
 		</section>
 
-		<!-- Profile photo placeholder -->
+		<!-- Profile photo -->
 		<section class="card bg-surface-50 shadow-sm">
 			<div class="card-body">
 				<h2 class="card-title text-base">Profile photo</h2>
-				<p class="text-sm text-surface-950/70">Photo upload will be available in a future update.</p>
+				<p class="text-sm text-surface-950/70 mb-3">Upload a photo (JPEG or PNG, max 2MB). Shows in header and on the display board.</p>
+				<div class="flex items-center gap-4 mb-4">
+					<UserAvatar user={user} size="lg" />
+					<form onsubmit={submitAvatar} class="flex flex-col gap-2">
+						<input
+							type="file"
+							name="avatar"
+							accept="image/jpeg,image/png,image/jpg"
+							class="file-input file-input-sm file-input-bordered w-full max-w-xs"
+						/>
+						<button type="submit" class="btn preset-filled-primary-500 btn-sm w-fit" disabled={avatarSubmitting}>
+							{avatarSubmitting ? 'Uploading…' : 'Upload photo'}
+						</button>
+					</form>
+				</div>
+				{#if avatarMessage}
+					<p class="text-sm {avatarMessage.type === 'error' ? 'text-error-500' : 'text-success-500'}">{avatarMessage.text}</p>
+				{/if}
 			</div>
 		</section>
 	</div>

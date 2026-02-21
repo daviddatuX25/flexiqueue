@@ -52,6 +52,10 @@ class SessionService
             throw new TokenInUseException($session);
         }
 
+        if ($token->status === 'deactivated') {
+            throw new \InvalidArgumentException('Token is deactivated and cannot be used.', 422);
+        }
+
         // Soft-deleted tokens excluded by Token model scope; token not found above.
 
         $track = $program->serviceTracks()->find($trackId);

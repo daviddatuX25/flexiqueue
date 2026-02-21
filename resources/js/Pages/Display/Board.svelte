@@ -7,6 +7,7 @@
 	import { router } from '@inertiajs/svelte';
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
 	import QrScanner from '../../Components/QrScanner.svelte';
+	import UserAvatar from '../../Components/UserAvatar.svelte';
 
 	let {
 		program_name = null,
@@ -15,6 +16,8 @@
 		waiting_by_station = [],
 		total_in_queue = 0,
 		station_activity = [],
+		staff_at_stations = [],
+		staff_online = 0,
 	} = $props();
 
 	let showScanner = $state(false);
@@ -109,7 +112,12 @@
 
 		<!-- Now Serving -->
 		<section>
-			<h2 class="text-xl font-bold text-surface-950 mb-3">NOW SERVING</h2>
+			<div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+				<h2 class="text-xl font-bold text-surface-950">NOW SERVING</h2>
+				{#if staff_online != null && staff_online >= 0}
+					<span class="text-xs text-surface-950/60" aria-label="Staff available">{staff_online} staff available</span>
+				{/if}
+			</div>
 			{#if now_serving.length > 0}
 				<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
 					{#each now_serving as entry}
@@ -167,6 +175,42 @@
 				<div class="card bg-surface-50 border border-surface-200 rounded-container">
 					<div class="p-4 py-6 text-center text-surface-950/70">
 						No one is currently waiting.
+					</div>
+				</div>
+			{/if}
+		</section>
+
+		<!-- Staff on duty -->
+		<section>
+			<h2 class="text-xl font-bold text-surface-950 mb-3">STAFF ON DUTY</h2>
+			{#if staff_at_stations?.length > 0}
+				<div class="space-y-2">
+					{#each staff_at_stations as row}
+						<div class="card bg-surface-50 border border-surface-200 rounded-container shadow-sm">
+							<div class="p-4 py-3 px-4">
+								<div class="flex flex-wrap items-center gap-3">
+									<span class="font-semibold text-surface-950">{row.station_name}:</span>
+									{#if row.staff?.length > 0}
+										<div class="flex flex-wrap items-center gap-2">
+											{#each row.staff as staff, i (row.station_name + staff.name + i)}
+												<div class="flex items-center gap-2">
+													<UserAvatar user={staff} size="sm" />
+													<span class="text-sm text-surface-950/90">{staff.name}</span>
+												</div>
+											{/each}
+										</div>
+									{:else}
+										<span class="text-surface-950/60 text-sm">No staff assigned</span>
+									{/if}
+								</div>
+							</div>
+						</div>
+					{/each}
+				</div>
+			{:else}
+				<div class="card bg-surface-50 border border-surface-200 rounded-container">
+					<div class="p-4 py-6 text-center text-surface-950/70">
+						No staff assigned.
 					</div>
 				</div>
 			{/if}

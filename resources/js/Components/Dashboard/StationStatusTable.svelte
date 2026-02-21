@@ -1,11 +1,19 @@
 <script lang="ts">
 	import type { DashboardStation } from '../../types/dashboard';
-	import { Monitor, User } from 'lucide-svelte';
+	import { Monitor } from 'lucide-svelte';
+	import UserAvatar from '../UserAvatar.svelte';
 
 	let { stations }: { stations: DashboardStation[] } = $props();
 
-	function staffNames(s: DashboardStation): string {
-		return s.assigned_staff.map((u) => u.name).join(', ') || '—';
+	function availabilityDotClass(status: string | undefined): string {
+		switch (status) {
+			case 'available':
+				return 'bg-success-500';
+			case 'on_break':
+				return 'bg-warning-500';
+			default:
+				return 'bg-surface-400';
+		}
 	}
 </script>
 
@@ -36,11 +44,21 @@
 						<tr class="hover:bg-surface-100/30 transition-colors">
 							<td class="pl-6 py-3 font-medium text-surface-900">{s.name}</td>
 							<td class="py-3 text-sm text-surface-600">
-								<div class="flex items-center gap-1.5">
+								<div class="flex flex-wrap items-center gap-2">
 									{#if s.assigned_staff.length > 0}
-										<User class="h-3 w-3 text-surface-400" />
+										{#each s.assigned_staff as staff (staff.id)}
+											<span class="inline-flex items-center gap-1.5">
+												<UserAvatar user={staff} size="sm" />
+												<span
+													class="w-2 h-2 rounded-full shrink-0 {availabilityDotClass(staff.availability_status)}"
+													aria-label="{staff.availability_status ?? 'offline'}"
+												></span>
+												<span>{staff.name}</span>
+											</span>
+										{/each}
+									{:else}
+										<span class="text-surface-400">—</span>
 									{/if}
-									{staffNames(s)}
 								</div>
 							</td>
 							<td class="py-3">

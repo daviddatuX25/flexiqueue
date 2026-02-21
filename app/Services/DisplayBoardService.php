@@ -6,6 +6,7 @@ use App\Models\Program;
 use App\Models\Session;
 use App\Models\Station;
 use App\Models\TransactionLog;
+use App\Models\User;
 use Illuminate\Support\Collection;
 
 /**
@@ -29,6 +30,8 @@ class DisplayBoardService
                 'waiting_by_station' => [],
                 'total_in_queue' => 0,
                 'station_activity' => [],
+                'staff_at_stations' => [],
+                'staff_online' => 0,
             ];
         }
 
@@ -78,6 +81,26 @@ class DisplayBoardService
         $stationIds = $program->stations()->pluck('id')->all();
         $stationActivity = $this->getStationActivity($stationIds, 15);
 
+        $stationsWithStaff = $program->stations()
+            ->with('assignedStaff')
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
+
+        $staffAtStations = $stationsWithStaff->map(fn (Station $s) => [
+            'station_name' => $s->name,
+            'staff' => $s->assignedStaff->map(fn (User $u) => [
+                'name' => $u->name,
+                'avatar_url' => $u->avatar_url,
+            ])->values()->all(),
+        ])->values()->all();
+
+        $staffOnline = User::query()
+            ->whereNotNull('assigned_station_id')
+            ->where('is_active', true)
+            ->where('availability_status', 'available')
+            ->count();
+
         return [
             'program_name' => $program->name,
             'date' => now()->format('F j, Y'),
@@ -85,6 +108,8 @@ class DisplayBoardService
             'waiting_by_station' => $waitingByStation,
             'total_in_queue' => $totalInQueue,
             'station_activity' => $stationActivity,
+            'staff_at_stations' => $staffAtStations,
+            'staff_online' => $staffOnline,
         ];
     }
 

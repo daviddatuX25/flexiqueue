@@ -87,6 +87,12 @@
 	let showCallNextOverrideModal = $state(false);
 	let callNextSession = $state<{ session_id: number; alias: string } | null>(null);
 
+	/** Station notes: shared note visible to staff at this station. Real-time via Reverb. */
+	let stationNote = $state<{ message: string; author_name?: string; updated_at?: string } | null>(null);
+	let noteMessage = $state('');
+	let noteSubmitting = $state(false);
+	let notesExpanded = $state(true);
+
 	/** Countdown per called session_id: when 0, No-show button enabled. Set when session enters 'called'. */
 	let noShowCountdown = $state<Record<number, number>>({});
 
@@ -167,10 +173,53 @@
 	$effect(() => {
 		if (station?.id) {
 			fetchQueue();
+			fetchNote();
 		} else {
 			queue = null;
+			stationNote = null;
 			loading = false;
 		}
+	});
+
+	async function fetchNote() {
+		if (!station) return;
+		const { ok, data } = await api('GET', `/api/stations/${station.id}/notes`);
+		if (ok && data) {
+			const n = (data as { note?: { message: string; author_name?: string; updated_at?: string } | null }).note;
+			stationNote = n;
+			if (n?.message) noteMessage = n.message;
+		}
+	}
+
+	async function submitNote(e: Event) {
+		e.preventDefault();
+		if (!station || noteSubmitting) return;
+		noteSubmitting = true;
+		const { ok, data } = await api('PUT', `/api/stations/${station.id}/notes`, { message: noteMessage });
+		if (ok && data) {
+			const n = (data as { note?: { message: string; author_name?: string; updated_at?: string } }).note;
+			stationNote = n ?? null;
+		}
+		noteSubmitting = false;
+	}
+
+	$effect(() => {
+		const sid = station?.id;
+		if (!sid || typeof window === 'undefined') return;
+		const w = window as unknown as { Echo?: { channel: (n: string) => { listen: (e: string, cb: (x: unknown) => void) => void }; leave: (n: string) => void } };
+		if (!w.Echo) return;
+		const Echo = w.Echo;
+		const ch = Echo.channel('station.' + sid);
+		ch.listen('.StationNoteUpdated', (e: { message?: string; author_name?: string; updated_at?: string }) => {
+			stationNote = {
+				message: e.message ?? '',
+				author_name: e.author_name,
+				updated_at: e.updated_at,
+			};
+		});
+		return () => {
+			Echo.leave('station.' + sid);
+		};
 	});
 
 	// Real-time: refetch when client arrives or status changes (e.g. after custom path approve)
@@ -778,6 +827,35 @@
 			<div class="rounded-box bg-surface-50 border border-surface-200 p-3 text-center text-sm text-surface-950/70">
 				Today: {queue.stats.total_served_today} served · Avg {queue.stats.avg_service_time_minutes} min
 			</div>
+
+			<!-- Station notes (shared, real-time) -->
+			<details class="rounded-box bg-surface-50 border border-surface-200" open={notesExpanded}>
+				<summary class="cursor-pointer px-4 py-3 font-medium text-surface-950 select-none">
+					Station notes
+				</summary>
+				<div class="px-4 pb-4 pt-1 space-y-2">
+					{#if stationNote?.message}
+						<p class="text-sm text-surface-950/90">{stationNote.message}</p>
+						{#if stationNote.author_name}
+							<p class="text-xs text-surface-950/60">— {stationNote.author_name}</p>
+						{/if}
+					{:else}
+						<p class="text-sm text-surface-950/60 italic">No note yet</p>
+					{/if}
+					<form onsubmit={submitNote} class="flex flex-col gap-2">
+						<textarea
+							class="textarea textarea-sm rounded-container border border-surface-200 w-full"
+							placeholder="Add or update note (e.g. Back in 5 min)"
+							bind:value={noteMessage}
+							maxlength="500"
+							rows="2"
+						></textarea>
+						<button type="submit" class="btn preset-filled-primary-500 btn-sm w-fit" disabled={noteSubmitting}>
+							{noteSubmitting ? 'Saving…' : 'Save note'}
+						</button>
+					</form>
+				</div>
+			</details>
 		{/if}
 	</div>
 

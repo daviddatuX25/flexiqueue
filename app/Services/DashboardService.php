@@ -159,6 +159,8 @@ class DashboardService
                     'assigned_staff' => $s->assignedStaff->map(fn ($u) => [
                         'id' => $u->id,
                         'name' => $u->name,
+                        'avatar_url' => $u->avatar_url,
+                        'availability_status' => $u->availability_status ?? 'offline',
                     ])->values()->all(),
                 ];
             })->values()->all(),

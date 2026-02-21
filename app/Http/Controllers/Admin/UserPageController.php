@@ -23,8 +23,10 @@ class UserPageController extends Controller
                 'id' => $u->id,
                 'name' => $u->name,
                 'email' => $u->email,
+                'avatar_url' => $u->avatar_url,
                 'role' => $u->role->value,
                 'is_active' => $u->is_active,
+                'availability_status' => $u->availability_status ?? 'offline',
                 'assigned_station_id' => $u->assigned_station_id,
                 'assigned_station' => $u->assignedStation ? [
                     'id' => $u->assignedStation->id,

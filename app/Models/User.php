@@ -26,7 +26,10 @@ class User extends Authenticatable
         'assigned_station_id',
         'is_active',
         'availability_status',
+        'avatar_path',
     ];
+
+    protected $appends = ['avatar_url'];
 
     protected $hidden = [
         'password',
@@ -116,5 +119,17 @@ class User extends Authenticatable
     public function temporaryAuthorizations(): HasMany
     {
         return $this->hasMany(TemporaryAuthorization::class);
+    }
+
+    /**
+     * Public URL for avatar image. Null when no avatar_path.
+     */
+    public function getAvatarUrlAttribute(): ?string
+    {
+        if (! $this->avatar_path) {
+            return null;
+        }
+
+        return \Illuminate\Support\Facades\Storage::disk('public')->url('avatars/'.$this->avatar_path);
     }
 }

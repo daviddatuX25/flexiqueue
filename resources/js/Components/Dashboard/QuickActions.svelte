@@ -58,9 +58,9 @@
 				<div class="stat-figure text-secondary-500 bg-secondary-100 p-2 rounded-lg">
 					<Users class="h-5 w-5" />
 				</div>
-				<div class="stat-title text-xs font-medium uppercase tracking-wider">Staff Assigned</div>
+				<div class="stat-title text-xs font-medium uppercase tracking-wider">Staff Online</div>
 				<div class="stat-value text-2xl text-secondary-600">{stats.staff_online}</div>
-				<div class="stat-desc text-xs mt-1">Staff currently at stations</div>
+				<div class="stat-desc text-xs mt-1">Available and assigned</div>
 			</div>
 		</div>
 	{/if}

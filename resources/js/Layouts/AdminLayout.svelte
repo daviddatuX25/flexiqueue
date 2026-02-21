@@ -9,6 +9,7 @@
 	import StatusFooter from './StatusFooter.svelte';
 	import Toast from '../Components/Toast.svelte';
 	import OfflineBanner from '../Components/OfflineBanner.svelte';
+	import UserAvatar from '../Components/UserAvatar.svelte';
 
 	let { children } = $props();
 
@@ -60,8 +61,9 @@
 						<li><Link href="/admin/reports" class="block py-2 px-3 rounded {currentPath.startsWith('/admin/reports') ? 'bg-primary-500 text-primary-contrast-500' : 'hover:bg-surface-700'}">Reports</Link></li>
 					</ul>
 				</nav>
-				<div class="p-4 border-t border-surface-600">
-					<span class="text-xs text-surface-400">{user?.name ?? '—'}</span>
+				<div class="p-4 border-t border-surface-600 flex flex-col items-center gap-2">
+					<UserAvatar user={user} size="md" />
+					<span class="text-xs text-surface-400 text-center">{user?.name ?? '—'}</span>
 					<Link href="/profile" class="btn preset-tonal btn-sm w-full mt-2 text-surface-100">Profile</Link>
 					<button type="button" class="btn preset-tonal btn-sm w-full text-surface-100" onclick={() => router.post('/logout')}>Log out</button>
 				</div>

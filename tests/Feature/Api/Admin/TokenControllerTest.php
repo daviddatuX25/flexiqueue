@@ -218,6 +218,58 @@ class TokenControllerTest extends TestCase
         $response->assertJsonPath('in_use_ids.0', $t2->id);
     }
 
+    public function test_update_token_status_to_deactivated_returns_200(): void
+    {
+        $token = $this->createToken('A1', 'available');
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/tokens/{$token->id}", [
+            'status' => 'deactivated',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('token.status', 'deactivated');
+        $this->assertDatabaseHas('tokens', ['id' => $token->id, 'status' => 'deactivated']);
+    }
+
+    public function test_update_deactivated_to_available_returns_200(): void
+    {
+        $token = $this->createToken('A1', 'deactivated');
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/tokens/{$token->id}", [
+            'status' => 'available',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('token.status', 'available');
+    }
+
+    public function test_update_in_use_to_deactivated_returns_409(): void
+    {
+        $token = $this->createToken('A1', 'available');
+        $user = User::factory()->create();
+        $program = \App\Models\Program::create(['name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
+        $station = \App\Models\Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
+        $track = \App\Models\ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
+        \App\Models\TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);
+        $session = \App\Models\Session::create([
+            'token_id' => $token->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'A1',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+        ]);
+        $token->update(['status' => 'in_use', 'current_session_id' => $session->id]);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/tokens/{$token->id}", [
+            'status' => 'deactivated',
+        ]);
+
+        $response->assertStatus(409);
+        $response->assertJsonPath('message', 'Cannot deactivate token in use. Mark it available first.');
+    }
+
     public function test_update_token_status_validates_allowed_values(): void
     {
         $token = $this->createToken('A1', 'available');

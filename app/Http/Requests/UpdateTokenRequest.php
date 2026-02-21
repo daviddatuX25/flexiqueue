@@ -5,8 +5,8 @@ namespace App\Http\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
- * Per plan: PUT /api/admin/tokens/{id} — status (available only).
- * in_use is set by bind flow; admin can only set to available. Lost/damaged replaced by soft delete.
+ * Per plan: PUT /api/admin/tokens/{id} — status.
+ * in_use is set by bind flow. Admin can set available (reactivate) or deactivated.
  */
 class UpdateTokenRequest extends FormRequest
 {
@@ -21,7 +21,7 @@ class UpdateTokenRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'status' => ['required', 'string', 'in:available'],
+            'status' => ['required', 'string', 'in:available,deactivated'],
         ];
     }
 }
