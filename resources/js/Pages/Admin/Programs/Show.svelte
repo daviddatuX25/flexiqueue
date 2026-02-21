@@ -43,6 +43,7 @@
             require_permission_before_override: boolean;
             priority_first: boolean;
             balance_mode: string;
+            station_selection_mode?: string;
             alternate_ratio: [number, number];
         };
     }
@@ -141,6 +142,7 @@
     let settingsRequireOverride = $state(true);
     let settingsPriorityFirst = $state(true);
     let settingsBalanceMode = $state<"fifo" | "alternate">("fifo");
+    let settingsStationSelectionMode = $state<string>("fixed");
     let settingsAlternateRatioP = $state(2);
     let settingsAlternateRatioR = $state(1);
 
@@ -154,6 +156,8 @@
             settingsBalanceMode = (
                 s.balance_mode === "alternate" ? "alternate" : "fifo"
             ) as "fifo" | "alternate";
+            settingsStationSelectionMode =
+                s.station_selection_mode ?? "fixed";
             const ar = s.alternate_ratio ?? [2, 1];
             settingsAlternateRatioP = ar[0] ?? 2;
             settingsAlternateRatioR = ar[1] ?? 1;
@@ -766,6 +770,7 @@
                     require_permission_before_override: settingsRequireOverride,
                     priority_first: settingsPriorityFirst,
                     balance_mode: settingsBalanceMode,
+                    station_selection_mode: settingsStationSelectionMode,
                     alternate_ratio: [
                         settingsAlternateRatioP,
                         settingsAlternateRatioR,
@@ -1507,7 +1512,48 @@
                             </div>
                         </div>
 
-                        <!-- Setting 4 -->
+                        <!-- Setting 4: Station Selection Mode -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3
+                                    class="font-medium text-surface-950 flex items-center gap-2"
+                                >
+                                    <GitMerge
+                                        class="w-4 h-4 text-surface-500"
+                                    /> Station Selection
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    When multiple stations serve the same process, how to pick the station.
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control">
+                                <select
+                                    id="station-selection-mode"
+                                    class="select rounded-container border border-surface-200 px-3 py-2 w-full text-surface-950 bg-white shadow-sm"
+                                    bind:value={settingsStationSelectionMode}
+                                >
+                                    <option value="fixed"
+                                        >Fixed — First configured station</option
+                                    >
+                                    <option value="shortest_queue"
+                                        >Shortest Queue — Fewest waiting</option
+                                    >
+                                    <option value="least_busy"
+                                        >Least Busy — Lowest active load</option
+                                    >
+                                    <option value="round_robin"
+                                        >Round Robin — Rotate fairly</option
+                                    >
+                                    <option value="least_recently_served"
+                                        >Least Recently Served</option
+                                    >
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Setting 5 -->
                         <div class="flex flex-col sm:flex-row gap-4">
                             <div class="sm:w-1/3 shrink-0">
                                 <h3

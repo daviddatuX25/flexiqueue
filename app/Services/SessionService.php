@@ -26,7 +26,8 @@ class SessionService
 {
     public function __construct(
         private FlowEngine $flowEngine,
-        private PinService $pinService
+        private PinService $pinService,
+        private StationSelectionService $stationSelectionService
     ) {}
 
     /**
@@ -68,16 +69,21 @@ class SessionService
             throw new \InvalidArgumentException('Track has no steps defined.', 422);
         }
 
-        return DB::transaction(function () use ($token, $program, $track, $firstStep, $clientCategory, $staffUserId) {
+        $firstStationId = $this->resolveFirstStationForStep($firstStep, $program->id);
+        if ($firstStationId === null) {
+            throw new \InvalidArgumentException('Track first step has no stations.', 422);
+        }
+
+        return DB::transaction(function () use ($token, $program, $track, $firstStep, $firstStationId, $clientCategory, $staffUserId) {
             $clientCategory = ClientCategory::normalize($clientCategory) ?? $clientCategory;
-            $nextPos = $this->getNextQueuePositionAtStation($firstStep->station_id);
+            $nextPos = $this->getNextQueuePositionAtStation($firstStationId);
             $session = \App\Models\Session::create([
                 'token_id' => $token->id,
                 'program_id' => $program->id,
                 'track_id' => $track->id,
                 'alias' => $token->physical_id,
                 'client_category' => $clientCategory,
-                'current_station_id' => $firstStep->station_id,
+                'current_station_id' => $firstStationId,
                 'current_step_order' => 1,
                 'station_queue_position' => $nextPos,
                 'status' => 'waiting',
@@ -94,11 +100,11 @@ class SessionService
                 'station_id' => null,
                 'staff_user_id' => $staffUserId,
                 'action_type' => 'bind',
-                'next_station_id' => $firstStep->station_id,
+                'next_station_id' => $firstStationId,
             ]);
 
-            event(new ClientArrived($session->fresh(['currentStation', 'serviceTrack']), $firstStep->station_id));
-            event(new QueueLengthUpdated($firstStep->station_id));
+            event(new ClientArrived($session->fresh(['currentStation', 'serviceTrack']), $firstStationId));
+            event(new QueueLengthUpdated($firstStationId));
 
             return [
                 'session' => $session->fresh(['currentStation', 'serviceTrack']),
@@ -237,7 +243,14 @@ class SessionService
                     'action_required' => 'complete',
                 ];
             }
-            $targetStationId = $next['station_id'];
+            $targetStationId = $this->resolveTargetStationFromNext($next, $session->program_id);
+            if ($targetStationId === null) {
+                return [
+                    'message' => 'No next station available.',
+                    'session' => $session->fresh(['currentStation', 'serviceTrack']),
+                    'action_required' => 'override',
+                ];
+            }
             $newStepOrder = $next['step_order'];
         } else {
             $station = Station::find($targetStationId);
@@ -547,9 +560,8 @@ class SessionService
             throw new \InvalidArgumentException('Target track has no steps defined.', 422);
         }
 
-        $targetStationId = $firstStep->station_id;
-        $station = Station::find($targetStationId);
-        if (! $station || ! $station->is_active) {
+        $targetStationId = $this->resolveFirstStationForStep($firstStep, $program->id);
+        if ($targetStationId === null) {
             throw new \InvalidArgumentException('Target station not found or inactive.', 422);
         }
 
@@ -618,16 +630,16 @@ class SessionService
             throw new \InvalidArgumentException('Target track has no steps.', 422);
         }
 
-        $station = Station::find($firstStep->station_id);
-        if (! $station || ! $station->is_active) {
+        $firstStationId = $this->resolveFirstStationForStep($firstStep, $session->program_id);
+        if ($firstStationId === null) {
             throw new \InvalidArgumentException('First station of track not found or inactive.', 422);
         }
 
-        return DB::transaction(function () use ($session, $track, $firstStep, $staffUserId) {
-            $nextPos = $this->getNextQueuePositionAtStation($firstStep->station_id);
+        return DB::transaction(function () use ($session, $track, $firstStationId, $staffUserId) {
+            $nextPos = $this->getNextQueuePositionAtStation($firstStationId);
             $session->update([
                 'track_id' => $track->id,
-                'current_station_id' => $firstStep->station_id,
+                'current_station_id' => $firstStationId,
                 'current_step_order' => 1,
                 'override_steps' => null,
                 'station_queue_position' => $nextPos,
@@ -635,8 +647,8 @@ class SessionService
                 'queued_at_station' => now(),
             ]);
 
-            event(new ClientArrived($session->fresh(['currentStation', 'serviceTrack']), $firstStep->station_id));
-            event(new QueueLengthUpdated($firstStep->station_id));
+            event(new ClientArrived($session->fresh(['currentStation', 'serviceTrack']), $firstStationId));
+            event(new QueueLengthUpdated($firstStationId));
 
             return ['session' => $session->fresh()];
         });
@@ -754,6 +766,7 @@ class SessionService
 
     /**
      * Resolve step order when transferring to target station (custom mode).
+     * Per PROCESS-STATION-REFACTOR: also match by process (station serves process).
      */
     private function resolveStepOrderForTarget(Session $session, int $targetStationId): int
     {
@@ -766,7 +779,58 @@ class SessionService
         }
 
         $step = TrackStep::where('track_id', $session->track_id)->where('station_id', $targetStationId)->first();
+        if ($step) {
+            return $step->step_order;
+        }
 
-        return $step?->step_order ?? $session->current_step_order;
+        $station = Station::find($targetStationId);
+        if ($station) {
+            $processIds = $station->processes()->pluck('process_id')->all();
+            if (! empty($processIds)) {
+                $step = TrackStep::where('track_id', $session->track_id)
+                    ->whereIn('process_id', $processIds)
+                    ->orderBy('step_order')
+                    ->first();
+                if ($step) {
+                    return $step->step_order;
+                }
+            }
+        }
+
+        return $session->current_step_order;
+    }
+
+    /**
+     * Resolve first station for a track step. Per PROCESS-STATION-REFACTOR: process_id → StationSelectionService.
+     */
+    private function resolveFirstStationForStep(TrackStep $step, int $programId): ?int
+    {
+        if ($step->process_id !== null) {
+            return $this->stationSelectionService->selectStationForProcess($step->process_id, $programId);
+        }
+
+        $station = $step->station;
+        if (! $station || ! $station->is_active) {
+            return null;
+        }
+
+        return $station->id;
+    }
+
+    /**
+     * Resolve target station from FlowEngine result. Handles process_id and station_id.
+     *
+     * @param  array{station_id?: int, process_id?: int, step_order: int}  $next
+     */
+    private function resolveTargetStationFromNext(array $next, int $programId): ?int
+    {
+        if (isset($next['station_id'])) {
+            return $next['station_id'];
+        }
+        if (isset($next['process_id'])) {
+            return $this->stationSelectionService->selectStationForProcess($next['process_id'], $programId);
+        }
+
+        return null;
     }
 }

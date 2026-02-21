@@ -78,6 +78,23 @@ class Program extends Model
         return $this->hasMany(Station::class);
     }
 
+    /**
+     * Per PROCESS-STATION-REFACTOR: Logical work types for the program.
+     */
+    public function processes(): HasMany
+    {
+        return $this->hasMany(Process::class);
+    }
+
+    public function getStationSelectionMode(): string
+    {
+        $mode = $this->settings['station_selection_mode'] ?? 'fixed';
+
+        return in_array($mode, ['fixed', 'shortest_queue', 'least_busy', 'round_robin', 'least_recently_served'], true)
+            ? $mode
+            : 'fixed';
+    }
+
     public function queueSessions(): HasMany
     {
         return $this->hasMany(Session::class, 'program_id');

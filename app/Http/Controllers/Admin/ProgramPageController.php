@@ -98,6 +98,7 @@ class ProgramPageController extends Controller
                     'require_permission_before_override' => (bool) ($settings['require_permission_before_override'] ?? true),
                     'priority_first' => (bool) ($settings['priority_first'] ?? true),
                     'balance_mode' => $settings['balance_mode'] ?? 'fifo',
+                    'station_selection_mode' => $settings['station_selection_mode'] ?? 'fixed',
                     'alternate_ratio' => [
                         (int) (($settings['alternate_ratio'] ?? [1, 1])[0] ?? 1),
                         (int) (($settings['alternate_ratio'] ?? [1, 1])[1] ?? 1),

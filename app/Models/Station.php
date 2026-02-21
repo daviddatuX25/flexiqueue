@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Station extends Model
@@ -28,6 +29,15 @@ class Station extends Model
     public function program(): BelongsTo
     {
         return $this->belongsTo(Program::class);
+    }
+
+    /**
+     * Per PROCESS-STATION-REFACTOR: Station M:M Process. Every station must have at least one process.
+     */
+    public function processes(): BelongsToMany
+    {
+        return $this->belongsToMany(Process::class, 'station_process')
+            ->withTimestamps(false);
     }
 
     public function trackSteps(): HasMany

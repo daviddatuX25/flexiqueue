@@ -2,7 +2,19 @@
 
 **Purpose:** Authoritative specification for introducing the Process entity and Station-Process many-to-many model into FlexiQueue. This document is the source of truth for task decomposition and implementation.
 
-**Status:** Planned — not yet implemented.
+**Status:** Phase 1 complete. Phase 2 and 3 pending.
+
+### Implementation Progress
+
+| Phase | Status | Bead | Notes |
+|-------|--------|------|-------|
+| **Phase 1** | Done | flexiqueue-6rt (closed) | Migrations: `processes`, `station_process`, `track_steps.process_id` + backfill. Models: Process, Station.processes(), TrackStep.process(), Program.processes(), Program.getStationSelectionMode(). All existing track steps backfilled via station name → process. `station_id` kept for dual-read. |
+| **Phase 2** | Done | flexiqueue-hde (closed) | FlowEngine, StationSelectionService, SessionService wiring; station_selection_mode in program settings |
+| **Phase 3** | Pending | flexiqueue-tpb | Drop station_id from track_steps, Step CRUD process_id (depends on flexiqueue-hde) |
+
+**Cases to be worked on / adjusted in higher-level plan:**
+- `track_steps.process_id` left nullable for SQLite test compatibility; Phase 3 migration will enforce NOT NULL when dropping `station_id`
+- Station create/update validation ("every station ≥1 process") not yet enforced — defer to Phase 2/3 when Process CRUD UI exists
 
 ---
 
@@ -349,18 +361,21 @@ Add `station_selection_mode` to `PUT /api/admin/programs/{id}` settings object.
 
 ## 14. Task Decomposition Checklist
 
+Beads: Phase 1 = flexiqueue-6rt (closed); Phase 2 = flexiqueue-hde; Phase 3 = flexiqueue-tpb.
+
 Use this checklist when creating beads or tickets:
 
-- [ ] Migration: create processes table
-- [ ] Migration: create station_process table
-- [ ] Migration: add process_id to track_steps, backfill
-- [ ] Model: Process
-- [ ] Model: Station belongsToMany Process, validation
-- [ ] Model: TrackStep process_id, process()
-- [ ] Model: Program hasMany Process, getStationSelectionMode
-- [ ] Service: StationSelectionService
-- [ ] Service: FlowEngine process_id return
-- [ ] Service: SessionService bind/transfer wiring
+- [x] Migration: create processes table
+- [x] Migration: create station_process table
+- [x] Migration: add process_id to track_steps, backfill
+- [x] Model: Process
+- [x] Model: Station belongsToMany Process (validation deferred to Phase 2/3)
+- [x] Model: TrackStep process_id, process()
+- [x] Model: Program hasMany Process, getStationSelectionMode
+- [x] Service: StationSelectionService
+- [x] Service: FlowEngine process_id return
+- [x] Service: SessionService bind/transfer wiring
+- [x] Program settings: station_selection_mode (UpdateProgramRequest, API, UI)
 - [ ] Controller: ProcessController CRUD
 - [ ] Controller: StepController process_id
 - [ ] Controller: StationController process assignment

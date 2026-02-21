@@ -112,6 +112,27 @@ class ProgramControllerTest extends TestCase
         $this->assertFalse($settings['require_permission_before_override']);
     }
 
+    public function test_update_persists_station_selection_mode(): void
+    {
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/programs/{$program->id}", [
+            'name' => 'P',
+            'description' => null,
+            'settings' => ['station_selection_mode' => 'shortest_queue'],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('program.settings.station_selection_mode', 'shortest_queue');
+        $program->refresh();
+        $this->assertSame('shortest_queue', $program->getStationSelectionMode());
+    }
+
     public function test_activate_sets_program_active_and_deactivates_others(): void
     {
         $other = Program::create([

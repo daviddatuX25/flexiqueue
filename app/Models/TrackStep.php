@@ -10,6 +10,7 @@ class TrackStep extends Model
     protected $fillable = [
         'track_id',
         'station_id',
+        'process_id',
         'step_order',
         'is_required',
         'estimated_minutes',
@@ -30,5 +31,13 @@ class TrackStep extends Model
     public function station(): BelongsTo
     {
         return $this->belongsTo(Station::class);
+    }
+
+    /**
+     * Per PROCESS-STATION-REFACTOR: TrackStep references Process (primary for routing).
+     */
+    public function process(): BelongsTo
+    {
+        return $this->belongsTo(Process::class);
     }
 }

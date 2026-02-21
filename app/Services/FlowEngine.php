@@ -7,15 +7,16 @@ use App\Models\TrackStep;
 
 /**
  * Per 03-FLOW-ENGINE §2: Routing algorithm for session flow.
- * Pure logic — reads data but does NOT mutate anything.
+ * Per PROCESS-STATION-REFACTOR: returns process_id when TrackStep has process; else station_id (dual-read).
  */
 class FlowEngine
 {
     /**
-     * Calculate the next station for a session in standard flow.
-     * Per TRACK-OVERRIDES-REFACTOR: when session.override_steps is set, use that path instead of track_steps.
+     * Calculate the next station or process for a session in standard flow.
+     * Per TRACK-OVERRIDES-REFACTOR: when session.override_steps is set, returns station_id.
+     * Per PROCESS-STATION-REFACTOR: when TrackStep has process_id, returns process_id; else station_id (dual-read).
      *
-     * @return array{station_id: int, step_order: int}|null Next station + step order, or NULL if flow complete or next station inactive
+     * @return array{station_id?: int, process_id?: int, step_order: int}|null Next station/process + step order, or NULL if flow complete or inactive
      */
     public function calculateNextStation(Session $session): ?array
     {
@@ -26,13 +27,22 @@ class FlowEngine
 
         $nextStep = TrackStep::where('track_id', $session->track_id)
             ->where('step_order', $session->current_step_order + 1)
-            ->with('station')
+            ->with(['station', 'process'])
             ->first();
 
         if (! $nextStep) {
             return null;
         }
 
+        // Per PROCESS-STATION-REFACTOR: process_id path → caller uses StationSelectionService
+        if ($nextStep->process_id !== null) {
+            return [
+                'process_id' => $nextStep->process_id,
+                'step_order' => $nextStep->step_order,
+            ];
+        }
+
+        // Dual-read fallback: station_id when process_id null
         $station = $nextStep->station;
         if (! $station || ! $station->is_active) {
             return null;
