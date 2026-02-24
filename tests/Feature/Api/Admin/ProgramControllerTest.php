@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api\Admin;
 
+use App\Models\Process;
 use App\Models\Program;
 use App\Models\ProgramAuditLog;
 use App\Models\ProgramStationAssignment;
@@ -10,6 +11,7 @@ use App\Models\Session;
 use App\Models\Station;
 use App\Models\Token;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -133,6 +135,24 @@ class ProgramControllerTest extends TestCase
         $this->assertSame('shortest_queue', $program->getStationSelectionMode());
     }
 
+    /** Per ISSUES-ELABORATION §16: activate returns 422 when pre-session checks fail. */
+    public function test_activate_returns_422_when_missing_required_config(): void
+    {
+        $program = Program::create([
+            'name' => 'Empty',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$program->id}/activate");
+
+        $response->assertStatus(422);
+        $missing = $response->json('missing');
+        $this->assertContains('no_stations', $missing);
+        $this->assertContains('no_tracks', $missing);
+    }
+
     public function test_activate_sets_program_active_and_deactivates_others(): void
     {
         $other = Program::create([
@@ -147,6 +167,7 @@ class ProgramControllerTest extends TestCase
             'is_active' => false,
             'created_by' => $this->admin->id,
         ]);
+        $this->addMinimalActivateSetup($program);
 
         $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$program->id}/activate");
 
@@ -175,11 +196,7 @@ class ProgramControllerTest extends TestCase
             'is_active' => false,
             'created_by' => $this->admin->id,
         ]);
-        ServiceTrack::create([
-            'program_id' => $program->id,
-            'name' => 'T1',
-            'is_default' => true,
-        ]);
+        $this->addMinimalActivateSetup($program);
 
         $this->actingAs($this->admin)->postJson("/api/admin/programs/{$program->id}/activate");
 
@@ -206,10 +223,26 @@ class ProgramControllerTest extends TestCase
             'capacity' => 1,
             'is_active' => true,
         ]);
+        $process = Process::create([
+            'program_id' => $program->id,
+            'name' => 'P1',
+            'description' => null,
+        ]);
+        DB::table('station_process')->insert([
+            'station_id' => $station->id,
+            'process_id' => $process->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
         ProgramStationAssignment::create([
             'program_id' => $program->id,
             'user_id' => $staff->id,
             'station_id' => $station->id,
+        ]);
+        ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'T1',
+            'is_default' => true,
         ]);
 
         $this->actingAs($this->admin)->postJson("/api/admin/programs/{$program->id}/activate");
@@ -373,5 +406,39 @@ class ProgramControllerTest extends TestCase
         $response = $this->actingAs($staff)->getJson('/api/admin/programs');
 
         $response->assertStatus(403);
+    }
+
+    /**
+     * Per ISSUES-ELABORATION §16: minimal setup so activate() passes pre-session checks.
+     */
+    private function addMinimalActivateSetup(Program $program): void
+    {
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'S1',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $process = Process::create([
+            'program_id' => $program->id,
+            'name' => 'P1',
+            'description' => null,
+        ]);
+        DB::table('station_process')->insert([
+            'station_id' => $station->id,
+            'process_id' => $process->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        ProgramStationAssignment::create([
+            'program_id' => $program->id,
+            'user_id' => $this->admin->id,
+            'station_id' => $station->id,
+        ]);
+        ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'T1',
+            'is_default' => true,
+        ]);
     }
 }

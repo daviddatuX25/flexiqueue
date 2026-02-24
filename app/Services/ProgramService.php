@@ -12,9 +12,40 @@ use Illuminate\Support\Facades\DB;
 /**
  * Per 08-API-SPEC-PHASE1 §5.1: activate (deactivates current), deactivate (no active sessions), delete (no sessions).
  * Per flexiqueue-loo: program session start/stop recorded in program_audit_log.
+ * Per ISSUES-ELABORATION §16: pre-session checkers before activate.
  */
 class ProgramService
 {
+    /**
+     * Check if program can be activated (has stations, processes with stations, staff assigned, tracks).
+     * Returns ['can_activate' => bool, 'missing' => string[]].
+     */
+    public function canActivate(Program $program): array
+    {
+        $missing = [];
+
+        if (! $program->stations()->exists()) {
+            $missing[] = 'no_stations';
+        }
+
+        if (! $program->stations()->whereHas('processes')->exists()) {
+            $missing[] = 'no_processes_with_stations';
+        }
+
+        if (! ProgramStationAssignment::where('program_id', $program->id)->exists()) {
+            $missing[] = 'no_staff_assigned';
+        }
+
+        if (! $program->serviceTracks()->exists()) {
+            $missing[] = 'no_tracks';
+        }
+
+        return [
+            'can_activate' => empty($missing),
+            'missing' => $missing,
+        ];
+    }
+
     /**
      * Activate this program; deactivate the current active program.
      */

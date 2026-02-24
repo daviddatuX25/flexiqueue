@@ -86,9 +86,26 @@ class ProgramController extends Controller
 
     /**
      * Activate program (deactivates current active).
+     * Per ISSUES-ELABORATION §16: returns 422 with missing[] if pre-session checks fail.
      */
     public function activate(Program $program): JsonResponse
     {
+        $check = $this->programService->canActivate($program);
+        if (! $check['can_activate']) {
+            $messages = [
+                'no_stations' => 'Add at least one station.',
+                'no_processes_with_stations' => 'Add at least one process and assign it to a station.',
+                'no_staff_assigned' => 'Assign at least one staff to a station.',
+                'no_tracks' => 'Create at least one track.',
+            ];
+            $message = implode(' ', array_map(fn ($key) => $messages[$key] ?? $key, $check['missing']));
+
+            return response()->json([
+                'message' => $message,
+                'missing' => $check['missing'],
+            ], 422);
+        }
+
         $program = $this->programService->activate($program);
 
         return response()->json(['program' => $this->programResource($program)]);

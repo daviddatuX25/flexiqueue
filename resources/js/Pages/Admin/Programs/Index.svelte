@@ -136,19 +136,33 @@
         }
     }
 
+    /** Per ISSUES-ELABORATION §16: 422 shows message + optional missing list. */
+    const ACTIVATE_MISSING_LABELS: Record<string, string> = {
+        no_stations: "Add at least one station.",
+        no_processes_with_stations: "Assign at least one process to a station.",
+        no_staff_assigned: "Assign at least one staff member to a station.",
+        no_tracks: "Add at least one track.",
+    };
+    let activateMissing = $state<string[]>([]);
+
     async function handleActivate(p: ProgramItem) {
         submitting = true;
         error = "";
-        const { ok, message } = await api(
+        activateMissing = [];
+        const { ok, message, data } = await api(
             "POST",
             `/api/admin/programs/${p.id}/activate`,
         );
         submitting = false;
         if (ok) {
             error = "";
+            activateMissing = [];
             router.reload();
         } else {
             error = message ?? "Failed to start session.";
+            const missing = (data as { missing?: string[] } | undefined)?.missing;
+            if (Array.isArray(missing))
+                activateMissing = missing.map((k) => ACTIVATE_MISSING_LABELS[k] ?? k);
         }
     }
 
@@ -244,14 +258,22 @@
                     Manage your active queue sessions and programs.
                 </p>
             </div>
-            <button
-                type="button"
-                class="btn preset-filled-primary-500 flex items-center gap-2"
-                onclick={openCreate}
-            >
-                <Plus class="w-4 h-4" />
-                Create Program
-            </button>
+            <div class="flex items-center gap-2">
+                <Link
+                    href="/admin/program-default-settings"
+                    class="btn preset-tonal flex items-center gap-2"
+                >
+                    Default program settings
+                </Link>
+                <button
+                    type="button"
+                    class="btn preset-filled-primary-500 flex items-center gap-2"
+                    onclick={openCreate}
+                >
+                    <Plus class="w-4 h-4" />
+                    Create Program
+                </button>
+            </div>
         </div>
 
         {#if error}
@@ -262,11 +284,18 @@
                 <AlertCircle class="w-5 h-5 text-error-500 mt-0.5 shrink-0" />
                 <div class="flex-grow">
                     <span class="font-medium text-sm">{error}</span>
+                    {#if activateMissing.length > 0}
+                        <ul class="mt-2 list-disc list-inside text-sm">
+                            {#each activateMissing as label}
+                                <li>{label}</li>
+                            {/each}
+                        </ul>
+                    {/if}
                 </div>
                 <button
                     type="button"
                     class="text-error-500 hover:text-error-700 transition-colors"
-                    onclick={() => (error = "")}
+                    onclick={() => { error = ""; activateMissing = []; }}
                 >
                     Dismiss
                 </button>
@@ -351,9 +380,9 @@
                                 <Link
                                     href="/admin/programs/{program.id}"
                                     class="btn preset-tonal btn-sm flex items-center gap-1.5"
-                                    title="View Dashboard"
+                                    title="Manage Program"
                                 >
-                                    <Eye class="w-3.5 h-3.5" /> View
+                                    <Eye class="w-3.5 h-3.5" /> Manage
                                 </Link>
 
                                 {#if program.is_active}

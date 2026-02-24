@@ -114,9 +114,13 @@
         stats?: ProgramStats;
     } = $props();
 
+    const queryTab =
+        typeof window !== "undefined"
+            ? new URLSearchParams(window.location.search).get("tab")
+            : null;
     let activeTab = $state<
         "tracks" | "processes" | "stations" | "overview" | "settings" | "staff"
-    >("overview");
+    >((queryTab as any) || "overview");
     let showCreateModal = $state(false);
     let editTrack = $state<TrackItem | null>(null);
     let createName = $state("");
@@ -162,6 +166,16 @@
     let settingsAlternateRatioP = $state(2);
     let settingsAlternateRatioR = $state(1);
 
+    // Per ISSUES-ELABORATION §17: show deactivate warning after reload (passed via sessionStorage)
+    $effect(() => {
+        if (typeof window === "undefined") return;
+        const w = sessionStorage.getItem("stationDeactivateWarning");
+        if (w) {
+            error = w;
+            sessionStorage.removeItem("stationDeactivateWarning");
+        }
+    });
+
     $effect(() => {
         const s = program?.settings;
         if (s) {
@@ -172,8 +186,7 @@
             settingsBalanceMode = (
                 s.balance_mode === "alternate" ? "alternate" : "fifo"
             ) as "fifo" | "alternate";
-            settingsStationSelectionMode =
-                s.station_selection_mode ?? "fixed";
+            settingsStationSelectionMode = s.station_selection_mode ?? "fixed";
             const ar = s.alternate_ratio ?? [2, 1];
             settingsAlternateRatioP = ar[0] ?? 2;
             settingsAlternateRatioR = ar[1] ?? 1;
@@ -317,16 +330,31 @@
         else error = message ?? "Failed to resume.";
     }
 
+    /** Per ISSUES-ELABORATION §16: 422 shows message + optional missing list. */
+    const ACTIVATE_MISSING_LABELS: Record<string, string> = {
+        no_stations: "Add at least one station.",
+        no_processes_with_stations: "Assign at least one process to a station.",
+        no_staff_assigned: "Assign at least one staff member to a station.",
+        no_tracks: "Add at least one track.",
+    };
+    let activateMissing = $state<string[]>([]);
+
     async function handleActivate() {
         submitting = true;
         error = "";
-        const { ok, message } = await api(
+        activateMissing = [];
+        const { ok, message, data } = await api(
             "POST",
             `/api/admin/programs/${program.id}/activate`,
         );
         submitting = false;
         if (ok) router.reload();
-        else error = message ?? "Failed to start session.";
+        else {
+            error = message ?? "Failed to start session.";
+            const missing = (data as { missing?: string[] } | undefined)?.missing;
+            if (Array.isArray(missing))
+                activateMissing = missing.map((k) => ACTIVATE_MISSING_LABELS[k] ?? k);
+        }
     }
 
     function openStopConfirm() {
@@ -547,7 +575,9 @@
 
     function toggleCreateProcess(id: number) {
         if (createStationProcessIds.includes(id)) {
-            createStationProcessIds = createStationProcessIds.filter((x) => x !== id);
+            createStationProcessIds = createStationProcessIds.filter(
+                (x) => x !== id,
+            );
         } else {
             createStationProcessIds = [...createStationProcessIds, id];
         }
@@ -555,7 +585,9 @@
 
     function toggleEditProcess(id: number) {
         if (editStationProcessIds.includes(id)) {
-            editStationProcessIds = editStationProcessIds.filter((x) => x !== id);
+            editStationProcessIds = editStationProcessIds.filter(
+                (x) => x !== id,
+            );
         } else {
             editStationProcessIds = [...editStationProcessIds, id];
         }
@@ -584,8 +616,13 @@
             closeModals();
             router.reload();
         } else {
-            const d = data as { message?: string; errors?: Record<string, string[]> };
-            const firstErr = d?.errors ? Object.values(d.errors).flat()[0] : null;
+            const d = data as {
+                message?: string;
+                errors?: Record<string, string[]>;
+            };
+            const firstErr = d?.errors
+                ? Object.values(d.errors).flat()[0]
+                : null;
             error = firstErr ?? message ?? "Failed to create station.";
         }
     }
@@ -610,9 +647,18 @@
             createProcessDescription = "";
             router.reload();
         } else {
-            const d = data as { message?: string; errors?: Record<string, string[]> };
-            const firstErr = d?.errors ? Object.values(d.errors).flat()[0] : null;
-            error = firstErr ?? d?.message ?? message ?? "Failed to create process.";
+            const d = data as {
+                message?: string;
+                errors?: Record<string, string[]>;
+            };
+            const firstErr = d?.errors
+                ? Object.values(d.errors).flat()[0]
+                : null;
+            error =
+                firstErr ??
+                d?.message ??
+                message ??
+                "Failed to create process.";
         }
     }
 
@@ -641,8 +687,13 @@
             closeModals();
             router.reload();
         } else {
-            const d = data as { message?: string; errors?: Record<string, string[]> };
-            const firstErr = d?.errors ? Object.values(d.errors).flat()[0] : null;
+            const d = data as {
+                message?: string;
+                errors?: Record<string, string[]>;
+            };
+            const firstErr = d?.errors
+                ? Object.values(d.errors).flat()[0]
+                : null;
             error = firstErr ?? message ?? "Failed to update station.";
         }
     }
@@ -677,7 +728,10 @@
     async function handleToggleStationActive(s: StationItem) {
         submitting = true;
         error = "";
-        const { ok, message } = await api(
+        // Per ISSUES-ELABORATION §17: include current process_ids so validation passes when only toggling is_active
+        const processIds =
+            s.process_ids && s.process_ids.length > 0 ? s.process_ids : [];
+        const { ok, data, message } = await api(
             "PUT",
             `/api/admin/stations/${s.id}`,
             {
@@ -685,10 +739,20 @@
                 capacity: s.capacity,
                 client_capacity: s.client_capacity ?? 1,
                 is_active: !s.is_active,
+                process_ids: processIds,
             },
         );
         submitting = false;
         if (ok) {
+            const payload = data as
+                | { station?: unknown; warning?: string }
+                | undefined;
+            if (payload?.warning && typeof sessionStorage !== "undefined") {
+                sessionStorage.setItem(
+                    "stationDeactivateWarning",
+                    payload.warning,
+                );
+            }
             router.reload();
         } else {
             error = message ?? "Failed to update station.";
@@ -855,6 +919,22 @@
         submitting = false;
         if (ok) router.reload();
         else error = message ?? "Failed to save settings.";
+    }
+
+    /** Per ISSUES-ELABORATION §2: load saved default settings into form (does not save to program until user clicks Save). */
+    async function applyDefaultSettings() {
+        error = "";
+        const { ok, data } = await api("GET", "/api/admin/program-default-settings");
+        if (!ok || !data) return;
+        const s = (data as { settings?: Record<string, unknown> }).settings ?? {};
+        settingsNoShowTimer = Number(s.no_show_timer_seconds ?? 10);
+        settingsRequireOverride = Boolean(s.require_permission_before_override ?? true);
+        settingsPriorityFirst = Boolean(s.priority_first ?? true);
+        settingsBalanceMode = ((s.balance_mode as string) ?? "fifo") as "fifo" | "alternate";
+        settingsStationSelectionMode = String(s.station_selection_mode ?? "fixed");
+        const ar = (s.alternate_ratio as number[] | undefined) ?? [2, 1];
+        settingsAlternateRatioP = Number(ar[0] ?? 2);
+        settingsAlternateRatioR = Number(ar[1] ?? 1);
     }
 
     async function handleAssignStaff(userId: number, stationId: number | null) {
@@ -1060,12 +1140,12 @@
                 </div>
                 <div class="flex flex-wrap items-center gap-3">
                     <Link
-                        href="/triage"
+                        href={`/admin/programs/${program.id}?tab=stations`}
                         class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm hover:shadow-md transition-shadow"
-                        title="Open triage to scan tokens and assign tracks"
+                        title="Open stations to manage the queue"
                     >
                         <Activity class="w-4 h-4" />
-                        Open Triage
+                        View Program
                     </Link>
                     <div class="h-6 w-px bg-success-200 hidden sm:block"></div>
                     <button
@@ -1145,61 +1225,13 @@
         {/if}
 
         <!-- Tab navigation (BD-009, BD-010) — Skeleton-compatible tabs, Overview first -->
-        <div role="tablist" class="tabs">
-            <button
-                type="button"
-                role="tab"
-                class="tab"
-                class:tab-active={activeTab === "overview"}
-                onclick={() => (activeTab = "overview")}
-            >
-                Overview
-            </button>
-            <button
-                type="button"
-                role="tab"
-                class="tab"
-                class:tab-active={activeTab === "tracks"}
-                onclick={() => (activeTab = "tracks")}
-            >
-                Tracks
-            </button>
-            <button
-                type="button"
-                role="tab"
-                class="tab"
-                class:tab-active={activeTab === "processes"}
-                onclick={() => (activeTab = "processes")}
-            >
-                Processes
-            </button>
-            <button
-                type="button"
-                role="tab"
-                class="tab"
-                class:tab-active={activeTab === "stations"}
-                onclick={() => (activeTab = "stations")}
-            >
-                Stations
-            </button>
-            <button
-                type="button"
-                role="tab"
-                class="tab"
-                class:tab-active={activeTab === "staff"}
-                onclick={() => (activeTab = "staff")}
-            >
-                Staff
-            </button>
-            <button
-                type="button"
-                role="tab"
-                class="tab"
-                class:tab-active={activeTab === "settings"}
-                onclick={() => (activeTab = "settings")}
-            >
-                Settings
-            </button>
+        <div role="tablist" class="tabs gap-2 overflow-x-auto pb-1">
+            <button type="button" role="tab" class="tab w-fit whitespace-nowrap px-4" class:tab-active={activeTab === "overview"} onclick={() => (activeTab = "overview")}>Overview</button>
+            <button type="button" role="tab" class="tab w-fit whitespace-nowrap px-4" class:tab-active={activeTab === "processes"} onclick={() => (activeTab = "processes")}>Processes</button>
+            <button type="button" role="tab" class="tab w-fit whitespace-nowrap px-4" class:tab-active={activeTab === "stations"} onclick={() => (activeTab = "stations")}>Stations</button>
+            <button type="button" role="tab" class="tab w-fit whitespace-nowrap px-4" class:tab-active={activeTab === "staff"} onclick={() => (activeTab = "staff")}>Staff</button>
+            <button type="button" role="tab" class="tab w-fit whitespace-nowrap px-4" class:tab-active={activeTab === "tracks"} onclick={() => (activeTab = "tracks")}>Tracks</button>
+            <button type="button" role="tab" class="tab w-fit whitespace-nowrap px-4" class:tab-active={activeTab === "settings"} onclick={() => (activeTab = "settings")}>Settings</button>
         </div>
 
         {#if error}
@@ -1208,11 +1240,18 @@
                 role="alert"
             >
                 <span>{error}</span>
+                {#if activateMissing.length > 0}
+                    <ul class="mt-2 list-disc list-inside text-sm">
+                        {#each activateMissing as label}
+                            <li>{label}</li>
+                        {/each}
+                    </ul>
+                {/if}
                 <button
                     type="button"
                     class="btn preset-tonal btn-sm"
-                    onclick={() => (error = "")}>Dismiss</button
-                >
+                    onclick={() => { error = ""; activateMissing = []; }}
+                >Dismiss</button>
             </div>
         {/if}
 
@@ -1451,6 +1490,13 @@
                             this program.
                         </p>
                     </div>
+                    <button
+                        type="button"
+                        class="btn preset-tonal btn-sm"
+                        onclick={applyDefaultSettings}
+                    >
+                        Apply default settings
+                    </button>
                 </div>
                 <div
                     class="rounded-container bg-surface-50 border border-surface-200 shadow-sm flex flex-col overflow-hidden"
@@ -1516,7 +1562,7 @@
                                     />
                                     <span
                                         class="label-text text-surface-950 font-medium"
-                                        >Enable priority first routing</span
+                                        >Enable strict priority first routing</span
                                     >
                                 </label>
                             </div>
@@ -1608,7 +1654,8 @@
                                     /> Station Selection
                                 </h3>
                                 <p class="text-xs text-surface-500 mt-1">
-                                    When multiple stations serve the same process, how to pick the station.
+                                    When multiple stations serve the same
+                                    process, how to pick the station.
                                 </p>
                             </div>
                             <div class="sm:w-2/3 form-control">
@@ -1667,6 +1714,14 @@
                                 </label>
                             </div>
                         </div>
+
+                        <!-- Per ISSUES-ELABORATION §5: info on multiple processes per station -->
+                        <div class="rounded-container bg-surface-100/80 border border-surface-200 p-4 mt-4">
+                            <p class="text-sm font-medium text-surface-800">Multiple processes per station</p>
+                            <p class="text-xs text-surface-600 mt-1">
+                                You can assign several processes to the same physical station: add the same station to multiple track steps (each step can use a different process), and in Stations ensure that station has multiple processes selected. Station selection mode above then applies when choosing which station serves each process.
+                            </p>
+                        </div>
                     </div>
 
                     <div
@@ -1695,7 +1750,9 @@
                         Processes
                     </h2>
                     <p class="text-sm text-surface-600 mb-4">
-                        Define logical work types (e.g. Verification, Cash Release). Each track step references a process. Create processes before adding steps to tracks.
+                        Define logical work types (e.g. Verification, Cash
+                        Release). Each track step references a process. Create
+                        processes before adding steps to tracks.
                     </p>
                     <div class="flex flex-wrap items-end gap-3 mb-6">
                         <div class="form-control min-w-[200px]">
@@ -1714,7 +1771,8 @@
                         </div>
                         <div class="form-control min-w-[200px]">
                             <label for="create-process-desc" class="label py-0"
-                                ><span class="label-text text-xs">Description (optional)</span
+                                ><span class="label-text text-xs"
+                                    >Description (optional)</span
                                 ></label
                             >
                             <input
@@ -1743,7 +1801,8 @@
                         <div
                             class="rounded-container bg-surface-50 border border-surface-200 p-8 text-center text-surface-600"
                         >
-                            No processes yet. Add one above to use in track steps.
+                            No processes yet. Add one above to use in track
+                            steps.
                         </div>
                     {:else}
                         <div class="flex flex-wrap gap-2">
@@ -1753,7 +1812,8 @@
                                 >
                                     {proc.name}
                                     {#if proc.description}
-                                        <span class="text-surface-500 text-xs ml-2"
+                                        <span
+                                            class="text-surface-500 text-xs ml-2"
                                             >— {proc.description}</span
                                         >
                                     {/if}
@@ -1823,7 +1883,10 @@
                                 </thead>
                                 <tbody>
                                     {#each staffStations as station (station.id)}
-                                        {@const assignedUserId = getAssignedUserIdForStation(station.id)}
+                                        {@const assignedUserId =
+                                            getAssignedUserIdForStation(
+                                                station.id,
+                                            )}
                                         <tr>
                                             <td>
                                                 <span class="font-medium"
@@ -1854,7 +1917,8 @@
                                                         >— Unassigned —</option
                                                     >
                                                     {#each staffAssignments as a (a.user_id)}
-                                                        <option value={a.user_id}
+                                                        <option
+                                                            value={a.user_id}
                                                             >{a.user.name}
                                                             {#if staffSupervisors.some((s) => s.id === a.user_id)}
                                                                 (Supervisor)
@@ -2336,10 +2400,17 @@
                 />
             </div>
             <div class="form-control w-full">
-                <label class="label"><span class="label-text">Processes</span></label>
-                <p class="text-xs text-surface-500 mb-2">Select which work types this station handles. At least one required.</p>
+                <label class="label"
+                    ><span class="label-text">Processes</span></label
+                >
+                <p class="text-xs text-surface-500 mb-2">
+                    Select which work types this station handles. At least one
+                    required.
+                </p>
                 {#if processes.length === 0}
-                    <p class="text-sm text-warning-600">Create processes in the Processes tab first.</p>
+                    <p class="text-sm text-warning-600">
+                        Create processes in the Processes tab first.
+                    </p>
                 {:else}
                     <div class="flex flex-wrap gap-3">
                         {#each processes as proc (proc.id)}
@@ -2349,8 +2420,11 @@
                                 <input
                                     type="checkbox"
                                     class="checkbox checkbox-sm"
-                                    checked={createStationProcessIds.includes(proc.id)}
-                                    onchange={() => toggleCreateProcess(proc.id)}
+                                    checked={createStationProcessIds.includes(
+                                        proc.id,
+                                    )}
+                                    onchange={() =>
+                                        toggleCreateProcess(proc.id)}
                                 />
                                 <span class="label-text">{proc.name}</span>
                             </label>
@@ -2367,7 +2441,10 @@
                 <button
                     type="submit"
                     class="btn preset-filled-primary-500"
-                    disabled={submitting || !createStationName.trim() || createStationProcessIds.length === 0 || processes.length === 0}
+                    disabled={submitting ||
+                        !createStationName.trim() ||
+                        createStationProcessIds.length === 0 ||
+                        processes.length === 0}
                 >
                     {submitting ? "Creating…" : "Create"}
                 </button>
@@ -2426,10 +2503,17 @@
                     />
                 </div>
                 <div class="form-control w-full">
-                    <label class="label"><span class="label-text">Processes</span></label>
-                    <p class="text-xs text-surface-500 mb-2">Select which work types this station handles. At least one required.</p>
+                    <label class="label"
+                        ><span class="label-text">Processes</span></label
+                    >
+                    <p class="text-xs text-surface-500 mb-2">
+                        Select which work types this station handles. At least
+                        one required.
+                    </p>
                     {#if processes.length === 0}
-                        <p class="text-sm text-warning-600">Create processes in the Processes tab first.</p>
+                        <p class="text-sm text-warning-600">
+                            Create processes in the Processes tab first.
+                        </p>
                     {:else}
                         <div class="flex flex-wrap gap-3">
                             {#each processes as proc (proc.id)}
@@ -2439,8 +2523,11 @@
                                     <input
                                         type="checkbox"
                                         class="checkbox checkbox-sm"
-                                        checked={editStationProcessIds.includes(proc.id)}
-                                        onchange={() => toggleEditProcess(proc.id)}
+                                        checked={editStationProcessIds.includes(
+                                            proc.id,
+                                        )}
+                                        onchange={() =>
+                                            toggleEditProcess(proc.id)}
                                     />
                                     <span class="label-text">{proc.name}</span>
                                 </label>
@@ -2495,7 +2582,10 @@
                     <button
                         type="submit"
                         class="btn preset-filled-primary-500"
-                        disabled={submitting || !editStationName.trim() || editStationProcessIds.length === 0 || processes.length === 0}
+                        disabled={submitting ||
+                            !editStationName.trim() ||
+                            editStationProcessIds.length === 0 ||
+                            processes.length === 0}
                     >
                         {submitting ? "Saving…" : "Save"}
                     </button>
