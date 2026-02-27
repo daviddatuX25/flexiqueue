@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@fontsource/inter": "^5.0.0",
+    "@xyflow/svelte": "^1.5.1",
     "html5-qrcode": "^2.3.8",
     "laravel-echo": "^1.16.1",
     "lucide-svelte": "^0.575.0",

@@ -55,12 +55,17 @@ class ProgramPageController extends Controller
                 'steps' => $t->trackSteps->map(fn ($s) => [
                     'id' => $s->id,
                     'track_id' => $s->track_id,
+                    'station_id' => $s->station_id,
+                    'station_name' => $s->station?->name,
                     'process_id' => $s->process_id,
                     'process_name' => $s->process?->name,
                     'step_order' => $s->step_order,
                     'is_required' => $s->is_required,
                     'estimated_minutes' => $s->estimated_minutes,
                 ])->values()->all(),
+                // Per flexiqueue-5l7: total = sum of step estimated_minutes; travel/queue = 0 for now
+                'total_estimated_minutes' => $t->trackSteps->sum(fn ($s) => (int) ($s->estimated_minutes ?? 0)),
+                'travel_queue_minutes' => 0,
             ]);
 
         $processes = $program->processes()
@@ -71,6 +76,7 @@ class ProgramPageController extends Controller
                 'program_id' => $p->program_id,
                 'name' => $p->name,
                 'description' => $p->description,
+                'expected_time_seconds' => $p->expected_time_seconds,
                 'created_at' => $p->created_at?->toIso8601String(),
             ]);
 
@@ -116,12 +122,18 @@ class ProgramPageController extends Controller
                         (int) (($settings['alternate_ratio'] ?? [1, 1])[0] ?? 1),
                         (int) (($settings['alternate_ratio'] ?? [1, 1])[1] ?? 1),
                     ],
+                    'alternate_priority_first' => (bool) ($settings['alternate_priority_first'] ?? true),
+                    'display_scan_timeout_seconds' => array_key_exists('display_scan_timeout_seconds', $settings)
+                        ? (int) $settings['display_scan_timeout_seconds']
+                        : 20,
                 ],
             ],
             'tracks' => $tracks,
             'processes' => $processes,
             'stations' => $stations,
             'stats' => $stats,
+            // Tab order for nav (Overview → Processes → Stations → Staff → Track → Settings). Per ISSUES-ELABORATION §13.
+            'tab_order' => ['Overview', 'Processes', 'Stations', 'Staff', 'Track', 'Diagram', 'Settings'],
         ]);
     }
 }

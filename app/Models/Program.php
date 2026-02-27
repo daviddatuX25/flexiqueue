@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Program extends Model
 {
@@ -95,6 +96,14 @@ class Program extends Model
             : 'fixed';
     }
 
+    /** Per flexiqueue-87p: display board scan auto-close. 0 = no auto-close; default 20 seconds. */
+    public function getDisplayScanTimeoutSeconds(): int
+    {
+        $v = $this->settings['display_scan_timeout_seconds'] ?? null;
+
+        return $v === null ? 20 : max(0, (int) $v);
+    }
+
     public function queueSessions(): HasMany
     {
         return $this->hasMany(Session::class, 'program_id');
@@ -109,6 +118,12 @@ class Program extends Model
     public function stationAssignments(): HasMany
     {
         return $this->hasMany(ProgramStationAssignment::class, 'program_id');
+    }
+
+    /** Per program diagram visualizer: one layout per program. */
+    public function diagram(): HasOne
+    {
+        return $this->hasOne(ProgramDiagram::class);
     }
 
     public function scopeActive($query)

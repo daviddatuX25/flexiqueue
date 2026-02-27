@@ -42,8 +42,9 @@ class CheckStatusService
         $session->load(['serviceTrack.trackSteps.process', 'serviceTrack.trackSteps.station', 'currentStation']);
         $track = $session->serviceTrack;
         $steps = $track ? $track->trackSteps->sortBy('step_order') : collect();
-        $currentOrder = $session->current_step_order ?? 1;
+        $currentOrder = (int) ($session->current_step_order ?? 1);
         $progressSteps = $this->buildProgressSteps($steps, $currentOrder);
+        $estimatedWaitMinutes = $this->computeEstimatedWaitMinutes($steps, $currentOrder);
 
         return [
             'result' => 'in_use',
@@ -57,9 +58,34 @@ class CheckStatusService
                 'current_step' => $currentOrder,
                 'steps' => $progressSteps,
             ],
-            'estimated_wait_minutes' => null,
+            'estimated_wait_minutes' => $estimatedWaitMinutes,
             'started_at' => $session->started_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Per flexiqueue-5l7: estimated wait = sum of remaining steps' estimated_minutes;
+     * if step has no estimated_minutes, use process expected_time_seconds/60.
+     *
+     * @param  Collection<int, \App\Models\TrackStep>  $steps
+     */
+    private function computeEstimatedWaitMinutes(Collection $steps, int $currentOrder): ?int
+    {
+        $remaining = $steps->filter(fn ($s) => (int) $s->step_order > $currentOrder);
+        if ($remaining->isEmpty()) {
+            return 0;
+        }
+        $total = 0;
+        foreach ($remaining as $step) {
+            $mins = $step->estimated_minutes;
+            if ($mins !== null && $mins >= 0) {
+                $total += $mins;
+            } elseif ($step->process && $step->process->expected_time_seconds !== null) {
+                $total += (int) ceil($step->process->expected_time_seconds / 60);
+            }
+        }
+
+        return $total > 0 ? $total : null;
     }
 
     /**

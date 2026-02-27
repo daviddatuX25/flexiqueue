@@ -34,8 +34,13 @@ class DisplayBoardTest extends TestCase
             ->has('station_activity')
             ->has('staff_at_stations')
             ->has('staff_online')
+            ->has('display_scan_timeout_seconds')
+            ->has('program_is_paused')
         );
         $props = $response->viewData('page')['props'];
+        $this->assertFalse($props['program_is_paused']);
+        $this->assertIsInt($props['display_scan_timeout_seconds']);
+        $this->assertGreaterThanOrEqual(0, $props['display_scan_timeout_seconds']);
         $this->assertIsArray($props['station_activity']);
         $this->assertIsArray($props['staff_at_stations']);
         foreach ($props['staff_at_stations'] as $row) {
@@ -43,6 +48,8 @@ class DisplayBoardTest extends TestCase
             $this->assertArrayHasKey('staff', $row);
             foreach ($row['staff'] as $staff) {
                 $this->assertArrayHasKey('name', $staff);
+                $this->assertArrayHasKey('availability_status', $staff);
+                $this->assertContains($staff['availability_status'], ['available', 'on_break', 'away', 'offline']);
                 $this->assertArrayNotHasKey('id', $staff);
             }
         }
@@ -96,6 +103,149 @@ class DisplayBoardTest extends TestCase
         $this->assertCount(1, $data['now_serving']);
         $this->assertSame('A1', $data['now_serving'][0]['alias']);
         $this->assertSame('Interview', $data['now_serving'][0]['station_name']);
+        // Per flexiqueue-ui3: now_serving includes process_id and process_name for each client
+        $this->assertArrayHasKey('process_id', $data['now_serving'][0]);
+        $this->assertArrayHasKey('process_name', $data['now_serving'][0]);
+        // Per flexiqueue-87p: display_scan_timeout_seconds from program settings (default 20)
+        $this->assertSame(20, $data['display_scan_timeout_seconds']);
+        $this->assertFalse($data['program_is_paused']);
+    }
+
+    /** Display board returns program_is_paused true when active program is paused. */
+    public function test_display_board_returns_program_is_paused_when_program_paused(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Paused Program',
+            'description' => null,
+            'is_active' => true,
+            'is_paused' => true,
+            'created_by' => $user->id,
+        ]);
+        $response = $this->get('/display');
+        $response->assertStatus(200);
+        $data = $response->viewData('page')['props'];
+        $this->assertTrue($data['program_is_paused']);
+        $this->assertSame('Paused Program', $data['program_name']);
+    }
+
+    /** Per flexiqueue-87p: display board returns display_scan_timeout_seconds from program settings. */
+    public function test_display_board_returns_display_scan_timeout_from_program_settings(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+            'settings' => ['display_scan_timeout_seconds' => 120],
+        ]);
+        $response = $this->get('/display');
+        $response->assertStatus(200);
+        $data = $response->viewData('page')['props'];
+        $this->assertSame(120, $data['display_scan_timeout_seconds']);
+    }
+
+    /** Per flexiqueue-ui3: display board waiting_by_station includes waiting_clients with alias and process_name */
+    public function test_display_board_waiting_by_station_includes_waiting_clients_with_process(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Cash Assistance',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Interview',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $track = ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'Priority',
+            'is_default' => true,
+        ]);
+        $token = new \App\Models\Token;
+        $token->qr_code_hash = hash('sha256', Str::random(32));
+        $token->physical_id = 'A1';
+        $token->status = 'in_use';
+        $token->save();
+        Session::create([
+            'token_id' => $token->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'A1',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'status' => 'waiting',
+        ]);
+        $token->update(['current_session_id' => Session::first()->id]);
+
+        $response = $this->get('/display');
+
+        $response->assertStatus(200);
+        $data = $response->viewData('page')['props'];
+        $this->assertCount(1, $data['waiting_by_station']);
+        $row = $data['waiting_by_station'][0];
+        $this->assertArrayHasKey('waiting_clients', $row);
+        $this->assertCount(1, $row['waiting_clients']);
+        $this->assertSame('A1', $row['waiting_clients'][0]['alias']);
+        $this->assertArrayHasKey('process_name', $row['waiting_clients'][0]);
+    }
+
+    public function test_display_board_includes_staff_availability_in_staff_at_stations(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Test Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Desk A',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $staffAvailable = User::factory()->create([
+            'name' => 'Jane Available',
+            'assigned_station_id' => $station->id,
+            'availability_status' => 'available',
+        ]);
+        $staffOnBreak = User::factory()->create([
+            'name' => 'Bob On Break',
+            'assigned_station_id' => $station->id,
+            'availability_status' => 'on_break',
+        ]);
+        $staffAway = User::factory()->create([
+            'name' => 'Ali Away',
+            'assigned_station_id' => $station->id,
+            'availability_status' => 'away',
+        ]);
+
+        $response = $this->get('/display');
+
+        $response->assertStatus(200);
+        $props = $response->viewData('page')['props'];
+        $this->assertArrayHasKey('staff_at_stations', $props);
+        $this->assertCount(1, $props['staff_at_stations']);
+        $row = $props['staff_at_stations'][0];
+        $this->assertSame('Desk A', $row['station_name']);
+        $staffNames = array_column($row['staff'], 'name');
+        $this->assertContains('Jane Available', $staffNames);
+        $this->assertContains('Bob On Break', $staffNames);
+        $this->assertContains('Ali Away', $staffNames);
+        $byName = [];
+        foreach ($row['staff'] as $s) {
+            $byName[$s['name']] = $s['availability_status'];
+        }
+        $this->assertSame('available', $byName['Jane Available']);
+        $this->assertSame('on_break', $byName['Bob On Break']);
+        $this->assertSame('away', $byName['Ali Away']);
+        $this->assertSame(1, $props['staff_online']);
     }
 
     public function test_display_board_includes_station_activity_from_transaction_logs(): void
@@ -164,6 +314,69 @@ class DisplayBoardTest extends TestCase
         $this->assertArrayHasKey('created_at', $first);
         $this->assertSame('Desk A', $first['station_name']);
         $this->assertStringContainsString('B1', $first['message']);
+    }
+
+    /** Per ISSUES-ELABORATION §10: display board shows bind in activity and waiting list after triage bind */
+    public function test_display_board_includes_bind_in_waiting_and_activity(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Queue Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Triage',
+            'capacity' => 2,
+            'is_active' => true,
+        ]);
+        $track = ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'Default',
+            'is_default' => true,
+        ]);
+        $token = new \App\Models\Token;
+        $token->qr_code_hash = hash('sha256', Str::random(32));
+        $token->physical_id = 'C1';
+        $token->status = 'in_use';
+        $token->save();
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'C1',
+            'client_category' => 'PWD',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'status' => 'waiting',
+            'station_queue_position' => 1,
+        ]);
+        $token->update(['current_session_id' => $session->id]);
+
+        TransactionLog::create([
+            'session_id' => $session->id,
+            'station_id' => null,
+            'next_station_id' => $station->id,
+            'staff_user_id' => $user->id,
+            'action_type' => 'bind',
+        ]);
+
+        $response = $this->get('/display');
+
+        $response->assertStatus(200);
+        $props = $response->viewData('page')['props'];
+        $this->assertSame(1, $props['total_in_queue']);
+        $this->assertCount(1, $props['waiting_by_station']);
+        $this->assertSame('Triage', $props['waiting_by_station'][0]['station_name']);
+        $this->assertSame(['C1'], $props['waiting_by_station'][0]['aliases']);
+        $this->assertSame(1, $props['waiting_by_station'][0]['count']);
+        $bindActivities = array_filter($props['station_activity'], fn ($a) => ($a['action_type'] ?? '') === 'bind');
+        $this->assertNotEmpty($bindActivities, 'station_activity should include bind entry');
+        $firstBind = reset($bindActivities);
+        $this->assertStringContainsString('registered at triage', $firstBind['message']);
+        $this->assertSame('C1', $firstBind['alias']);
     }
 
     public function test_display_status_returns_200_for_valid_qr_hash(): void
@@ -252,6 +465,10 @@ class DisplayBoardTest extends TestCase
             ->where('current_station', 'Desk 1')
             ->has('progress')
             ->where('progress.total_steps', 1)
+            ->has('estimated_wait_minutes')
         );
+        $props = $response->viewData('page')['props'];
+        $this->assertArrayHasKey('estimated_wait_minutes', $props);
+        $this->assertSame(0, $props['estimated_wait_minutes'], 'Single step track has no remaining steps');
     }
 }

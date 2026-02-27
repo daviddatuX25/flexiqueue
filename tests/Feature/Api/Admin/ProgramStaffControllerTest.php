@@ -66,11 +66,16 @@ class ProgramStaffControllerTest extends TestCase
         $response->assertStatus(200);
         $response->assertJsonStructure([
             'assignments' => [['user_id', 'user' => ['id', 'name', 'email'], 'station_id', 'station']],
-            'stations' => [['id', 'name']],
+            'stations' => [['id', 'name', 'capacity']],
         ]);
         $stationNames = collect($response->json('stations'))->pluck('name')->all();
         $this->assertContains('Interview', $stationNames);
         $this->assertContains('Cashier', $stationNames);
+        // Per flexiqueue-bci: stations include capacity for multiple staff-per-station UI
+        $interview = collect($response->json('stations'))->firstWhere('name', 'Interview');
+        $this->assertNotNull($interview);
+        $this->assertArrayHasKey('capacity', $interview);
+        $this->assertSame(1, $interview['capacity']);
     }
 
     public function test_assign_staff_to_station_returns_201(): void
@@ -108,6 +113,29 @@ class ProgramStaffControllerTest extends TestCase
             'program_id' => $this->program->id,
             'user_id' => $this->staff1->id,
         ]);
+    }
+
+    /** Per flexiqueue-bci: multiple staff can be assigned to the same station. */
+    public function test_multiple_staff_can_be_assigned_to_same_station(): void
+    {
+        $this->station1->update(['capacity' => 2]);
+
+        $this->actingAs($this->admin)->postJson("/api/admin/programs/{$this->program->id}/staff-assignments", [
+            'user_id' => $this->staff1->id,
+            'station_id' => $this->station1->id,
+        ])->assertStatus(201);
+
+        $this->actingAs($this->admin)->postJson("/api/admin/programs/{$this->program->id}/staff-assignments", [
+            'user_id' => $this->staff2->id,
+            'station_id' => $this->station1->id,
+        ])->assertStatus(201);
+
+        $response = $this->actingAs($this->admin)->getJson("/api/admin/programs/{$this->program->id}/staff-assignments");
+        $response->assertStatus(200);
+        $atStation1 = collect($response->json('assignments'))->where('station_id', $this->station1->id)->all();
+        $this->assertCount(2, $atStation1);
+        $userIds = collect($atStation1)->pluck('user_id')->sort()->values()->all();
+        $this->assertSame([$this->staff1->id, $this->staff2->id], $userIds);
     }
 
     public function test_supervisors_returns_200(): void

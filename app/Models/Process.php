@@ -15,6 +15,7 @@ class Process extends Model
         'program_id',
         'name',
         'description',
+        'expected_time_seconds',
     ];
 
     public function program(): BelongsTo

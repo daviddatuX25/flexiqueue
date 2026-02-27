@@ -8,6 +8,8 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\LengthAwarePaginator as LengthAwarePaginatorConcrete;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -121,8 +123,9 @@ class ReportService
 
         $transactionLogs = $this->getTransactionLogsForAudit($filters);
         $programLogs = $this->getProgramAuditLogsForAudit($filters);
+        $staffActivityLogs = $this->getStaffActivityLogsForAudit($filters);
 
-        $merged = $transactionLogs->concat($programLogs)->sortByDesc('created_at')->values();
+        $merged = $transactionLogs->concat($programLogs)->concat($staffActivityLogs)->sortByDesc('created_at')->values();
         $total = $merged->count();
         $slice = $merged->slice(($page - 1) * $perPage, $perPage)->values()->all();
 
@@ -234,6 +237,66 @@ class ReportService
     }
 
     /**
+     * Per flexiqueue-m7z: staff_activity_log rows normalized to same shape as audit log.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return Collection<int, array{id: string, source: string, session_alias: string, action_type: string, station: string, staff: string, remarks: string|null, created_at: string}>
+     */
+    private function getStaffActivityLogsForAudit(array $filters): Collection
+    {
+        if (! Schema::hasTable('staff_activity_log')) {
+            return collect();
+        }
+
+        $query = DB::table('staff_activity_log')
+            ->join('users', 'staff_activity_log.user_id', '=', 'users.id')
+            ->select(
+                'staff_activity_log.id',
+                'staff_activity_log.action_type',
+                'staff_activity_log.old_value',
+                'staff_activity_log.new_value',
+                'staff_activity_log.created_at',
+                'users.name as staff_name'
+            );
+
+        if (! empty($filters['from'])) {
+            $query->whereDate('staff_activity_log.created_at', '>=', $filters['from']);
+        }
+        if (! empty($filters['to'])) {
+            $query->whereDate('staff_activity_log.created_at', '<=', $filters['to']);
+        }
+        if (isset($filters['_range_start'])) {
+            $query->where('staff_activity_log.created_at', '>=', $filters['_range_start']);
+        }
+        if (! empty($filters['_range_end'])) {
+            $query->where('staff_activity_log.created_at', '<=', $filters['_range_end']);
+        }
+        if (! empty($filters['staff_user_id'])) {
+            $query->where('staff_activity_log.user_id', (int) $filters['staff_user_id']);
+        }
+
+        $query->orderByDesc('staff_activity_log.created_at');
+
+        return $query->get()->map(function ($row) {
+            $remarks = trim(($row->old_value ?? '').' → '.($row->new_value ?? ''));
+            if ($remarks === '→') {
+                $remarks = null;
+            }
+
+            return [
+                'id' => 'sal-'.$row->id,
+                'source' => 'staff_activity',
+                'session_alias' => '—',
+                'action_type' => $row->action_type ?? 'availability_change',
+                'station' => '—',
+                'staff' => $row->staff_name ?? '—',
+                'remarks' => $remarks ?: null,
+                'created_at' => Carbon::parse($row->created_at)->toIso8601String(),
+            ];
+        });
+    }
+
+    /**
      * Transform a TransactionLog for API response (per 08-API-SPEC §5.8).
      */
     public function auditLogResource(TransactionLog $log): array
@@ -276,7 +339,8 @@ class ReportService
 
         $transactionLogs = $this->getTransactionLogsForAudit($filters);
         $programLogs = $this->getProgramAuditLogsForAudit($filters);
-        $merged = $transactionLogs->concat($programLogs)->sortBy('created_at')->values();
+        $staffActivityLogs = $this->getStaffActivityLogsForAudit($filters);
+        $merged = $transactionLogs->concat($programLogs)->concat($staffActivityLogs)->sortBy('created_at')->values();
 
         $filename = 'flexiqueue-audit-'.Carbon::now()->format('Y-m-d-His').'.csv';
 

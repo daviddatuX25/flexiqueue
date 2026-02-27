@@ -145,6 +145,24 @@ class SessionActionsTest extends TestCase
         });
     }
 
+    /** Display activity: only indicate "priority lane" when client has priority classification; regular client must not get "priority lane" in message. */
+    public function test_call_regular_client_does_not_include_priority_lane_in_station_activity_message(): void
+    {
+        $this->session->update(['client_category' => 'regular']);
+        Event::fake([StationActivity::class]);
+
+        $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/call");
+
+        Event::assertDispatched(StationActivity::class, function (StationActivity $event) {
+            return $event->stationId === $this->station1->id
+                && $event->alias === 'A1'
+                && $event->actionType === 'call'
+                && str_contains($event->message, 'A1')
+                && str_contains($event->message, 'called')
+                && ! str_contains($event->message, 'priority lane');
+        });
+    }
+
     public function test_serve_dispatches_station_activity_broadcast(): void
     {
         $this->session->update(['status' => 'called']);
@@ -345,5 +363,66 @@ class SessionActionsTest extends TestCase
         $response->assertJsonPath('session.current_station.id', $this->station2->id);
         $response->assertJsonStructure(['override' => ['authorized_by', 'reason']]);
         $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'override']);
+    }
+
+    /** Per flexiqueue-i87: When require_permission_before_override is OFF, staff can force-complete with reason only (no PIN). */
+    public function test_force_complete_with_reason_only_when_require_permission_off_returns_200(): void
+    {
+        $this->program->update(['settings' => ['require_permission_before_override' => false]]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/force-complete", [
+            'reason' => 'Client left without completing',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session.status', 'completed');
+        $response->assertJsonPath('token.status', 'available');
+        $this->assertDatabaseHas('transaction_logs', [
+            'session_id' => $this->session->id,
+            'action_type' => 'force_complete',
+        ]);
+    }
+
+    /** Per flexiqueue-i87: When require_permission_before_override is OFF, staff can override with reason only (no PIN). */
+    public function test_override_with_reason_only_when_require_permission_off_returns_200(): void
+    {
+        $this->program->update(['settings' => ['require_permission_before_override' => false]]);
+        $this->session->update(['status' => 'serving']);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/override", [
+            'target_track_id' => $this->trackToStation2->id,
+            'reason' => 'Skip to final step',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session.status', 'waiting');
+        $response->assertJsonPath('session.current_station.id', $this->station2->id);
+        $response->assertJsonStructure(['override' => ['authorized_by', 'reason']]);
+        $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'override']);
+    }
+
+    /** When require_permission_before_override is ON (default), staff without PIN gets 401. */
+    public function test_force_complete_without_auth_when_require_permission_on_returns_401(): void
+    {
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/force-complete", [
+            'reason' => 'Client left',
+        ]);
+
+        $response->assertStatus(401);
+        $response->assertJsonPath('message', 'Supervisor authorization required.');
+    }
+
+    /** When require_permission_before_override is ON (default), staff without PIN gets 401 for override. */
+    public function test_override_without_auth_when_require_permission_on_returns_401(): void
+    {
+        $this->session->update(['status' => 'serving']);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/override", [
+            'target_track_id' => $this->trackToStation2->id,
+            'reason' => 'Skip to final step',
+        ]);
+
+        $response->assertStatus(401);
+        $response->assertJsonPath('message', 'Supervisor authorization required.');
     }
 }

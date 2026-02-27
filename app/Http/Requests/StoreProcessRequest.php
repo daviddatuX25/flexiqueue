@@ -27,6 +27,7 @@ class StoreProcessRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:50', Rule::unique('processes', 'name')->where('program_id', $program->id)],
             'description' => ['nullable', 'string'],
+            'expected_time_seconds' => ['nullable', 'integer', 'min:0', 'max:600'],
         ];
     }
 }

@@ -72,8 +72,19 @@ class LoginController extends Controller
         return $this->redirectByRole($user->role);
     }
 
+    /**
+     * Log out and set user availability to 'away' so queue/process fallbacks
+     * (which count only availability_status = 'available') exclude this user.
+     */
     public function logout(Request $request): RedirectResponse
     {
+        $user = Auth::user();
+        if ($user) {
+            $user->update([
+                'availability_status' => \App\Models\User::AVAILABILITY_AWAY,
+                'availability_updated_at' => now(),
+            ]);
+        }
         Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();

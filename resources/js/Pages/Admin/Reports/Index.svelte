@@ -234,6 +234,7 @@
             identity_mismatch: "preset-filled-error-500",
             session_start: "preset-filled-success-500",
             session_stop: "preset-tonal",
+            availability_change: "preset-filled-warning-500",
         };
         return `badge ${map[actionType] ?? "preset-tonal"}`;
     }
@@ -606,6 +607,11 @@
                                             class="text-[10px] px-1.5 py-0.5 rounded preset-tonal text-surface-500 border border-surface-200 ml-1 uppercase tracking-wider font-bold"
                                             >program</span
                                         >
+                                    {:else if entry.source === "staff_activity"}
+                                        <span
+                                            class="text-[10px] px-1.5 py-0.5 rounded preset-tonal text-warning-600 border border-warning-200 ml-1 uppercase tracking-wider font-bold"
+                                            >Staff status</span
+                                        >
                                     {/if}
                                 </td>
                                 <td class="text-surface-700">{entry.station}</td
@@ -653,6 +659,12 @@
                                         class="text-[10px] px-1.5 py-0.5 rounded preset-tonal text-surface-500 border border-surface-200 uppercase tracking-wider font-bold"
                                     >
                                         program
+                                    </span>
+                                {:else if entry.source === "staff_activity"}
+                                    <span
+                                        class="text-[10px] px-1.5 py-0.5 rounded preset-tonal text-warning-600 border border-warning-200 uppercase tracking-wider font-bold"
+                                    >
+                                        Staff status
                                     </span>
                                 {/if}
                             </div>

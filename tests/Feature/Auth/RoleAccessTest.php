@@ -160,4 +160,30 @@ class RoleAccessTest extends TestCase
 
         $response->assertStatus(403);
     }
+
+    /** Per docs/plans/STAFF-DASHBOARD-PLAN.md: staff/supervisor see Staff Dashboard at /dashboard. */
+    public function test_staff_dashboard_returns_200_with_metrics(): void
+    {
+        $staff = User::factory()->create(['role' => 'staff']);
+
+        $response = $this->actingAs($staff)->get(route('dashboard'));
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->component('Staff/Dashboard')
+            ->has('metrics')
+            ->has('metrics.sessions_served_today')
+            ->has('metrics.activity_counts_today')
+        );
+    }
+
+    /** Admin visiting /dashboard is redirected to admin dashboard. */
+    public function test_admin_visiting_dashboard_redirects_to_admin_dashboard(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $response = $this->actingAs($admin)->get(route('dashboard'));
+
+        $response->assertRedirect(route('admin.dashboard'));
+    }
 }

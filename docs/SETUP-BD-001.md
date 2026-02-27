@@ -93,6 +93,14 @@ docker run --rm \
 ./vendor/bin/sail artisan migrate
 ```
 
+8. **Create storage link** (required for profile avatars and other public files):
+
+```bash
+./vendor/bin/sail artisan storage:link
+```
+
+This links `public/storage` to `storage/app/public`. Without it, uploaded avatars return 404. Ensure `APP_URL` in `.env` matches the URL you use to access the app so generated avatar URLs are correct.
+
 **Tip**: Add `alias sail='./vendor/bin/sail'` to your shell profile for shorter commands.
 
 ### Daily workflow

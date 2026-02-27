@@ -126,6 +126,8 @@
 				scannedToken = { physical_id: t.physical_id, qr_hash: t.qr_hash, status: 'available' };
 			} else if (t?.status === 'in_use') {
 				error = 'Token is already in use.';
+			} else if (t?.status === 'deactivated') {
+				error = 'Token deactivated.';
 			} else {
 				error = 'Token not found.';
 			}
@@ -143,6 +145,12 @@
 		setDefaultTrack();
 		error = '';
 		showCamera = false;
+	}
+
+	/** Per ISSUES-ELABORATION §12: clear error and allow scan/lookup again without refresh (e.g. after token freed elsewhere). */
+	function tryAgain() {
+		error = '';
+		scanHandled = false;
 	}
 
 	async function handleConfirm() {
@@ -176,22 +184,22 @@
 </svelte:head>
 
 <MobileLayout headerTitle="Triage" {queueCount} {processedToday}>
-	<div class="flex flex-col gap-4 text-surface-950">
+	<div class="flex flex-col gap-4 md:gap-6 text-surface-950 w-full max-w-2xl mx-auto px-4 md:px-6 py-4 md:py-6">
 		{#if !activeProgram}
-			<div class="rounded-container bg-surface-50 border border-surface-200 p-6 text-center text-surface-950/80">
+			<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-6 md:p-8 text-center text-surface-950/80">
 				<p class="font-medium">No active program</p>
-				<p class="mt-1 text-sm">Activate a program from Admin → Programs.</p>
+				<p class="mt-2 text-sm">Activate a program from Admin → Programs.</p>
 			</div>
 		{:else}
-			<h1 class="text-xl font-semibold text-surface-950">Triage</h1>
+			<h1 class="text-xl md:text-2xl font-semibold text-surface-950">Triage</h1>
 
 			{#if !scannedToken}
 				<!-- Get token: scan or enter ID (unified) -->
-				<div class="rounded-container border border-surface-200 bg-surface-50 p-4 flex flex-col gap-4">
+				<div class="rounded-container border border-surface-200 bg-surface-50 elevation-card p-4 md:p-6 flex flex-col gap-4">
 					<p class="text-sm font-medium text-surface-950">Scan or enter token ID</p>
 					<button
 						type="button"
-						class="btn {showCamera ? 'preset-tonal' : 'preset-filled-primary-500'}"
+						class="btn min-h-[48px] px-4 {showCamera ? 'preset-tonal' : 'preset-filled-primary-500'}"
 						onclick={() => {
 							showCamera = !showCamera;
 							error = '';
@@ -211,20 +219,25 @@
 					<div class="flex gap-2">
 						<input
 							type="text"
-							class="input flex-1 rounded-container border border-surface-200 px-3 py-2"
+							class="input flex-1 rounded-container border border-surface-200 px-3 min-h-[48px]"
 							placeholder="e.g. A1"
 							bind:value={manualPhysicalId}
 							onkeydown={(e) => e.key === 'Enter' && handleLookup()}
 						/>
-						<button type="button" class="btn preset-filled-primary-500" onclick={handleLookup}>Look up</button>
+						<button type="button" class="btn preset-filled-primary-500 min-h-[48px] min-w-[48px] px-4" onclick={handleLookup}>Look up</button>
 					</div>
 					{#if error}
-						<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-2 text-sm">{error}</div>
+						<div class="rounded-container bg-error-100 text-error-900 border border-error-300 p-3 md:p-4 text-sm flex flex-col gap-3">
+							<span>{error}</span>
+							<button type="button" class="btn preset-tonal min-h-[48px] min-w-[48px] px-4 w-fit" onclick={tryAgain}>
+								Try again
+							</button>
+						</div>
 					{/if}
 				</div>
 			{:else}
 				<!-- Category + track + confirm -->
-				<div class="rounded-container border border-surface-200 bg-surface-50 p-4 space-y-4">
+				<div class="rounded-container border border-surface-200 bg-surface-50 elevation-card p-4 md:p-6 space-y-4">
 					<p class="font-medium text-surface-950">Token: <span class="font-mono text-primary-500">{scannedToken.physical_id}</span></p>
 
 					<div>
@@ -233,7 +246,7 @@
 							{#each CATEGORIES as cat}
 								<button
 									type="button"
-									class="btn btn-sm {selectedCategory === cat.value ? 'preset-filled-primary-500' : 'preset-tonal'}"
+									class="btn min-h-[48px] px-4 py-2 {selectedCategory === cat.value ? 'preset-filled-primary-500' : 'preset-tonal'}"
 									onclick={() => (selectedCategory = cat.value)}
 								>
 									{cat.label}
@@ -243,8 +256,8 @@
 					</div>
 
 					<div>
-						<label for="triage-track" class="block text-sm font-medium text-surface-950 mb-1">Track</label>
-						<select id="triage-track" class="w-full rounded-container border border-surface-200 px-3 py-2" bind:value={selectedTrackId}>
+						<label for="triage-track" class="block text-sm font-medium text-surface-950 mb-2">Track</label>
+						<select id="triage-track" class="w-full rounded-container border border-surface-200 px-3 py-2 min-h-[48px]" bind:value={selectedTrackId}>
 							{#each activeProgram?.tracks ?? [] as track (track.id)}
 								<option value={track.id}>{track.name}</option>
 							{/each}
@@ -252,16 +265,16 @@
 					</div>
 
 					{#if error}
-						<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-2 text-sm">{error}</div>
+						<div class="rounded-container bg-error-100 text-error-900 border border-error-300 p-3 text-sm">{error}</div>
 					{/if}
 
 					<div class="flex gap-2 pt-2">
-						<button type="button" class="btn preset-tonal flex-1" onclick={resetScan} disabled={isSubmitting}>
+						<button type="button" class="btn preset-tonal flex-1 min-h-[48px]" onclick={resetScan} disabled={isSubmitting}>
 							Cancel
 						</button>
 						<button
 							type="button"
-							class="btn preset-filled-primary-500 flex-1"
+							class="btn preset-filled-primary-500 flex-1 min-h-[48px]"
 							onclick={handleConfirm}
 							disabled={isSubmitting || selectedCategory === null || selectedTrackId === null}
 						>

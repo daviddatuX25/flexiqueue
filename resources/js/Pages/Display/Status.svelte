@@ -1,9 +1,10 @@
 <script>
 	/**
 	 * Display/Status.svelte — client QR status result. Per 09-UI-ROUTES-PHASE1 §3.5.
-	 * Data from server (check-status logic). Dismiss returns to /display. Auto-dismiss 30s.
+	 * Data from server (check-status logic). Dismiss returns to /display. Auto-dismiss uses display_scan_timeout_seconds from program settings.
+	 * Hidden barcode input allows continuous scanning: scan next ticket without reopening camera (per display scanner plan).
 	 */
-	import { onDestroy } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 	import { Link, router } from '@inertiajs/svelte';
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
 
@@ -17,11 +18,16 @@
 		estimated_wait_minutes = null,
 		started_at = null,
 		message = null,
+		display_scan_timeout_seconds = 20,
+		program_name = null,
+		date = '',
 	} = $props();
 
-	// Per spec §3.5: AutoDismissTimer (30 seconds → auto-navigate back)
-	let countdown = $state(30);
+	const dismissSeconds = Math.max(0, Number(display_scan_timeout_seconds) || 20);
+	let countdown = $state(dismissSeconds);
 	let timerId;
+	let barcodeInputValue = $state('');
+	let barcodeInputEl = $state(null);
 
 	timerId = setInterval(() => {
 		countdown -= 1;
@@ -30,6 +36,38 @@
 			router.visit('/display');
 		}
 	}, 1000);
+
+	function extendCountdown() {
+		const extra = Math.max(0, Number(display_scan_timeout_seconds) || 20);
+		countdown += extra;
+	}
+
+	function onBarcodeKeydown(e) {
+		if (e.key !== 'Enter') return;
+		const raw = barcodeInputValue.trim();
+		if (!raw) return;
+		e.preventDefault();
+		const qrHash = raw.includes('/') ? raw.split('/').pop() ?? raw : raw;
+		if (qrHash) {
+			router.visit(`/display/status/${encodeURIComponent(qrHash)}`);
+		}
+		barcodeInputValue = '';
+		barcodeInputEl?.focus();
+	}
+
+	$effect(() => {
+		const el = barcodeInputEl;
+		if (!el) return;
+		tick().then(() => el?.focus());
+	});
+
+	/** Refocus hidden barcode input every 2s (mimic /display) so HID scanner keeps working. */
+	$effect(() => {
+		const id = setInterval(() => {
+			barcodeInputEl?.focus();
+		}, 2000);
+		return () => clearInterval(id);
+	});
 
 	onDestroy(() => {
 		if (timerId) clearInterval(timerId);
@@ -40,7 +78,18 @@
 	<title>Your Status — FlexiQueue</title>
 </svelte:head>
 
-<DisplayLayout programName={null} date="">
+<DisplayLayout programName={program_name} date={date || ''}>
+	<!-- Hidden input for HID barcode scanner: scan next ticket without reopening camera (continuous scanning) -->
+	<input
+		type="text"
+		autocomplete="off"
+		inputmode="text"
+		aria-label="Barcode scanner input for next ticket; scan with hardware scanner or type and press Enter"
+		class="sr-only"
+		bind:value={barcodeInputValue}
+		bind:this={barcodeInputEl}
+		onkeydown={onBarcodeKeydown}
+	/>
 	<div class="max-w-md mx-auto flex flex-col gap-6">
 		<h1 class="text-2xl font-bold text-surface-950">YOUR STATUS</h1>
 
@@ -88,7 +137,18 @@
 			{/if}
 		{/if}
 
-		<p class="text-sm text-surface-950/60">Returning to board in {countdown}s</p>
-		<Link href="/display" class="btn preset-filled-primary-500 w-full">OK, GOT IT</Link>
+		<div class="flex flex-wrap items-center justify-center gap-2">
+			<p class="text-sm text-surface-950/60">Returning to board in {countdown}s</p>
+			<button
+				type="button"
+				class="btn preset-tonal text-sm py-1.5 px-3"
+				onclick={extendCountdown}
+			>
+				Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)
+			</button>
+		</div>
+		<div>
+			<Link href="/display" class="btn preset-filled-primary-500 w-full">Go back</Link>
+		</div>
 	</div>
 </DisplayLayout>

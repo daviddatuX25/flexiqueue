@@ -76,6 +76,7 @@ class DashboardService
             ->filter()
             ->count();
 
+        // Queue/process fallbacks: only 'available' counts; offline/away = not on duty. Logout sets user to 'away'.
         $staffOnline = User::query()
             ->whereNotNull('assigned_station_id')
             ->where('is_active', true)

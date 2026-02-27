@@ -117,8 +117,43 @@ class StationControllerTest extends TestCase
         $response->assertStatus(200);
         $response->assertJsonPath('station.name', 'Updated Name');
         $response->assertJsonPath('station.is_active', false);
+        $this->assertArrayNotHasKey('warning', $response->json());
         $station->refresh();
         $this->assertSame('Updated Name', $station->name);
+    }
+
+    /** Per ISSUES-ELABORATION §17: deactivating station whose process is in track steps returns warning. */
+    public function test_update_deactivate_includes_warning_when_station_process_used_in_track_steps(): void
+    {
+        $track = ServiceTrack::create([
+            'program_id' => $this->program->id,
+            'name' => 'Main',
+            'is_default' => true,
+        ]);
+        $station = Station::create([
+            'program_id' => $this->program->id,
+            'name' => 'Desk',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $station->processes()->attach($this->process->id);
+        TrackStep::create([
+            'track_id' => $track->id,
+            'process_id' => $this->process->id,
+            'step_order' => 1,
+            'is_required' => true,
+        ]);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/stations/{$station->id}", [
+            'name' => 'Desk',
+            'capacity' => 1,
+            'is_active' => false,
+            'process_ids' => [$this->process->id],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('station.is_active', false);
+        $response->assertJsonPath('warning', "This station's processes are used in track steps. Deactivating may prevent tracks from completing.");
     }
 
     public function test_destroy_blocked_when_referenced_by_track_steps_returns_400(): void

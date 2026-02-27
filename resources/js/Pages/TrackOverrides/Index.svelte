@@ -228,16 +228,16 @@
 </svelte:head>
 
 <MobileLayout headerTitle="Track Overrides" {queueCount} {processedToday}>
-	<div class="flex flex-col gap-6 text-surface-950">
+	<div class="flex flex-col gap-4 md:gap-6 text-surface-950 w-full max-w-2xl mx-auto px-4 md:px-6 py-4 md:py-6">
 		{#if canApprove}
 			<!-- Generate PIN/QR for staff -->
-			<div class="rounded-box bg-surface-50 border border-surface-200 p-4">
+			<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-6">
 				<p class="text-sm font-medium text-surface-950/80 mb-3">Generate for staff</p>
 				<p class="text-xs text-surface-950/60 mb-4">Create temporary PIN or QR for staff to authorize override or force-complete.</p>
 				<div class="form-control w-full max-w-xs mb-4">
 					<label class="label"><span class="label-text">Expiry</span></label>
 					<select
-						class="select rounded-container border border-surface-200 px-3 py-2 select-sm"
+						class="select rounded-container border border-surface-200 px-3 min-h-[48px]"
 						bind:value={selectedTtlSeconds}
 						onchange={(e) => (selectedTtlSeconds = Number((e.target as HTMLSelectElement).value))}
 					>
@@ -246,11 +246,11 @@
 						{/each}
 					</select>
 				</div>
-				<div class="flex flex-wrap gap-4">
+				<div class="flex flex-wrap gap-3">
 					<div class="flex flex-col gap-2">
 						<button
 							type="button"
-							class="btn preset-outlined btn-sm"
+							class="btn preset-outlined min-h-[48px] px-4"
 							disabled={!!actionLoading}
 							onclick={generateTempPin}
 						>
@@ -264,7 +264,7 @@
 					<div class="flex flex-col gap-2">
 						<button
 							type="button"
-							class="btn preset-outlined btn-sm"
+							class="btn preset-outlined min-h-[48px] px-4"
 							disabled={!!actionLoading}
 							onclick={generateTempQr}
 						>
@@ -280,7 +280,7 @@
 
 			<!-- Recent generated auths -->
 			{#if authorizations.length > 0}
-				<div class="rounded-box bg-surface-50 border border-surface-200 p-4">
+				<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5">
 					<p class="text-sm font-medium text-surface-950/80 mb-3">Recent authorizations</p>
 					<ul class="space-y-1 text-xs">
 						{#each authorizations as a (a.id)}
@@ -302,21 +302,21 @@
 		{/if}
 
 		<!-- Pending requests -->
-		<div class="rounded-box bg-surface-50 border border-surface-200 p-4">
-			<p class="text-sm font-medium text-surface-950/80 mb-3">
+		<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-6">
+			<p class="text-sm md:text-base font-medium text-surface-950/80 mb-4">
 				{canApprove ? 'Pending requests' : 'Your pending requests'}
 			</p>
 			{#if error}
-				<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 text-sm mb-3">{error}</div>
+				<div class="rounded-container bg-error-100 text-error-900 border border-error-300 p-4 text-sm mb-4">{error}</div>
 			{/if}
 			{#if pendingRequests.length === 0}
 				<p class="text-sm text-surface-950/60 py-4">
 					{canApprove ? 'No pending requests.' : 'No pending requests. Request approval from the Override or Force Complete modal on the Station page.'}
 				</p>
 			{:else}
-				<ul class="space-y-3">
+				<ul class="space-y-3 md:space-y-4">
 					{#each pendingRequests as pr (pr.id)}
-						<li class="rounded-box bg-surface-100 p-3 space-y-2">
+						<li class="rounded-container bg-surface-100 border border-surface-200 p-3 md:p-4 space-y-2">
 							<div class="flex justify-between items-start gap-2">
 								<div>
 									<span class="badge text-xs {pr.action_type === 'override' ? 'preset-filled-primary-500' : 'preset-filled-warning-500'}">{pr.action_type.replace('_', ' ')}</span>
@@ -338,10 +338,10 @@
 							{/if}
 							<p class="text-xs text-surface-950/50">{new Date(pr.created_at).toLocaleString()}</p>
 							{#if canApprove}
-								<div class="flex gap-2 pt-2">
+								<div class="flex flex-wrap gap-2 pt-2">
 									<button
 										type="button"
-										class="btn preset-filled-primary-500 btn-sm"
+										class="btn preset-filled-primary-500 min-h-[48px] min-w-[48px] px-4"
 										disabled={!!actionLoading}
 										onclick={() => openApproveModal(pr)}
 									>
@@ -350,7 +350,7 @@
 									{#if pr.action_type === 'override'}
 										<button
 											type="button"
-											class="btn preset-filled-error-500 btn-sm"
+											class="btn preset-filled-error-500 min-h-[48px] min-w-[48px] px-4"
 											disabled={!!actionLoading}
 											onclick={() => openRejectModal(pr.id)}
 										>
@@ -359,7 +359,7 @@
 									{:else}
 										<button
 											type="button"
-											class="btn preset-filled-error-500 btn-sm"
+											class="btn preset-filled-error-500 min-h-[48px] min-w-[48px] px-4"
 											disabled={!!actionLoading}
 											onclick={() => rejectRequest(pr.id)}
 										>
@@ -378,15 +378,21 @@
 	</div>
 
 	{#if approveModalRequestId}
-		<dialog open class="modal-dialog-center rounded-container">
-			<div class="card bg-surface-50 rounded-container shadow-xl p-6 max-w-sm text-surface-950">
+		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
+			<div class="card bg-surface-50 rounded-container shadow-xl p-6 max-w-sm text-surface-950 relative">
+				<button
+					type="button"
+					class="btn btn-icon btn-icon-sm preset-tonal absolute right-2 top-2"
+					aria-label="Close"
+					onclick={closeApproveModal}
+				>✕</button>
 				<h3 class="font-bold text-lg">Define custom path</h3>
 				<p class="text-sm text-surface-950/70 py-2">Add stations in the order the client should visit. Admin defines the one-off path.</p>
 				<div class="form-control w-full mt-2">
 					<label class="label"><span class="label-text">Add station</span></label>
 					<div class="flex gap-2">
 						<select
-							class="select rounded-container border border-surface-200 px-3 py-2 select-sm flex-1"
+							class="select rounded-container border border-surface-200 px-3 min-h-[48px] flex-1"
 							bind:value={approveCustomAddStationId}
 							onchange={(e) => { approveCustomAddStationId = (e.target as HTMLSelectElement).value === '' ? '' : Number((e.target as HTMLSelectElement).value); }}
 						>
@@ -395,7 +401,7 @@
 								<option value={st.id}>{st.name}</option>
 							{/each}
 						</select>
-						<button type="button" class="btn preset-outlined btn-sm" onclick={addStationToCustomPath} disabled={approveCustomAddStationId === ''}>Add</button>
+						<button type="button" class="btn preset-outlined min-h-[48px] min-w-[48px] px-4" onclick={addStationToCustomPath} disabled={approveCustomAddStationId === ''}>Add</button>
 					</div>
 				</div>
 				{#if approveCustomPath.length > 0}
@@ -404,19 +410,19 @@
 						<ul class="space-y-1">
 							{#each approveCustomPath as stationId, i}
 								{@const st = stations.find(s => s.id === stationId)}
-								<li class="flex justify-between items-center text-sm text-surface-950">
+								<li class="flex justify-between items-center text-sm text-surface-950 gap-2">
 									<span>{i + 1}. {st?.name ?? stationId}</span>
-									<button type="button" class="btn preset-tonal btn-xs" onclick={() => removeStationFromCustomPath(i)}>×</button>
+									<button type="button" class="btn preset-tonal min-h-[48px] min-w-[48px] shrink-0" onclick={() => removeStationFromCustomPath(i)} aria-label="Remove station">×</button>
 								</li>
 							{/each}
 						</ul>
 					</div>
 				{/if}
-				<div class="flex justify-end gap-2 mt-4">
-					<button type="button" class="btn preset-tonal" onclick={closeApproveModal}>Cancel</button>
+				<div class="flex flex-wrap justify-end gap-2 mt-4">
+					<button type="button" class="btn preset-tonal min-h-[48px] px-4" onclick={closeApproveModal}>Cancel</button>
 					<button
 						type="button"
-						class="btn preset-filled-primary-500"
+						class="btn preset-filled-primary-500 min-h-[48px] px-4"
 						disabled={approveCustomPath.length === 0 || !!actionLoading}
 						onclick={() => approveRequest(approveModalRequestId!, { custom_steps: approveCustomPath })}
 					>
@@ -424,21 +430,26 @@
 					</button>
 				</div>
 			</div>
-			<form method="dialog" class="modal-backdrop">
-				<button type="button" onclick={closeApproveModal}>close</button>
-			</form>
+			<!-- Per flexiqueue-ldd: backdrop does not close modal; only Cancel/Close buttons do -->
+			<div class="modal-backdrop" aria-hidden="true"></div>
 		</dialog>
 	{/if}
 
 	{#if rejectModalRequestId}
-		<dialog open class="modal-dialog-center rounded-container">
-			<div class="card bg-surface-50 rounded-container shadow-xl p-6 max-w-sm text-surface-950">
+		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
+			<div class="card bg-surface-50 rounded-container shadow-xl p-6 max-w-sm text-surface-950 relative">
+				<button
+					type="button"
+					class="btn btn-icon btn-icon-sm preset-tonal absolute right-2 top-2"
+					aria-label="Close"
+					onclick={closeRejectModal}
+				>✕</button>
 				<h3 class="font-bold text-lg">Reject and reassign?</h3>
 				<p class="text-sm text-surface-950/70 py-2">Optionally reassign the session to a track instead of leaving it awaiting approval.</p>
 				<div class="form-control w-full mt-2">
 					<label class="label"><span class="label-text">Reassign to track (optional)</span></label>
 					<select
-						class="select rounded-container border border-surface-200 px-3 py-2 w-full"
+						class="select rounded-container border border-surface-200 px-3 min-h-[48px] w-full"
 						value={rejectReassignTrackId ?? ''}
 						onchange={(e) => {
 							const v = (e.target as HTMLSelectElement).value;
@@ -451,11 +462,11 @@
 						{/each}
 					</select>
 				</div>
-				<div class="flex justify-end gap-2 mt-4">
-					<button type="button" class="btn preset-tonal" onclick={closeRejectModal}>Cancel</button>
+				<div class="flex flex-wrap justify-end gap-2 mt-4">
+					<button type="button" class="btn preset-tonal min-h-[48px] px-4" onclick={closeRejectModal}>Cancel</button>
 					<button
 						type="button"
-						class="btn preset-filled-error-500"
+						class="btn preset-filled-error-500 min-h-[48px] px-4"
 						disabled={!!actionLoading}
 						onclick={() => rejectRequest(rejectModalRequestId!, rejectReassignTrackId ? { reassign_track_id: rejectReassignTrackId } : undefined)}
 					>
@@ -463,9 +474,7 @@
 					</button>
 				</div>
 			</div>
-			<form method="dialog" class="modal-backdrop">
-				<button type="button" onclick={closeRejectModal}>close</button>
-			</form>
+			<div class="modal-backdrop" aria-hidden="true"></div>
 		</dialog>
 	{/if}
 </MobileLayout>

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api;
 
+use App\Events\StationActivity;
 use App\Models\Process;
 use App\Models\Program;
 use App\Models\ServiceTrack;
@@ -10,6 +11,7 @@ use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -88,6 +90,25 @@ class SessionBindTest extends TestCase
         $this->assertDatabaseHas('queue_sessions', ['alias' => 'A1', 'status' => 'waiting']);
         $this->assertDatabaseHas('tokens', ['id' => $this->token->id, 'status' => 'in_use']);
         $this->assertDatabaseHas('transaction_logs', ['action_type' => 'bind']);
+    }
+
+    /** Per ISSUES-ELABORATION §10: display board updates in real time when token bound at triage */
+    public function test_bind_dispatches_station_activity_for_display_board(): void
+    {
+        Event::fake([StationActivity::class]);
+
+        $this->actingAs($this->staff)->postJson('/api/sessions/bind', [
+            'qr_hash' => $this->token->qr_code_hash,
+            'track_id' => $this->track->id,
+            'client_category' => 'Regular',
+        ])->assertStatus(201);
+
+        Event::assertDispatched(StationActivity::class, function (StationActivity $event) {
+            return $event->actionType === 'bind'
+                && $event->alias === 'A1'
+                && $event->stationId === $this->station->id
+                && str_contains($event->message, 'registered at triage');
+        });
     }
 
     public function test_bind_deactivated_token_returns_422(): void
@@ -291,5 +312,35 @@ class SessionBindTest extends TestCase
         $response->assertJsonPath('physical_id', 'A1');
         $response->assertJsonPath('qr_hash', $this->token->qr_code_hash);
         $response->assertJsonPath('status', 'available');
+    }
+
+    /** Per ISSUES-ELABORATION §11: deactivated token returns 200 with status so frontend can show "Token deactivated." */
+    public function test_token_lookup_deactivated_returns_200_with_status_deactivated(): void
+    {
+        $this->token->update(['status' => 'deactivated']);
+
+        $response = $this->actingAs($this->staff)->getJson('/api/sessions/token-lookup?physical_id=A1');
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('physical_id', 'A1');
+        $response->assertJsonPath('status', 'deactivated');
+    }
+
+    /** Per ISSUES-ELABORATION §11: scan attempts logged; not_found flags potentially fabricated. */
+    public function test_token_lookup_logs_scan_to_triage_scan_log(): void
+    {
+        $this->actingAs($this->staff)->getJson('/api/sessions/token-lookup?physical_id=A1');
+        $this->assertDatabaseHas('triage_scan_log', [
+            'physical_id' => 'A1',
+            'result' => 'available',
+            'token_id' => $this->token->id,
+        ]);
+
+        $this->actingAs($this->staff)->getJson('/api/sessions/token-lookup?physical_id=Z99');
+        $this->assertDatabaseHas('triage_scan_log', [
+            'physical_id' => 'Z99',
+            'result' => 'not_found',
+            'token_id' => null,
+        ]);
     }
 }

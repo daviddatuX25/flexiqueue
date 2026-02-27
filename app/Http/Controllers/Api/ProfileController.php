@@ -97,8 +97,17 @@ class ProfileController extends Controller
             Storage::disk('public')->delete('avatars/'.$oldPath);
         }
 
+        // Per ISSUES-ELABORATION §9: ensure stored file is readable; return URL so frontend can show immediately
+        if (! Storage::disk('public')->exists($path)) {
+            return response()->json(['message' => 'Avatar could not be stored.'], 500);
+        }
+
+        // Return URL from refreshed user so frontend and next Inertia load see the same value
+        $user->refresh();
+        $avatarUrl = $user->avatar_url;
+
         return response()->json([
-            'avatar_url' => Storage::disk('public')->url($path),
+            'avatar_url' => $avatarUrl,
             'message' => 'Avatar updated.',
         ]);
     }

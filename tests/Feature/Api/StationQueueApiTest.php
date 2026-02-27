@@ -140,6 +140,91 @@ class StationQueueApiTest extends TestCase
         $response->assertJsonPath('serving.0.total_steps', 2);
         $response->assertJsonPath('serving.0.no_show_attempts', 0);
         $response->assertJsonPath('station.serving_count', 1);
+        // Per flexiqueue-ui3: queue payload includes process for each serving/waiting session
+        $response->assertJsonStructure(['serving' => [['session_id', 'alias', 'track', 'process_id', 'process_name']]]);
+    }
+
+    /** Per flexiqueue-ui3: when track step has process, serving payload includes process_id and process_name */
+    public function test_queue_serving_includes_process_when_step_has_process(): void
+    {
+        $process = \App\Models\Process::create([
+            'program_id' => $this->program->id,
+            'name' => 'Verification',
+            'description' => null,
+        ]);
+        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+            'station_id' => $this->station1->id,
+            'process_id' => $process->id,
+        ]);
+        $step = TrackStep::where('track_id', $this->track->id)->where('step_order', 1)->first();
+        $step->update(['process_id' => $process->id]);
+
+        $token = $this->createToken('A1');
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'A1',
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+            'no_show_attempts' => 0,
+        ]);
+        $token->update(['status' => 'in_use', 'current_session_id' => $session->id]);
+
+        $response = $this->actingAs($this->staff)->getJson("/api/stations/{$this->station1->id}/queue");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('serving.0.process_id', $process->id);
+        $response->assertJsonPath('serving.0.process_name', 'Verification');
+    }
+
+    /** Per flexiqueue-ui3: waiting list items include process_id and process_name */
+    public function test_queue_waiting_includes_process_keys(): void
+    {
+        $token = $this->createToken('A1');
+        Session::create([
+            'token_id' => $token->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'A1',
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'status' => 'waiting',
+        ]);
+
+        $response = $this->actingAs($this->staff)->getJson("/api/stations/{$this->station1->id}/queue");
+
+        $response->assertStatus(200);
+        $response->assertJsonStructure(['waiting' => [['session_id', 'alias', 'process_id', 'process_name']]]);
+    }
+
+    /** Per ISSUES-ELABORATION §4: custom-override sessions use override step count so station UI shows Complete on last step */
+    public function test_serving_with_override_steps_uses_override_count_for_total_steps(): void
+    {
+        $token = $this->createToken('C1');
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'C1',
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+            'no_show_attempts' => 0,
+            'override_steps' => [$this->station1->id],
+        ]);
+        $token->update(['status' => 'in_use', 'current_session_id' => $session->id]);
+
+        $response = $this->actingAs($this->staff)->getJson("/api/stations/{$this->station1->id}/queue");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('serving.0.session_id', $session->id);
+        $response->assertJsonPath('serving.0.current_step_order', 1);
+        $response->assertJsonPath('serving.0.total_steps', 1);
     }
 
     public function test_staff_assigned_sees_waiting_ordered_by_started_at_fifo(): void

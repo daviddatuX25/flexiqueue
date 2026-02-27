@@ -1,9 +1,12 @@
 <script lang="ts">
 	/**
-	 * QR scanner using html5-qrcode. When active, shows camera and calls onScan(decodedText) on success.
-	 * Supports: camera selection (multi-camera), file-scan fallback (no camera), optional sound on scan.
+	 * QR and barcode scanner. When active, calls onScan(decodedText) on success.
+	 * Scanning includes: (a) camera/file decoding via html5-qrcode (QR + barcode), and (b) keyboard-wedge (HID)
+	 * barcode scanner input — a dedicated input is focused when active so hardware scanners that "type" + Enter work.
+	 * Supports: QR + barcode (explicit formatsToSupport), camera selection (multi-camera), last camera persisted in
+	 * localStorage (flexiqueue_last_camera_id), file-scan fallback (no camera), optional sound on scan.
 	 */
-	import { onMount, onDestroy } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 
 	interface CameraDevice {
 		id: string;
@@ -15,6 +18,8 @@
 		onScan = () => {},
 		soundOnScan = false,
 		showFileFallback = true,
+		/** When true (e.g. display modal): no barcode input/label; only camera dropdown, video, file fallback, errors. */
+		cameraOnly = false,
 	} = $props();
 
 	let containerId = 'qr-reader-' + Math.random().toString(36).slice(2, 9);
@@ -26,8 +31,11 @@
 	let errorMessage = $state('');
 	let isLoading = $state(false);
 	let mode = $state<'camera' | 'file' | 'error'>('camera');
+	let barcodeInputValue = $state('');
+	let barcodeInputEl = $state<HTMLInputElement | null>(null);
 
 	const SCAN_CONFIG = { fps: 5, qrbox: { width: 250, height: 250 } } as const;
+	const STORAGE_KEY = 'flexiqueue_last_camera_id';
 
 	function playBeep() {
 		try {
@@ -51,6 +59,17 @@
 		onScan(decodedText);
 	}
 
+	function onBarcodeInputKeydown(e: KeyboardEvent) {
+		if (e.key !== 'Enter') return;
+		const raw = barcodeInputValue.trim();
+		if (raw) {
+			e.preventDefault();
+			handleScanSuccess(raw);
+			barcodeInputValue = '';
+			barcodeInputEl?.focus();
+		}
+	}
+
 	function pickPreferredCamera(cams: CameraDevice[]): string {
 		const env = cams.find(
 			(c) =>
@@ -68,8 +87,18 @@
 	async function startCamera(cameraIdOrConfig: string | { facingMode: string }) {
 		await stopScanner();
 		if (!document.getElementById(containerId)) return;
-		const { Html5Qrcode } = await import('html5-qrcode');
-		html5Qrcode = new Html5Qrcode(containerId);
+		const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
+		const scannerConfig = {
+			formatsToSupport: [
+				Html5QrcodeSupportedFormats.QR_CODE,
+				Html5QrcodeSupportedFormats.CODE_128,
+				Html5QrcodeSupportedFormats.EAN_13,
+				Html5QrcodeSupportedFormats.EAN_8,
+				Html5QrcodeSupportedFormats.UPC_A,
+				Html5QrcodeSupportedFormats.CODE_39,
+			],
+		};
+		html5Qrcode = new Html5Qrcode(containerId, scannerConfig);
 		await html5Qrcode.start(
 			cameraIdOrConfig,
 			SCAN_CONFIG,
@@ -99,9 +128,14 @@
 				return;
 			}
 			cameras = list;
-			const preferred = pickPreferredCamera(list);
-			selectedCameraId = preferred || list[0]!.id;
+			const savedId =
+				typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) ?? '' : '';
+			const idInList = savedId && list.some((c) => c.id === savedId);
+			selectedCameraId = idInList ? savedId : (pickPreferredCamera(list) || list[0]?.id) ?? null;
 			await startCamera(selectedCameraId);
+			if (selectedCameraId && typeof localStorage !== 'undefined') {
+				localStorage.setItem(STORAGE_KEY, selectedCameraId);
+			}
 			mode = 'camera';
 		} catch (err) {
 			const e = err as { name?: string; message?: string };
@@ -123,6 +157,13 @@
 		try {
 			await startCamera(newId);
 			errorMessage = '';
+			if (typeof localStorage !== 'undefined') {
+				localStorage.setItem(STORAGE_KEY, newId);
+			}
+			if (!cameraOnly) {
+				await tick();
+				barcodeInputEl?.focus();
+			}
 		} catch (err) {
 			errorMessage = (err as Error)?.message ?? 'Could not switch camera.';
 		}
@@ -133,8 +174,18 @@
 		const file = input.files?.[0];
 		if (!file) return;
 		try {
-			const { Html5Qrcode } = await import('html5-qrcode');
-			const html5 = new Html5Qrcode(containerId);
+			const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
+			const scannerConfig = {
+				formatsToSupport: [
+					Html5QrcodeSupportedFormats.QR_CODE,
+					Html5QrcodeSupportedFormats.CODE_128,
+					Html5QrcodeSupportedFormats.EAN_13,
+					Html5QrcodeSupportedFormats.EAN_8,
+					Html5QrcodeSupportedFormats.UPC_A,
+					Html5QrcodeSupportedFormats.CODE_39,
+				],
+			};
+			const html5 = new Html5Qrcode(containerId, scannerConfig);
 			const result = await html5.scanFileV2(file, false);
 			handleScanSuccess(result.decodedText);
 		} catch {
@@ -152,10 +203,17 @@
 			cameras = [];
 			selectedCameraId = null;
 			errorMessage = '';
+			barcodeInputValue = '';
 		}
 		return () => {
 			stopScanner();
 		};
+	});
+
+	$effect(() => {
+		if (cameraOnly || !active || !barcodeInputEl) return;
+		const el = barcodeInputEl;
+		tick().then(() => el?.focus());
 	});
 
 	onDestroy(() => {
@@ -164,7 +222,25 @@
 </script>
 
 {#if active}
-	<div class="flex flex-col gap-3 w-full max-w-[300px] mx-auto">
+	<div class="flex flex-col gap-3 w-full mx-auto {cameraOnly ? 'max-w-xl' : 'max-w-[300px]'}">
+		{#if !cameraOnly}
+			<!-- HID barcode scanner: input is visually hidden so typed stream is not shown; still focusable so hardware scanner works -->
+			<div class="flex flex-col gap-1 relative">
+				<label for="qr-barcode-input" class="text-xs font-medium text-surface-950/70 cursor-pointer hover:text-surface-950">Scan with barcode scanner</label>
+				<input
+					id="qr-barcode-input"
+					type="text"
+					autocomplete="off"
+					inputmode="text"
+					aria-label="Barcode scanner input; scan with hardware scanner or type and press Enter"
+					class="sr-only"
+					bind:value={barcodeInputValue}
+					bind:this={barcodeInputEl}
+					onkeydown={onBarcodeInputKeydown}
+				/>
+				<span class="text-xs text-surface-950/60">Or use camera below</span>
+			</div>
+		{/if}
 		{#if mode === 'camera' && cameras.length > 1}
 			<div class="flex flex-col gap-1">
 				<label for="qr-camera-select" class="text-xs font-medium text-surface-950/70">Camera</label>
@@ -190,7 +266,7 @@
 		<!-- Container always in DOM when active; visible only in camera mode -->
 		<div
 			id={containerId}
-			class="overflow-hidden rounded-lg border border-surface-200 bg-surface-50 min-h-[250px] w-full relative {mode !== 'camera' ? 'hidden' : ''}"
+			class="overflow-hidden rounded-lg border border-surface-200 bg-surface-50 w-full relative {mode !== 'camera' ? 'hidden' : ''} {cameraOnly ? 'min-h-[320px]' : 'min-h-[250px]'}"
 		>
 			{#if mode === 'camera' && isLoading}
 				<div class="absolute inset-0 flex items-center justify-center bg-surface-50 z-10">

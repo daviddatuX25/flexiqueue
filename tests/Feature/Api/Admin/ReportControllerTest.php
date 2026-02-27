@@ -12,6 +12,7 @@ use App\Models\TransactionLog;
 use App\Models\TrackStep;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -253,6 +254,33 @@ class ReportControllerTest extends TestCase
         $this->assertStringContainsString('Time,Source,Session,Action,Station,Staff,Remarks', $content);
         $this->assertStringContainsString('check_in', $content);
         $this->assertStringContainsString('A1', $content);
+    }
+
+    /** Per flexiqueue-m7z: audit log includes staff_activity_log (availability changes). */
+    public function test_audit_includes_staff_activity_log_entries(): void
+    {
+        DB::table('staff_activity_log')->insert([
+            'user_id' => $this->staff->id,
+            'action_type' => 'availability_change',
+            'old_value' => 'offline',
+            'new_value' => 'available',
+            'metadata' => null,
+            'created_at' => now(),
+        ]);
+
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/reports/audit');
+
+        $response->assertStatus(200);
+        $data = $response->json('data');
+        $this->assertIsArray($data);
+        $staffActivityEntries = array_filter($data, fn ($e) => ($e['source'] ?? '') === 'staff_activity');
+        $this->assertNotEmpty($staffActivityEntries, 'Audit log should include at least one staff_activity entry');
+        $first = reset($staffActivityEntries);
+        $this->assertSame('staff_activity', $first['source']);
+        $this->assertSame('availability_change', $first['action_type']);
+        $this->assertSame($this->staff->name, $first['staff']);
+        $this->assertStringContainsString('offline', $first['remarks'] ?? '');
+        $this->assertStringContainsString('available', $first['remarks'] ?? '');
     }
 
     public function test_audit_export_staff_returns_403(): void

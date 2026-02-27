@@ -106,6 +106,17 @@ class SessionService
             event(new ClientArrived($session->fresh(['currentStation', 'serviceTrack']), $firstStationId));
             event(new QueueLengthUpdated($firstStationId));
 
+            // Per ISSUES-ELABORATION §10: broadcast so display board shows triage bind in real time
+            $firstStation = Station::find($firstStationId);
+            event(new StationActivity(
+                $firstStationId,
+                $firstStation?->name ?? 'Triage',
+                "{$session->alias} registered at triage",
+                $session->alias,
+                'bind',
+                now()->toIso8601String()
+            ));
+
             return [
                 'session' => $session->fresh(['currentStation', 'serviceTrack']),
                 'token' => [
@@ -155,6 +166,7 @@ class SessionService
 
         $session = $session->fresh(['serviceTrack', 'currentStation']);
         $station = $session->currentStation;
+        // Only indicate "priority lane" when the client has a priority classification (PWD/Senior/Pregnant), not when the program is merely priority-first.
         $isPriority = $session->isPriorityCategory();
         $message = $isPriority
             ? "{$session->alias} called from priority lane"
@@ -238,7 +250,7 @@ class SessionService
             $next = $this->flowEngine->calculateNextStation($session);
             if (! $next) {
                 return [
-                    'message' => 'No next station in track. Session is ready to complete.',
+                    'message' => 'No next process in track. Session is ready to complete.',
                     'session' => $session->fresh(['currentStation', 'serviceTrack']),
                     'action_required' => 'complete',
                 ];
@@ -246,7 +258,7 @@ class SessionService
             $targetStationId = $this->resolveTargetStationFromNext($next, $session->program_id);
             if ($targetStationId === null) {
                 return [
-                    'message' => 'No next station available.',
+                    'message' => 'No next process available.',
                     'session' => $session->fresh(['currentStation', 'serviceTrack']),
                     'action_required' => 'override',
                 ];

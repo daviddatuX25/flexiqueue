@@ -13,13 +13,22 @@
 	let {
 		user = null,
 		size = 'md',
+		avatarUrlOverride = null,
 	}: {
 		user?: UserLike | null;
 		size?: 'sm' | 'md' | 'lg';
+		/** When set (e.g. after upload), use this URL so the new avatar shows immediately without reload. */
+		avatarUrlOverride?: string | null;
 	} = $props();
 
 	let imageError = $state(false);
-	const showImage = $derived(!!(user?.avatar_url && !imageError));
+	const effectiveAvatarUrl = $derived(avatarUrlOverride ?? user?.avatar_url ?? null);
+	const showImage = $derived(!!(effectiveAvatarUrl && !imageError));
+
+	$effect(() => {
+		effectiveAvatarUrl;
+		imageError = false;
+	});
 
 	const initials = $derived.by(() => {
 		const n = user?.name?.trim();
@@ -63,7 +72,7 @@
 	</div>
 {:else if showImage}
 	<img
-		src={user.avatar_url!}
+		src={effectiveAvatarUrl!}
 		alt=""
 		class="rounded-full object-cover shrink-0 {sizeClasses}"
 		onerror={handleImageError}

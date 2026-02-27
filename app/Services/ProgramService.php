@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\ProgramStatusChanged;
 use App\Models\Program;
 use App\Models\ProgramAuditLog;
 use App\Models\ProgramStationAssignment;
@@ -48,9 +49,17 @@ class ProgramService
 
     /**
      * Activate this program; deactivate the current active program.
+     * Fails if another program is active and still has clients in the queue (waiting/called/serving).
      */
     public function activate(Program $program): Program
     {
+        $previousActive = Program::where('is_active', true)->where('id', '!=', $program->id)->first();
+        if ($previousActive && $previousActive->queueSessions()->active()->exists()) {
+            throw new \InvalidArgumentException(
+                'Another program is currently running and has clients in the queue. Stop that program\'s session first (or wait until the queue is empty) before starting this program.'
+            );
+        }
+
         return DB::transaction(function () use ($program) {
             $previousActive = Program::where('is_active', true)->where('id', '!=', $program->id)->first();
             Program::where('is_active', true)->where('id', '!=', $program->id)->update(['is_active' => false, 'is_paused' => false]);
@@ -109,6 +118,8 @@ class ProgramService
 
         $program->update(['is_paused' => true]);
 
+        broadcast(new ProgramStatusChanged(true));
+
         return $program->fresh();
     }
 
@@ -122,6 +133,8 @@ class ProgramService
         }
 
         $program->update(['is_paused' => false]);
+
+        broadcast(new ProgramStatusChanged(false));
 
         return $program->fresh();
     }

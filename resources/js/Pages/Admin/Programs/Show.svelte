@@ -3,8 +3,10 @@
     import Modal from "../../../Components/Modal.svelte";
     import ConfirmModal from "../../../Components/ConfirmModal.svelte";
     import FlowDiagram from "../../../Components/FlowDiagram.svelte";
+    import DiagramCanvas from "../../../Components/ProgramDiagram/DiagramCanvas.svelte";
     import { get } from "svelte/store";
     import { Link, router, usePage } from "@inertiajs/svelte";
+    import { toast } from "../../../stores/toastStore.js";
 
     import {
         Plus,
@@ -16,6 +18,7 @@
         Eye,
         FolderOpen,
         AlertCircle,
+        AlertTriangle,
         CheckCircle,
         Clock,
         Settings,
@@ -29,6 +32,8 @@
         User,
         Power,
         Rocket,
+        ChevronLeft,
+        ChevronRight,
     } from "lucide-svelte";
 
     interface ProgramItem {
@@ -45,6 +50,10 @@
             balance_mode: string;
             station_selection_mode?: string;
             alternate_ratio: [number, number];
+            /** Per bead flexiqueue-5gl: in alternate mode, serve priority queue first (true) or regular first (false). Default true. */
+            alternate_priority_first?: boolean;
+            /** Per flexiqueue-87p: display board scan countdown (0 = no auto-close). */
+            display_scan_timeout_seconds?: number;
         };
     }
 
@@ -63,6 +72,7 @@
         program_id: number;
         name: string;
         description: string | null;
+        expected_time_seconds?: number | null;
         created_at: string | null;
     }
 
@@ -76,6 +86,8 @@
         created_at: string | null;
         active_sessions_count?: number;
         steps?: StepItem[];
+        total_estimated_minutes?: number;
+        travel_queue_minutes?: number;
     }
 
     interface StationItem {
@@ -119,8 +131,37 @@
             ? new URLSearchParams(window.location.search).get("tab")
             : null;
     let activeTab = $state<
-        "tracks" | "processes" | "stations" | "overview" | "settings" | "staff"
+        "tracks" | "processes" | "stations" | "overview" | "settings" | "staff" | "diagram"
     >((queryTab as any) || "overview");
+    /** Tab nav scroll: ref and scroll indicators for left/right arrows (no scrollbar). */
+    let tabListEl = $state<HTMLDivElement | null>(null);
+    let canScrollLeft = $state(false);
+    let canScrollRight = $state(false);
+    const TAB_SCROLL_PX = 180;
+    function updateTabScrollState() {
+        const el = tabListEl;
+        if (!el) return;
+        canScrollLeft = el.scrollLeft > 2;
+        canScrollRight = el.scrollLeft < el.scrollWidth - el.clientWidth - 2;
+    }
+    function scrollTabList(direction: "left" | "right") {
+        const el = tabListEl;
+        if (!el) return;
+        el.scrollBy({ left: direction === "left" ? -TAB_SCROLL_PX : TAB_SCROLL_PX, behavior: "smooth" });
+    }
+    $effect(() => {
+        const el = tabListEl;
+        if (!el) return;
+        updateTabScrollState();
+        const onScroll = () => updateTabScrollState();
+        const ro = new ResizeObserver(() => updateTabScrollState());
+        el.addEventListener("scroll", onScroll);
+        ro.observe(el);
+        return () => {
+            el.removeEventListener("scroll", onScroll);
+            ro.disconnect();
+        };
+    });
     let showCreateModal = $state(false);
     let editTrack = $state<TrackItem | null>(null);
     let createName = $state("");
@@ -159,27 +200,37 @@
     let submitting = $state(false);
     let error = $state("");
     let settingsNoShowTimer = $state(10);
+    /** Per ISSUES-ELABORATION §20: mm:ss display for no-show timer (5–600 seconds). */
+    let noShowTimerMinutes = $state(0);
+    let noShowTimerSeconds = $state(10);
     let settingsRequireOverride = $state(true);
     let settingsPriorityFirst = $state(true);
     let settingsBalanceMode = $state<"fifo" | "alternate">("fifo");
     let settingsStationSelectionMode = $state<string>("fixed");
     let settingsAlternateRatioP = $state(2);
     let settingsAlternateRatioR = $state(1);
+    /** Per bead flexiqueue-5gl: in alternate mode, which queue is served first. Default true = priority first. */
+    let settingsAlternatePriorityFirst = $state(true);
+    /** Per flexiqueue-87p: display board scan countdown in seconds; 0 = no auto-close. */
+    let displayScanTimeoutSeconds = $state(20);
+    /** Per ISSUES-ELABORATION §15: expandable "More details" for station selection. */
+    let showStationSelectionDetails = $state(false);
+    /** Per bead flexiqueue-5gl: expandable "More details" for priority/regular ratio (alternate mode). */
+    let showRatioDetails = $state(false);
 
-    // Per ISSUES-ELABORATION §17: show deactivate warning after reload (passed via sessionStorage)
+    /** Per ISSUES-ELABORATION §17: local copy so we can update station (e.g. is_active) without full reload. */
+    let localStations = $state<StationItem[]>([]);
     $effect(() => {
-        if (typeof window === "undefined") return;
-        const w = sessionStorage.getItem("stationDeactivateWarning");
-        if (w) {
-            error = w;
-            sessionStorage.removeItem("stationDeactivateWarning");
-        }
+        localStations = [...stations];
     });
 
     $effect(() => {
         const s = program?.settings;
         if (s) {
-            settingsNoShowTimer = s.no_show_timer_seconds ?? 10;
+            const total = s.no_show_timer_seconds ?? 10;
+            settingsNoShowTimer = total;
+            noShowTimerMinutes = Math.floor(total / 60);
+            noShowTimerSeconds = total % 60;
             settingsRequireOverride =
                 s.require_permission_before_override ?? true;
             settingsPriorityFirst = s.priority_first ?? true;
@@ -190,6 +241,8 @@
             const ar = s.alternate_ratio ?? [2, 1];
             settingsAlternateRatioP = ar[0] ?? 2;
             settingsAlternateRatioR = ar[1] ?? 1;
+            settingsAlternatePriorityFirst = s.alternate_priority_first !== false;
+            displayScanTimeoutSeconds = Math.min(300, Math.max(0, Number(s.display_scan_timeout_seconds ?? 20)));
         }
     });
 
@@ -234,11 +287,41 @@
     let pendingReorderStepIds = $state<number[]>([]);
     let reorderScope = $state<"new_only" | "migrate">("new_only");
     let confirmStopProgram = $state(false);
+    /** When true, show warning that stop is not allowed while queue has clients; suggest Pause. Per bead flexiqueue-nlu. */
+    let showStopQueueWarning = $state(false);
     let confirmDeleteTrack = $state<TrackItem | null>(null);
     let confirmDeleteStation = $state<StationItem | null>(null);
     let confirmRemoveStep = $state<{ step: StepItem; track: TrackItem } | null>(
         null,
     );
+    // Process tab: edit and delete (per ISSUES-ELABORATION §19)
+    let editProcess = $state<ProcessItem | null>(null);
+    let editProcessName = $state("");
+    let editProcessDescription = $state("");
+    let editProcessExpectedTimeMmSs = $state("");
+    let createProcessExpectedTimeMmSs = $state("");
+    let confirmDeleteProcess = $state<ProcessItem | null>(null);
+
+    /** Per flexiqueue-5l7: format seconds as mm:ss (max 10:00). */
+    function secondsToMmSs(sec: number | null | undefined): string {
+        if (sec == null || sec <= 0) return "";
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        return `${m}:${String(s).padStart(2, "0")}`;
+    }
+
+    /** Parse mm:ss to seconds (0–600). Returns null if invalid. */
+    function mmSsToSeconds(str: string): number | null {
+        const t = str.trim();
+        if (!t) return null;
+        const parts = t.split(":");
+        if (parts.length !== 2) return null;
+        const m = parseInt(parts[0], 10);
+        const s = parseInt(parts[1], 10);
+        if (Number.isNaN(m) || Number.isNaN(s) || m < 0 || s < 0 || s > 59) return null;
+        const total = m * 60 + s;
+        return total > 600 ? null : total;
+    }
     // Staff tab state
     let staffAssignments = $state<
         Array<{
@@ -248,7 +331,7 @@
             station: { id: number; name: string } | null;
         }>
     >([]);
-    let staffStations = $state<Array<{ id: number; name: string }>>([]);
+    let staffStations = $state<Array<{ id: number; name: string; capacity?: number }>>([]);
     let staffSupervisors = $state<
         Array<{ id: number; name: string; email: string }>
     >([]);
@@ -264,12 +347,50 @@
     let staffAssigningUserId = $state<number | null>(null);
     let staffAssigningStationId = $state<number | null>(null);
 
-    /** Staff currently assigned to a station (first if multiple; null if none). */
+    /** One row per (station, slot) for multiple staff per station. Per bead flexiqueue-bci. */
+    const staffStationSlots = $derived(
+        staffStations.flatMap((station) =>
+            Array.from(
+                { length: Math.max(1, station.capacity ?? 1) },
+                (_, slotIndex) => ({ station, slotIndex }),
+            ),
+            ),
+    );
+
+    /** Staff currently assigned to a station (first if multiple; null if none). Used for backward compatibility. */
     function getAssignedUserIdForStation(stationId: number): number | null {
         const a = staffAssignments.find((x) => x.station_id === stationId);
         return a?.user_id ?? null;
     }
+
+    /** All user IDs assigned to this station (supports multiple staff per station). Per bead flexiqueue-bci. */
+    function getAssignedUserIdsForStation(stationId: number): number[] {
+        return staffAssignments
+            .filter((x) => x.station_id === stationId)
+            .map((x) => x.user_id);
+    }
     const page = usePage();
+    // Sync activeTab with URL so direct links with ?tab=stations (or other tab) work when already on this page
+    $effect(() => {
+        const p = $page;
+        const url = (p?.url as string) ?? "";
+        const search = url.includes("?") ? url.slice(url.indexOf("?")) : "";
+        const tab = new URLSearchParams(search).get("tab");
+        const valid: (typeof activeTab)[] = ["overview", "processes", "stations", "staff", "tracks", "diagram", "settings"];
+        if (tab && valid.includes(tab as (typeof activeTab))) activeTab = tab as typeof activeTab;
+    });
+    const diagramViewMode = $derived(
+        (() => {
+            const p = $page;
+            const url = (p?.url as string) ?? (typeof window !== "undefined" ? window.location.href : "");
+            try {
+                const search = url.includes("?") ? url.slice(url.indexOf("?")) : "";
+                return new URLSearchParams(search).get("mode") === "view" && activeTab === "diagram";
+            } catch {
+                return false;
+            }
+        })()
+    );
     function getCsrfToken(): string {
         const p = get(page);
         const fromProps = (p?.props as { csrf_token?: string } | undefined)
@@ -357,9 +478,15 @@
         }
     }
 
+    /** Per bead flexiqueue-nlu: if queue has active sessions, show warning + suggest Pause; else show confirm then deactivate. */
     function openStopConfirm() {
-        confirmStopProgram = true;
         error = "";
+        const active = stats?.active_sessions ?? 0;
+        if (active > 0) {
+            showStopQueueWarning = true;
+        } else {
+            confirmStopProgram = true;
+        }
     }
 
     async function handleStopConfirm() {
@@ -382,6 +509,15 @@
 
     function closeStopConfirm() {
         confirmStopProgram = false;
+    }
+
+    function closeStopQueueWarning() {
+        showStopQueueWarning = false;
+    }
+
+    async function handlePauseFromStopWarning() {
+        closeStopQueueWarning();
+        await handlePause();
     }
 
     function openCreate() {
@@ -635,16 +771,18 @@
         const { ok, data, message } = await api(
             "POST",
             `/api/admin/programs/${program.id}/processes`,
-            {
-                name: createProcessName.trim(),
-                description: createProcessDescription.trim() || null,
-            },
+                {
+                    name: createProcessName.trim(),
+                    description: createProcessDescription.trim() || null,
+                    expected_time_seconds: mmSsToSeconds(createProcessExpectedTimeMmSs) ?? null,
+                },
         );
         creatingProcess = false;
         submitting = false;
         if (ok) {
             createProcessName = "";
             createProcessDescription = "";
+            createProcessExpectedTimeMmSs = "";
             router.reload();
         } else {
             const d = data as {
@@ -659,6 +797,55 @@
                 d?.message ??
                 message ??
                 "Failed to create process.";
+        }
+    }
+
+    function openEditProcessModal(proc: ProcessItem) {
+        editProcess = proc;
+        editProcessName = proc.name;
+        editProcessDescription = proc.description ?? "";
+        editProcessExpectedTimeMmSs = secondsToMmSs(proc.expected_time_seconds ?? null) || "";
+        error = "";
+    }
+
+    function closeEditProcessModal() {
+        editProcess = null;
+        editProcessName = "";
+        editProcessDescription = "";
+        editProcessExpectedTimeMmSs = "";
+    }
+
+    async function handleUpdateProcess() {
+        if (!editProcess || !program || !editProcessName.trim()) return;
+        submitting = true;
+        error = "";
+        const expectedSeconds = mmSsToSeconds(editProcessExpectedTimeMmSs);
+        const { ok, data, message } = await api(
+            "PUT",
+            `/api/admin/programs/${program.id}/processes/${editProcess.id}`,
+            {
+                name: editProcessName.trim(),
+                description: editProcessDescription.trim() || null,
+                expected_time_seconds: expectedSeconds ?? null,
+            },
+        );
+        submitting = false;
+        if (ok) {
+            closeEditProcessModal();
+            router.reload();
+        } else {
+            const d = data as {
+                message?: string;
+                errors?: Record<string, string[]>;
+            };
+            const firstErr = d?.errors
+                ? Object.values(d.errors).flat()[0]
+                : null;
+            error =
+                firstErr ??
+                d?.message ??
+                message ??
+                "Failed to update process.";
         }
     }
 
@@ -725,6 +912,33 @@
         confirmDeleteStation = null;
     }
 
+    function openDeleteProcessConfirm(proc: ProcessItem) {
+        confirmDeleteProcess = proc;
+        error = "";
+    }
+
+    async function handleDeleteProcessConfirm() {
+        if (!confirmDeleteProcess || !program) return;
+        const proc = confirmDeleteProcess;
+        submitting = true;
+        error = "";
+        const { ok, message } = await api(
+            "DELETE",
+            `/api/admin/programs/${program.id}/processes/${proc.id}`,
+        );
+        submitting = false;
+        if (ok) {
+            confirmDeleteProcess = null;
+            router.reload();
+        } else {
+            error = message ?? "Cannot delete process.";
+        }
+    }
+
+    function closeDeleteProcessConfirm() {
+        confirmDeleteProcess = null;
+    }
+
     async function handleToggleStationActive(s: StationItem) {
         submitting = true;
         error = "";
@@ -745,15 +959,17 @@
         submitting = false;
         if (ok) {
             const payload = data as
-                | { station?: unknown; warning?: string }
+                | { station?: StationItem; warning?: string }
                 | undefined;
-            if (payload?.warning && typeof sessionStorage !== "undefined") {
-                sessionStorage.setItem(
-                    "stationDeactivateWarning",
-                    payload.warning,
+            if (payload?.station) {
+                const updated = payload.station;
+                localStations = localStations.map((st) =>
+                    st.id === updated.id ? { ...st, ...updated } : st,
                 );
             }
-            router.reload();
+            if (payload?.warning) {
+                toast(payload.warning, "info");
+            }
         } else {
             error = message ?? "Failed to update station.";
         }
@@ -904,7 +1120,10 @@
                 name: program.name,
                 description: program.description,
                 settings: {
-                    no_show_timer_seconds: settingsNoShowTimer,
+                    no_show_timer_seconds: Math.min(
+                        600,
+                        Math.max(5, noShowTimerMinutes * 60 + noShowTimerSeconds),
+                    ),
                     require_permission_before_override: settingsRequireOverride,
                     priority_first: settingsPriorityFirst,
                     balance_mode: settingsBalanceMode,
@@ -913,6 +1132,8 @@
                         settingsAlternateRatioP,
                         settingsAlternateRatioR,
                     ],
+                    alternate_priority_first: settingsAlternatePriorityFirst,
+                    display_scan_timeout_seconds: displayScanTimeoutSeconds,
                 },
             },
         );
@@ -927,7 +1148,10 @@
         const { ok, data } = await api("GET", "/api/admin/program-default-settings");
         if (!ok || !data) return;
         const s = (data as { settings?: Record<string, unknown> }).settings ?? {};
-        settingsNoShowTimer = Number(s.no_show_timer_seconds ?? 10);
+        const total = Number(s.no_show_timer_seconds ?? 10);
+        settingsNoShowTimer = total;
+        noShowTimerMinutes = Math.floor(total / 60);
+        noShowTimerSeconds = total % 60;
         settingsRequireOverride = Boolean(s.require_permission_before_override ?? true);
         settingsPriorityFirst = Boolean(s.priority_first ?? true);
         settingsBalanceMode = ((s.balance_mode as string) ?? "fifo") as "fifo" | "alternate";
@@ -935,6 +1159,8 @@
         const ar = (s.alternate_ratio as number[] | undefined) ?? [2, 1];
         settingsAlternateRatioP = Number(ar[0] ?? 2);
         settingsAlternateRatioR = Number(ar[1] ?? 1);
+        settingsAlternatePriorityFirst = (s.alternate_priority_first as boolean | undefined) !== false;
+        displayScanTimeoutSeconds = Math.min(300, Math.max(0, Number((s as { display_scan_timeout_seconds?: number }).display_scan_timeout_seconds ?? 20)));
     }
 
     async function handleAssignStaff(userId: number, stationId: number | null) {
@@ -997,6 +1223,22 @@
             }
             await handleAssignStaff(userId, stationId);
         }
+        staffAssigningStationId = null;
+    }
+
+    /** Per-slot assign/unassign for multiple staff per station (flexiqueue-bci). */
+    async function handleAssignStaffForStationSlot(
+        stationId: number,
+        slotIndex: number,
+        newUserId: number | null,
+    ) {
+        const assignedIds = getAssignedUserIdsForStation(stationId);
+        const oldUserId = assignedIds[slotIndex] ?? null;
+        if (newUserId === oldUserId) return;
+        staffAssigningStationId = stationId;
+        error = "";
+        if (oldUserId != null) await handleAssignStaff(oldUserId, null);
+        if (newUserId != null) await handleAssignStaff(newUserId, stationId);
         staffAssigningStationId = null;
     }
 
@@ -1140,9 +1382,9 @@
                 </div>
                 <div class="flex flex-wrap items-center gap-3">
                     <Link
-                        href={`/admin/programs/${program.id}?tab=stations`}
+                        href="/station"
                         class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm hover:shadow-md transition-shadow"
-                        title="Open stations to manage the queue"
+                        title="Open station interface to manage the queue"
                     >
                         <Activity class="w-4 h-4" />
                         View Program
@@ -1224,15 +1466,47 @@
             </div>
         {/if}
 
-        <!-- Tab navigation (BD-009, BD-010) — Skeleton-compatible tabs, Overview first -->
-        <div role="tablist" class="tabs gap-2 overflow-x-auto pb-1">
-            <button type="button" role="tab" class="tab w-fit whitespace-nowrap px-4" class:tab-active={activeTab === "overview"} onclick={() => (activeTab = "overview")}>Overview</button>
-            <button type="button" role="tab" class="tab w-fit whitespace-nowrap px-4" class:tab-active={activeTab === "processes"} onclick={() => (activeTab = "processes")}>Processes</button>
-            <button type="button" role="tab" class="tab w-fit whitespace-nowrap px-4" class:tab-active={activeTab === "stations"} onclick={() => (activeTab = "stations")}>Stations</button>
-            <button type="button" role="tab" class="tab w-fit whitespace-nowrap px-4" class:tab-active={activeTab === "staff"} onclick={() => (activeTab = "staff")}>Staff</button>
-            <button type="button" role="tab" class="tab w-fit whitespace-nowrap px-4" class:tab-active={activeTab === "tracks"} onclick={() => (activeTab = "tracks")}>Tracks</button>
-            <button type="button" role="tab" class="tab w-fit whitespace-nowrap px-4" class:tab-active={activeTab === "settings"} onclick={() => (activeTab = "settings")}>Settings</button>
-        </div>
+        <!-- Tab navigation: no scrollbar; pulsating arrows when more to scroll (per sketch) -->
+        <nav
+            aria-label="Program sections"
+            class="sticky top-0 z-20 -mx-4 px-4 py-2 bg-surface-50 border-y border-surface-200 shadow-sm sm:relative sm:mx-0 sm:px-0 sm:py-0 sm:border-0 sm:shadow-none sm:rounded-container sm:border sm:border-surface-200 sm:bg-surface-100/80 sm:mt-4"
+        >
+            <div class="relative flex items-center gap-0 w-full">
+                {#if canScrollLeft}
+                    <button
+                        type="button"
+                        aria-label="Scroll tabs left"
+                        class="absolute left-0 z-10 flex items-center justify-center w-10 h-full min-h-[52px] bg-surface-100/95 hover:bg-surface-200/95 rounded-l-lg text-surface-600 animate-pulse shrink-0"
+                        onclick={() => scrollTabList("left")}
+                    >
+                        <ChevronLeft class="w-5 h-5" />
+                    </button>
+                {/if}
+                <div
+                    role="tablist"
+                    bind:this={tabListEl}
+                    class="flex gap-1 overflow-x-auto overflow-y-hidden flex-nowrap w-full max-w-full py-1 sm:py-2 sm:px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                >
+                    <button type="button" role="tab" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'overview' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "overview")}>Overview</button>
+                    <button type="button" role="tab" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'processes' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "processes")}>Processes</button>
+                    <button type="button" role="tab" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'stations' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "stations")}>Stations</button>
+                    <button type="button" role="tab" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'staff' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "staff")}>Staff</button>
+                    <button type="button" role="tab" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'tracks' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "tracks")}>Track</button>
+                    <button type="button" role="tab" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'diagram' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "diagram")}>Diagram</button>
+                    <button type="button" role="tab" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'settings' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "settings")}>Settings</button>
+                </div>
+                {#if canScrollRight}
+                    <button
+                        type="button"
+                        aria-label="Scroll tabs right"
+                        class="absolute right-0 z-10 flex items-center justify-center w-10 h-full min-h-[52px] bg-surface-100/95 hover:bg-surface-200/95 rounded-r-lg text-surface-600 animate-pulse shrink-0"
+                        onclick={() => scrollTabList("right")}
+                    >
+                        <ChevronRight class="w-5 h-5" />
+                    </button>
+                {/if}
+            </div>
+        </nav>
 
         {#if error}
             <div
@@ -1320,6 +1594,517 @@
                         Track flow
                     </h2>
                     <FlowDiagram {tracks} />
+                </section>
+            </div>
+        {:else if activeTab === "diagram"}
+            <div class="space-y-4">
+                <section>
+                    <h2 class="text-lg font-semibold text-surface-950 mb-2">
+                        Program diagram
+                    </h2>
+                    <p class="text-sm text-surface-600 mb-4">
+                        {#if diagramViewMode}
+                            View-only. Remove <code class="text-xs bg-surface-200 px-1 rounded">?mode=view</code> from the URL to edit.
+                        {:else}
+                            Arrange stations, tracks, and decorations on the canvas. Use Save diagram to persist your layout. Add <code class="text-xs bg-surface-200 px-1 rounded">?mode=view</code> for read-only view.
+                        {/if}
+                    </p>
+                    <DiagramCanvas {program} {tracks} {stations} {processes} readOnly={diagramViewMode} />
+                </section>
+            </div>
+        {:else if activeTab === "processes"}
+            <div class="space-y-6">
+                <section>
+                    <h2 class="text-lg font-semibold text-surface-950 mb-2">
+                        Processes
+                    </h2>
+                    <p class="text-sm text-surface-600 mb-4">
+                        Define logical work types (e.g. Verification, Cash
+                        Release). Each track step references a process. Create
+                        processes before adding steps to tracks.
+                    </p>
+                    <div class="flex flex-wrap items-end gap-3 mb-6">
+                        <div class="form-control min-w-[200px]">
+                            <label for="create-process-name" class="label py-0"
+                                ><span class="label-text text-xs">Name</span
+                                ></label
+                            >
+                            <input
+                                id="create-process-name"
+                                type="text"
+                                class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                                placeholder="e.g. Verification"
+                                bind:value={createProcessName}
+                                maxlength="50"
+                            />
+                        </div>
+                        <div class="form-control min-w-[200px]">
+                            <label for="create-process-desc" class="label py-0"
+                                ><span class="label-text text-xs"
+                                    >Description (optional)</span
+                                ></label
+                            >
+                            <input
+                                id="create-process-desc"
+                                type="text"
+                                class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                                placeholder="Optional"
+                                bind:value={createProcessDescription}
+                            />
+                        </div>
+                        <div class="form-control min-w-[120px]">
+                            <label for="create-process-expected-time" class="label py-0"
+                                ><span class="label-text text-xs">Expected time (mm:ss)</span></label
+                            >
+                            <input
+                                id="create-process-expected-time"
+                                type="text"
+                                class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                                placeholder="0:00"
+                                bind:value={createProcessExpectedTimeMmSs}
+                            />
+                        </div>
+                        <button
+                            type="button"
+                            class="btn preset-filled-primary-500 flex items-center gap-2"
+                            disabled={submitting || !createProcessName.trim()}
+                            onclick={handleCreateProcess}
+                        >
+                            {#if submitting && creatingProcess}
+                                <span class="loading-spinner loading-sm"></span>
+                                Adding...
+                            {:else}
+                                <Plus class="w-4 h-4" /> Add Process
+                            {/if}
+                        </button>
+                    </div>
+                    {#if processes.length === 0}
+                        <div
+                            class="rounded-container bg-surface-50 border border-surface-200 p-8 text-center text-surface-600"
+                        >
+                            No processes yet. Add one above to use in track
+                            steps.
+                        </div>
+                    {:else}
+                        <div class="flex flex-wrap gap-2">
+                            {#each processes as proc (proc.id)}
+                                <span
+                                    class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-100 border border-surface-200 text-sm font-medium text-surface-950"
+                                >
+                                    <span
+                                        >{proc.name}
+                                        {#if proc.expected_time_seconds != null && proc.expected_time_seconds > 0}
+                                            <span class="text-surface-500 text-xs ml-1"
+                                                >— {secondsToMmSs(proc.expected_time_seconds)}</span
+                                            >
+                                        {/if}
+                                        {#if proc.description}
+                                            <span
+                                                class="text-surface-500 text-xs ml-2"
+                                                >— {proc.description}</span
+                                            >
+                                        {/if}</span
+                                    >
+                                    <button
+                                        type="button"
+                                        class="btn btn-ghost btn-sm p-1 min-h-0 h-7"
+                                        onclick={() => openEditProcessModal(proc)}
+                                        disabled={submitting}
+                                        aria-label="Edit process"
+                                    >
+                                        <Edit2 class="w-4 h-4" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-ghost btn-sm p-1 min-h-0 h-7 text-error-500"
+                                        onclick={() =>
+                                            openDeleteProcessConfirm(proc)}
+                                        disabled={submitting}
+                                        aria-label="Delete process"
+                                    >
+                                        <Trash2 class="w-4 h-4" />
+                                    </button>
+                                </span>
+                            {/each}
+                        </div>
+                    {/if}
+                </section>
+            </div>
+        {:else if activeTab === "stations"}
+            <!-- Stations tab (BD-010) -->
+            <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+                <div>
+                    <h2 class="text-lg font-semibold text-surface-950">
+                        Stations
+                    </h2>
+                    <p class="text-sm text-surface-600 mt-0.5">
+                        Manage service points where clients receive attention.
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm"
+                    onclick={openCreateStation}
+                >
+                    <Plus class="w-4 h-4" /> Add Station
+                </button>
+            </div>
+            {#if localStations.length === 0}
+                <div
+                    class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
+                >
+                    <div
+                        class="bg-surface-100 p-4 rounded-full text-surface-400 mb-4"
+                    >
+                        <Monitor class="w-8 h-8" />
+                    </div>
+                    <h3 class="text-lg font-semibold text-surface-950">
+                        No stations defined
+                    </h3>
+                    <p class="text-surface-600 max-w-sm mt-2 mb-6">
+                        Create a station (e.g., Verification Desk, Cashier) for
+                        staff to serve clients.
+                    </p>
+                    <button
+                        type="button"
+                        class="btn preset-filled-primary-500 flex items-center gap-2"
+                        onclick={openCreateStation}
+                    >
+                        <Plus class="w-4 h-4" /> Create First Station
+                    </button>
+                </div>
+            {:else}
+                <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {#each localStations as station (station.id)}
+                        <div
+                            class="bg-surface-50 rounded-container elevation-card transition-all hover:shadow-[var(--shadow-raised)] flex flex-col h-full border border-surface-200/50"
+                        >
+                            <div class="p-5 flex-grow flex flex-col gap-3">
+                                <div
+                                    class="flex items-start justify-between gap-3"
+                                >
+                                    <div class="flex items-center gap-2.5">
+                                        <div
+                                            class="bg-surface-100 p-2 rounded-lg text-surface-600"
+                                        >
+                                            <Monitor class="w-5 h-5" />
+                                        </div>
+                                        <h3
+                                            class="text-lg font-bold text-surface-950 line-clamp-1"
+                                        >
+                                            {station.name}
+                                        </h3>
+                                    </div>
+                                    <div class="shrink-0 mt-1">
+                                        {#if station.is_active}
+                                            <span
+                                                class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded preset-filled-success-500 shadow-sm flex items-center gap-1"
+                                            >
+                                                <span
+                                                    class="w-1.5 h-1.5 rounded-full bg-white/80 shrink-0 animate-pulse"
+                                                ></span> Active
+                                            </span>
+                                        {:else}
+                                            <span
+                                                class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded preset-tonal text-surface-600 shadow-sm"
+                                            >
+                                                Inactive
+                                            </span>
+                                        {/if}
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2 mt-2">
+                                    <div
+                                        class="bg-surface-100/50 rounded p-2 border border-surface-200/50 flex flex-col"
+                                    >
+                                        <span
+                                            class="text-xs font-medium text-surface-500 uppercase tracking-wider mb-1 flex items-center gap-1"
+                                            ><Users class="w-3 h-3" /> Staff</span
+                                        >
+                                        <span
+                                            class="text-sm font-semibold text-surface-900"
+                                            >{station.capacity} desk{station.capacity !==
+                                            1
+                                                ? "s"
+                                                : ""}</span
+                                        >
+                                    </div>
+                                    <div
+                                        class="bg-surface-100/50 rounded p-2 border border-surface-200/50 flex flex-col"
+                                    >
+                                        <span
+                                            class="text-xs font-medium text-surface-500 uppercase tracking-wider mb-1 flex items-center gap-1"
+                                            ><User class="w-3 h-3" /> Clients</span
+                                        >
+                                        <span
+                                            class="text-sm font-semibold text-surface-900"
+                                            >{station.client_capacity ?? 1} / turn</span
+                                        >
+                                    </div>
+                                </div>
+                            </div>
+                            <div
+                                class="px-5 py-3 border-t border-surface-100 flex items-center justify-between bg-surface-50/50 rounded-b-container"
+                            >
+                                <button
+                                    type="button"
+                                    class="text-xs font-medium transition-colors hover:text-surface-900 flex items-center gap-1.5 {station.is_active
+                                        ? 'text-error-600 hover:text-error-700'
+                                        : 'text-success-600 hover:text-success-700'}"
+                                    onclick={() =>
+                                        handleToggleStationActive(station)}
+                                    disabled={submitting}
+                                >
+                                    {#if station.is_active}
+                                        <Power class="w-3.5 h-3.5" /> Deactivate
+                                    {:else}
+                                        <Power class="w-3.5 h-3.5" /> Activate
+                                    {/if}
+                                </button>
+                                <div class="flex items-center gap-1">
+                                    <button
+                                        type="button"
+                                        class="btn preset-tonal btn-sm p-2"
+                                        onclick={() => openEditStation(station)}
+                                        disabled={submitting}
+                                        title="Edit Station"
+                                    >
+                                        <Edit2
+                                            class="w-4 h-4 text-surface-600"
+                                        />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn preset-tonal btn-sm p-2 hover:bg-error-50"
+                                        onclick={() =>
+                                            openDeleteStationConfirm(station)}
+                                        disabled={submitting}
+                                        title="Delete Station"
+                                    >
+                                        <Trash2
+                                            class="w-4 h-4 text-error-500"
+                                        />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    {/each}
+                </div>
+            {/if}
+        {:else if activeTab === "staff"}
+            <!-- Staff tab: station assignments + supervisors -->
+            <div class="space-y-8">
+                <section>
+                    <h2 class="text-lg font-semibold text-surface-950 mb-4">
+                        Station assignments
+                    </h2>
+                    
+                    {#if settingsRequireOverride && staffSupervisors.length === 0}
+                        <div class="bg-warning-50 text-warning-800 border border-warning-200 rounded-container p-4 flex items-start gap-3 mb-6 shadow-sm">
+                            <AlertTriangle class="w-5 h-5 text-warning-600 shrink-0 mt-0.5" />
+                            <div>
+                                <p class="text-sm font-medium">
+                                    Override requires a supervisor PIN but no supervisors are assigned. Assign supervisors below or <button type="button" class="underline hover:text-warning-950" onclick={() => activeTab = 'settings'}>disable this in Settings</button>.
+                                </p>
+                            </div>
+                        </div>
+                    {/if}
+                    <p class="text-sm text-surface-950/70 mb-4">
+                        For each station, select which staff is assigned. You
+                        see all stations as rows so role coverage stays clear
+                        even with few staff.
+                    </p>
+                    {#if staffLoading}
+                        <div
+                            class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
+                        >
+                            <span
+                                class="loading-spinner loading-lg text-primary-500 mb-4"
+                            ></span>
+                            <p
+                                class="text-surface-600 font-medium animate-pulse"
+                            >
+                                Loading staff data...
+                            </p>
+                        </div>
+                    {:else if staffAssignments.length === 0}
+                        <div
+                            class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
+                        >
+                            <div
+                                class="bg-surface-100 p-4 rounded-full text-surface-400 mb-4"
+                            >
+                                <Users class="w-8 h-8" />
+                            </div>
+                            <h3 class="text-lg font-semibold text-surface-950">
+                                No staff assigned
+                            </h3>
+                            <p class="text-surface-600 max-w-sm mt-2">
+                                Add staff accounts from the main Staff
+                                management page first.
+                            </p>
+                        </div>
+                    {:else if staffStations.length === 0}
+                        <div
+                            class="bg-warning-100 text-warning-900 border border-warning-300 rounded-container p-4"
+                        >
+                            No stations in this program. Add stations first,
+                            then assign staff.
+                        </div>
+                    {:else}
+                        <div class="table-container">
+                            <table class="table table-zebra">
+                                <thead>
+                                    <tr>
+                                        <th>Station</th>
+                                        <th>Assigned staff</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {#each staffStationSlots as { station, slotIndex } (`${station.id}-${slotIndex}`)}
+                                        {@const assignedIds = getAssignedUserIdsForStation(station.id)}
+                                        {@const assignedUserId = assignedIds[slotIndex] ?? null}
+                                        <tr>
+                                            <td>
+                                                <span class="font-medium"
+                                                    >{station.name}</span
+                                                >
+                                                {#if (station.capacity ?? 1) > 1}
+                                                    <span class="text-surface-500 text-sm ml-1">(slot {slotIndex + 1})</span>
+                                                {/if}
+                                            </td>
+                                            <td>
+                                                <select
+                                                    class="select rounded-container border border-surface-200 px-3 py-2 select-sm max-w-xs"
+                                                    value={assignedUserId ?? ""}
+                                                    disabled={staffAssigningStationId ===
+                                                        station.id}
+                                                    onchange={(e) => {
+                                                        const val = (
+                                                            e.target as HTMLSelectElement
+                                                        ).value;
+                                                        const uid =
+                                                            val === ""
+                                                                ? null
+                                                                : Number(val);
+                                                        handleAssignStaffForStationSlot(
+                                                            station.id,
+                                                            slotIndex,
+                                                            uid,
+                                                        );
+                                                    }}
+                                                >
+                                                    <option value=""
+                                                        >— Unassigned —</option
+                                                    >
+                                                    {#each staffAssignments as a (a.user_id)}
+                                                        <option
+                                                            value={a.user_id}
+                                                            >{a.user.name}
+                                                            {#if staffSupervisors.some((s) => s.id === a.user_id)}
+                                                                (Supervisor)
+                                                            {/if}</option
+                                                        >
+                                                    {/each}
+                                                </select>
+                                            </td>
+                                        </tr>
+                                    {/each}
+                                </tbody>
+                            </table>
+                        </div>
+                    {/if}
+                </section>
+
+                <section>
+                    <h2 class="text-lg font-semibold text-surface-950 mb-4">
+                        Supervisors
+                    </h2>
+                    <p class="text-sm text-surface-950/70 mb-4">
+                        Supervisors can approve flow overrides.
+                    </p>
+                    {#if staffLoading}
+                        <div
+                            class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
+                        >
+                            <span
+                                class="loading-spinner loading-lg text-primary-500 mb-4"
+                            ></span>
+                            <p
+                                class="text-surface-600 font-medium animate-pulse"
+                            >
+                                Loading supervisor data...
+                            </p>
+                        </div>
+                    {:else}
+                        <div class="space-y-4">
+                            <div
+                                class="rounded-container bg-surface-50 border border-surface-200 p-5 shadow-sm"
+                            >
+                                <h3 class="font-medium text-surface-950 mb-2">
+                                    Current supervisors
+                                </h3>
+                                {#if staffSupervisors.length === 0}
+                                    <p class="text-sm text-surface-950/70">
+                                        None. Add staff with override PINs
+                                        below.
+                                    </p>
+                                {:else}
+                                    <ul class="flex flex-wrap gap-2">
+                                        {#each staffSupervisors as s (s.id)}
+                                            <li
+                                                class="text-xs px-2 py-0.5 rounded preset-filled-primary-500 badge-lg gap-1"
+                                            >
+                                                {s.name}
+                                                <button
+                                                    type="button"
+                                                    class="btn preset-tonal btn-xs"
+                                                    aria-label="Remove {s.name}"
+                                                    onclick={() =>
+                                                        handleRemoveSupervisor(
+                                                            s.id,
+                                                        )}
+                                                    disabled={submitting}
+                                                >
+                                                    ×
+                                                </button>
+                                            </li>
+                                        {/each}
+                                    </ul>
+                                {/if}
+                            </div>
+                            <div
+                                class="rounded-container bg-surface-50 border border-surface-200 p-5 shadow-sm"
+                            >
+                                <h3 class="font-medium text-surface-950 mb-2">
+                                    Add supervisor (staff with PIN)
+                                </h3>
+                                {#if staffWithPin.filter((u) => !u.is_supervisor).length === 0}
+                                    <p class="text-sm text-surface-950/70">
+                                        No staff with override PIN left to add.
+                                    </p>
+                                {:else}
+                                    <ul class="flex flex-wrap gap-2">
+                                        {#each staffWithPin.filter((u) => !u.is_supervisor) as u (u.id)}
+                                            <li>
+                                                <button
+                                                    type="button"
+                                                    class="btn preset-outlined btn-sm"
+                                                    onclick={() =>
+                                                        handleAddSupervisor(
+                                                            u.id,
+                                                        )}
+                                                    disabled={submitting}
+                                                >
+                                                    + {u.name}
+                                                </button>
+                                            </li>
+                                        {/each}
+                                    </ul>
+                                {/if}
+                            </div>
+                        </div>
+                    {/if}
                 </section>
             </div>
         {:else if activeTab === "tracks"}
@@ -1444,7 +2229,8 @@
                                     onclick={() => openStepModal(track)}
                                     disabled={submitting}
                                 >
-                                    <GitMerge class="w-3.5 h-3.5" /> Steps
+                                    <GitMerge class="w-3.5 h-3.5" />
+                                    {(track.steps ?? []).length > 0 ? "Manage steps" : "Create steps"}
                                 </button>
                                 <div class="flex items-center gap-1">
                                     <button
@@ -1519,19 +2305,63 @@
                                 </p>
                             </div>
                             <div class="sm:w-2/3 form-control">
-                                <div class="flex items-center gap-3">
-                                    <input
-                                        id="no-show-timer"
-                                        type="number"
-                                        class="input rounded-container border border-surface-200 px-3 py-2 w-24 text-surface-950 bg-white shadow-sm"
-                                        min="5"
-                                        max="120"
-                                        bind:value={settingsNoShowTimer}
-                                    />
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <label class="flex items-center gap-2">
+                                        <span class="text-sm text-surface-600">min</span>
+                                        <input
+                                            id="no-show-timer-min"
+                                            type="number"
+                                            class="input rounded-container border border-surface-200 px-3 py-2 w-16 text-surface-950 bg-white shadow-sm text-center"
+                                            min="0"
+                                            max="10"
+                                            bind:value={noShowTimerMinutes}
+                                        />
+                                    </label>
+                                    <span class="text-surface-400 font-bold">:</span>
+                                    <label class="flex items-center gap-2">
+                                        <span class="text-sm text-surface-600">sec</span>
+                                        <input
+                                            id="no-show-timer-sec"
+                                            type="number"
+                                            class="input rounded-container border border-surface-200 px-3 py-2 w-16 text-surface-950 bg-white shadow-sm text-center"
+                                            min="0"
+                                            max="59"
+                                            bind:value={noShowTimerSeconds}
+                                        />
+                                    </label>
                                     <span class="text-sm text-surface-600"
-                                        >seconds (default: 10)</span
+                                        >(total 5s–10m)</span
                                     >
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- Display scan timeout: scanner modal auto-close and status page auto-dismiss (flexiqueue-87p) -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3
+                                    class="font-medium text-surface-950 flex items-center gap-2"
+                                >
+                                    <Monitor class="w-4 h-4 text-surface-500" /> Display scan timeout
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    Seconds before the camera scanner modal and status page auto-close. 0 = no auto-close.
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control">
+                                <label class="flex items-center gap-2 flex-wrap">
+                                    <input
+                                        id="informant-desk-activity-buffer"
+                                        type="number"
+                                        class="input rounded-container border border-surface-200 px-3 py-2 w-20 text-surface-950 bg-white shadow-sm text-center"
+                                        min="0"
+                                        max="300"
+                                        bind:value={displayScanTimeoutSeconds}
+                                    />
+                                    <span class="text-sm text-surface-600">seconds (0–300, 0 = no auto-close)</span>
+                                </label>
                             </div>
                         </div>
 
@@ -1543,8 +2373,7 @@
                                 <h3
                                     class="font-medium text-surface-950 flex items-center gap-2"
                                 >
-                                    <Users class="w-4 h-4 text-surface-500" /> Priority
-                                    First
+                                    <Users class="w-4 h-4 text-surface-500" /> Strict priority first
                                 </h3>
                                 <p class="text-xs text-surface-500 mt-1">
                                     Call PWD, Senior, and Pregnant clients
@@ -1582,7 +2411,7 @@
                                     /> Balance Mode
                                 </h3>
                                 <p class="text-xs text-surface-500 mt-1">
-                                    How to balance queue when 'Priority First'
+                                    How to balance queue when strict priority first
                                     is disabled.
                                 </p>
                             </div>
@@ -1604,37 +2433,76 @@
 
                                 {#if settingsBalanceMode === "alternate" && !settingsPriorityFirst}
                                     <div
-                                        class="flex items-center gap-3 bg-surface-100 p-3 rounded-container border border-surface-200 text-sm"
+                                        class="flex flex-col gap-2 bg-surface-100 p-3 rounded-container border border-surface-200 text-sm"
                                     >
                                         <span
                                             class="font-medium text-surface-700"
                                             >Ratio Priority:Regular</span
                                         >
                                         <div
-                                            class="flex flex-row items-center gap-2"
+                                            class="flex flex-row items-center gap-2 flex-wrap"
                                         >
-                                            <input
-                                                type="number"
-                                                class="input rounded border border-surface-300 px-2 py-1.5 w-16 text-center text-surface-950 bg-white"
-                                                min="1"
-                                                max="10"
-                                                bind:value={
-                                                    settingsAlternateRatioP
-                                                }
-                                            />
+                                            <label class="flex items-center gap-1.5">
+                                                <span class="text-xs text-surface-600">Priority</span>
+                                                <input
+                                                    type="number"
+                                                    class="input rounded border border-surface-300 px-2 py-1.5 w-16 text-center text-surface-950 bg-white"
+                                                    min="1"
+                                                    max="10"
+                                                    bind:value={
+                                                        settingsAlternateRatioP
+                                                    }
+                                                />
+                                            </label>
                                             <span
                                                 class="font-bold text-surface-400"
                                                 >:</span
                                             >
-                                            <input
-                                                type="number"
-                                                class="input rounded border border-surface-300 px-2 py-1.5 w-16 text-center text-surface-950 bg-white"
-                                                min="1"
-                                                max="10"
-                                                bind:value={
-                                                    settingsAlternateRatioR
-                                                }
-                                            />
+                                            <label class="flex items-center gap-1.5">
+                                                <span class="text-xs text-surface-600">Regular</span>
+                                                <input
+                                                    type="number"
+                                                    class="input rounded border border-surface-300 px-2 py-1.5 w-16 text-center text-surface-950 bg-white"
+                                                    min="1"
+                                                    max="10"
+                                                    bind:value={
+                                                        settingsAlternateRatioR
+                                                    }
+                                                />
+                                            </label>
+                                        </div>
+                                        <!-- Per bead flexiqueue-5gl: toggleable explanation for ratio (alternate mode). -->
+                                        <button
+                                            type="button"
+                                            class="btn preset-tonal btn-sm mt-1 text-surface-600 hover:text-surface-950 w-fit"
+                                            onclick={() => (showRatioDetails = !showRatioDetails)}
+                                        >
+                                            {showRatioDetails ? "Hide details" : "More details"}
+                                        </button>
+                                        {#if showRatioDetails}
+                                            <p class="text-xs text-surface-600 mt-1 bg-surface-50 p-2 rounded border border-surface-200">
+                                                Alternate mode serves clients from priority and regular queues in the ratio above. Use strict priority first when the priority queue should always be served before regular. Here you can choose which queue is served first in each ratio cycle.
+                                            </p>
+                                        {/if}
+                                        <!-- Per bead flexiqueue-5gl: choose which queue goes first in alternate mode. Default: priority first. -->
+                                        <div class="flex flex-col gap-1.5 mt-2">
+                                            <span class="text-xs font-medium text-surface-700">Which goes first in each cycle</span>
+                                            <div class="flex flex-wrap gap-2" role="group" aria-label="Which queue first">
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-sm {settingsAlternatePriorityFirst ? 'preset-filled' : 'preset-tonal'}"
+                                                    onclick={() => (settingsAlternatePriorityFirst = true)}
+                                                >
+                                                    Priority first
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-sm {settingsAlternatePriorityFirst ? 'preset-tonal' : 'preset-filled'}"
+                                                    onclick={() => (settingsAlternatePriorityFirst = false)}
+                                                >
+                                                    Regular first
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 {/if}
@@ -1680,6 +2548,22 @@
                                         >Least Recently Served</option
                                     >
                                 </select>
+                                <button
+                                    type="button"
+                                    class="btn preset-tonal btn-sm mt-2 text-surface-600 hover:text-surface-950"
+                                    onclick={() => (showStationSelectionDetails = !showStationSelectionDetails)}
+                                >
+                                    {showStationSelectionDetails ? "Hide details" : "More details"}
+                                </button>
+                                {#if showStationSelectionDetails}
+                                    <ul class="mt-2 space-y-1 text-xs text-surface-600 list-disc list-inside bg-surface-50 p-3 rounded-container border border-surface-200">
+                                        <li><strong>Fixed:</strong> Always use the first station configured for that process.</li>
+                                        <li><strong>Shortest Queue:</strong> Choose the station with the fewest clients waiting.</li>
+                                        <li><strong>Least Busy:</strong> Choose the station with the lowest current load (active servings).</li>
+                                        <li><strong>Round Robin:</strong> Rotate among stations fairly over time.</li>
+                                        <li><strong>Least Recently Served:</strong> Prefer the station that has not served a client for the longest time.</li>
+                                    </ul>
+                                {/if}
                             </div>
                         </div>
 
@@ -1743,450 +2627,6 @@
                     </div>
                 </div>
             </div>
-        {:else if activeTab === "processes"}
-            <div class="space-y-6">
-                <section>
-                    <h2 class="text-lg font-semibold text-surface-950 mb-2">
-                        Processes
-                    </h2>
-                    <p class="text-sm text-surface-600 mb-4">
-                        Define logical work types (e.g. Verification, Cash
-                        Release). Each track step references a process. Create
-                        processes before adding steps to tracks.
-                    </p>
-                    <div class="flex flex-wrap items-end gap-3 mb-6">
-                        <div class="form-control min-w-[200px]">
-                            <label for="create-process-name" class="label py-0"
-                                ><span class="label-text text-xs">Name</span
-                                ></label
-                            >
-                            <input
-                                id="create-process-name"
-                                type="text"
-                                class="input rounded-container border border-surface-200 px-3 py-2 w-full"
-                                placeholder="e.g. Verification"
-                                bind:value={createProcessName}
-                                maxlength="50"
-                            />
-                        </div>
-                        <div class="form-control min-w-[200px]">
-                            <label for="create-process-desc" class="label py-0"
-                                ><span class="label-text text-xs"
-                                    >Description (optional)</span
-                                ></label
-                            >
-                            <input
-                                id="create-process-desc"
-                                type="text"
-                                class="input rounded-container border border-surface-200 px-3 py-2 w-full"
-                                placeholder="Optional"
-                                bind:value={createProcessDescription}
-                            />
-                        </div>
-                        <button
-                            type="button"
-                            class="btn preset-filled-primary-500 flex items-center gap-2"
-                            disabled={submitting || !createProcessName.trim()}
-                            onclick={handleCreateProcess}
-                        >
-                            {#if submitting && creatingProcess}
-                                <span class="loading-spinner loading-sm"></span>
-                                Adding...
-                            {:else}
-                                <Plus class="w-4 h-4" /> Add Process
-                            {/if}
-                        </button>
-                    </div>
-                    {#if processes.length === 0}
-                        <div
-                            class="rounded-container bg-surface-50 border border-surface-200 p-8 text-center text-surface-600"
-                        >
-                            No processes yet. Add one above to use in track
-                            steps.
-                        </div>
-                    {:else}
-                        <div class="flex flex-wrap gap-2">
-                            {#each processes as proc (proc.id)}
-                                <span
-                                    class="inline-flex items-center px-3 py-1.5 rounded-lg bg-surface-100 border border-surface-200 text-sm font-medium text-surface-950"
-                                >
-                                    {proc.name}
-                                    {#if proc.description}
-                                        <span
-                                            class="text-surface-500 text-xs ml-2"
-                                            >— {proc.description}</span
-                                        >
-                                    {/if}
-                                </span>
-                            {/each}
-                        </div>
-                    {/if}
-                </section>
-            </div>
-        {:else if activeTab === "staff"}
-            <!-- Staff tab: station assignments + supervisors -->
-            <div class="space-y-8">
-                <section>
-                    <h2 class="text-lg font-semibold text-surface-950 mb-4">
-                        Station assignments
-                    </h2>
-                    <p class="text-sm text-surface-950/70 mb-4">
-                        For each station, select which staff is assigned. You
-                        see all stations as rows so role coverage stays clear
-                        even with few staff.
-                    </p>
-                    {#if staffLoading}
-                        <div
-                            class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
-                        >
-                            <span
-                                class="loading-spinner loading-lg text-primary-500 mb-4"
-                            ></span>
-                            <p
-                                class="text-surface-600 font-medium animate-pulse"
-                            >
-                                Loading staff data...
-                            </p>
-                        </div>
-                    {:else if staffAssignments.length === 0}
-                        <div
-                            class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
-                        >
-                            <div
-                                class="bg-surface-100 p-4 rounded-full text-surface-400 mb-4"
-                            >
-                                <Users class="w-8 h-8" />
-                            </div>
-                            <h3 class="text-lg font-semibold text-surface-950">
-                                No staff assigned
-                            </h3>
-                            <p class="text-surface-600 max-w-sm mt-2">
-                                Add staff accounts from the main Staff
-                                management page first.
-                            </p>
-                        </div>
-                    {:else if staffStations.length === 0}
-                        <div
-                            class="bg-warning-100 text-warning-900 border border-warning-300 rounded-container p-4"
-                        >
-                            No stations in this program. Add stations first,
-                            then assign staff.
-                        </div>
-                    {:else}
-                        <div class="table-container">
-                            <table class="table table-zebra">
-                                <thead>
-                                    <tr>
-                                        <th>Station</th>
-                                        <th>Assigned staff</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {#each staffStations as station (station.id)}
-                                        {@const assignedUserId =
-                                            getAssignedUserIdForStation(
-                                                station.id,
-                                            )}
-                                        <tr>
-                                            <td>
-                                                <span class="font-medium"
-                                                    >{station.name}</span
-                                                >
-                                            </td>
-                                            <td>
-                                                <select
-                                                    class="select rounded-container border border-surface-200 px-3 py-2 select-sm max-w-xs"
-                                                    value={assignedUserId ?? ""}
-                                                    disabled={staffAssigningStationId ===
-                                                        station.id}
-                                                    onchange={(e) => {
-                                                        const val = (
-                                                            e.target as HTMLSelectElement
-                                                        ).value;
-                                                        const uid =
-                                                            val === ""
-                                                                ? null
-                                                                : Number(val);
-                                                        handleAssignStaffForStation(
-                                                            station.id,
-                                                            uid,
-                                                        );
-                                                    }}
-                                                >
-                                                    <option value=""
-                                                        >— Unassigned —</option
-                                                    >
-                                                    {#each staffAssignments as a (a.user_id)}
-                                                        <option
-                                                            value={a.user_id}
-                                                            >{a.user.name}
-                                                            {#if staffSupervisors.some((s) => s.id === a.user_id)}
-                                                                (Supervisor)
-                                                            {/if}</option
-                                                        >
-                                                    {/each}
-                                                </select>
-                                            </td>
-                                        </tr>
-                                    {/each}
-                                </tbody>
-                            </table>
-                        </div>
-                    {/if}
-                </section>
-
-                <section>
-                    <h2 class="text-lg font-semibold text-surface-950 mb-4">
-                        Supervisors
-                    </h2>
-                    <p class="text-sm text-surface-950/70 mb-4">
-                        Supervisors can approve flow overrides.
-                    </p>
-                    {#if staffLoading}
-                        <div
-                            class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
-                        >
-                            <span
-                                class="loading-spinner loading-lg text-primary-500 mb-4"
-                            ></span>
-                            <p
-                                class="text-surface-600 font-medium animate-pulse"
-                            >
-                                Loading supervisor data...
-                            </p>
-                        </div>
-                    {:else}
-                        <div class="space-y-4">
-                            <div
-                                class="rounded-container bg-surface-50 border border-surface-200 p-5 shadow-sm"
-                            >
-                                <h3 class="font-medium text-surface-950 mb-2">
-                                    Current supervisors
-                                </h3>
-                                {#if staffSupervisors.length === 0}
-                                    <p class="text-sm text-surface-950/70">
-                                        None. Add staff with override PINs
-                                        below.
-                                    </p>
-                                {:else}
-                                    <ul class="flex flex-wrap gap-2">
-                                        {#each staffSupervisors as s (s.id)}
-                                            <li
-                                                class="text-xs px-2 py-0.5 rounded preset-filled-primary-500 badge-lg gap-1"
-                                            >
-                                                {s.name}
-                                                <button
-                                                    type="button"
-                                                    class="btn preset-tonal btn-xs"
-                                                    aria-label="Remove {s.name}"
-                                                    onclick={() =>
-                                                        handleRemoveSupervisor(
-                                                            s.id,
-                                                        )}
-                                                    disabled={submitting}
-                                                >
-                                                    ×
-                                                </button>
-                                            </li>
-                                        {/each}
-                                    </ul>
-                                {/if}
-                            </div>
-                            <div
-                                class="rounded-container bg-surface-50 border border-surface-200 p-5 shadow-sm"
-                            >
-                                <h3 class="font-medium text-surface-950 mb-2">
-                                    Add supervisor (staff with PIN)
-                                </h3>
-                                {#if staffWithPin.filter((u) => !u.is_supervisor).length === 0}
-                                    <p class="text-sm text-surface-950/70">
-                                        No staff with override PIN left to add.
-                                    </p>
-                                {:else}
-                                    <ul class="flex flex-wrap gap-2">
-                                        {#each staffWithPin.filter((u) => !u.is_supervisor) as u (u.id)}
-                                            <li>
-                                                <button
-                                                    type="button"
-                                                    class="btn preset-outlined btn-sm"
-                                                    onclick={() =>
-                                                        handleAddSupervisor(
-                                                            u.id,
-                                                        )}
-                                                    disabled={submitting}
-                                                >
-                                                    + {u.name}
-                                                </button>
-                                            </li>
-                                        {/each}
-                                    </ul>
-                                {/if}
-                            </div>
-                        </div>
-                    {/if}
-                </section>
-            </div>
-        {:else}
-            <!-- Stations tab (BD-010) -->
-            <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
-                <div>
-                    <h2 class="text-lg font-semibold text-surface-950">
-                        Stations
-                    </h2>
-                    <p class="text-sm text-surface-600 mt-0.5">
-                        Manage service points where clients receive attention.
-                    </p>
-                </div>
-                <button
-                    type="button"
-                    class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm"
-                    onclick={openCreateStation}
-                >
-                    <Plus class="w-4 h-4" /> Add Station
-                </button>
-            </div>
-            {#if stations.length === 0}
-                <div
-                    class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
-                >
-                    <div
-                        class="bg-surface-100 p-4 rounded-full text-surface-400 mb-4"
-                    >
-                        <Monitor class="w-8 h-8" />
-                    </div>
-                    <h3 class="text-lg font-semibold text-surface-950">
-                        No stations defined
-                    </h3>
-                    <p class="text-surface-600 max-w-sm mt-2 mb-6">
-                        Create a station (e.g., Verification Desk, Cashier) for
-                        staff to serve clients.
-                    </p>
-                    <button
-                        type="button"
-                        class="btn preset-filled-primary-500 flex items-center gap-2"
-                        onclick={openCreateStation}
-                    >
-                        <Plus class="w-4 h-4" /> Create First Station
-                    </button>
-                </div>
-            {:else}
-                <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {#each stations as station (station.id)}
-                        <div
-                            class="bg-surface-50 rounded-container elevation-card transition-all hover:shadow-[var(--shadow-raised)] flex flex-col h-full border border-surface-200/50"
-                        >
-                            <div class="p-5 flex-grow flex flex-col gap-3">
-                                <div
-                                    class="flex items-start justify-between gap-3"
-                                >
-                                    <div class="flex items-center gap-2.5">
-                                        <div
-                                            class="bg-surface-100 p-2 rounded-lg text-surface-600"
-                                        >
-                                            <Monitor class="w-5 h-5" />
-                                        </div>
-                                        <h3
-                                            class="text-lg font-bold text-surface-950 line-clamp-1"
-                                        >
-                                            {station.name}
-                                        </h3>
-                                    </div>
-                                    <div class="shrink-0 mt-1">
-                                        {#if station.is_active}
-                                            <span
-                                                class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded preset-filled-success-500 shadow-sm flex items-center gap-1"
-                                            >
-                                                <span
-                                                    class="w-1.5 h-1.5 rounded-full bg-white/80 shrink-0 animate-pulse"
-                                                ></span> Active
-                                            </span>
-                                        {:else}
-                                            <span
-                                                class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded preset-tonal text-surface-600 shadow-sm"
-                                            >
-                                                Inactive
-                                            </span>
-                                        {/if}
-                                    </div>
-                                </div>
-                                <div class="grid grid-cols-2 gap-2 mt-2">
-                                    <div
-                                        class="bg-surface-100/50 rounded p-2 border border-surface-200/50 flex flex-col"
-                                    >
-                                        <span
-                                            class="text-xs font-medium text-surface-500 uppercase tracking-wider mb-1 flex items-center gap-1"
-                                            ><Users class="w-3 h-3" /> Staff</span
-                                        >
-                                        <span
-                                            class="text-sm font-semibold text-surface-900"
-                                            >{station.capacity} desk{station.capacity !==
-                                            1
-                                                ? "s"
-                                                : ""}</span
-                                        >
-                                    </div>
-                                    <div
-                                        class="bg-surface-100/50 rounded p-2 border border-surface-200/50 flex flex-col"
-                                    >
-                                        <span
-                                            class="text-xs font-medium text-surface-500 uppercase tracking-wider mb-1 flex items-center gap-1"
-                                            ><User class="w-3 h-3" /> Clients</span
-                                        >
-                                        <span
-                                            class="text-sm font-semibold text-surface-900"
-                                            >{station.client_capacity ?? 1} / turn</span
-                                        >
-                                    </div>
-                                </div>
-                            </div>
-                            <div
-                                class="px-5 py-3 border-t border-surface-100 flex items-center justify-between bg-surface-50/50 rounded-b-container"
-                            >
-                                <button
-                                    type="button"
-                                    class="text-xs font-medium transition-colors hover:text-surface-900 flex items-center gap-1.5 {station.is_active
-                                        ? 'text-error-600 hover:text-error-700'
-                                        : 'text-success-600 hover:text-success-700'}"
-                                    onclick={() =>
-                                        handleToggleStationActive(station)}
-                                    disabled={submitting}
-                                >
-                                    {#if station.is_active}
-                                        <Power class="w-3.5 h-3.5" /> Deactivate
-                                    {:else}
-                                        <Power class="w-3.5 h-3.5" /> Activate
-                                    {/if}
-                                </button>
-                                <div class="flex items-center gap-1">
-                                    <button
-                                        type="button"
-                                        class="btn preset-tonal btn-sm p-2"
-                                        onclick={() => openEditStation(station)}
-                                        disabled={submitting}
-                                        title="Edit Station"
-                                    >
-                                        <Edit2
-                                            class="w-4 h-4 text-surface-600"
-                                        />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="btn preset-tonal btn-sm p-2 hover:bg-error-50"
-                                        onclick={() =>
-                                            openDeleteStationConfirm(station)}
-                                        disabled={submitting}
-                                        title="Delete Station"
-                                    >
-                                        <Trash2
-                                            class="w-4 h-4 text-error-500"
-                                        />
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    {/each}
-                </div>
-            {/if}
         {/if}
     </div>
 </AdminLayout>
@@ -2453,6 +2893,75 @@
     {/snippet}
 </Modal>
 
+{#if editProcess}
+    <Modal open={!!editProcess} title="Edit process" onClose={closeEditProcessModal}>
+        {#snippet children()}
+            <form
+                onsubmit={(e) => {
+                    e.preventDefault();
+                    handleUpdateProcess();
+                }}
+                class="flex flex-col gap-4"
+            >
+                <div class="form-control w-full">
+                    <label for="edit-process-name" class="label"
+                        ><span class="label-text">Name</span></label
+                    >
+                    <input
+                        id="edit-process-name"
+                        type="text"
+                        class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                        placeholder="e.g. Verification"
+                        maxlength="50"
+                        bind:value={editProcessName}
+                        required
+                    />
+                </div>
+                <div class="form-control w-full">
+                    <label for="edit-process-desc" class="label"
+                        ><span class="label-text">Description (optional)</span></label
+                    >
+                    <input
+                        id="edit-process-desc"
+                        type="text"
+                        class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                        placeholder="Optional"
+                        bind:value={editProcessDescription}
+                    />
+                </div>
+                <div class="form-control w-full">
+                    <label for="edit-process-expected-time" class="label"
+                        ><span class="label-text">Expected time (mm:ss)</span></label
+                    >
+                    <input
+                        id="edit-process-expected-time"
+                        type="text"
+                        class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                        placeholder="e.g. 5:30 (max 10:00)"
+                        bind:value={editProcessExpectedTimeMmSs}
+                    />
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button
+                        type="button"
+                        class="btn preset-tonal"
+                        onclick={closeEditProcessModal}
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        class="btn preset-filled-primary-500"
+                        disabled={submitting || !editProcessName.trim()}
+                    >
+                        {submitting ? "Saving…" : "Save"}
+                    </button>
+                </div>
+            </form>
+        {/snippet}
+    </Modal>
+{/if}
+
 {#if editStation}
     <Modal open={!!editStation} title="Edit Station" onClose={closeModals}>
         {#snippet children()}
@@ -2537,7 +3046,7 @@
                 </div>
                 <div class="form-control">
                     <label for="edit-priority-override" class="label"
-                        ><span class="label-text">Priority first override</span
+                        ><span class="label-text">Strict priority first override</span
                         ></label
                     >
                     <select
@@ -2555,7 +3064,7 @@
                         }}
                     >
                         <option value="default">Use program default</option>
-                        <option value="true">Yes (priority lane first)</option>
+                        <option value="true">Yes (strict priority first)</option>
                         <option value="false">No (FIFO/alternate)</option>
                     </select>
                     <span class="label-text-alt"
@@ -2934,6 +3443,19 @@
     onCancel={closeStopConfirm}
 />
 
+<!-- Per bead flexiqueue-nlu: when queue has clients, show warning and suggest Pause instead of confirm. -->
+<ConfirmModal
+    open={showStopQueueWarning}
+    title="Cannot stop session"
+    message="You cannot stop the session while clients are in the queue. Use Pause instead to temporarily halt operations."
+    confirmLabel="Pause instead"
+    cancelLabel="OK"
+    variant="warning"
+    loading={submitting}
+    onConfirm={handlePauseFromStopWarning}
+    onCancel={closeStopQueueWarning}
+/>
+
 <ConfirmModal
     open={!!confirmDeleteTrack}
     title="Delete track?"
@@ -2960,6 +3482,20 @@
     loading={submitting}
     onConfirm={handleDeleteStationConfirm}
     onCancel={closeDeleteStationConfirm}
+/>
+
+<ConfirmModal
+    open={!!confirmDeleteProcess}
+    title="Delete process?"
+    message={confirmDeleteProcess
+        ? `Delete process "${confirmDeleteProcess.name}"? This is only allowed if it is not used by any station or track step.`
+        : ""}
+    confirmLabel="Delete"
+    cancelLabel="Cancel"
+    variant="danger"
+    loading={submitting}
+    onConfirm={handleDeleteProcessConfirm}
+    onCancel={closeDeleteProcessConfirm}
 />
 
 <ConfirmModal

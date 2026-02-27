@@ -7,7 +7,9 @@
 		open = false,
 		title = '',
 		onClose = () => {},
-		children
+		children,
+		/** When true, use a wider card (e.g. for scanner modal). */
+		wide = false,
 	} = $props();
 
 	let dialogEl = $state(/** @type {HTMLDialogElement | null} */ (null));
@@ -16,13 +18,6 @@
 		if (!dialogEl) return;
 		if (open) {
 			dialogEl.showModal();
-			// #region agent log
-			requestAnimationFrame(() => {
-				const cs = getComputedStyle(dialogEl);
-				const rect = dialogEl.getBoundingClientRect();
-				fetch('http://127.0.0.1:7245/ingest/315b3bef-aa43-40ce-b2fe-4cd06d9bf0f1',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b03ec3'},body:JSON.stringify({sessionId:'b03ec3',location:'Modal.svelte:effect',message:'dialog open (showModal)',data:{display:cs.display,alignItems:cs.alignItems,justifyContent:cs.justifyContent,position:cs.position,width:cs.width,height:cs.height,margin:cs.margin,rect:{top:rect.top,left:rect.left,width:rect.width,height:rect.height},viewport:{w:window.innerWidth,h:window.innerHeight},childCount:dialogEl.children.length},timestamp:Date.now(),hypothesisId:'H1-H5'})}).catch(()=>{});
-			});
-			// #endregion
 		} else {
 			dialogEl.close();
 		}
@@ -34,14 +29,16 @@
 	}
 </script>
 
+<!-- Per ISSUES-ELABORATION: only explicit Close/Cancel (and optionally Escape) close; no click-outside -->
 <dialog
 	bind:this={dialogEl}
 	class="modal-dialog-center p-0 m-0 rounded-none border-0 shadow-none bg-transparent backdrop:bg-black/50"
 	onclose={handleClose}
-	onclick={(e) => e.target === dialogEl && handleClose()}
+	oncancel={(e) => e.preventDefault()}
+	onkeydown={(e) => e.key === 'Escape' && handleClose()}
 >
 	<div
-		class="card bg-surface-50 rounded-container elevation-modal p-6 relative max-h-[90vh] overflow-y-auto"
+		class="card bg-surface-50 rounded-container elevation-modal p-6 relative max-h-[90vh] overflow-y-auto {wide ? 'min-w-[36rem] max-w-2xl w-full' : ''}"
 		role="document"
 		aria-label={title || 'Dialog'}
 		onclick={(e) => e.stopPropagation()}
@@ -62,5 +59,5 @@
 			onclick={handleClose}
 		>✕</button>
 	</div>
-	<form method="dialog" class="absolute inset-0 -z-10"><button type="submit">close</button></form>
+	<!-- Per flexiqueue-ldd: no form/button on backdrop — only explicit Close or Escape close the modal -->
 </dialog>

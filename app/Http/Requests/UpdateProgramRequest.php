@@ -23,7 +23,7 @@ class UpdateProgramRequest extends FormRequest
             'name' => ['required', 'string', 'max:100'],
             'description' => ['nullable', 'string'],
             'settings' => ['sometimes', 'array'],
-            'settings.no_show_timer_seconds' => ['sometimes', 'integer', 'min:5', 'max:120'],
+            'settings.no_show_timer_seconds' => ['sometimes', 'integer', 'min:5', 'max:600'],
             'settings.require_permission_before_override' => ['sometimes', 'boolean'],
             'settings.priority_first' => ['sometimes', 'boolean'],
             'settings.balance_mode' => ['sometimes', 'string', 'in:fifo,alternate'],
@@ -31,6 +31,9 @@ class UpdateProgramRequest extends FormRequest
             'settings.alternate_ratio' => ['sometimes', 'array'],
             'settings.alternate_ratio.0' => ['sometimes', 'integer', 'min:1', 'max:10'],
             'settings.alternate_ratio.1' => ['sometimes', 'integer', 'min:1', 'max:10'],
+            // Per bead flexiqueue-5gl: which queue is served first in alternate mode (default: priority first).
+            'settings.alternate_priority_first' => ['sometimes', 'boolean'],
+            'settings.display_scan_timeout_seconds' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:300'],
         ];
     }
 }

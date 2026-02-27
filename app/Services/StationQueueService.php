@@ -43,7 +43,7 @@ class StationQueueService
             ->where('program_id', $station->program_id)
             ->where('current_station_id', $station->id)
             ->whereIn('status', ['waiting', 'called', 'serving'])
-            ->with(['serviceTrack', 'token'])
+            ->with(['serviceTrack.trackSteps.process', 'token'])
             ->get();
 
         $servingAndCalled = $sessions
@@ -231,10 +231,34 @@ class StationQueueService
         ];
     }
 
+    /**
+     * Resolve current process for a session from track step at current_step_order.
+     * Per flexiqueue-ui3: 1-station-many-process — show which queue/process each client is in.
+     */
+    private function currentProcessForSession(Session $s): ?array
+    {
+        $track = $s->serviceTrack;
+        if (! $track || ! $track->relationLoaded('trackSteps')) {
+            return null;
+        }
+        $order = (int) ($s->current_step_order ?? 1);
+        $step = $track->trackSteps->firstWhere('step_order', $order);
+
+        return $step && $step->process
+            ? ['process_id' => $step->process->id, 'process_name' => $step->process->name]
+            : null;
+    }
+
     private function formatServingSession(Session $s): array
     {
         $track = $s->serviceTrack;
-        $totalSteps = $track ? $track->trackSteps()->count() : 1;
+        // Per ISSUES-ELABORATION §4: custom-override sessions use override step count so station UI shows Complete on last step
+        $overrideSteps = $s->override_steps ?? [];
+        $totalSteps = count($overrideSteps) > 0
+            ? count($overrideSteps)
+            : ($track ? $track->trackSteps()->count() : 1);
+
+        $process = $this->currentProcessForSession($s);
 
         return [
             'session_id' => $s->id,
@@ -246,6 +270,8 @@ class StationQueueService
             'total_steps' => $totalSteps,
             'started_at' => $s->started_at?->toIso8601String(),
             'no_show_attempts' => $s->no_show_attempts ?? 0,
+            'process_id' => $process ? $process['process_id'] : null,
+            'process_name' => $process ? $process['process_name'] : null,
         ];
     }
 
@@ -253,6 +279,7 @@ class StationQueueService
     {
         $track = $s->serviceTrack;
         $queuedAt = $s->queued_at_station ?? $s->started_at;
+        $process = $this->currentProcessForSession($s);
 
         return [
             'session_id' => $s->id,
@@ -262,6 +289,8 @@ class StationQueueService
             'status' => $s->status,
             'station_queue_position' => $s->station_queue_position,
             'queued_at' => $queuedAt?->toIso8601String(),
+            'process_id' => $process ? $process['process_id'] : null,
+            'process_name' => $process ? $process['process_name'] : null,
         ];
     }
 

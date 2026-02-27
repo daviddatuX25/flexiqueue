@@ -116,6 +116,17 @@ class LoginTest extends TestCase
         $this->assertGuest();
     }
 
+    /** Logout sets availability to 'away' so queue/process fallbacks (staff_online, etc.) exclude this user. */
+    public function test_logout_sets_availability_to_away(): void
+    {
+        $user = User::factory()->create(['availability_status' => 'available']);
+
+        $this->actingAs($user)->post(route('logout'));
+
+        $user->refresh();
+        $this->assertSame('away', $user->availability_status);
+    }
+
     public function test_guest_visiting_protected_route_redirects_to_login(): void
     {
         $response = $this->get(route('admin.dashboard'));

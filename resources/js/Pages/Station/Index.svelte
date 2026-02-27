@@ -23,6 +23,8 @@
 		total_steps: number;
 		started_at: string;
 		no_show_attempts: number;
+		process_id?: number | null;
+		process_name?: string | null;
 	}
 
 	interface WaitingSession {
@@ -33,6 +35,8 @@
 		status: string;
 		queued_at: string;
 		station_queue_position?: number;
+		process_id?: number | null;
+		process_name?: string | null;
 	}
 
 	interface QueueData {
@@ -107,8 +111,8 @@
 	const atCapacity = $derived(servingCount >= clientCapacity);
 	const noShowTimerSeconds = $derived(queue?.no_show_timer_seconds ?? 10);
 
-	/** Staff needs auth for override/force-complete; admin/supervisor do not */
-	const needsAuthForOverride = $derived(!canSwitchStation);
+	/** Staff needs auth for override/force-complete when program requires it; admin/supervisor never. Per flexiqueue-i87: when require_permission_before_override is OFF, reason-only (no PIN/QR). */
+	const needsAuthForOverride = $derived(!canSwitchStation && (queue?.require_permission_before_override ?? true));
 
 	function getCsrfToken(): string {
 		const p = get(page);
@@ -217,6 +221,10 @@
 				updated_at: e.updated_at,
 			};
 		});
+		// Real-time: refetch queue when status changes (call, serve, transfer, complete, no-show, etc.)
+		ch.listen('.status_update', () => {
+			fetchQueue(true);
+		});
 		return () => {
 			Echo.leave('station.' + sid);
 		};
@@ -289,8 +297,8 @@
 	async function callNext() {
 		const target = queue?.next_to_call ?? queue?.waiting?.[0];
 		if (!target || actionLoading || atCapacity) return;
-		const sessionId = typeof target === 'object' && 'session_id' in target ? target.session_id : target.session_id;
-		const alias = typeof target === 'object' && 'alias' in target ? target.alias : (queue?.waiting?.find((w) => w.session_id === sessionId)?.alias ?? '');
+		const sessionId = (target as { session_id: number }).session_id;
+		const alias = (target as { session_id: number; alias?: string }).alias ?? (queue?.waiting?.find((w) => w.session_id === sessionId)?.alias ?? '');
 
 		// Flow redirection: when call would skip priority, staff needs auth; admin/supervisor call directly
 		if (queue?.call_next_requires_override && needsAuthForOverride) {
@@ -352,7 +360,7 @@
 		if (ok) {
 			const d = data as { action_required?: string };
 			if (d?.action_required === 'complete') {
-				error = 'No next station in track. Complete the session instead.';
+				error = 'No next process in track. Complete the session instead.';
 			}
 			await fetchQueue(true, () => { actionLoading = null; });
 		} else {
@@ -616,6 +624,27 @@
 		if (remaining > 0) return `No-Show (${remaining}s)`;
 		return s.no_show_attempts > 0 ? `No-Show (${s.no_show_attempts}/3)` : 'No-Show';
 	}
+
+	/** Format note updated_at for display (e.g. "2 min ago", "Today 10:30"). */
+	function formatNoteTime(iso: string | undefined): string {
+		if (!iso) return '';
+		try {
+			const d = new Date(iso);
+			const now = new Date();
+			const diffMs = now.getTime() - d.getTime();
+			const diffMins = Math.floor(diffMs / 60000);
+			const diffHours = Math.floor(diffMins / 60);
+			const diffDays = Math.floor(diffHours / 24);
+			if (diffMins < 1) return 'Just now';
+			if (diffMins < 60) return `${diffMins} min ago`;
+			if (diffHours < 24) return `${diffHours}h ago`;
+			if (diffDays === 1) return 'Yesterday';
+			if (diffDays < 7) return `${diffDays} days ago`;
+			return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+		} catch {
+			return '';
+		}
+	}
 </script>
 
 <svelte:head>
@@ -623,36 +652,36 @@
 </svelte:head>
 
 <MobileLayout headerTitle={station?.name ?? 'Station'} {queueCount} {processedToday}>
-	<div class="flex flex-col gap-4 text-surface-950">
+	<div class="flex flex-col gap-4 md:gap-6 text-surface-950 w-full max-w-2xl mx-auto px-4 md:px-6 py-4 md:py-6">
 		{#if !station}
-			<div class="rounded-box bg-surface-50 border border-surface-200 p-6 text-center text-surface-950/80">
+			<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-6 md:p-8 text-center text-surface-950/80">
 				{#if canSwitchStation && stations.length > 0}
-					<p class="font-medium mb-3">Select a station</p>
-					<div class="flex flex-col gap-2">
+					<p class="font-medium mb-4">Select a station</p>
+					<div class="flex flex-col gap-3 max-w-xs mx-auto">
 						{#each stations as s (s.id)}
-							<button type="button" class="btn preset-outlined btn-block" onclick={() => switchStation(s)}>
+							<button type="button" class="btn preset-outlined min-h-[48px] w-full" onclick={() => switchStation(s)}>
 								{s.name}
 							</button>
 						{/each}
 					</div>
 				{:else}
 					<p class="font-medium">No station assigned</p>
-					<p class="mt-1 text-sm">Contact admin to assign you to a station.</p>
+					<p class="mt-2 text-sm">Contact admin to assign you to a station.</p>
 				{/if}
 			</div>
 		{:else if loading}
-			<div class="flex justify-center py-12">
+			<div class="flex justify-center py-16 md:py-24">
 				<span class="loading-spinner loading-lg text-primary-500"></span>
 			</div>
 		{:else if error}
-			<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4">{error}</div>
+			<div class="rounded-container bg-error-100 text-error-900 border border-error-300 p-4 md:p-5">{error}</div>
 		{:else if queue}
 			{#if canSwitchStation && stations.length > 1}
-				<div class="flex gap-2 overflow-x-auto pb-2">
+				<div class="flex gap-2 overflow-x-auto pb-2 -mx-1">
 					{#each stations as s (s.id)}
 						<button
 							type="button"
-							class="btn btn-sm shrink-0 {s.id === station.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
+							class="btn btn-sm shrink-0 min-h-[44px] {s.id === station.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
 							onclick={() => switchStation(s)}
 						>
 							{s.name}
@@ -662,7 +691,7 @@
 			{/if}
 
 			<!-- Capacity indicator and Priority first toggle -->
-			<div class="flex flex-wrap items-center justify-between gap-2">
+			<div class="flex flex-wrap items-center justify-between gap-3 py-1">
 				<div class="text-sm text-surface-950/70">
 					Serving {servingCount}/{clientCapacity}
 				</div>
@@ -682,13 +711,16 @@
 
 			<!-- Serving / Called cards (one per client) -->
 			{#each queue.serving as s (s.session_id)}
-				<div class="rounded-box bg-surface-50 border border-surface-200 p-4 space-y-3">
+				<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5 space-y-3">
 					<p class="text-xs font-medium text-surface-950/70 uppercase tracking-wide">
 						{s.status === 'called' ? 'Calling' : 'Now Serving'}
 					</p>
 					<p class="text-4xl font-bold text-primary-500 tabular-nums">{s.alias}</p>
-					<!-- Client type prominent -->
+					<!-- Client type and current process (1-station-many-process) -->
 					<div class="flex flex-wrap gap-2">
+						{#if s.process_name}
+							<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500/20 text-primary-700" title="Current process">{s.process_name}</span>
+						{/if}
 						<span class="text-xs px-2 py-0.5 rounded preset-outlined text-surface-950">{s.track}</span>
 						<span class="badge {categoryBadgeClass(s.client_category)} text-sm font-semibold text-surface-950">
 							{s.client_category ?? 'Regular'}
@@ -738,7 +770,7 @@
 									disabled={!!actionLoading}
 									onclick={() => transfer(s)}
 								>
-									{actionLoading === `transfer-${s.session_id}` ? 'Transferring…' : 'Send to Next Station'}
+									{actionLoading === `transfer-${s.session_id}` ? 'Transferring…' : 'Send to next process'}
 								</button>
 							{/if}
 							<div class="flex flex-wrap gap-2">
@@ -774,7 +806,7 @@
 
 			<!-- Call Next (when capacity allows) -->
 			{#if queue.serving.length === 0 || !atCapacity}
-				<div class="rounded-box bg-surface-50 border border-surface-200 p-6 text-center">
+				<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-6 md:p-8 text-center">
 					<p class="text-surface-950/70 font-medium mb-4">
 						{queue.serving.length > 0 ? 'Call another client' : 'No client active'}
 					</p>
@@ -783,7 +815,7 @@
 						<p class="text-sm text-surface-950/60 mb-3">
 							Next: <span class="font-mono font-semibold text-surface-950">{nextSession.alias}</span>
 							<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm ml-1 text-surface-950">{nextSession.client_category ?? 'Regular'}</span>
-							({nextSession.track})
+							({nextSession.track}{#if nextSession.process_name}) — {nextSession.process_name}{/if})
 						</p>
 						<button
 							type="button"
@@ -806,7 +838,7 @@
 
 			<!-- Queue preview with client type -->
 			{#if queue.waiting.length > 0}
-				<div class="rounded-box bg-surface-50 border border-surface-200 p-4">
+				<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5">
 					<p class="text-xs font-medium text-surface-950/70 uppercase tracking-wide mb-2">
 						Queue — Next {queue.waiting.length}
 					</p>
@@ -816,6 +848,9 @@
 								<div class="flex items-center gap-2 min-w-0">
 									<span class="font-mono font-medium">{w.alias}</span>
 									<span class="badge {categoryBadgeClass(w.client_category)} badge-sm">{w.client_category ?? 'Regular'}</span>
+									{#if w.process_name}
+										<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80">{w.process_name}</span>
+									{/if}
 								</div>
 								<span class="text-surface-950/60 shrink-0">{w.track} · {formatDuration(w.queued_at)}</span>
 							</li>
@@ -824,35 +859,54 @@
 				</div>
 			{/if}
 
-			<div class="rounded-box bg-surface-50 border border-surface-200 p-3 text-center text-sm text-surface-950/70">
+			<div class="rounded-container bg-surface-50 border border-surface-200 p-4 md:p-5 text-center text-sm text-surface-950/70">
 				Today: {queue.stats.total_served_today} served · Avg {queue.stats.avg_service_time_minutes} min
 			</div>
 
-			<!-- Station notes (shared, real-time) -->
-			<details class="rounded-box bg-surface-50 border border-surface-200" open={notesExpanded}>
-				<summary class="cursor-pointer px-4 py-3 font-medium text-surface-950 select-none">
-					Station notes
-				</summary>
-				<div class="px-4 pb-4 pt-1 space-y-2">
-					{#if stationNote?.message}
-						<p class="text-sm text-surface-950/90">{stationNote.message}</p>
-						{#if stationNote.author_name}
-							<p class="text-xs text-surface-950/60">— {stationNote.author_name}</p>
-						{/if}
-					{:else}
-						<p class="text-sm text-surface-950/60 italic">No note yet</p>
+			<!-- Station notes (shared, real-time). Creator prominent for many-staff clarity. -->
+			<details class="rounded-box bg-surface-50 border border-surface-200 elevation-card overflow-hidden" open={notesExpanded}>
+				<summary class="cursor-pointer px-4 py-3 font-medium text-surface-950 select-none flex items-center justify-between gap-2 min-h-[48px]">
+					<span>Station notes</span>
+					{#if stationNote?.author_name}
+						<span class="text-xs font-normal text-surface-950/60 truncate max-w-[50%]" title={stationNote.author_name}>
+							by {stationNote.author_name}
+						</span>
 					{/if}
-					<form onsubmit={submitNote} class="flex flex-col gap-2">
+				</summary>
+				<div class="px-4 pb-4 pt-1 space-y-4">
+					{#if stationNote?.message}
+						<div class="rounded-container bg-surface-100/80 border border-surface-200 p-3 space-y-2">
+							<p class="text-sm text-surface-950/90 whitespace-pre-wrap break-words">{stationNote.message}</p>
+							<div class="flex flex-wrap items-center gap-2 text-xs text-surface-950/70">
+								{#if stationNote.author_name}
+									<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded preset-filled-primary-500/20 text-primary-700 font-medium" title="Note author">
+										{stationNote.author_name}
+									</span>
+								{/if}
+								{#if stationNote.updated_at}
+									<span class="text-surface-950/60">{formatNoteTime(stationNote.updated_at)}</span>
+								{/if}
+							</div>
+						</div>
+					{:else}
+						<p class="text-sm text-surface-950/60 italic">No note yet. Add one below.</p>
+					{/if}
+					<form onsubmit={submitNote} class="flex flex-col gap-3">
+						<label for="station-note-input" class="label py-0"><span class="label-text text-sm">Add or update note</span></label>
 						<textarea
-							class="textarea textarea-sm rounded-container border border-surface-200 w-full"
-							placeholder="Add or update note (e.g. Back in 5 min)"
+							id="station-note-input"
+							class="textarea textarea-sm rounded-container border border-surface-200 w-full min-h-[80px]"
+							placeholder="e.g. Back in 5 min"
 							bind:value={noteMessage}
 							maxlength="500"
 							rows="2"
 						></textarea>
-						<button type="submit" class="btn preset-filled-primary-500 btn-sm w-fit" disabled={noteSubmitting}>
-							{noteSubmitting ? 'Saving…' : 'Save note'}
-						</button>
+						<div class="flex items-center justify-between gap-2">
+							<span class="text-xs text-surface-950/50">{noteMessage.length}/500</span>
+							<button type="submit" class="btn preset-filled-primary-500 btn-sm min-h-[44px] px-4" disabled={noteSubmitting}>
+								{noteSubmitting ? 'Saving…' : 'Save note'}
+							</button>
+						</div>
 					</form>
 				</div>
 			</details>
@@ -860,7 +914,7 @@
 	</div>
 
 	{#if noShowModalSession}
-		<dialog open class="modal-dialog-center rounded-container">
+		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
 			<div class="card bg-surface-50 rounded-container shadow-xl p-6 text-surface-950">
 				<h3 class="font-bold text-lg">Mark No-Show</h3>
 				<p class="py-2">
@@ -876,14 +930,13 @@
 					</button>
 				</div>
 			</div>
-			<form method="dialog" class="modal-backdrop">
-				<button type="button" onclick={() => (noShowModalSession = null)}>close</button>
-			</form>
+			<!-- Per flexiqueue-ldd: backdrop does not close modal; only Cancel/buttons do -->
+			<div class="modal-backdrop" aria-hidden="true"></div>
 		</dialog>
 	{/if}
 
 	{#if showOverrideModal}
-		<dialog open class="modal-dialog-center rounded-container">
+		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
 			<div class="card bg-surface-50 rounded-container shadow-xl p-6 max-w-md text-surface-950">
 				<h3 class="font-bold text-lg">Override standard flow</h3>
 				<p class="text-sm text-surface-950/70 py-2">
@@ -982,16 +1035,12 @@
 					</button>
 				</div>
 			</div>
-			<form method="dialog" class="modal-backdrop">
-				<button type="button" onclick={() => { showOverrideModal = false; overrideSession = null; overrideTargetTrackId = null; overrideIsCustom = false; overrideReason = ''; overridePin = ''; overrideSupervisorId = null; resetAuthState(); error = ''; }}>
-					close
-				</button>
-			</form>
+			<div class="modal-backdrop" aria-hidden="true"></div>
 		</dialog>
 	{/if}
 
 	{#if showForceCompleteModal}
-		<dialog open class="modal-dialog-center rounded-container">
+		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
 			<div class="card bg-surface-50 rounded-container shadow-xl p-6 max-w-md text-surface-950">
 				<h3 class="font-bold text-lg">Force complete session</h3>
 				<p class="text-sm text-surface-950/70 py-2">
@@ -1036,14 +1085,12 @@
 					</button>
 				</div>
 			</div>
-			<form method="dialog" class="modal-backdrop">
-				<button type="button" onclick={() => { showForceCompleteModal = false; forceCompleteSession = null; forceCompleteReason = ''; overridePin = ''; overrideSupervisorId = null; resetAuthState(); error = ''; }}>close</button>
-			</form>
+			<div class="modal-backdrop" aria-hidden="true"></div>
 		</dialog>
 	{/if}
 
 	{#if showCallNextOverrideModal}
-		<dialog open class="modal-dialog-center rounded-container">
+		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
 			<div class="card bg-surface-50 rounded-container shadow-xl p-6 max-w-md text-surface-950">
 				<h3 class="font-bold text-lg">Call Next (Override Priority)</h3>
 				<p class="text-sm text-surface-950/70 py-2">
@@ -1076,9 +1123,7 @@
 					</button>
 				</div>
 			</div>
-			<form method="dialog" class="modal-backdrop">
-				<button type="button" onclick={() => { showCallNextOverrideModal = false; callNextSession = null; overridePin = ''; overrideSupervisorId = null; resetAuthState(); error = ''; }}>close</button>
-			</form>
+			<div class="modal-backdrop" aria-hidden="true"></div>
 		</dialog>
 	{/if}
 </MobileLayout>

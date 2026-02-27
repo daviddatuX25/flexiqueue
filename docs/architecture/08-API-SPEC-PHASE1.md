@@ -265,10 +265,10 @@ All session endpoints require `auth` middleware and either `role:admin,superviso
   }
 }
 ```
-**Flow Complete — No Next Station (200):**
+**Flow Complete — No Next Process (200):**
 ```json
 {
-  "message": "No next station in track. Session is ready to complete.",
+  "message": "No next process in track. Session is ready to complete.",
   "session": { "id": 101, "alias": "A1", "status": "serving" },
   "action_required": "complete"
 }
@@ -680,6 +680,20 @@ All admin endpoints require `auth` + `role:admin` middleware.
 | `PUT /api/admin/steps/{id}` | Update step |
 | `DELETE /api/admin/steps/{id}` | Delete step | Auto-reorders remaining steps |
 | `POST /api/admin/tracks/{trackId}/steps/reorder` | Reorder steps | Body: `{ step_ids: [3, 1, 2] }` |
+
+---
+
+### Program Diagram (Admin)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET /api/admin/programs/{program}/diagram` | Get diagram layout | Returns `{ layout }`; `layout` is `null` if none saved. |
+| `PUT /api/admin/programs/{program}/diagram` | Save diagram layout | Body: `{ layout }`. Validates node types and entityIds. |
+| `POST /api/admin/programs/{program}/diagram/image` | Upload image for diagram | Multipart form: `image` (jpeg/png, max 2MB). Returns `{ url }`. |
+
+**Layout schema:** `layout` is an object: `{ viewport?: { x, y, zoom }, nodes: [...], edges: [...] }`. Each node has `id`, `type`, `position`, `data`. Node types: `station`, `track`, `process`, `staff`, `client_seat`, `shape`, `text`, `image`. Entity nodes (`station`, `track`, `process`, `staff`) require `data.entityId` to reference a valid program entity; PUT returns 422 if any entityId is invalid. GET returns layout as-is; frontend may show "Unknown (removed)" for nodes whose entity was deleted.
+
+**Future enhancement:** Export diagram as PNG / Print is out of Phase 1 scope.
 
 ---
 

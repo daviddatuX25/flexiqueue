@@ -39,6 +39,8 @@
     let selectedIds = $state<Set<number>>(new Set());
     let selectAllCheckbox = $state<HTMLInputElement | null>(null);
     let selectAllCheckboxMobile = $state<HTMLInputElement | null>(null);
+    // Row actions dropdown (which token's menu is open; null = none)
+    let dropdownOpen = $state<number | null>(null);
     // Print modal (uniform flow: select template then print)
     let showPrintModal = $state(false);
     let printSettings = $state({
@@ -383,6 +385,10 @@
         }
     }
 
+    function handleWindowClick() {
+        dropdownOpen = null;
+    }
+
     // Load tokens on mount
     $effect(() => {
         fetchTokens();
@@ -400,6 +406,8 @@
 <svelte:head>
     <title>Tokens — FlexiQueue</title>
 </svelte:head>
+
+<svelte:window onclick={handleWindowClick} />
 
 <AdminLayout>
     <div class="flex flex-col gap-6">
@@ -684,69 +692,67 @@
                                 </td>
                                 <td class="text-right">
                                     {#if !someSelected}
-                                        <div
-                                            class="flex items-center justify-end gap-2"
-                                        >
-                                            {#if token.status === "in_use"}
-                                                <button
-                                                    type="button"
-                                                    class="btn btn-sm preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
-                                                    onclick={() =>
-                                                        setTokenStatus(
-                                                            token,
-                                                            "available",
-                                                        )}
-                                                    disabled={submitting}
-                                                    title="Mark Available"
-                                                >
-                                                    <CheckCircle2
-                                                        class="w-3.5 h-3.5"
-                                                    /> Available
-                                                </button>
-                                            {:else if token.status === "available"}
-                                                <button
-                                                    type="button"
-                                                    class="btn btn-sm preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
-                                                    onclick={() =>
-                                                        setTokenStatus(
-                                                            token,
-                                                            "deactivated",
-                                                        )}
-                                                    disabled={submitting}
-                                                    title="Deactivate"
-                                                >
-                                                    <Ban class="w-3.5 h-3.5" /> Deactivate
-                                                </button>
-                                            {:else if token.status === "deactivated"}
-                                                <button
-                                                    type="button"
-                                                    class="btn btn-sm preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
-                                                    onclick={() =>
-                                                        setTokenStatus(
-                                                            token,
-                                                            "available",
-                                                        )}
-                                                    disabled={submitting}
-                                                    title="Activate"
-                                                >
-                                                    <CheckCircle2
-                                                        class="w-3.5 h-3.5"
-                                                    /> Activate
-                                                </button>
-                                            {/if}
+                                        <div class="relative inline-block text-left" class:dropdown-open={dropdownOpen === token.id}>
                                             <button
                                                 type="button"
-                                                class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
-                                                onclick={() =>
-                                                    handleDeleteToken(token)}
-                                                disabled={submitting ||
-                                                    token.status === "in_use"}
-                                                title={token.status === "in_use"
-                                                    ? "Cannot delete token in use"
-                                                    : "Delete"}
+                                                class="btn btn-sm preset-tonal p-2 flex items-center justify-center hover:bg-surface-100 transition-colors"
+                                                onclick={(e) => { e.stopPropagation(); dropdownOpen = dropdownOpen === token.id ? null : token.id; }}
+                                                aria-label="Actions for {token.physical_id}"
                                             >
-                                                <Trash2 class="w-3.5 h-3.5" /> Delete
+                                                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-surface-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
                                             </button>
+                                            
+                                            {#if dropdownOpen === token.id}
+                                                <div class="absolute right-0 mt-2 w-48 bg-white rounded-container shadow-lg border border-surface-200 z-50 py-1">
+                                                    <button
+                                                        type="button"
+                                                        class="w-full text-left px-4 py-2 text-sm text-surface-700 hover:bg-surface-50 flex items-center gap-2"
+                                                        onclick={() => { dropdownOpen = null; openPrintModal([token.id]); }}
+                                                    >
+                                                        <Printer class="w-4 h-4" /> Print
+                                                    </button>
+                                                    
+                                                    {#if token.status === "in_use"}
+                                                        <button
+                                                            type="button"
+                                                            class="w-full text-left px-4 py-2 text-sm text-surface-700 hover:bg-surface-50 flex items-center gap-2"
+                                                            onclick={() => { dropdownOpen = null; setTokenStatus(token, "available"); }}
+                                                            disabled={submitting}
+                                                        >
+                                                            <CheckCircle2 class="w-4 h-4" /> Mark Available
+                                                        </button>
+                                                    {:else if token.status === "available"}
+                                                        <button
+                                                            type="button"
+                                                            class="w-full text-left px-4 py-2 text-sm text-surface-700 hover:bg-surface-50 flex items-center gap-2"
+                                                            onclick={() => { dropdownOpen = null; setTokenStatus(token, "deactivated"); }}
+                                                            disabled={submitting}
+                                                        >
+                                                            <Ban class="w-4 h-4" /> Deactivate
+                                                        </button>
+                                                    {:else if token.status === "deactivated"}
+                                                        <button
+                                                            type="button"
+                                                            class="w-full text-left px-4 py-2 text-sm text-surface-700 hover:bg-surface-50 flex items-center gap-2"
+                                                            onclick={() => { dropdownOpen = null; setTokenStatus(token, "available"); }}
+                                                            disabled={submitting}
+                                                        >
+                                                            <CheckCircle2 class="w-4 h-4" /> Activate
+                                                        </button>
+                                                    {/if}
+                                                    
+                                                    <hr class="border-surface-100 my-1" />
+                                                    
+                                                    <button
+                                                        type="button"
+                                                        class="w-full text-left px-4 py-2 text-sm text-error-600 hover:bg-error-50 flex items-center gap-2"
+                                                        onclick={() => { dropdownOpen = null; handleDeleteToken(token); }}
+                                                        disabled={submitting || token.status === "in_use"}
+                                                    >
+                                                        <Trash2 class="w-4 h-4" /> Delete
+                                                    </button>
+                                                </div>
+                                            {/if}
                                         </div>
                                     {/if}
                                 </td>
@@ -839,15 +845,19 @@
                         </div>
 
                         {#if !someSelected}
-                            <div
-                                class="pt-3 border-t border-surface-200 flex flex-wrap items-center justify-end gap-2"
-                            >
+                            <div class="pt-3 border-t border-surface-200 flex flex-wrap items-center justify-end gap-2">
+                                <button
+                                    type="button"
+                                    class="btn btn-sm preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1.5 shadow-sm hover:bg-surface-50 px-3 py-1.5"
+                                    onclick={() => openPrintModal([token.id])}
+                                >
+                                    <Printer class="w-3.5 h-3.5" /> Print
+                                </button>
                                 {#if token.status === "in_use"}
                                     <button
                                         type="button"
                                         class="btn btn-sm flex-1 preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1 px-3 py-1.5 shadow-sm transition-colors hover:bg-surface-50"
-                                        onclick={() =>
-                                            setTokenStatus(token, "available")}
+                                        onclick={() => setTokenStatus(token, "available")}
                                         disabled={submitting}
                                     >
                                         <CheckCircle2 class="w-3.5 h-3.5" /> Available
@@ -856,11 +866,7 @@
                                     <button
                                         type="button"
                                         class="btn btn-sm flex-1 preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1 px-3 py-1.5 shadow-sm transition-colors hover:bg-surface-50"
-                                        onclick={() =>
-                                            setTokenStatus(
-                                                token,
-                                                "deactivated",
-                                            )}
+                                        onclick={() => setTokenStatus(token, "deactivated")}
                                         disabled={submitting}
                                     >
                                         <Ban class="w-3.5 h-3.5" /> Deactivate
@@ -869,8 +875,7 @@
                                     <button
                                         type="button"
                                         class="btn btn-sm flex-1 preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1 px-3 py-1.5 shadow-sm transition-colors hover:bg-surface-50"
-                                        onclick={() =>
-                                            setTokenStatus(token, "available")}
+                                        onclick={() => setTokenStatus(token, "available")}
                                         disabled={submitting}
                                     >
                                         <CheckCircle2 class="w-3.5 h-3.5" /> Activate
@@ -878,12 +883,12 @@
                                 {/if}
                                 <button
                                     type="button"
-                                    class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center justify-center gap-1 px-3 py-1.5 w-full shadow-sm"
+                                    class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center justify-center p-2 shadow-sm shrink-0"
                                     onclick={() => handleDeleteToken(token)}
-                                    disabled={submitting ||
-                                        token.status === "in_use"}
+                                    disabled={submitting || token.status === "in_use"}
+                                    aria-label="Delete token"
                                 >
-                                    <Trash2 class="w-3.5 h-3.5" /> Delete
+                                    <Trash2 class="w-4 h-4" />
                                 </button>
                             </div>
                         {/if}

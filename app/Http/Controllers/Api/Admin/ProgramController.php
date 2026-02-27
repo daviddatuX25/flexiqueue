@@ -106,7 +106,11 @@ class ProgramController extends Controller
             ], 422);
         }
 
-        $program = $this->programService->activate($program);
+        try {
+            $program = $this->programService->activate($program);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 409);
+        }
 
         return response()->json(['program' => $this->programResource($program)]);
     }
@@ -188,6 +192,8 @@ class ProgramController extends Controller
                     (int) (($settings['alternate_ratio'] ?? [1, 1])[0] ?? 1),
                     (int) (($settings['alternate_ratio'] ?? [1, 1])[1] ?? 1),
                 ],
+                'alternate_priority_first' => (bool) ($settings['alternate_priority_first'] ?? true),
+                'display_scan_timeout_seconds' => $program->getDisplayScanTimeoutSeconds(),
             ],
         ];
     }

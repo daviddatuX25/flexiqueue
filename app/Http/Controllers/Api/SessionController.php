@@ -19,7 +19,9 @@ use App\Services\PinService;
 use App\Services\SessionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Schema;
 use App\Support\ClientCategory;
 
 /**
@@ -390,6 +392,29 @@ class SessionController extends Controller
             ]);
         }
 
+        // Per flexiqueue-i87: When program has require_permission_before_override OFF, accept reason only (no PIN/QR).
+        $session->loadMissing('program');
+        $program = $session->program;
+        if ($program && ! $program->getRequirePermissionBeforeOverride()) {
+            try {
+                $result = $this->sessionService->forceComplete(
+                    $session,
+                    $request->validated('reason'),
+                    $staffUserId,
+                    $staffUserId
+                );
+            } catch (\InvalidArgumentException $e) {
+                $code = $e->getCode() ?: 409;
+
+                return response()->json(['message' => $e->getMessage()], (int) $code);
+            }
+
+            return response()->json([
+                'session' => $this->formatSession($result['session']),
+                'token' => $result['token'],
+            ]);
+        }
+
         $validated = $request->validated();
         $authType = $this->resolveAuthType($validated);
         if (! $authType || ! in_array($authType, ['preset_pin', 'preset_qr', 'temp_pin', 'temp_qr'], true)) {
@@ -479,6 +504,31 @@ class SessionController extends Controller
             return response()->json([
                 'session' => $this->formatSession($result['session']),
                 'override' => $result['override'] ?? null,
+            ]);
+        }
+
+        // Per flexiqueue-i87: When program has require_permission_before_override OFF, accept reason only (no PIN/QR).
+        $session->loadMissing('program');
+        $program = $session->program;
+        if ($program && ! $program->getRequirePermissionBeforeOverride()) {
+            try {
+                $result = $this->sessionService->overrideByTrack(
+                    $session,
+                    (int) $request->validated('target_track_id'),
+                    $request->validated('reason'),
+                    $staffUserId,
+                    $staffUserId,
+                    $this->sanitizeCustomSteps($request->validated('custom_steps'))
+                );
+            } catch (\InvalidArgumentException $e) {
+                $code = $e->getCode() ?: 409;
+
+                return response()->json(['message' => $e->getMessage()], (int) $code);
+            }
+
+            return response()->json([
+                'session' => $this->formatSession($result['session']),
+                'override' => $result['override'],
             ]);
         }
 
@@ -595,6 +645,7 @@ class SessionController extends Controller
 
     /**
      * Look up token by physical_id or qr_hash for triage entry. Returns physical_id, qr_hash, status.
+     * Per ISSUES-ELABORATION §11: logs each scan attempt to triage_scan_log (result not_found = potentially fabricated).
      */
     public function tokenLookup(Request $request): JsonResponse
     {
@@ -608,17 +659,39 @@ class SessionController extends Controller
             $token = \App\Models\Token::where('physical_id', $physicalId)->first();
         }
 
+        $shouldLog = (is_string($physicalId) && $physicalId !== '') || (is_string($qrHash) && $qrHash !== '');
+
         if (! $token) {
-            if (! is_string($physicalId) && ! is_string($qrHash)) {
+            if (! $shouldLog) {
                 return response()->json(['message' => 'physical_id or qr_hash is required.'], 422);
             }
+            $this->logTriageScan($request, null, 'not_found', null, null);
             return response()->json(['message' => 'Token not found.'], 404);
         }
+
+        $this->logTriageScan($request, $token->id, $token->status, $token->physical_id, $token->qr_code_hash);
 
         return response()->json([
             'physical_id' => $token->physical_id,
             'qr_hash' => $token->qr_code_hash,
             'status' => $token->status,
+        ]);
+    }
+
+    private function logTriageScan(Request $request, ?int $tokenId, string $result, ?string $physicalId, ?string $qrHash): void
+    {
+        if (! Schema::hasTable('triage_scan_log')) {
+            return;
+        }
+        DB::table('triage_scan_log')->insert([
+            'physical_id' => $physicalId ?? $request->query('physical_id'),
+            'qr_hash' => $qrHash ?? $request->query('qr_hash'),
+            'result' => $result,
+            'token_id' => $tokenId,
+            'user_id' => $request->user()?->id,
+            'ip' => $request->ip(),
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
     }
 }

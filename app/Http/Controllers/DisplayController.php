@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Program;
 use App\Services\CheckStatusService;
 use App\Services\DisplayBoardService;
 use Inertia\Inertia;
@@ -29,12 +30,18 @@ class DisplayController extends Controller
 
     /**
      * Show client status after QR scan. Public. Per 08-API-SPEC §2.1 (same logic as check-status).
+     * Pass display_scan_timeout_seconds from active program so Status page auto-dismiss matches board scanner setting.
      */
     public function status(string $qr_hash): Response
     {
         $data = $this->checkStatusService->getStatus($qr_hash);
 
         $inertiaProps = $this->checkStatusResultToInertiaProps($data);
+
+        $program = Program::query()->where('is_active', true)->first();
+        $inertiaProps['display_scan_timeout_seconds'] = $program ? $program->getDisplayScanTimeoutSeconds() : 20;
+        $inertiaProps['program_name'] = $program?->name;
+        $inertiaProps['date'] = now()->format('F j, Y');
 
         return Inertia::render('Display/Status', $inertiaProps);
     }

@@ -135,6 +135,41 @@ class ProgramControllerTest extends TestCase
         $this->assertSame('shortest_queue', $program->getStationSelectionMode());
     }
 
+    /** Per bead flexiqueue-5gl: program settings accept and persist alternate_priority_first. */
+    public function test_update_accepts_alternate_priority_first_setting(): void
+    {
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+            'settings' => ['balance_mode' => 'alternate'],
+        ]);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/programs/{$program->id}", [
+            'name' => 'P',
+            'description' => null,
+            'settings' => [
+                'balance_mode' => 'alternate',
+                'alternate_priority_first' => false,
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('program.settings.alternate_priority_first', false);
+        $program->refresh();
+        $this->assertFalse($program->settings['alternate_priority_first'] ?? true);
+
+        $response2 = $this->actingAs($this->admin)->putJson("/api/admin/programs/{$program->id}", [
+            'name' => 'P',
+            'description' => null,
+            'settings' => ['alternate_priority_first' => true],
+        ]);
+        $response2->assertStatus(200);
+        $program->refresh();
+        $this->assertTrue($program->settings['alternate_priority_first'] ?? false);
+    }
+
     /** Per ISSUES-ELABORATION §16: activate returns 422 when pre-session checks fail. */
     public function test_activate_returns_422_when_missing_required_config(): void
     {
@@ -186,6 +221,56 @@ class ProgramControllerTest extends TestCase
             'staff_user_id' => $this->admin->id,
             'action' => 'session_start',
         ]);
+    }
+
+    public function test_activate_fails_when_another_program_has_active_sessions(): void
+    {
+        $runningProgram = Program::create([
+            'name' => 'Running Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $this->admin->id,
+        ]);
+        $track = ServiceTrack::create([
+            'program_id' => $runningProgram->id,
+            'name' => 'Track 1',
+            'is_default' => true,
+        ]);
+        $station = Station::create([
+            'program_id' => $runningProgram->id,
+            'name' => 'Station 1',
+            'capacity' => 1,
+        ]);
+        $token = new Token;
+        $token->qr_code_hash = str_repeat('a', 64);
+        $token->physical_id = 'A1';
+        $token->status = 'in_use';
+        $token->save();
+        Session::create([
+            'token_id' => $token->id,
+            'program_id' => $runningProgram->id,
+            'track_id' => $track->id,
+            'alias' => 'A1',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'status' => 'waiting',
+            'no_show_attempts' => 0,
+        ]);
+
+        $otherProgram = Program::create([
+            'name' => 'Other Program',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+        $this->addMinimalActivateSetup($otherProgram);
+
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$otherProgram->id}/activate");
+
+        $response->assertStatus(409);
+        $response->assertJsonFragment(['message' => 'Another program is currently running and has clients in the queue. Stop that program\'s session first (or wait until the queue is empty) before starting this program.']);
+        $this->assertTrue($runningProgram->fresh()->is_active);
+        $this->assertFalse($otherProgram->fresh()->is_active);
     }
 
     public function test_activate_creates_session_start_log_when_no_previous_active(): void

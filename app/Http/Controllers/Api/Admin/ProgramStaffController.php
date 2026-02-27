@@ -60,7 +60,7 @@ class ProgramStaffController extends Controller
 
         return response()->json([
             'assignments' => array_merge($items, $unassigned),
-            'stations' => $program->stations()->where('is_active', true)->orderBy('name')->get(['id', 'name'])->all(),
+            'stations' => $program->stations()->where('is_active', true)->orderBy('name')->get(['id', 'name', 'capacity'])->all(),
         ]);
     }
 

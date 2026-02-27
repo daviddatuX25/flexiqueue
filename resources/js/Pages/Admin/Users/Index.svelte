@@ -10,8 +10,10 @@
         Edit2,
         Key,
         Ban,
+        CheckCircle,
         CheckCircle2,
         XCircle,
+        Clock,
     } from "lucide-svelte";
     import UserAvatar from "../../../Components/UserAvatar.svelte";
 

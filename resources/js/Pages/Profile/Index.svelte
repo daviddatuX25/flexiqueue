@@ -1,179 +1,269 @@
 <script lang="ts">
-	/**
-	 * Profile: password, preset PIN, preset QR, profile photo. Preset is per-user; any staff can set it.
-	 * Preset authorization only works when the user is a supervisor for the program where it's used.
-	 */
-	import AppShell from '../../Layouts/AppShell.svelte';
-	import UserAvatar from '../../Components/UserAvatar.svelte';
-	import { usePage } from '@inertiajs/svelte';
-	import { router } from '@inertiajs/svelte';
+    /**
+     * Profile: password, preset PIN, preset QR, profile photo. Preset is per-user; any staff can set it.
+     * Preset authorization only works when the user is a supervisor for the program where it's used.
+     */
+    import AdminLayout from "../../Layouts/AdminLayout.svelte";
+    import MobileLayout from "../../Layouts/MobileLayout.svelte";
+    import UserAvatar from "../../Components/UserAvatar.svelte";
+    import { usePage } from "@inertiajs/svelte";
+    import { router } from "@inertiajs/svelte";
 
-	const page = usePage();
-	const user = $derived($page.props?.auth?.user ?? null);
+    const page = usePage();
+    const user = $derived($page.props?.auth?.user ?? null);
 
-	// Password form
-	let passwordCurrent = $state('');
-	let passwordNew = $state('');
-	let passwordConfirm = $state('');
-	let passwordSubmitting = $state(false);
-	let passwordMessage = $state<{ type: 'success' | 'error'; text: string } | null>(null);
+    // Password form
+    let passwordCurrent = $state("");
+    let passwordNew = $state("");
+    let passwordConfirm = $state("");
+    let passwordSubmitting = $state(false);
+    let passwordMessage = $state<{
+        type: "success" | "error";
+        text: string;
+    } | null>(null);
 
-	// Override PIN form
-	let currentPassword = $state('');
-	let newPin = $state('');
-	let pinSubmitting = $state(false);
-	let pinMessage = $state<{ type: 'success' | 'error'; text: string } | null>(null);
+    // Override PIN form
+    let currentPassword = $state("");
+    let newPin = $state("");
+    let pinSubmitting = $state(false);
+    let pinMessage = $state<{ type: "success" | "error"; text: string } | null>(
+        null,
+    );
 
-	// Profile photo
-	let avatarSubmitting = $state(false);
-	let avatarMessage = $state<{ type: 'success' | 'error'; text: string } | null>(null);
+    // Profile photo — use response URL so new avatar shows immediately (per ISSUES-ELABORATION §9)
+    let avatarSubmitting = $state(false);
+    let avatarMessage = $state<{
+        type: "success" | "error";
+        text: string;
+    } | null>(null);
+    let displayAvatarUrl = $state<string | null>(null);
 
-	// Preset QR
-	let hasPresetQr = $state(false);
-	let qrLoading = $state(false);
-	let qrRegenerating = $state(false);
-	let qrDataUri = $state<string | null>(null);
-	let qrMessage = $state<{ type: 'success' | 'error'; text: string } | null>(null);
+	// Avatar upload interactive state
+	let selectedAvatarFile = $state<File | null>(null);
+	let avatarPreviewUrl = $state<string | null>(null);
+	let avatarDragging = $state(false);
 
-	async function fetchHasPresetQr() {
-		qrLoading = true;
-		try {
-			const r = await fetch('/api/profile/override-qr', { credentials: 'include' });
-			const data = await r.json();
-			hasPresetQr = !!data.has_preset_qr;
-		} finally {
-			qrLoading = false;
+	function handleAvatarSelect(files: FileList | null) {
+		if (files && files.length > 0) {
+			selectedAvatarFile = files[0];
+			if (avatarPreviewUrl) URL.revokeObjectURL(avatarPreviewUrl);
+			avatarPreviewUrl = URL.createObjectURL(selectedAvatarFile);
+			avatarMessage = null;
+		} else {
+			selectedAvatarFile = null;
+			if (avatarPreviewUrl) URL.revokeObjectURL(avatarPreviewUrl);
+			avatarPreviewUrl = null;
 		}
 	}
-
-	$effect(() => {
-		if (user) fetchHasPresetQr();
-	});
-
-	async function submitPassword(e: Event) {
-		e.preventDefault();
-		passwordMessage = null;
-		passwordSubmitting = true;
-		try {
-			const r = await fetch('/api/profile/password', {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-XSRF-TOKEN': getCsrfToken() },
-				credentials: 'include',
-				body: JSON.stringify({
-					current_password: passwordCurrent,
-					password: passwordNew,
-					password_confirmation: passwordConfirm,
-				}),
-			});
-			const data = await r.json().catch(() => ({}));
-			if (r.ok) {
-				passwordMessage = { type: 'success', text: data.message ?? 'Password updated.' };
-				passwordCurrent = '';
-				passwordNew = '';
-				passwordConfirm = '';
-			} else {
-				passwordMessage = {
-					type: 'error',
-					text: data.message ?? (data.errors ? Object.values(data.errors).flat().join(' ') : 'Failed to update password.'),
-				};
-			}
-		} finally {
-			passwordSubmitting = false;
-		}
+	
+	function triggerFileInput() {
+		document.getElementById('hidden-avatar-input')?.click();
 	}
 
-	async function submitPin(e: Event) {
-		e.preventDefault();
-		pinMessage = null;
-		pinSubmitting = true;
-		try {
-			const r = await fetch('/api/profile/override-pin', {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-XSRF-TOKEN': getCsrfToken() },
-				credentials: 'include',
-				body: JSON.stringify({ current_password: currentPassword, new_pin: newPin }),
-			});
-			const data = await r.json().catch(() => ({}));
-			if (r.ok) {
-				pinMessage = { type: 'success', text: data.message ?? 'Override PIN updated.' };
-				currentPassword = '';
-				newPin = '';
-			} else {
-				pinMessage = { type: 'error', text: data.message ?? (data.errors ? Object.values(data.errors).flat().join(' ') : 'Failed to update PIN.') };
-			}
-		} finally {
-			pinSubmitting = false;
-		}
-	}
+    // Preset QR
+    let hasPresetQr = $state(false);
+    let qrLoading = $state(false);
+    let qrRegenerating = $state(false);
+    let qrDataUri = $state<string | null>(null);
+    let qrMessage = $state<{ type: "success" | "error"; text: string } | null>(
+        null,
+    );
 
-	async function regenerateQr() {
-		qrMessage = null;
-		qrDataUri = null;
-		qrRegenerating = true;
-		try {
-			const r = await fetch('/api/profile/override-qr/regenerate', {
-				method: 'POST',
-				headers: { Accept: 'application/json', 'X-XSRF-TOKEN': getCsrfToken() },
-				credentials: 'include',
-			});
-			const data = await r.json().catch(() => ({}));
-			if (r.ok) {
-				qrDataUri = data.qr_data_uri ?? null;
-				hasPresetQr = true;
-				qrMessage = { type: 'success', text: data.message ?? 'Preset QR regenerated. Save or print it; it will not be shown again.' };
-			} else {
-				qrMessage = { type: 'error', text: data.message ?? 'Failed to regenerate QR.' };
-			}
-		} finally {
-			qrRegenerating = false;
-		}
-	}
+    async function fetchHasPresetQr() {
+        qrLoading = true;
+        try {
+            const r = await fetch("/api/profile/override-qr", {
+                credentials: "include",
+            });
+            const data = await r.json();
+            hasPresetQr = !!data.has_preset_qr;
+        } finally {
+            qrLoading = false;
+        }
+    }
 
-	async function submitAvatar(e: Event) {
+    $effect(() => {
+        if (user) fetchHasPresetQr();
+    });
+
+    async function submitPassword(e: Event) {
+        e.preventDefault();
+        passwordMessage = null;
+        passwordSubmitting = true;
+        try {
+            const r = await fetch("/api/profile/password", {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                    "X-XSRF-TOKEN": getCsrfToken(),
+                },
+                credentials: "include",
+                body: JSON.stringify({
+                    current_password: passwordCurrent,
+                    password: passwordNew,
+                    password_confirmation: passwordConfirm,
+                }),
+            });
+            const data = await r.json().catch(() => ({}));
+            if (r.ok) {
+                passwordMessage = {
+                    type: "success",
+                    text: data.message ?? "Password updated.",
+                };
+                passwordCurrent = "";
+                passwordNew = "";
+                passwordConfirm = "";
+            } else {
+                passwordMessage = {
+                    type: "error",
+                    text:
+                        data.message ??
+                        (data.errors
+                            ? Object.values(data.errors).flat().join(" ")
+                            : "Failed to update password."),
+                };
+            }
+        } finally {
+            passwordSubmitting = false;
+        }
+    }
+
+    async function submitPin(e: Event) {
+        e.preventDefault();
+        pinMessage = null;
+        pinSubmitting = true;
+        try {
+            const r = await fetch("/api/profile/override-pin", {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                    "X-XSRF-TOKEN": getCsrfToken(),
+                },
+                credentials: "include",
+                body: JSON.stringify({
+                    current_password: currentPassword,
+                    new_pin: newPin,
+                }),
+            });
+            const data = await r.json().catch(() => ({}));
+            if (r.ok) {
+                pinMessage = {
+                    type: "success",
+                    text: data.message ?? "Override PIN updated.",
+                };
+                currentPassword = "";
+                newPin = "";
+            } else {
+                pinMessage = {
+                    type: "error",
+                    text:
+                        data.message ??
+                        (data.errors
+                            ? Object.values(data.errors).flat().join(" ")
+                            : "Failed to update PIN."),
+                };
+            }
+        } finally {
+            pinSubmitting = false;
+        }
+    }
+
+    async function regenerateQr() {
+        qrMessage = null;
+        qrDataUri = null;
+        qrRegenerating = true;
+        try {
+            const r = await fetch("/api/profile/override-qr/regenerate", {
+                method: "POST",
+                headers: {
+                    Accept: "application/json",
+                    "X-XSRF-TOKEN": getCsrfToken(),
+                },
+                credentials: "include",
+            });
+            const data = await r.json().catch(() => ({}));
+            if (r.ok) {
+                qrDataUri = data.qr_data_uri ?? null;
+                hasPresetQr = true;
+                qrMessage = {
+                    type: "success",
+                    text:
+                        data.message ??
+                        "Preset QR regenerated. Save or print it; it will not be shown again.",
+                };
+            } else {
+                qrMessage = {
+                    type: "error",
+                    text: data.message ?? "Failed to regenerate QR.",
+                };
+            }
+        } finally {
+            qrRegenerating = false;
+        }
+    }
+
+    async function submitAvatar(e: Event) {
 		e.preventDefault();
 		const form = e.target as HTMLFormElement;
 		const fileInput = form.querySelector<HTMLInputElement>('input[type="file"][name="avatar"]');
-		if (!fileInput?.files?.length) {
-			avatarMessage = { type: 'error', text: 'Please select an image.' };
+		const file = fileInput?.files?.[0] ?? selectedAvatarFile;
+		if (!file) {
+			avatarMessage = { type: "error", text: "Please select an image." };
 			return;
 		}
 		avatarMessage = null;
-		avatarSubmitting = true;
-		try {
-			const fd = new FormData();
-			fd.append('avatar', fileInput.files[0]);
-			const r = await fetch('/api/profile/avatar', {
-				method: 'POST',
-				headers: { Accept: 'application/json', 'X-XSRF-TOKEN': getCsrfToken() },
-				credentials: 'include',
-				body: fd,
-			});
-			const data = await r.json().catch(() => ({}));
-			if (r.ok) {
-				avatarMessage = { type: 'success', text: data.message ?? 'Avatar updated.' };
+        avatarSubmitting = true;
+        try {
+            const fd = new FormData();
+            fd.append("avatar", file);
+            const r = await fetch("/api/profile/avatar", {
+                method: "POST",
+                headers: {
+                    Accept: "application/json",
+                    "X-XSRF-TOKEN": getCsrfToken(),
+                },
+                credentials: "include",
+                body: fd,
+            });
+            const data = await r.json().catch(() => ({}));
+            if (r.ok) {
+                avatarMessage = {
+                    type: "success",
+                    text: data.message ?? "Avatar updated.",
+                };
+                if (data.avatar_url) displayAvatarUrl = data.avatar_url;
+				selectedAvatarFile = null;
+				if (avatarPreviewUrl) { URL.revokeObjectURL(avatarPreviewUrl); avatarPreviewUrl = null; }
+				if (fileInput) fileInput.value = "";
 				router.reload();
-			} else {
-				avatarMessage = {
-					type: 'error',
-					text: data.message ?? (data.errors ? Object.values(data.errors).flat().join(' ') : 'Failed to update avatar.'),
-				};
-			}
-		} finally {
-			avatarSubmitting = false;
-		}
-	}
+            } else {
+                avatarMessage = {
+                    type: "error",
+                    text:
+                        data.message ??
+                        (data.errors
+                            ? Object.values(data.errors).flat().join(" ")
+                            : "Failed to update avatar."),
+                };
+            }
+        } finally {
+            avatarSubmitting = false;
+        }
+    }
 
-	function getCsrfToken(): string {
-		const match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
-		return match ? decodeURIComponent(match[1]) : '';
-	}
+    function getCsrfToken(): string {
+        const match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
+        return match ? decodeURIComponent(match[1]) : "";
+    }
 
-	function printPresetQr() {
-		if (!qrDataUri || !user) return;
-		const name = user.name ?? 'User';
-		const w = window.open('', '_blank', 'width=400,height=500');
-		if (!w) return;
-		w.document.write(`
+    function printPresetQr() {
+        if (!qrDataUri || !user) return;
+        const name = user.name ?? "User";
+        const w = window.open("", "_blank", "width=400,height=500");
+        if (!w) return;
+        w.document.write(`
 <!DOCTYPE html>
 <html>
 <head>
@@ -193,177 +283,311 @@
 	<img src="${escapeHtml(qrDataUri)}" alt="Preset QR code" />
 </body>
 </html>`);
-		w.document.close();
-		w.focus();
-		w.print();
-	}
+        w.document.close();
+        w.focus();
+        w.print();
+    }
 
-	function escapeHtml(s: string): string {
-		const div = document.createElement('div');
-		div.textContent = s;
-		return div.innerHTML;
-	}
+    function escapeHtml(s: string): string {
+        const div = document.createElement("div");
+        div.textContent = s;
+        return div.innerHTML;
+    }
 </script>
 
 <svelte:head>
-	<title>Profile — FlexiQueue</title>
+    <title>Profile — FlexiQueue</title>
 </svelte:head>
 
-<AppShell>
-	<div class="profile-page-content p-4 max-w-lg mx-auto">
-		<h1 class="text-xl font-semibold mb-4">Profile</h1>
-		{#if user}
-			<span class="text-sm text-surface-950/70">{user.name}</span>
-			<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500 badge-sm ml-2">{user.role}</span>
-		{/if}
+{#snippet profileContent()}
+    <div class="profile-page-content p-4 max-w-lg mx-auto">
+        <h1 class="text-xl font-semibold mb-4">Profile</h1>
+        {#if user}
+            <span class="text-sm text-surface-950/70">{user.name}</span>
+            <span
+                class="text-xs px-2 py-0.5 rounded preset-filled-primary-500 badge-sm ml-2"
+                >{user.role}</span
+            >
+        {/if}
 
-		<!-- Password -->
-		<section class="card bg-surface-50 shadow-sm mt-4 mb-6">
-			<div class="card-body">
-				<h2 class="card-title text-base">Change password</h2>
-				<form onsubmit={submitPassword} class="space-y-3">
-					<div>
-						<label for="current_password" class="label label-text">Current password</label>
-						<input
-							id="current_password"
-							type="password"
-							class="input rounded-container border border-surface-200 px-3 py-2 w-full"
-							bind:value={passwordCurrent}
-							required
-							autocomplete="current-password"
-						/>
-					</div>
-					<div>
-						<label for="password_new" class="label label-text">New password</label>
-						<input
-							id="password_new"
-							type="password"
-							class="input rounded-container border border-surface-200 px-3 py-2 w-full"
-							bind:value={passwordNew}
-							required
-							autocomplete="new-password"
-						/>
-					</div>
-					<div>
-						<label for="password_confirm" class="label label-text">Confirm new password</label>
-						<input
-							id="password_confirm"
-							type="password"
-							class="input rounded-container border border-surface-200 px-3 py-2 w-full"
-							bind:value={passwordConfirm}
-							required
-							autocomplete="new-password"
-						/>
-					</div>
-					{#if passwordMessage}
-						<p class="text-sm {passwordMessage.type === 'error' ? 'text-error-500' : 'text-success-500'}">{passwordMessage.text}</p>
-					{/if}
-					<button type="submit" class="btn preset-filled-primary-500 btn-sm" disabled={passwordSubmitting}>
-						{passwordSubmitting ? 'Updating…' : 'Update password'}
-					</button>
-				</form>
-			</div>
-		</section>
+        <!-- Password -->
+        <section class="card bg-surface-50 shadow-sm mt-4 mb-6">
+            <div class="card-body">
+                <h2 class="card-title text-base">Change password</h2>
+                <form onsubmit={submitPassword} class="space-y-3">
+                    <div>
+                        <label for="current_password" class="label label-text"
+                            >Current password</label
+                        >
+                        <input
+                            id="current_password"
+                            type="password"
+                            class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                            bind:value={passwordCurrent}
+                            required
+                            autocomplete="current-password"
+                        />
+                    </div>
+                    <div>
+                        <label for="password_new" class="label label-text"
+                            >New password</label
+                        >
+                        <input
+                            id="password_new"
+                            type="password"
+                            class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                            bind:value={passwordNew}
+                            required
+                            autocomplete="new-password"
+                        />
+                    </div>
+                    <div>
+                        <label for="password_confirm" class="label label-text"
+                            >Confirm new password</label
+                        >
+                        <input
+                            id="password_confirm"
+                            type="password"
+                            class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                            bind:value={passwordConfirm}
+                            required
+                            autocomplete="new-password"
+                        />
+                    </div>
+                    {#if passwordMessage}
+                        <p
+                            class="text-sm {passwordMessage.type === 'error'
+                                ? 'text-error-500'
+                                : 'text-success-500'}"
+                        >
+                            {passwordMessage.text}
+                        </p>
+                    {/if}
+                    <button
+                        type="submit"
+                        class="btn preset-filled-primary-500 btn-sm"
+                        disabled={passwordSubmitting}
+                    >
+                        {passwordSubmitting ? "Updating…" : "Update password"}
+                    </button>
+                </form>
+            </div>
+        </section>
 
-		<!-- Preset PIN & QR (any user; only works when you're a supervisor for that program) -->
-		<section class="card bg-surface-50 shadow-sm mb-6">
-			<div class="card-body">
-				<h2 class="card-title text-base">Override PIN</h2>
-				<p class="text-sm text-surface-950/70">Set or change your 6-digit PIN for authorizing overrides and force-complete. Not visible to admins. <strong>Only works when you are a supervisor for the program</strong> where it’s used; otherwise staff will see: “You are not a supervisor for this program.”</p>
-				<form onsubmit={submitPin} class="space-y-3">
-					<div>
-						<label for="pin_current_password" class="label label-text">Current password</label>
-						<input
-							id="pin_current_password"
-							type="password"
-							class="input rounded-container border border-surface-200 px-3 py-2 w-full"
-							bind:value={currentPassword}
-							required
-							autocomplete="current-password"
-						/>
-					</div>
-					<div>
-						<label for="new_pin" class="label label-text">New 6-digit PIN</label>
-						<input
-							id="new_pin"
-							type="password"
-							inputmode="numeric"
-							pattern="[0-9]{6}"
-							maxlength="6"
-							class="input rounded-container border border-surface-200 px-3 py-2 w-full"
-							bind:value={newPin}
-							required
-							placeholder="000000"
-							autocomplete="off"
-						/>
-					</div>
-					{#if pinMessage}
-						<p class="text-sm {pinMessage.type === 'error' ? 'text-error-500' : 'text-success-500'}">{pinMessage.text}</p>
-					{/if}
-					<button type="submit" class="btn preset-filled-primary-500 btn-sm" disabled={pinSubmitting}>
-						{pinSubmitting ? 'Saving…' : 'Update PIN'}
-					</button>
-				</form>
-			</div>
-		</section>
+        <!-- Preset PIN & QR (any user; only works when you're a supervisor for that program) -->
+        <section class="card bg-surface-50 shadow-sm mb-6">
+            <div class="card-body">
+                <h2 class="card-title text-base">Override PIN</h2>
+                <p class="text-sm text-surface-950/70">
+                    Set or change your 6-digit PIN for authorizing overrides and
+                    force-complete. Not visible to admins. <strong
+                        >Only works when you are a supervisor for the program</strong
+                    > where it’s used; otherwise staff will see: “You are not a supervisor
+                    for this program.”
+                </p>
+                <form onsubmit={submitPin} class="space-y-3">
+                    <div>
+                        <label
+                            for="pin_current_password"
+                            class="label label-text">Current password</label
+                        >
+                        <input
+                            id="pin_current_password"
+                            type="password"
+                            class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                            bind:value={currentPassword}
+                            required
+                            autocomplete="current-password"
+                        />
+                    </div>
+                    <div>
+                        <label for="new_pin" class="label label-text"
+                            >New 6-digit PIN</label
+                        >
+                        <input
+                            id="new_pin"
+                            type="password"
+                            inputmode="numeric"
+                            pattern="[0-9]{6}"
+                            maxlength="6"
+                            class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                            bind:value={newPin}
+                            required
+                            placeholder="000000"
+                            autocomplete="off"
+                        />
+                    </div>
+                    {#if pinMessage}
+                        <p
+                            class="text-sm {pinMessage.type === 'error'
+                                ? 'text-error-500'
+                                : 'text-success-500'}"
+                        >
+                            {pinMessage.text}
+                        </p>
+                    {/if}
+                    <button
+                        type="submit"
+                        class="btn preset-filled-primary-500 btn-sm"
+                        disabled={pinSubmitting}
+                    >
+                        {pinSubmitting ? "Saving…" : "Update PIN"}
+                    </button>
+                </form>
+            </div>
+        </section>
 
-		<section class="card bg-surface-50 shadow-sm mb-6">
-			<div class="card-body">
-				<h2 class="card-title text-base">Preset QR</h2>
-				<p class="text-sm text-surface-950/70">Staff can scan your preset QR to authorize overrides. Preset is per-user; <strong>it only works when you are a supervisor for that program</strong>. Regenerating invalidates the previous QR. The QR is shown only once after regeneration.</p>
-				{#if qrLoading}
-					<p class="text-sm text-surface-950/60">Loading…</p>
-				{:else}
-					{#if hasPresetQr && !qrDataUri}
-						<p class="text-sm text-surface-950/70">You have a preset QR set. Regenerate to get a new one (current one will stop working).</p>
-					{/if}
-					{#if qrDataUri}
-						<div class="flex flex-col items-center gap-2 my-2">
-							<img src={qrDataUri} alt="Preset QR code" class="w-48 h-48 object-contain border border-surface-200 rounded-lg" />
-							<p class="text-xs text-warning-500">Save or print this; it will not be shown again.</p>
-							<button type="button" class="btn preset-outlined btn-sm" onclick={printPresetQr}>
-								Print
+        <section class="card bg-surface-50 shadow-sm mb-6">
+            <div class="card-body">
+                <h2 class="card-title text-base">Preset QR</h2>
+                <p class="text-sm text-surface-950/70">
+                    Staff can scan your preset QR to authorize overrides. Preset
+                    is per-user; <strong
+                        >it only works when you are a supervisor for that
+                        program</strong
+                    >. Regenerating invalidates the previous QR. The QR is shown
+                    only once after regeneration.
+                </p>
+                {#if qrLoading}
+                    <p class="text-sm text-surface-950/60">Loading…</p>
+                {:else}
+                    {#if hasPresetQr && !qrDataUri}
+                        <p class="text-sm text-surface-950/70">
+                            You have a preset QR set. Regenerate to get a new
+                            one (current one will stop working).
+                        </p>
+                    {/if}
+                    {#if qrDataUri}
+                        <div class="flex flex-col items-center gap-2 my-2">
+                            <img
+                                src={qrDataUri}
+                                alt="Preset QR code"
+                                class="w-48 h-48 object-contain border border-surface-200 rounded-lg"
+                            />
+                            <p class="text-xs text-warning-500">
+                                Save or print this; it will not be shown again.
+                            </p>
+                            <button
+                                type="button"
+                                class="btn preset-outlined btn-sm"
+                                onclick={printPresetQr}
+                            >
+                                Print
+                            </button>
+                        </div>
+                    {/if}
+                    {#if qrMessage}
+                        <p
+                            class="text-sm {qrMessage.type === 'error'
+                                ? 'text-error-500'
+                                : 'text-success-500'}"
+                        >
+                            {qrMessage.text}
+                        </p>
+                    {/if}
+                    <button
+                        type="button"
+                        class="btn preset-outlined btn-sm"
+                        disabled={qrRegenerating}
+                        onclick={regenerateQr}
+                    >
+                        {qrRegenerating
+                            ? "Regenerating…"
+                            : hasPresetQr
+                              ? "Regenerate preset QR"
+                              : "Generate preset QR"}
+                    </button>
+                {/if}
+            </div>
+        </section>
+
+        <!-- Profile photo -->
+        <section class="card bg-surface-50 shadow-sm">
+            <div class="card-body">
+                <h2 class="card-title text-base">Profile photo</h2>
+                <p class="text-sm text-surface-950/70 mb-3">
+                    Upload a photo (JPEG or PNG, max 2MB). Shows in header and
+                    on the display board.
+                </p>
+                <form onsubmit={submitAvatar} class="mb-5 flex flex-col gap-4">
+					<div class="flex flex-col sm:flex-row items-start sm:items-center gap-6">
+						<!-- Avatar Preview -->
+						<div class="shrink-0 relative group">
+							{#if avatarPreviewUrl}
+								<img src={avatarPreviewUrl} alt="Preview" class="w-24 h-24 rounded-full object-cover border-4 border-primary-100 shadow-sm" />
+								<button 
+									type="button" 
+									class="btn btn-sm preset-filled-surface-500 absolute -top-2 -right-2 rounded-full w-8 h-8 p-0 flex items-center justify-center shadow"
+									onclick={() => handleAvatarSelect(null)}
+									aria-label="Remove photo"
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+								</button>
+							{:else}
+								<UserAvatar user={user} size="xl" avatarUrlOverride={displayAvatarUrl} />
+							{/if}
+						</div>
+
+						<!-- Dropzone -->
+						<div class="flex-1 w-full">
+							<div 
+								class="border-2 border-dashed rounded-container p-6 text-center transition-colors {avatarDragging ? 'border-primary-500 bg-primary-50' : 'border-surface-300 hover:border-primary-400 bg-surface-50/50 hover:bg-surface-100/50'} cursor-pointer"
+								ondragover={(e) => { e.preventDefault(); avatarDragging = true; }}
+								ondragleave={() => avatarDragging = false}
+								ondrop={(e) => { e.preventDefault(); avatarDragging = false; handleAvatarSelect(e.dataTransfer?.files || null); }}
+								onclick={triggerFileInput}
+								onkeydown={(e) => e.key === 'Enter' && triggerFileInput()}
+								role="button"
+								tabindex="0"
+								aria-label="Upload profile photo"
+							>
+								<input 
+									id="hidden-avatar-input"
+									name="avatar"
+									type="file" 
+									accept="image/jpeg,image/png,image/jpg"
+									class="hidden"
+									onchange={(e) => handleAvatarSelect(e.currentTarget.files)}
+								/>
+								<div class="flex flex-col items-center justify-center gap-2 pointer-events-none">
+									<svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 text-surface-400 {avatarDragging ? 'text-primary-500' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+									<div class="text-sm">
+										<span class="font-semibold text-primary-600">Click to upload</span> or drag and drop
+									</div>
+									<p class="text-xs text-surface-500">PNG or JPG up to 2MB</p>
+								</div>
+							</div>
+						</div>
+					</div>
+					
+					{#if selectedAvatarFile}
+						<div class="flex justify-end border-t border-surface-200 pt-3 mt-1">
+							<button type="submit" class="btn preset-filled-primary-500 min-w-24" disabled={avatarSubmitting}>
+								{avatarSubmitting ? "Saving…" : "Save photo"}
 							</button>
 						</div>
 					{/if}
-					{#if qrMessage}
-						<p class="text-sm {qrMessage.type === 'error' ? 'text-error-500' : 'text-success-500'}">{qrMessage.text}</p>
-					{/if}
-					<button
-						type="button"
-						class="btn preset-outlined btn-sm"
-						disabled={qrRegenerating}
-						onclick={regenerateQr}
-					>
-						{qrRegenerating ? 'Regenerating…' : (hasPresetQr ? 'Regenerate preset QR' : 'Generate preset QR')}
-					</button>
-				{/if}
-			</div>
-		</section>
+				</form>
+                {#if avatarMessage}
+                    <p
+                        class="text-sm {avatarMessage.type === 'error'
+                            ? 'text-error-500'
+                            : 'text-success-500'}"
+                    >
+                        {avatarMessage.text}
+                    </p>
+                {/if}
+            </div>
+        </section>
+    </div>
+{/snippet}
 
-		<!-- Profile photo -->
-		<section class="card bg-surface-50 shadow-sm">
-			<div class="card-body">
-				<h2 class="card-title text-base">Profile photo</h2>
-				<p class="text-sm text-surface-950/70 mb-3">Upload a photo (JPEG or PNG, max 2MB). Shows in header and on the display board.</p>
-				<div class="flex items-center gap-4 mb-4">
-					<UserAvatar user={user} size="lg" />
-					<form onsubmit={submitAvatar} class="flex flex-col gap-2">
-						<input
-							type="file"
-							name="avatar"
-							accept="image/jpeg,image/png,image/jpg"
-							class="file-input file-input-sm file-input-bordered w-full max-w-xs"
-						/>
-						<button type="submit" class="btn preset-filled-primary-500 btn-sm w-fit" disabled={avatarSubmitting}>
-							{avatarSubmitting ? 'Uploading…' : 'Upload photo'}
-						</button>
-					</form>
-				</div>
-				{#if avatarMessage}
-					<p class="text-sm {avatarMessage.type === 'error' ? 'text-error-500' : 'text-success-500'}">{avatarMessage.text}</p>
-				{/if}
-			</div>
-		</section>
-	</div>
-</AppShell>
+{#if user?.role === "admin"}
+    <AdminLayout>
+        {@render profileContent()}
+    </AdminLayout>
+{:else}
+    <MobileLayout title="Profile" showBackBtn={false}>
+        {@render profileContent()}
+    </MobileLayout>
+{/if}

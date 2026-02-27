@@ -7,8 +7,10 @@ use App\Http\Controllers\Api\Admin\ProgramStaffController;
 use App\Http\Controllers\Api\Admin\ReportController as AdminReportController;
 use App\Http\Controllers\Api\Admin\StationController as AdminStationController;
 use App\Http\Controllers\Api\Admin\ProcessController as AdminProcessController;
+use App\Http\Controllers\Api\Admin\ProgramDiagramController;
 use App\Http\Controllers\Api\Admin\StepController as AdminStepController;
 use App\Http\Controllers\Api\Admin\PrintSettingsController;
+use App\Http\Controllers\Api\Admin\ProgramDefaultSettingsController;
 use App\Http\Controllers\Api\Admin\TokenController as AdminTokenController;
 use App\Http\Controllers\Api\Admin\TrackController as AdminTrackController;
 use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
@@ -39,10 +41,15 @@ use Inertia\Inertia;
 
 // Per 08-API-SPEC-PHASE1 §5: admin API (session auth, role:admin)
 Route::middleware(['auth', 'role:admin'])->prefix('api/admin')->group(function (): void {
+    Route::get('/program-default-settings', [ProgramDefaultSettingsController::class, 'show']);
+    Route::put('/program-default-settings', [ProgramDefaultSettingsController::class, 'update']);
     Route::get('/programs', [AdminProgramController::class, 'index']);
     Route::post('/programs', [AdminProgramController::class, 'store']);
     Route::get('/programs/{program}', [AdminProgramController::class, 'show']);
     Route::put('/programs/{program}', [AdminProgramController::class, 'update']);
+    Route::get('/programs/{program}/diagram', [ProgramDiagramController::class, 'show']);
+    Route::put('/programs/{program}/diagram', [ProgramDiagramController::class, 'update']);
+    Route::post('/programs/{program}/diagram/image', [ProgramDiagramController::class, 'storeImage']);
     Route::post('/programs/{program}/activate', [AdminProgramController::class, 'activate'])->name('api.admin.programs.activate');
     Route::post('/programs/{program}/deactivate', [AdminProgramController::class, 'deactivate'])->name('api.admin.programs.deactivate');
     Route::post('/programs/{program}/pause', [AdminProgramController::class, 'pause'])->name('api.admin.programs.pause');
@@ -56,6 +63,8 @@ Route::middleware(['auth', 'role:admin'])->prefix('api/admin')->group(function (
     // Per 08-API-SPEC-PHASE1 §5.3: Station CRUD
     Route::get('/programs/{program}/processes', [AdminProcessController::class, 'index']);
     Route::post('/programs/{program}/processes', [AdminProcessController::class, 'store']);
+    Route::put('/programs/{program}/processes/{process}', [AdminProcessController::class, 'update']);
+    Route::delete('/programs/{program}/processes/{process}', [AdminProcessController::class, 'destroy']);
     Route::get('/programs/{program}/stations', [AdminStationController::class, 'index']);
     Route::post('/programs/{program}/stations', [AdminStationController::class, 'store']);
     Route::get('/programs/{program}/stations/{station}/processes', [AdminStationController::class, 'listProcesses']);
@@ -175,6 +184,7 @@ Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->grou
     Route::redirect('/', '/admin/dashboard', 302)->name('index');
     Route::get('/dashboard', fn () => Inertia::render('Admin/Dashboard'))->name('dashboard');
     Route::get('/programs', [ProgramPageController::class, 'index'])->name('programs');
+    Route::get('/program-default-settings', fn () => Inertia::render('Admin/ProgramDefaultSettings'))->name('program-default-settings');
     Route::get('/programs/{program}', [ProgramPageController::class, 'show'])->name('programs.show');
     Route::get('/tokens', fn () => Inertia::render('Admin/Tokens/Index'))->name('tokens');
     Route::get('/tokens/print', TokenPrintController::class)->name('tokens.print');
@@ -184,12 +194,7 @@ Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->grou
 
 // All staff (admin, supervisor, staff): station, triage, track-overrides, profile, dashboard
 Route::middleware(['auth', 'role:admin,supervisor,staff'])->group(function (): void {
-    Route::get('/dashboard', function () {
-        $user = Auth::user();
-        return $user && $user->role === UserRole::Admin
-            ? redirect()->route('admin.dashboard')
-            : redirect()->route('station');
-    })->name('dashboard');
+    Route::get('/dashboard', \App\Http\Controllers\StaffDashboardController::class)->name('dashboard');
     Route::get('/station/{station?}', StationPageController::class)->name('station');
     Route::get('/triage', TriagePageController::class)->name('triage');
     Route::redirect('/authorize', '/track-overrides', 302)->name('authorize');

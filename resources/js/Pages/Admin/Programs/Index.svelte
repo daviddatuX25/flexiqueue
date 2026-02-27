@@ -160,9 +160,12 @@
             router.reload();
         } else {
             error = message ?? "Failed to start session.";
-            const missing = (data as { missing?: string[] } | undefined)?.missing;
+            const missing = (data as { missing?: string[] } | undefined)
+                ?.missing;
             if (Array.isArray(missing))
-                activateMissing = missing.map((k) => ACTIVATE_MISSING_LABELS[k] ?? k);
+                activateMissing = missing.map(
+                    (k) => ACTIVATE_MISSING_LABELS[k] ?? k,
+                );
         }
     }
 
@@ -295,7 +298,10 @@
                 <button
                     type="button"
                     class="text-error-500 hover:text-error-700 transition-colors"
-                    onclick={() => { error = ""; activateMissing = []; }}
+                    onclick={() => {
+                        error = "";
+                        activateMissing = [];
+                    }}
                 >
                     Dismiss
                 </button>
@@ -382,7 +388,11 @@
                                     class="btn preset-tonal btn-sm flex items-center gap-1.5"
                                     title="Manage Program"
                                 >
-                                    <Eye class="w-3.5 h-3.5" /> Manage
+                                    <Eye class="w-3.5 h-3.5" />
+                                    <span class="sr-only">Manage Program</span>
+                                    <span class="hidden sm:inline"
+                                        >Manage Program</span
+                                    >
                                 </Link>
 
                                 {#if program.is_active}

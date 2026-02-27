@@ -1,13 +1,26 @@
 <script>
 	/**
 	 * Display/Board.svelte — client-facing "Now Serving" informant. Per 09-UI-ROUTES-PHASE1 §3.4.
-	 * Public, no auth. Shows program name, date, Scan section, Now Serving grid, waiting by station, station activity.
+	 * Public, no auth. Shows program name, date, staff availability (profile bar + status icons),
+	 * Scan section, Now Serving grid, waiting by station, station activity.
+	 *
+	 * Plan: Staff availability from backend (staff_at_stations[].staff[].availability_status).
+	 * Profile bar at top (compact list with avatar + status dot + name); STAFF ON DUTY section
+	 * shows same status dot per staff. No Echo for status in Phase 1 (page load only).
+	 *
+	 * Edge cases: No active program → staff_at_stations empty, bar hidden. No staff assigned →
+	 * bar hidden, section shows "No staff assigned". Mixed statuses → dot by status (available /
+	 * on_break / away|offline). Mobile: bar wraps. Empty state: existing copy.
 	 */
 	import { onMount } from 'svelte';
-	import { router } from '@inertiajs/svelte';
+	import { router, usePage } from '@inertiajs/svelte';
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
+	import Modal from '../../Components/Modal.svelte';
 	import QrScanner from '../../Components/QrScanner.svelte';
 	import UserAvatar from '../../Components/UserAvatar.svelte';
+	import { Camera } from 'lucide-svelte';
+
+	const page = usePage();
 
 	let {
 		program_name = null,
@@ -18,22 +31,61 @@
 		station_activity = [],
 		staff_at_stations = [],
 		staff_online = 0,
+		display_scan_timeout_seconds = 20,
+		program_is_paused = false,
 	} = $props();
+
+	/** Synced from prop + .program_status; when true, show "Program is paused" overlay (real-time). */
+	let programIsPaused = $state(false);
+
+	$effect(() => {
+		programIsPaused = !!program_is_paused;
+	});
+
+	/** Open camera modal when URL has ?scan=1 (e.g. "Scan again" from Status page). */
+	$effect(() => {
+		const url = typeof page?.url === 'string' ? page.url : (typeof window !== 'undefined' ? window.location.href : '');
+		try {
+			const parsed = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+			if (parsed.searchParams.get('scan') === '1') {
+				showScanner = true;
+				scanHandled = false;
+				if (typeof window !== 'undefined') {
+					window.history.replaceState({}, '', '/display');
+				}
+			}
+		} catch {
+			// Ignore URL parse errors
+		}
+	});
 
 	let showScanner = $state(false);
 	/** Latch: ignore repeated onScan callbacks after first successful scan (per gotchas — stops flicker / unresponsive OK GOT IT). */
 	let scanHandled = $state(false);
-	/** Activity feed: initial from props, prepended by real-time events */
-	let activityFeed = $state([...(station_activity ?? [])]);
-
+	/** Per flexiqueue-87p: countdown when scanner open; 0 = no auto-close. */
+	let scanCountdown = $state(0);
+	let scanCountdownIntervalId = $state(null);
+	/** Hidden input for HID barcode scanner on display; refocus every 2s when camera modal is closed. */
+	let displayBarcodeValue = $state('');
+	let displayBarcodeInputEl = $state(null);
+	/** Activity feed: synced from props (and after reload), prepended by real-time events */
+	let activityFeed = $state([]);
 	$effect(() => {
 		activityFeed = [...(station_activity ?? [])];
 	});
 
+	/** Recent activity: max 20 items, fixed-height scroll (shows ~5 items). No View more/less. */
+	const visibleActivity = $derived(activityFeed.slice(0, 20));
+
+	function refreshBoardData() {
+		router.reload({ only: ['now_serving', 'waiting_by_station', 'total_in_queue', 'station_activity', 'program_is_paused'] });
+	}
+
 	onMount(() => {
 		if (typeof window === 'undefined' || !window.Echo) return;
-		const channel = window.Echo.channel('display.activity');
-		channel.listen('.station_activity', (e) => {
+		const echo = window.Echo;
+		const activityChannel = echo.channel('display.activity');
+		activityChannel.listen('.station_activity', (e) => {
 			const item = {
 				station_name: e.station_name ?? '—',
 				message: e.message ?? '',
@@ -42,9 +94,24 @@
 				created_at: e.created_at ?? new Date().toISOString(),
 			};
 			activityFeed = [item, ...activityFeed].slice(0, 20);
+			// Per ISSUES-ELABORATION §10: refresh waiting/now serving so "Currently waiting" updates in realtime
+			refreshBoardData();
 		});
+		// Per flexiqueue-wrx: staff availability changes → refresh staff footer only
+		activityChannel.listen('.staff_availability', () => {
+			router.reload({ only: ['staff_at_stations', 'staff_online'] });
+		});
+		// Program paused/resumed → show or hide blocker overlay in real time
+		activityChannel.listen('.program_status', (e) => {
+			programIsPaused = !!e.program_is_paused;
+		});
+		// Real-time: refresh Now Serving and waiting list when serve/transfer/complete (not only on activity)
+		const queueChannel = echo.channel('global.queue');
+		queueChannel.listen('.now_serving', refreshBoardData);
+		queueChannel.listen('.queue_length', refreshBoardData);
 		return () => {
-			window.Echo?.leave('display.activity');
+			echo.leave('display.activity');
+			echo.leave('global.queue');
 		};
 	});
 
@@ -61,6 +128,59 @@
 		}
 	}
 
+	function closeScanner() {
+		if (scanCountdownIntervalId != null) {
+			clearInterval(scanCountdownIntervalId);
+			scanCountdownIntervalId = null;
+		}
+		scanCountdown = 0;
+		showScanner = false;
+		displayBarcodeInputEl?.focus();
+	}
+
+	/** Add one full timeout period to the scanner modal countdown (extension time from program settings). */
+	function extendScannerCountdown() {
+		const extra = Math.max(0, Number(display_scan_timeout_seconds) || 20);
+		scanCountdown += extra;
+	}
+
+	/** Refocus hidden barcode input every 2s when camera modal is closed (so HID scanner keeps working). */
+	$effect(() => {
+		if (showScanner) return;
+		const id = setInterval(() => {
+			displayBarcodeInputEl?.focus();
+		}, 2000);
+		return () => clearInterval(id);
+	});
+
+	$effect(() => {
+		if (!showScanner) {
+			if (scanCountdownIntervalId != null) {
+				clearInterval(scanCountdownIntervalId);
+				scanCountdownIntervalId = null;
+			}
+			scanCountdown = 0;
+			return;
+		}
+		const timeout = Math.max(0, Number(display_scan_timeout_seconds) || 20);
+		if (timeout === 0) return;
+		let remaining = timeout;
+		scanCountdown = remaining;
+		const id = setInterval(() => {
+			remaining -= 1;
+			scanCountdown = remaining;
+			if (remaining <= 0) {
+				clearInterval(id);
+				showScanner = false;
+			}
+		}, 1000);
+		scanCountdownIntervalId = id;
+		return () => {
+			clearInterval(id);
+			scanCountdownIntervalId = null;
+		};
+	});
+
 	function handleQrScan(decodedText) {
 		if (scanHandled) return;
 		scanHandled = true;
@@ -72,6 +192,52 @@
 			router.visit(`/display/status/${encodeURIComponent(qrHash)}`);
 		}
 	}
+
+	function onDisplayBarcodeKeydown(e) {
+		if (e.key !== 'Enter') return;
+		const raw = displayBarcodeValue.trim();
+		if (!raw) return;
+		e.preventDefault();
+		handleQrScan(raw);
+		displayBarcodeValue = '';
+		displayBarcodeInputEl?.focus();
+	}
+
+	/** Status icon/dot class per 07-UI-UX-SPECS and StatusFooter/StationStatusTable. */
+	function availabilityDotClass(status) {
+		switch (status) {
+			case 'available':
+				return 'bg-success-500';
+			case 'on_break':
+				return 'bg-warning-500';
+			default:
+				return 'bg-surface-400';
+		}
+	}
+
+	function availabilityLabel(status) {
+		switch (status) {
+			case 'available': return 'Available';
+			case 'on_break': return 'On break';
+			case 'away': return 'Away';
+			default: return 'Offline';
+		}
+	}
+
+	/** Flatten staff from all stations for profile bar (no duplicates by name). */
+	const staffForBar = $derived.by(() => {
+		const seen = new Set();
+		const list = [];
+		for (const row of staff_at_stations ?? []) {
+			for (const s of row.staff ?? []) {
+				const key = (s.name ?? '') + (s.availability_status ?? '');
+				if (seen.has(key)) continue;
+				seen.add(key);
+				list.push({ ...s, station_name: row.station_name });
+			}
+		}
+		return list;
+	});
 </script>
 
 <svelte:head>
@@ -79,36 +245,82 @@
 </svelte:head>
 
 <DisplayLayout programName={program_name} {date}>
-	<div class="flex flex-col gap-6 max-w-4xl mx-auto">
-		<!-- Scan section: tap to activate camera, on scan navigate to status. Per 09-UI-ROUTES §3.4 -->
+	<div class="relative">
+		{#if programIsPaused}
+			<div
+				class="absolute inset-0 z-10 flex items-center justify-center bg-surface-950/80 rounded-container min-h-[280px]"
+				aria-live="polite"
+			>
+				<div class="card bg-white border border-surface-200 rounded-container shadow-lg p-8 max-w-md mx-4 text-center">
+					<p class="text-xl font-semibold text-surface-950">Program is paused</p>
+					<p class="text-surface-600 mt-2">Service will resume shortly.</p>
+				</div>
+			</div>
+		{/if}
+		<div class="flex flex-col gap-6 max-w-4xl mx-auto pb-28">
+			<!-- Scan section: hidden input for HID barcode; pulsing CTA + camera icon opens camera modal. Per display scanner refactor plan. -->
 		<section>
 			<h2 class="text-xl font-bold text-surface-950 mb-3">CHECK YOUR STATUS</h2>
-			{#if showScanner}
-				<div class="card bg-surface-50 border border-surface-200 rounded-container">
-					<div class="p-4">
-						<QrScanner active={true} onScan={handleQrScan} />
-						<button
-							type="button"
-							class="btn preset-tonal btn-sm mt-2"
-							onclick={() => (showScanner = false)}
-						>
-							Cancel
-						</button>
-					</div>
-				</div>
-			{:else}
+			<input
+				type="text"
+				autocomplete="off"
+				inputmode="text"
+				aria-label="Barcode scanner input; scan with hardware scanner or type and press Enter"
+				class="sr-only"
+				bind:value={displayBarcodeValue}
+				bind:this={displayBarcodeInputEl}
+				onkeydown={onDisplayBarcodeKeydown}
+			/>
+			<div
+				class="flex items-center gap-3 rounded-container border-2 border-primary-500/30 bg-primary-500/5 p-4 animate-pulse"
+				role="region"
+				aria-label="Scan to check status"
+			>
+				<p class="flex-1 text-base font-medium text-surface-950">
+					Scan your QR or barcode to check status
+				</p>
 				<button
 					type="button"
-					class="btn preset-filled-primary-500 w-full text-lg py-4"
+					class="btn btn-icon preset-filled-primary-500 shrink-0 min-h-[48px] min-w-[48px]"
+					aria-label="Open camera to scan QR code"
+					title="Tap to scan with device camera"
 					onclick={() => {
 						showScanner = true;
 						scanHandled = false;
 					}}
 				>
-					TAP TO SCAN QR CODE
+					<Camera class="w-6 h-6" />
 				</button>
-			{/if}
+			</div>
 		</section>
+
+		<!-- Camera scan modal: camera-only QrScanner, countdown, Cancel -->
+		<Modal open={showScanner} title="Scan QR via Device" onClose={closeScanner} wide={true}>
+			{#snippet children()}
+				<div class="flex flex-col gap-3 w-full min-w-[20rem] mx-auto">
+					<QrScanner active={true} cameraOnly={true} onScan={handleQrScan} />
+					{#if scanCountdown > 0}
+						<div class="flex flex-wrap items-center justify-center gap-2">
+							<p class="text-sm text-surface-600" aria-live="polite">Closing in {scanCountdown}s</p>
+							<button
+								type="button"
+								class="btn preset-tonal text-sm py-1.5 px-3"
+								onclick={extendScannerCountdown}
+							>
+								Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)
+							</button>
+						</div>
+					{/if}
+					<button
+						type="button"
+						class="w-full py-3 text-base font-semibold rounded-container border-2 border-surface-300 bg-white text-surface-950 shadow-md hover:bg-surface-200 focus:ring-2 focus:ring-offset-2 focus:ring-surface-400"
+						onclick={closeScanner}
+					>
+						Cancel
+					</button>
+				</div>
+			{/snippet}
+		</Modal>
 
 		<!-- Now Serving -->
 		<section>
@@ -125,9 +337,12 @@
 							<div class="p-4 text-center">
 								<div class="text-4xl font-bold text-primary-500">{entry.alias}</div>
 								<div class="text-sm text-surface-950/80">{entry.station_name}</div>
-								<div class="flex justify-center gap-1 mt-1">
+								<div class="flex justify-center flex-wrap gap-1 mt-1">
 									{#if entry.status === 'called'}
 										<span class="text-xs px-2 py-0.5 rounded preset-filled-warning-500">Calling</span>
+									{/if}
+									{#if entry.process_name}
+										<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500/20 text-primary-700">{entry.process_name}</span>
 									{/if}
 									<span class="text-xs px-2 py-0.5 rounded preset-tonal">{entry.track}</span>
 								</div>
@@ -144,27 +359,39 @@
 			{/if}
 		</section>
 
-		<!-- Currently Waiting -->
+		<!-- Currently Waiting: columns per station, queue in order (per plan) -->
 		<section>
 			<h2 class="text-xl font-bold text-surface-950 mb-3">CURRENTLY WAITING</h2>
 			{#if waiting_by_station.length > 0}
-				<div class="space-y-2">
-					{#each waiting_by_station as row}
-						<div class="card bg-surface-50 border border-surface-200 rounded-container shadow-sm">
-							<div class="p-4 py-3 px-4">
-								<div class="flex flex-wrap items-center gap-2">
-									<span class="font-semibold text-surface-950">{row.station_name}:</span>
+				<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+					{#each waiting_by_station as row (row.station_name)}
+						<div class="card bg-surface-50 border border-surface-200 rounded-container shadow-sm flex flex-col">
+							<div class="p-4 py-3 shrink-0">
+								<h3 class="font-semibold text-surface-950">{row.station_name}</h3>
+								<div class="flex flex-wrap items-center gap-2 mt-1">
 									{#if row.serving_count != null && row.client_capacity != null}
 										<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500"
 											>{row.serving_count}/{row.client_capacity} serving</span
 										>
 									{/if}
-									<span class="text-surface-950/80">
-										{row.aliases.length > 0 ? row.aliases.join(', ') + ' — ' : ''}{row.count}
+									<span class="text-surface-950/80 text-sm">
+										{row.count}
 										{row.count === 1 ? 'client' : 'clients'} waiting
 									</span>
 								</div>
 							</div>
+							{#if row.waiting_clients?.length > 0}
+								<ul class="px-4 pb-4 space-y-1 text-sm text-surface-950/90" aria-label="Queue order for {row.station_name}">
+									{#each row.waiting_clients as client (client.alias)}
+										<li>
+											<span class="font-mono font-medium">{client.alias}</span>
+											{#if client.process_name}
+												<span class="text-surface-950/70 ml-1">— {client.process_name}</span>
+											{/if}
+										</li>
+									{/each}
+								</ul>
+							{/if}
 						</div>
 					{/each}
 				</div>
@@ -180,49 +407,13 @@
 			{/if}
 		</section>
 
-		<!-- Staff on duty -->
-		<section>
-			<h2 class="text-xl font-bold text-surface-950 mb-3">STAFF ON DUTY</h2>
-			{#if staff_at_stations?.length > 0}
-				<div class="space-y-2">
-					{#each staff_at_stations as row}
-						<div class="card bg-surface-50 border border-surface-200 rounded-container shadow-sm">
-							<div class="p-4 py-3 px-4">
-								<div class="flex flex-wrap items-center gap-3">
-									<span class="font-semibold text-surface-950">{row.station_name}:</span>
-									{#if row.staff?.length > 0}
-										<div class="flex flex-wrap items-center gap-2">
-											{#each row.staff as staff, i (row.station_name + staff.name + i)}
-												<div class="flex items-center gap-2">
-													<UserAvatar user={staff} size="sm" />
-													<span class="text-sm text-surface-950/90">{staff.name}</span>
-												</div>
-											{/each}
-										</div>
-									{:else}
-										<span class="text-surface-950/60 text-sm">No staff assigned</span>
-									{/if}
-								</div>
-							</div>
-						</div>
-					{/each}
-				</div>
-			{:else}
-				<div class="card bg-surface-50 border border-surface-200 rounded-container">
-					<div class="p-4 py-6 text-center text-surface-950/70">
-						No staff assigned.
-					</div>
-				</div>
-			{/if}
-		</section>
-
-		<!-- Station activity (real-time via Reverb) -->
+		<!-- Station activity (real-time): max 20 items, scroll to see all (~5 visible). -->
 		<section>
 			<h2 class="text-xl font-bold text-surface-950 mb-3">RECENT ACTIVITY</h2>
 			{#if activityFeed.length > 0}
-				<div class="card bg-surface-50 border border-surface-200 rounded-container">
-					<ul class="divide-y divide-surface-200">
-						{#each activityFeed as item, i (String(i) + (item.created_at ?? '') + (item.alias ?? '') + (item.station_name ?? ''))}
+				<div class="card bg-surface-50 border border-surface-200 rounded-container overflow-hidden">
+					<ul class="divide-y divide-surface-200 max-h-[12rem] overflow-y-auto" aria-label="Recent activity">
+						{#each visibleActivity as item, i (String(i) + (item.created_at ?? '') + (item.alias ?? '') + (item.station_name ?? ''))}
 							<li class="px-4 py-2 flex justify-between items-center gap-2">
 								<span class="text-surface-950/90">
 									<span class="font-semibold text-surface-950">{item.station_name}:</span> {item.message}
@@ -240,5 +431,35 @@
 				</div>
 			{/if}
 		</section>
+		</div>
 	</div>
+
+	<!-- Fixed footer: staff and availability only, with photo. -->
+	<footer
+		class="fixed bottom-0 left-0 right-0 z-30 px-4 py-3 bg-surface-800 text-surface-100 shadow-[0_-4px_12px_rgba(0,0,0,0.08)]"
+		aria-label="Staff on duty"
+	>
+		<div class="flex flex-wrap items-center gap-3">
+			<span class="text-xs font-semibold uppercase tracking-wider text-surface-300 shrink-0 self-center">Staff on duty</span>
+			{#if staffForBar.length > 0}
+				<div class="flex flex-wrap items-center gap-3" aria-label="Staff availability">
+					{#each staffForBar as s (s.name + (s.station_name ?? '') + (s.availability_status ?? ''))}
+						<div
+							class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-700/80 text-surface-100"
+							title="{s.name} — {availabilityLabel(s.availability_status)}"
+						>
+							<UserAvatar user={s} size="sm" />
+							<span
+								class="w-2 h-2 rounded-full shrink-0 {availabilityDotClass(s.availability_status)}"
+								aria-label="{availabilityLabel(s.availability_status)}"
+							></span>
+							<span class="text-sm max-w-[6rem] truncate">{s.name}</span>
+						</div>
+					{/each}
+				</div>
+			{:else}
+				<span class="text-xs text-surface-400">No staff assigned</span>
+			{/if}
+		</div>
+	</footer>
 </DisplayLayout>

@@ -50,6 +50,7 @@ class StationController extends Controller
 
     /**
      * Update station.
+     * Per ISSUES-ELABORATION §17: when deactivating, include warning if station's processes are used in track steps.
      */
     public function update(UpdateStationRequest $request, Station $station): JsonResponse
     {
@@ -63,7 +64,24 @@ class StationController extends Controller
             $station->processes()->sync($processIds);
         }
 
-        return response()->json(['station' => $this->stationResource($station->fresh())]);
+        $station = $station->fresh();
+        $payload = ['station' => $this->stationResource($station)];
+
+        if (($data['is_active'] ?? true) === false) {
+            $stationProcessIds = $station->processes()->pluck('processes.id')->all();
+            if (! empty($stationProcessIds)) {
+                $programTrackIds = $station->program->serviceTracks()->pluck('id')->all();
+                $usedInTracks = TrackStep::query()
+                    ->whereIn('process_id', $stationProcessIds)
+                    ->whereIn('track_id', $programTrackIds)
+                    ->exists();
+                if ($usedInTracks) {
+                    $payload['warning'] = "This station's processes are used in track steps. Deactivating may prevent tracks from completing.";
+                }
+            }
+        }
+
+        return response()->json($payload);
     }
 
     /**

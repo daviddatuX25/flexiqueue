@@ -32,30 +32,38 @@ class DisplayBoardService
                 'station_activity' => [],
                 'staff_at_stations' => [],
                 'staff_online' => 0,
+                'display_scan_timeout_seconds' => 20,
+                'program_is_paused' => false,
             ];
         }
 
         $servingAndCalled = Session::query()
             ->where('program_id', $program->id)
             ->whereIn('status', ['serving', 'called'])
-            ->with(['currentStation', 'serviceTrack'])
+            ->with(['currentStation', 'serviceTrack.trackSteps.process'])
             ->orderBy('started_at')
             ->get();
 
         $waiting = Session::query()
             ->where('program_id', $program->id)
             ->where('status', 'waiting')
-            ->with('currentStation')
+            ->with(['currentStation', 'serviceTrack.trackSteps.process'])
             ->orderBy('station_queue_position')
             ->orderBy('started_at')
             ->get();
 
-        $nowServing = $servingAndCalled->map(fn (Session $s) => [
-            'alias' => $s->alias,
-            'status' => $s->status,
-            'station_name' => $s->currentStation?->name ?? '—',
-            'track' => $s->serviceTrack?->name ?? '—',
-        ])->values()->all();
+        $nowServing = $servingAndCalled->map(function (Session $s) {
+            $process = $this->currentProcessForSession($s);
+
+            return [
+                'alias' => $s->alias,
+                'status' => $s->status,
+                'station_name' => $s->currentStation?->name ?? '—',
+                'track' => $s->serviceTrack?->name ?? '—',
+                'process_id' => $process ? $process['process_id'] : null,
+                'process_name' => $process ? $process['process_name'] : null,
+            ];
+        })->values()->all();
 
         $byStationServing = $servingAndCalled->groupBy('current_station_id');
         $byStationWaiting = $waiting->groupBy('current_station_id');
@@ -67,9 +75,18 @@ class DisplayBoardService
                 ?? $byStationWaiting->get($stationId)?->first()?->currentStation;
             $servingAtStation = $byStationServing->get($stationId) ?? collect();
             $waitingAtStation = $byStationWaiting->get($stationId) ?? collect();
+            $waitingClients = $waitingAtStation->map(function (Session $s) {
+                $process = $this->currentProcessForSession($s);
+
+                return [
+                    'alias' => $s->alias,
+                    'process_name' => $process ? $process['process_name'] : null,
+                ];
+            })->values()->all();
             $waitingByStation[] = [
                 'station_name' => $station?->name ?? '—',
                 'aliases' => $waitingAtStation->pluck('alias')->values()->all(),
+                'waiting_clients' => $waitingClients,
                 'count' => $waitingAtStation->count(),
                 'serving_count' => $servingAtStation->count(),
                 'client_capacity' => (int) ($station?->client_capacity ?? 1),
@@ -92,9 +109,11 @@ class DisplayBoardService
             'staff' => $s->assignedStaff->map(fn (User $u) => [
                 'name' => $u->name,
                 'avatar_url' => $u->avatar_url,
+                'availability_status' => $u->availability_status ?? 'offline',
             ])->values()->all(),
         ])->values()->all();
 
+        // Queue/process fallbacks: only 'available' counts; offline/away = not on duty. Logout sets user to 'away'.
         $staffOnline = User::query()
             ->whereNotNull('assigned_station_id')
             ->where('is_active', true)
@@ -110,11 +129,34 @@ class DisplayBoardService
             'station_activity' => $stationActivity,
             'staff_at_stations' => $staffAtStations,
             'staff_online' => $staffOnline,
+            'display_scan_timeout_seconds' => $program->getDisplayScanTimeoutSeconds(),
+            'program_is_paused' => (bool) $program->is_paused,
         ];
     }
 
     /**
-     * Get last N station activities (call, check_in) for display.
+     * Resolve current process for a session from track step at current_step_order.
+     * Per flexiqueue-ui3: show which queue/process each client is in on display.
+     *
+     * @return array{process_id: int, process_name: string}|null
+     */
+    private function currentProcessForSession(Session $s): ?array
+    {
+        $track = $s->serviceTrack;
+        if (! $track || ! $track->relationLoaded('trackSteps')) {
+            return null;
+        }
+        $order = (int) ($s->current_step_order ?? 1);
+        $step = $track->trackSteps->firstWhere('step_order', $order);
+
+        return $step && $step->process
+            ? ['process_id' => $step->process->id, 'process_name' => $step->process->name]
+            : null;
+    }
+
+    /**
+     * Get last N station activities (bind, call, check_in) for display.
+     * Per ISSUES-ELABORATION §10: include bind so "Recent activity" stays in sync after realtime refresh.
      *
      * @param  array<int>  $stationIds
      * @return array<int, array{station_name: string, message: string, alias: string, action_type: string, created_at: string}>
@@ -126,8 +168,13 @@ class DisplayBoardService
         }
 
         $logs = TransactionLog::query()
-            ->whereIn('station_id', $stationIds)
-            ->whereIn('action_type', ['call', 'check_in'])
+            ->whereIn('action_type', ['call', 'check_in', 'bind'])
+            ->where(function ($q) use ($stationIds) {
+                $q->whereIn('station_id', $stationIds)
+                    ->orWhere(function ($q2) use ($stationIds) {
+                        $q2->where('action_type', 'bind')->whereIn('next_station_id', $stationIds);
+                    });
+            })
             ->with(['session', 'station'])
             ->orderByDesc('created_at')
             ->limit($limit)
@@ -137,13 +184,16 @@ class DisplayBoardService
 
         return $logs->map(function (TransactionLog $log) use ($stations) {
             $session = $log->session;
-            $station = $log->station ?? $stations->get($log->station_id);
+            $stationId = $log->station_id ?? $log->next_station_id;
+            $station = $log->station ?? $stations->get($stationId);
             $alias = $session?->alias ?? '—';
             $stationName = $station?->name ?? '—';
 
+            // Only indicate "priority lane" when the client has a priority classification (PWD/Senior/Pregnant), not when the program is merely priority-first.
             $isPriority = $session?->isPriorityCategory() ?? false;
 
             $message = match ($log->action_type) {
+                'bind' => "{$alias} registered at triage",
                 'call' => $isPriority ? "{$alias} called from priority lane" : "{$alias} called",
                 'check_in' => "{$alias} arrived (serving)",
                 default => "{$alias} — {$log->action_type}",
