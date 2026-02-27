@@ -15,7 +15,7 @@
 </script>
 
 <div
-	class="rounded-lg border-2 border-primary-300 bg-primary-50/90 w-full h-full min-w-[220px] min-h-[220px] flex flex-col shadow-md overflow-hidden"
+	class="rounded-lg border-2 border-primary-300 bg-primary-50/90 w-full h-full min-w-[220px] min-h-[220px] flex flex-col shadow-md overflow-visible"
 	data-id={id}
 >
 	<!-- Top zone: process boxes are pre-placed and dragged only within this dotted area -->

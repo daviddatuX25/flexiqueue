@@ -2,12 +2,12 @@
 	/**
 	 * Inner diagram content: uses Svelte Flow hooks for load/save and drop. Per plan 1.5, 1.6.
 	 */
-	import { setContext } from 'svelte';
+import { setContext } from 'svelte';
 	import { tick } from 'svelte';
-	import { get, writable } from 'svelte/store';
+	import { writable } from 'svelte/store';
 	import { SvelteFlow, Background, Controls, Panel } from '@xyflow/svelte';
-	import type { Node } from '@xyflow/svelte';
-	import { useNodes, useEdges, useViewport, useSvelteFlow } from '@xyflow/svelte';
+	import type { Node, Edge } from '@xyflow/svelte';
+	import { useViewport, useSvelteFlow } from '@xyflow/svelte';
 	import { toast } from '../../stores/toastStore.js';
 	import StationNode from './nodes/StationNode.svelte';
 	import TrackNode from './nodes/TrackNode.svelte';
@@ -17,8 +17,8 @@
 	import ShapeNode from './nodes/ShapeNode.svelte';
 	import TextNode from './nodes/TextNode.svelte';
 	import ImageNode from './nodes/ImageNode.svelte';
-	import StationGroupNode from './nodes/StationGroupNode.svelte';
-	import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
+import StationGroupNode from './nodes/StationGroupNode.svelte';
+import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 	import DottedFlowEdge from './edges/DottedFlowEdge.svelte';
 
 	interface LayoutShape {
@@ -113,95 +113,88 @@
 		dottedFlow: DottedFlowEdge,
 	};
 
-	const { current: nodesCurrent, set: setNodes, update: updateNodes } = useNodes();
-	const { current: edgesCurrent, set: setEdges } = useEdges();
-	const { current: viewportCurrent, set: setViewport } = useViewport();
+	// Pattern A: parent owns nodes/edges as $state.raw + bind: — avoids both structuredClone
+	// errors (from toObject()) and derived_references_self circular deps from hook getters.
+	// $state.raw skips deep proxying so no cloning issues; bind: keeps SvelteFlow in sync.
+	let ownNodes = $state.raw<Node[]>([]);
+	let ownEdges = $state.raw<Edge[]>([]);
+	const { set: setViewport } = useViewport();
 	const svelteFlow = useSvelteFlow();
 
 	let saving = $state(false);
-	/** Edge id that is in bend mode (double-clicked, shows draggable midpoint). */
+	let saveStatus = $state<'idle' | 'saving' | 'saved' | 'error'>('idle');
+	let saveStatusTimeout: ReturnType<typeof setTimeout> | null = null;
+	let publishing = $state(false);
+	let autoSaveTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	/** Edge bending state: which edge is currently in bend mode, and per-edge layout metadata. */
 	const bendingEdgeIdStore = writable<string | null>(null);
-	/** Persisted waypoints for edges (survives derivation). */
-	let edgeWaypoints = $state<Map<string, { x: number; y: number }>>(new Map());
-
-	/** Undo/redo history: use stores so Svelte does not clone (avoids DataCloneError on assign). */
-	type HistoryEntryPlain = { nodes: unknown[]; viewport: { x: number; y: number; zoom: number }; edgeWaypoints: Array<[string, { x: number; y: number }]> };
-	const historyStore = writable<HistoryEntryPlain[]>([]);
-	const historyIndexStore = writable(-1);
-	const MAX_HISTORY = 50;
-	let isRestoring = $state(false);
-
-	function serializeState(): HistoryEntryPlain {
-		const { nodes, viewport } = svelteFlow.toObject();
-		return {
-			nodes: JSON.parse(JSON.stringify(nodes ?? [])),
-			viewport: viewport && typeof viewport.x === 'number' ? { x: viewport.x, y: viewport.y ?? 0, zoom: viewport.zoom ?? 1 } : { x: 0, y: 0, zoom: 1 },
-			edgeWaypoints: [...edgeWaypoints.entries()],
-		};
-	}
-	function entryToWaypointsMap(entry: HistoryEntryPlain): Map<string, { x: number; y: number }> {
-		return new Map(entry.edgeWaypoints);
-	}
-	function pushHistory() {
-		if (readOnly || isRestoring) return;
-		queueMicrotask(() => {
-			let snap: HistoryEntryPlain;
-			try {
-				snap = serializeState();
-			} catch {
-				return;
-			}
-			const h = get(historyStore);
-			const idx = get(historyIndexStore);
-			const next = idx + 1;
-			let newHistory = next < h.length ? h.slice(0, next) : [...h];
-			newHistory = [...newHistory, snap];
-			if (newHistory.length > MAX_HISTORY) newHistory = newHistory.slice(-MAX_HISTORY);
-			historyStore.set(newHistory);
-			historyIndexStore.set(newHistory.length - 1);
-		});
-	}
-	function undo() {
-		if ($historyIndexStore <= 0) return;
-		isRestoring = true;
-		historyIndexStore.update((i) => i - 1);
-		const e = get(historyStore)[get(historyIndexStore)];
-		if (e) {
-			setNodes(e.nodes as Parameters<typeof setNodes>[0]);
-			setViewport(e.viewport);
-			edgeWaypoints = entryToWaypointsMap(e);
+	let edgeWaypoints = new Map<string, { x: number; y: number }[]>();
+	let edgeEndpointMeta = new Map<
+		string,
+		{
+			sourceSide?: 'top' | 'right' | 'bottom' | 'left';
+			sourceOffset?: number;
+			targetSide?: 'top' | 'right' | 'bottom' | 'left';
+			targetOffset?: number;
 		}
-		isRestoring = false;
-	}
-	function redo() {
-		if ($historyIndexStore >= $historyStore.length - 1) return;
-		isRestoring = true;
-		historyIndexStore.update((i) => i + 1);
-		const e = get(historyStore)[get(historyIndexStore)];
-		if (e) {
-			setNodes(e.nodes as Parameters<typeof setNodes>[0]);
-			setViewport(e.viewport);
-			edgeWaypoints = entryToWaypointsMap(e);
+	>();
+	let edgeLayoutVersion = $state(0);
+
+	function setSaveStatus(status: 'idle' | 'saving' | 'saved' | 'error') {
+		if (saveStatusTimeout) clearTimeout(saveStatusTimeout);
+		saveStatus = status;
+		if (status === 'saved' || status === 'error') {
+			saveStatusTimeout = setTimeout(() => {
+				saveStatus = 'idle';
+			}, 3000);
 		}
-		isRestoring = false;
 	}
-	const canUndo = $derived($historyIndexStore > 0);
-	const canRedo = $derived($historyIndexStore < $historyStore.length - 1 && $historyStore.length > 0);
 
 	setContext('diagramFlow', {
 		bendingEdgeIdStore,
-		onWaypointUpdate(id: string, waypoint: { x: number; y: number }) {
-			edgeWaypoints = new Map(edgeWaypoints).set(id, waypoint);
-			svelteFlow.updateEdge(id, (e) => ({ ...e, data: { ...(e.data ?? {}), waypoint } }));
-			pushHistory();
+		onWaypointUpdate(id: string, waypoints: { x: number; y: number }[]) {
+			edgeWaypoints = new Map(edgeWaypoints).set(id, waypoints);
+			edgeLayoutVersion++;
+			scheduleAutoSave('bend-edge');
+		},
+		onEndpointUpdate(
+			id: string,
+			payload: {
+				sourceSide?: 'top' | 'right' | 'bottom' | 'left';
+				sourceOffset?: number;
+				targetSide?: 'top' | 'right' | 'bottom' | 'left';
+				targetOffset?: number;
+			}
+		) {
+			edgeEndpointMeta = new Map(edgeEndpointMeta).set(id, payload);
+			edgeLayoutVersion++;
+			scheduleAutoSave('endpoint-drag');
 		},
 		get readOnly() {
 			return readOnly;
 		},
-		pushHistory,
 	});
 	let imageUploading = $state(false);
-	let imageInputEl: HTMLInputElement | undefined = $state();
+	let imageInputEl = $state<HTMLInputElement | undefined>(undefined);
+
+	function scheduleAutoSave(reason?: string) {
+		if (readOnly || !programId) return;
+		if (autoSaveTimeout) {
+			clearTimeout(autoSaveTimeout);
+		}
+		autoSaveTimeout = setTimeout(() => {
+			// If a save is already in progress, try again shortly after it finishes.
+			if (saving) {
+				scheduleAutoSave(reason);
+				return;
+			}
+			handleSave();
+		}, 800);
+		if (reason) {
+			console.debug?.('Scheduling diagram auto-save:', reason);
+		}
+	}
 
 	/** Tracks last loaded layout so we only reset when layoutFromApi actually changes (not when entityLookups/staffList loads). */
 	let lastLoadedLayoutRef = $state<LayoutShape | null | undefined>(undefined);
@@ -210,93 +203,137 @@
 		if (!layout || layout === lastLoadedLayoutRef) return;
 		lastLoadedLayoutRef = layout;
 		const sanitized = initialLayout ?? layout;
-		const nodes = Array.isArray(sanitized.nodes) ? sanitized.nodes : [];
-		const edges = Array.isArray(sanitized.edges) ? sanitized.edges : [];
+		const loadedNodes = Array.isArray(sanitized.nodes) ? sanitized.nodes : [];
+		const loadedEdges = Array.isArray(sanitized.edges) ? sanitized.edges : [];
 		const vp = sanitized.viewport ?? layout.viewport;
-		if (Array.isArray(edges) && edges.length > 0) {
-			const map = new Map<string, { x: number; y: number }>();
-			for (const e of edges) {
-				const ed = e as { id?: string; data?: { waypoint?: { x: number; y: number } } };
-				if (ed.id && ed.data?.waypoint) map.set(ed.id, ed.data.waypoint);
+		if (loadedEdges.length > 0) {
+			const waypointMap = new Map<string, { x: number; y: number }[]>();
+			const endpointMap = new Map<
+				string,
+				{
+					sourceSide?: 'top' | 'right' | 'bottom' | 'left';
+					sourceOffset?: number;
+					targetSide?: 'top' | 'right' | 'bottom' | 'left';
+					targetOffset?: number;
+				}
+			>();
+			for (const e of loadedEdges) {
+				const edge = e as {
+					id?: string;
+					data?: {
+						waypoint?: { x: number; y: number };
+						waypoints?: { x: number; y: number }[];
+						sourceSide?: 'top' | 'right' | 'bottom' | 'left';
+						sourceOffset?: number;
+						targetSide?: 'top' | 'right' | 'bottom' | 'left';
+						targetOffset?: number;
+					};
+				};
+				if (!edge.id || !edge.data) continue;
+				if (Array.isArray(edge.data.waypoints) && edge.data.waypoints.length) {
+					waypointMap.set(
+						edge.id,
+						edge.data.waypoints.map((wp) => ({ x: wp.x, y: wp.y }))
+					);
+				} else if (edge.data.waypoint) {
+					waypointMap.set(edge.id, [{ x: edge.data.waypoint.x, y: edge.data.waypoint.y }]);
+				}
+				const { sourceSide, sourceOffset, targetSide, targetOffset } = edge.data;
+				if (
+					sourceSide ||
+					targetSide ||
+					typeof sourceOffset === 'number' ||
+					typeof targetOffset === 'number'
+				) {
+					endpointMap.set(edge.id, { sourceSide, sourceOffset, targetSide, targetOffset });
+				}
 			}
-			edgeWaypoints = map;
+			edgeWaypoints = waypointMap;
+			edgeEndpointMeta = endpointMap;
+			edgeLayoutVersion++;
 		} else {
 			edgeWaypoints = new Map();
+			edgeEndpointMeta = new Map();
+			edgeLayoutVersion++;
 		}
-		isRestoring = true;
-		setNodes(nodes as Parameters<typeof setNodes>[0]);
-		setEdges(edges as Parameters<typeof setEdges>[0]);
+		ownNodes = loadedNodes as unknown as Node[];
+		ownEdges = [];
 		if (vp && typeof vp.x === 'number' && typeof vp.y === 'number' && typeof vp.zoom === 'number') {
 			setViewport({ x: vp.x, y: vp.y, zoom: vp.zoom });
 		}
-		isRestoring = false;
-		queueMicrotask(async () => {
-			await tick();
-			const snap = serializeState();
-			historyStore.set([snap]);
-			historyIndexStore.set(0);
-		});
 	});
 
-	/** When no saved layout, initialize history with empty snapshot so undo/redo work after first user action. */
+	/** Diagram v2: derive flow edges from track steps and process handle nodes.
+	 * If a track is selected, show only that track; otherwise show all tracks.
+	 * Waypoints (edge bends) come from edgeWaypoints, keyed by edge id. */
 	$effect(() => {
-		if (layoutFromApi != null) return;
-		if ($historyStore.length > 0) return;
-		queueMicrotask(async () => {
-			await tick();
-			const snap = serializeState();
-			historyStore.set([snap]);
-			historyIndexStore.set(0);
+		const _version = edgeLayoutVersion;
+		const tracksToShow = selectedTrackId == null ? tracks : tracks.filter((t) => t.id === selectedTrackId);
+		if (!tracksToShow.length) {
+			ownEdges = [];
+			return;
+		}
+		const currentNodes = ownNodes as Array<{ id: string; type?: string; data?: Record<string, unknown> }>;
+		// Map process_id -> first process_handle node id. Track steps only carry process_id,
+		// so we connect based on the process sequence, not specific stations.
+		const handleMap = new Map<number, string>();
+		for (const n of currentNodes) {
+			if (n.type !== 'process_handle' || !n.data) continue;
+			const pid = n.data.processId as number | undefined;
+			if (pid == null || Number.isNaN(pid)) continue;
+			if (!handleMap.has(pid)) handleMap.set(pid, n.id);
+		}
+		const palette = ['var(--color-primary-500)', 'var(--color-secondary-500)', 'var(--color-tertiary-500)'];
+		const baseEdges: Array<{
+			id: string;
+			source: string;
+			target: string;
+			type: string;
+			data?: {
+				trackColor?: string;
+				waypoints?: { x: number; y: number }[];
+				sourceSide?: 'top' | 'right' | 'bottom' | 'left';
+				sourceOffset?: number;
+				targetSide?: 'top' | 'right' | 'bottom' | 'left';
+				targetOffset?: number;
+			};
+		}> = [];
+		tracksToShow.forEach((track, trackIndex) => {
+			const steps = track.steps;
+			if (!steps || steps.length < 2) return;
+			const sortedSteps = [...steps].sort(
+				(a, b) => ((a as { step_order?: number }).step_order ?? 0) - ((b as { step_order?: number }).step_order ?? 0)
+			);
+			const color = palette[trackIndex % palette.length];
+			for (let i = 0; i < sortedSteps.length - 1; i++) {
+				const a = sortedSteps[i] as { process_id: number };
+				const b = sortedSteps[i + 1] as { process_id: number };
+				const sourceId = handleMap.get(a.process_id);
+				const targetId = handleMap.get(b.process_id);
+				if (sourceId && targetId) {
+					const edgeId = `flow-${track.id}-${a.process_id}-${b.process_id}-${i}`;
+					const waypoints = edgeWaypoints.get(edgeId);
+					const endpoints = edgeEndpointMeta.get(edgeId);
+					baseEdges.push({
+						id: edgeId,
+						source: sourceId,
+						target: targetId,
+						type: 'dottedFlow',
+						data: {
+							trackColor: color,
+							...(waypoints && waypoints.length ? { waypoints } : {}),
+							...(endpoints ?? {}),
+						},
+					});
+				}
+			}
 		});
-	});
-
-	/** Diagram v2: when a track is selected, derive flow edges from track steps and process handle nodes. Merge waypoints from edgeWaypoints and current edges. */
-	$effect(() => {
-		if (selectedTrackId == null) {
-			setEdges([]);
-			return;
-		}
-		const track = tracks.find((t) => t.id === selectedTrackId);
-		const steps = track?.steps;
-		if (!steps || steps.length < 2) {
-			setEdges([]);
-			return;
-		}
-		const nodes = nodesCurrent as Array<{ id: string; type?: string; data?: Record<string, unknown> }>;
-		const handleMap = new Map<string, string>();
-		for (const n of nodes) {
-			if (n.type === 'process_handle' && n.data) {
-				const sid = n.data.stationId as number | undefined;
-				const pid = n.data.processId as number | undefined;
-				if (sid != null && pid != null) handleMap.set(`${sid},${pid}`, n.id);
-			}
-		}
-		const sortedSteps = [...steps].sort(
-			(a, b) => ((a as { step_order?: number }).step_order ?? 0) - ((b as { step_order?: number }).step_order ?? 0)
-		);
-		const baseEdges: Array<{ id: string; source: string; target: string; type: string; data?: { waypoint?: { x: number; y: number } } }> = [];
-		for (let i = 0; i < sortedSteps.length - 1; i++) {
-			const a = sortedSteps[i] as { station_id: number; process_id: number; id?: number };
-			const b = sortedSteps[i + 1] as { station_id: number; process_id: number; id?: number };
-			const sourceId = handleMap.get(`${a.station_id},${a.process_id}`);
-			const targetId = handleMap.get(`${b.station_id},${b.process_id}`);
-			if (sourceId && targetId) {
-				const edgeId = `dotted-${a.station_id}-${a.process_id}-${b.station_id}-${b.process_id}-${i}`;
-				const wp = edgeWaypoints.get(edgeId) ?? (edgesCurrent as Array<{ id: string; data?: { waypoint?: { x: number; y: number } } }>).find((e) => e.id === edgeId)?.data?.waypoint;
-				baseEdges.push({
-					id: edgeId,
-					source: sourceId,
-					target: targetId,
-					type: 'dottedFlow',
-					...(wp ? { data: { waypoint: wp } } : {}),
-				});
-			}
-		}
-		setEdges(baseEdges as Parameters<typeof setEdges>[0]);
+		ownEdges = baseEdges as unknown as Edge[];
 	});
 
 	function handleDrop(e: DragEvent) {
 		e.preventDefault();
+		e.stopPropagation();
 		if (readOnly) return;
 		const raw = e.dataTransfer?.getData('application/json');
 		if (!raw) return;
@@ -305,7 +342,10 @@
 			const type = payload.type ?? 'station';
 			const allowed = ['station', 'track', 'process', 'staff', 'client_seat', 'shape', 'text', 'image'];
 			if (!allowed.includes(type)) return;
-			const position = svelteFlow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+			let position = svelteFlow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+			if (!position || typeof position.x !== 'number' || typeof position.y !== 'number' || Number.isNaN(position.x) || Number.isNaN(position.y)) {
+				position = { x: 0, y: 0 };
+			}
 
 			if (type === 'station' && payload.entityId != null && stations.length > 0) {
 				const station = stations.find((s) => s.id === payload.entityId);
@@ -367,8 +407,8 @@
 						data: { stationId: station.id, processId, label, side, indexOnSide },
 					});
 				}
-				updateNodes((nodes) => [...nodes, parentNode, ...processHandleNodes] as Node[]);
-				pushHistory();
+			ownNodes = [...ownNodes, parentNode as unknown as Node, ...(processHandleNodes as unknown as Node[])];
+			scheduleAutoSave('drop-station-group');
 				return;
 			}
 
@@ -390,8 +430,8 @@
 				position,
 				data,
 			};
-			updateNodes((nodes) => [...nodes, newNode]);
-			pushHistory();
+			ownNodes = [...ownNodes, newNode as unknown as Node];
+			scheduleAutoSave('drop-node');
 		} catch {
 			// ignore invalid JSON
 		}
@@ -399,15 +439,21 @@
 
 	function handleDragOver(e: DragEvent) {
 		e.preventDefault();
+		e.stopPropagation();
 		if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
 	}
 
 	async function handleSave() {
 		if (!programId) return;
 		saving = true;
+		setSaveStatus('saving');
 		try {
 			await tick();
-			const { nodes, edges, viewport } = svelteFlow.toObject();
+			// Read directly from $state.raw owned arrays — no structuredClone issues,
+			// no circular deps. JSON round-trip strips any remaining reactive proxy wrappers.
+			const nodes = JSON.parse(JSON.stringify(ownNodes)) as Array<Record<string, unknown>>;
+			const edges = JSON.parse(JSON.stringify(ownEdges)) as Array<Record<string, unknown>>;
+			const viewport = svelteFlow.getViewport() as { x?: number; y?: number; zoom?: number } | undefined;
 			/** Sanitize nodes: backend requires id, type, position{x,y}; station_group needs entityId; process_handle needs data.stationId, data.processId. */
 			const sanitizedNodes = ((nodes ?? []) as Array<Record<string, unknown>>).map((n) => {
 				const pos = (n.position as { x?: number; y?: number }) ?? {};
@@ -438,7 +484,7 @@
 				if (n.height != null && typeof n.height === 'number') obj.height = n.height;
 				return obj;
 			});
-			/** Sanitize edges: include only id, source, target, type, data (for waypoints). */
+			/** Sanitize edges: include only id, source, target, type, data (for trackColor/waypoint). */
 			const rawEdges = (edges ?? []) as Array<Record<string, unknown>>;
 			const sanitizedEdges = rawEdges.map((e) => ({
 				id: String(e.id ?? ''),
@@ -447,6 +493,7 @@
 				type: e.type ?? 'dottedFlow',
 				...(e.data && typeof e.data === 'object' ? { data: e.data } : {}),
 			}));
+
 			const layout: Record<string, unknown> = {
 				nodes: sanitizedNodes,
 				edges: sanitizedEdges,
@@ -459,6 +506,7 @@
 					(document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content) ||
 				'';
 			if (!csrf) {
+				setSaveStatus('error');
 				toast('Missing CSRF token. Refresh the page and try again.', 'error');
 				return;
 			}
@@ -475,17 +523,33 @@
 			});
 			const data = await res.json().catch(() => ({}));
 			if (res.ok) {
-				toast('Diagram saved.', 'success');
+				setSaveStatus('saved');
 			} else {
 				const errMsg = data?.message as string | undefined;
 				const errs = data?.errors as Record<string, string[]> | undefined;
-				const firstErr = errs && typeof errs === 'object'
-					? (Object.values(errs).flat()[0] as string | undefined)
-					: undefined;
-				toast(firstErr || errMsg || `Failed to save diagram (${res.status}).`, 'error');
+				const firstErr =
+					errs && typeof errs === 'object'
+						? (Object.values(errs).flat()[0] as string | undefined)
+						: undefined;
+				let message: string;
+				if (firstErr) {
+					message = firstErr;
+				} else if (errMsg) {
+					message = errMsg;
+				} else if (res.status === 419) {
+					message = 'Session expired. Refresh the page and try again.';
+				} else if (res.status >= 500) {
+					message = 'Failed to save diagram (server error). Please try again or contact support.';
+				} else {
+					message = `Failed to save diagram (${res.status}).`;
+				}
+			console.error?.('Failed to save diagram response', res.status, data);
+			setSaveStatus('error');
+			toast(message, 'error');
 			}
-		} catch {
-			toast('Failed to save diagram.', 'error');
+	} catch (err) {
+		setSaveStatus('error');
+		toast('Failed to save diagram. Check your connection and try again.', 'error');
 		} finally {
 			saving = false;
 		}
@@ -515,17 +579,17 @@
 			});
 			const data = await res.json().catch(() => ({}));
 			if (res.ok && data?.url) {
-				updateNodes((nodes) => [
-					...nodes,
+				ownNodes = [
+					...ownNodes,
 					{
 						id: crypto.randomUUID(),
 						type: 'image',
 						position: { x: 100, y: 100 },
 						data: { url: data.url },
-					},
-				]);
-				pushHistory();
+					} as unknown as Node,
+				];
 				toast('Image added.', 'success');
+				scheduleAutoSave('image-upload');
 			} else {
 				toast((data?.message as string) || 'Failed to upload image.', 'error');
 			}
@@ -535,26 +599,6 @@
 			imageUploading = false;
 			input.value = '';
 		}
-	}
-
-	const selectedNodeIds = $derived(
-		(nodesCurrent as Array<{ id: string; selected?: boolean }>).filter((n) => n.selected).map((n) => n.id)
-	);
-
-	function bringSelectedToFront() {
-		const nodes = nodesCurrent as Array<{ id: string; zIndex?: number }>;
-		const maxZ = nodes.reduce((m, n) => Math.max(m, n.zIndex ?? 0), 0);
-		for (const id of selectedNodeIds) {
-			svelteFlow.updateNode(id, { zIndex: maxZ + 1 });
-		}
-		pushHistory();
-	}
-
-	function sendSelectedToBack() {
-		for (const id of selectedNodeIds) {
-			svelteFlow.updateNode(id, { zIndex: 0 });
-		}
-		pushHistory();
 	}
 
 	/** Keep process handles inside their zone (top or bottom dotted area) when drag stops. */
@@ -567,9 +611,17 @@
 		targetNode: { id: string; type?: string; parentId?: string; position?: { x: number; y: number }; data?: Record<string, unknown> };
 		nodes: Array<{ id: string; type?: string; parentId?: string; position?: { x: number; y: number }; width?: number; height?: number }>;
 	}) {
-		if (readOnly || !targetNode || targetNode.type !== 'process_handle' || !targetNode.parentId) return;
+		if (readOnly || !targetNode) return;
+		if (targetNode.type !== 'process_handle' || !targetNode.parentId) {
+			// Other node types (stations, shapes, etc.) still need auto-save.
+			scheduleAutoSave('node-drag');
+			return;
+		}
 		const parent = nodes.find((n) => n.id === targetNode.parentId);
-		if (!parent || typeof parent.width !== 'number' || typeof parent.height !== 'number') return;
+		if (!parent || typeof parent.width !== 'number' || typeof parent.height !== 'number') {
+			scheduleAutoSave('process-handle-drag-no-parent');
+			return;
+		}
 		const parentWidth = parent.width;
 		const parentHeight = parent.height;
 		const handleWidth = 80;
@@ -586,20 +638,87 @@
 		const y = side === 'top'
 			? Math.max(0, Math.min(topZoneYMax, pos.y))
 			: Math.max(bottomZoneYMin, Math.min(bottomZoneYMax, pos.y));
-		svelteFlow.updateNode(targetNode.id, { position: { x, y } });
-		svelteFlow.updateNodeData(targetNode.id, { ...(targetNode.data ?? {}), side });
-		pushHistory();
+		ownNodes = ownNodes.map((n) => {
+			if (n.id !== targetNode.id) return n;
+			return { ...n, position: { x, y }, data: { ...(n.data as Record<string, unknown> ?? {}), side } } as unknown as Node;
+		});
+		scheduleAutoSave('process-handle-drag');
+	}
+
+	function buildHandleKeySet(nodes: Array<{ type?: string; data?: Record<string, unknown> }>): Set<string> {
+		const keys = new Set<string>();
+		for (const node of nodes) {
+			if (node.type !== 'process_handle' || !node.data) continue;
+			const sidRaw = node.data.stationId as unknown;
+			const pidRaw = node.data.processId as unknown;
+			const sid = typeof sidRaw === 'number' ? sidRaw : parseInt(String(sidRaw ?? ''), 10);
+			const pid = typeof pidRaw === 'number' ? pidRaw : parseInt(String(pidRaw ?? ''), 10);
+			if (Number.isNaN(sid) || Number.isNaN(pid)) continue;
+			keys.add(`${sid},${pid}`);
+		}
+		return keys;
+	}
+
+	function validateDiagramForPublish(): { ok: boolean; errors: string[] } {
+		const errors: string[] = [];
+		const nodes = ownNodes as Array<{ type?: string; data?: Record<string, unknown> }>;
+		const handleKeys = buildHandleKeySet(nodes);
+
+		const checkedTracks =
+			selectedTrackId != null ? tracks.filter((t) => t.id === selectedTrackId) : tracks;
+
+		for (const track of checkedTracks) {
+			const steps = track.steps ?? [];
+			if (!Array.isArray(steps) || steps.length === 0) {
+				errors.push(`Track "${track.name}" has no steps configured.`);
+				continue;
+			}
+			for (const step of steps) {
+				const sid = (step as { station_id?: number }).station_id;
+				const pid = (step as { process_id?: number }).process_id;
+				if (sid == null || pid == null) {
+					errors.push(
+						`Track "${track.name}" has a step with missing station or process. Check track configuration.`
+					);
+					continue;
+				}
+				const key = `${sid},${pid}`;
+				if (!handleKeys.has(key)) {
+					errors.push(
+						`Track "${track.name}": step for station ${sid} / process ${pid} is missing from the diagram.`
+					);
+				}
+			}
+		}
+
+		return { ok: errors.length === 0, errors };
+	}
+
+	async function handlePublish() {
+		if (!programId) return;
+		publishing = true;
+		try {
+			const result = validateDiagramForPublish();
+			if (!result.ok) {
+				const first = result.errors[0] ?? 'Diagram is not ready to publish.';
+				console.warn?.('Diagram publish validation errors', result.errors);
+				toast(first, 'error');
+				return;
+			}
+			toast('Diagram passed publish checks.', 'success');
+		} finally {
+			publishing = false;
+		}
 	}
 </script>
 
-<svelte:window
-	onkeydown={(e) => {
-		if (readOnly) return;
-		const mod = e.ctrlKey || e.metaKey;
-		if (mod && e.key === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
-		if (mod && e.key === 'y') { e.preventDefault(); redo(); }
-	}}
-/>
+<style>
+	:global(.svelte-flow__edges) {
+		z-index: 10 !important;
+	}
+</style>
+
+<svelte:window />
 <div
 	class="min-h-[360px] w-full"
 	ondrop={handleDrop}
@@ -607,11 +726,14 @@
 	role="presentation"
 >
 <SvelteFlow
-	nodes={nodesCurrent}
-	edges={edgesCurrent}
+	bind:nodes={ownNodes}
+	bind:edges={ownEdges}
+	ondrop={handleDrop}
+	ondragover={handleDragOver}
 	deleteKey={['Backspace', 'Delete']}
 	nodeTypes={nodeTypes}
 	edgeTypes={edgeTypes}
+	zIndexMode="manual"
 	fitView={!initialLayout?.viewport}
 	initialViewport={initialLayout?.viewport ? { x: initialLayout.viewport.x ?? 0, y: initialLayout.viewport.y ?? 0, zoom: initialLayout.viewport.zoom ?? 1 } : undefined}
 	nodesDraggable={!readOnly}
@@ -622,7 +744,7 @@
 	}}
 	onpaneclick={() => bendingEdgeIdStore.set(null)}
 	onbeforedelete={() => {
-		pushHistory();
+		scheduleAutoSave('delete');
 		return Promise.resolve(true);
 	}}
 	zoomOnDoubleClick={false}
@@ -631,49 +753,24 @@
 	<Background />
 	<Controls />
 	{#if !readOnly}
+		<Panel position="bottom-center" class="pointer-events-none">
+			{#if saveStatus === 'saving'}
+				<div class="pointer-events-auto rounded bg-surface-100/80 px-3 py-1 text-xs shadow border border-surface-200">
+					Saving…
+				</div>
+			{:else if saveStatus === 'saved'}
+				<div class="pointer-events-auto rounded bg-surface-100/80 px-3 py-1 text-xs shadow border border-surface-200">
+					Saved
+				</div>
+			{:else if saveStatus === 'error'}
+				<div class="pointer-events-auto rounded bg-error-100/90 px-3 py-1 text-xs shadow border border-error-200 text-error-700">
+					Save failed
+				</div>
+			{/if}
+		</Panel>
+	{/if}
+	{#if !readOnly}
 	<Panel position="top-left" class="flex flex-col gap-2 max-w-[200px]">
-		<p class="text-xs font-semibold text-surface-700">Undo / Redo</p>
-		<div class="flex flex-wrap gap-1">
-			<button
-				type="button"
-				class="btn preset-tonal text-xs min-h-[32px] px-2"
-				disabled={!canUndo}
-				onclick={undo}
-				title="Undo"
-			>
-				Undo
-			</button>
-			<button
-				type="button"
-				class="btn preset-tonal text-xs min-h-[32px] px-2"
-				disabled={!canRedo}
-				onclick={redo}
-				title="Redo"
-			>
-				Redo
-			</button>
-		</div>
-		<p class="text-xs font-semibold text-surface-700">Layer</p>
-		<div class="flex flex-wrap gap-1">
-			<button
-				type="button"
-				class="btn preset-tonal text-xs min-h-[32px] px-2"
-				disabled={selectedNodeIds.length === 0}
-				onclick={bringSelectedToFront}
-				title="Bring selected to front"
-			>
-				Front
-			</button>
-			<button
-				type="button"
-				class="btn preset-tonal text-xs min-h-[32px] px-2"
-				disabled={selectedNodeIds.length === 0}
-				onclick={sendSelectedToBack}
-				title="Send selected to back"
-			>
-				Back
-			</button>
-		</div>
 		<p class="text-xs font-semibold text-surface-700">Flow (track)</p>
 		<div class="flex flex-wrap gap-1">
 			<button
@@ -696,13 +793,13 @@
 		<button
 			type="button"
 			class="btn preset-filled-primary-500 min-h-[40px]"
-			disabled={saving}
-			onclick={handleSave}
+			disabled={saving || publishing}
+			onclick={handlePublish}
 		>
-			{#if saving}
-				Saving...
+			{#if publishing}
+				Checking…
 			{:else}
-				Save diagram
+				Publish diagram
 			{/if}
 		</button>
 		<input

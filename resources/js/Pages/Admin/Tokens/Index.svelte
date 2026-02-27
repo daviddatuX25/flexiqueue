@@ -39,8 +39,6 @@
     let selectedIds = $state<Set<number>>(new Set());
     let selectAllCheckbox = $state<HTMLInputElement | null>(null);
     let selectAllCheckboxMobile = $state<HTMLInputElement | null>(null);
-    // Row actions dropdown (which token's menu is open; null = none)
-    let dropdownOpen = $state<number | null>(null);
     // Print modal (uniform flow: select template then print)
     let showPrintModal = $state(false);
     let printSettings = $state({
@@ -385,10 +383,6 @@
         }
     }
 
-    function handleWindowClick() {
-        dropdownOpen = null;
-    }
-
     // Load tokens on mount
     $effect(() => {
         fetchTokens();
@@ -406,8 +400,6 @@
 <svelte:head>
     <title>Tokens — FlexiQueue</title>
 </svelte:head>
-
-<svelte:window onclick={handleWindowClick} />
 
 <AdminLayout>
     <div class="flex flex-col gap-6">
@@ -619,7 +611,6 @@
                                 />
                             </th>
                             <th class="w-48 text-left">Physical ID</th>
-                            <th>QR Hash</th>
                             <th class="w-32">Status</th>
                             <th class="w-64 text-right">Actions</th>
                         </tr>
@@ -649,17 +640,12 @@
                                         </div>
                                     {/if}
                                 </td>
-                                <td
-                                    ><span
+                                <td>
+                                    <span
                                         class="font-mono font-bold text-surface-900"
-                                        >{token.physical_id}</span
-                                    ></td
-                                >
-                                <td
-                                    class="font-mono text-xs text-surface-600"
-                                    title={token.qr_code_hash}
-                                >
-                                    {token.qr_code_hash.slice(0, 12)}…
+                                    >
+                                        {token.physical_id}
+                                    </span>
                                 </td>
                                 <td>
                                     {#if token.status === "available"}
@@ -692,67 +678,52 @@
                                 </td>
                                 <td class="text-right">
                                     {#if !someSelected}
-                                        <div class="relative inline-block text-left" class:dropdown-open={dropdownOpen === token.id}>
+                                        <div class="flex items-center justify-end gap-2">
                                             <button
                                                 type="button"
-                                                class="btn btn-sm preset-tonal p-2 flex items-center justify-center hover:bg-surface-100 transition-colors"
-                                                onclick={(e) => { e.stopPropagation(); dropdownOpen = dropdownOpen === token.id ? null : token.id; }}
-                                                aria-label="Actions for {token.physical_id}"
+                                                class="btn btn-sm preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1.5 shadow-sm px-3 py-1.5 transition-colors"
+                                                onclick={() => openPrintModal([token.id])}
                                             >
-                                                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-surface-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                                                <Printer class="w-3.5 h-3.5" /> Print
                                             </button>
-                                            
-                                            {#if dropdownOpen === token.id}
-                                                <div class="absolute right-0 mt-2 w-48 bg-white rounded-container shadow-lg border border-surface-200 z-50 py-1">
-                                                    <button
-                                                        type="button"
-                                                        class="w-full text-left px-4 py-2 text-sm text-surface-700 hover:bg-surface-50 flex items-center gap-2"
-                                                        onclick={() => { dropdownOpen = null; openPrintModal([token.id]); }}
-                                                    >
-                                                        <Printer class="w-4 h-4" /> Print
-                                                    </button>
-                                                    
-                                                    {#if token.status === "in_use"}
-                                                        <button
-                                                            type="button"
-                                                            class="w-full text-left px-4 py-2 text-sm text-surface-700 hover:bg-surface-50 flex items-center gap-2"
-                                                            onclick={() => { dropdownOpen = null; setTokenStatus(token, "available"); }}
-                                                            disabled={submitting}
-                                                        >
-                                                            <CheckCircle2 class="w-4 h-4" /> Mark Available
-                                                        </button>
-                                                    {:else if token.status === "available"}
-                                                        <button
-                                                            type="button"
-                                                            class="w-full text-left px-4 py-2 text-sm text-surface-700 hover:bg-surface-50 flex items-center gap-2"
-                                                            onclick={() => { dropdownOpen = null; setTokenStatus(token, "deactivated"); }}
-                                                            disabled={submitting}
-                                                        >
-                                                            <Ban class="w-4 h-4" /> Deactivate
-                                                        </button>
-                                                    {:else if token.status === "deactivated"}
-                                                        <button
-                                                            type="button"
-                                                            class="w-full text-left px-4 py-2 text-sm text-surface-700 hover:bg-surface-50 flex items-center gap-2"
-                                                            onclick={() => { dropdownOpen = null; setTokenStatus(token, "available"); }}
-                                                            disabled={submitting}
-                                                        >
-                                                            <CheckCircle2 class="w-4 h-4" /> Activate
-                                                        </button>
-                                                    {/if}
-                                                    
-                                                    <hr class="border-surface-100 my-1" />
-                                                    
-                                                    <button
-                                                        type="button"
-                                                        class="w-full text-left px-4 py-2 text-sm text-error-600 hover:bg-error-50 flex items-center gap-2"
-                                                        onclick={() => { dropdownOpen = null; handleDeleteToken(token); }}
-                                                        disabled={submitting || token.status === "in_use"}
-                                                    >
-                                                        <Trash2 class="w-4 h-4" /> Delete
-                                                    </button>
-                                                </div>
+
+                                            {#if token.status === "in_use"}
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-sm preset-outlined bg-white text-surface-700 flex items-center gap-1.5 shadow-sm px-3 py-1.5 transition-colors"
+                                                    onclick={() => setTokenStatus(token, "available")}
+                                                    disabled={submitting}
+                                                >
+                                                    <CheckCircle2 class="w-3.5 h-3.5" /> Available
+                                                </button>
+                                            {:else if token.status === "available"}
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-sm preset-outlined bg-white text-surface-700 flex items-center gap-1.5 shadow-sm px-3 py-1.5 transition-colors"
+                                                    onclick={() => setTokenStatus(token, "deactivated")}
+                                                    disabled={submitting}
+                                                >
+                                                    <Ban class="w-3.5 h-3.5" /> Deactivate
+                                                </button>
+                                            {:else if token.status === "deactivated"}
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-sm preset-outlined bg-white text-surface-700 flex items-center gap-1.5 shadow-sm px-3 py-1.5 transition-colors"
+                                                    onclick={() => setTokenStatus(token, "available")}
+                                                    disabled={submitting}
+                                                >
+                                                    <CheckCircle2 class="w-3.5 h-3.5" /> Activate
+                                                </button>
                                             {/if}
+
+                                            <button
+                                                type="button"
+                                                class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center gap-1.5 shadow-sm px-3 py-1.5 transition-colors"
+                                                onclick={() => handleDeleteToken(token)}
+                                                disabled={submitting || token.status === "in_use"}
+                                            >
+                                                <Trash2 class="w-3.5 h-3.5" /> Delete
+                                            </button>
                                         </div>
                                     {/if}
                                 </td>
@@ -804,15 +775,9 @@
                                 <div>
                                     <span
                                         class="font-mono font-bold text-surface-900 block"
-                                        >{token.physical_id}</span
                                     >
-                                    <span
-                                        class="font-mono text-xs text-surface-500"
-                                        >{token.qr_code_hash.slice(
-                                            0,
-                                            12,
-                                        )}…</span
-                                    >
+                                        {token.physical_id}
+                                    </span>
                                 </div>
                             </div>
                             <div>
