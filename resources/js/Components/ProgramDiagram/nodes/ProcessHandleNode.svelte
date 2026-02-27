@@ -26,10 +26,10 @@
 	class="rounded border border-dashed border-surface-500 bg-surface-50 px-2 py-1 min-w-[80px] min-h-[28px] flex items-center justify-center text-xs font-medium text-surface-800 shadow-sm"
 	data-id={id}
 >
-	<Handle type="target" position={Position.Top} />
-	<Handle type="source" position={Position.Bottom} />
-	<Handle type="target" position={Position.Left} />
-	<Handle type="source" position={Position.Right} />
+	<Handle type="target" position={Position.Top} isConnectable={false} />
+	<Handle type="source" position={Position.Bottom} isConnectable={false} />
+	<Handle type="target" position={Position.Left} isConnectable={false} />
+	<Handle type="source" position={Position.Right} isConnectable={false} />
 	{#if editing}
 		<input
 			type="text"

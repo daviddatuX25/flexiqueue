@@ -63,6 +63,7 @@
 	const color = $derived((data as { trackColor?: string } | undefined)?.trackColor ?? 'var(--color-primary-500, #6366f1)');
 	const isBending = $derived(bendingEdgeId === id);
 	const showHandle = $derived(isBending && !ctx?.readOnly);
+	const showEndpointHandles = $derived(!ctx?.readOnly);
 
 	$effect(() => {
 		const store = ctx?.bendingEdgeIdStore;
@@ -80,6 +81,23 @@
 			waypoints = d.waypoints.map((wp) => ({ x: wp.x, y: wp.y }));
 		} else if (d?.waypoint) {
 			waypoints = [{ x: d.waypoint.x, y: d.waypoint.y }];
+		}
+	});
+
+	// When user puts an edge into bend mode and there is no saved waypoint yet,
+	// create a single default midpoint so it can be adjusted.
+	$effect(() => {
+		if (!isBending) return;
+		if (waypoints.length) return;
+		const d = data as { waypoints?: Waypoint[]; waypoint?: Waypoint } | undefined;
+		if (d?.waypoints?.length || d?.waypoint) return;
+		const mid: Waypoint = {
+			x: (sourcePoint.x + targetPoint.x) / 2,
+			y: (sourcePoint.y + targetPoint.y) / 2,
+		};
+		waypoints = [mid];
+		if (ctx?.onWaypointUpdate) {
+			ctx.onWaypointUpdate(id, [mid]);
 		}
 	});
 
@@ -272,13 +290,14 @@
 		if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return;
 		const next = [...waypoints, { x: pos.x, y: pos.y }];
 		waypoints = next;
+		selectedWaypointIndex = next.length - 1;
 		ctx.onWaypointUpdate(id, next);
 	}
 
 	function handleKeyDown(e: KeyboardEvent) {
-		if (!isBending || selectedWaypointIndex === null) return;
 		if (e.key !== 'Delete' && e.key !== 'Backspace') return;
-		if (!ctx?.onWaypointUpdate) return;
+		if (!isBending || waypoints.length === 0 || !ctx?.onWaypointUpdate) return;
+		if (selectedWaypointIndex === null) return;
 		e.preventDefault();
 		const idx = selectedWaypointIndex;
 		const next = waypoints.filter((_, i) => i !== idx);
@@ -322,7 +341,9 @@
 			ctx.onEndpointUpdate(id, payload);
 		}
 
-		function onUp() {
+		function onUp(e: PointerEvent) {
+			e.preventDefault();
+			e.stopPropagation();
 			draggingEndpoint = null;
 		}
 
@@ -422,7 +443,7 @@
 		{/each}
 	{/if}
 
-	{#if showHandle}
+	{#if showEndpointHandles}
 		<!-- Endpoint handles at the root/target of the edge, constrained to their process boxes. -->
 		<circle
 			cx={sourcePoint.x}

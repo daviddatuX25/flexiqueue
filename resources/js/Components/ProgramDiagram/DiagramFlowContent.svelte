@@ -167,7 +167,14 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 				targetOffset?: number;
 			}
 		) {
-			edgeEndpointMeta = new Map(edgeEndpointMeta).set(id, payload);
+			// Merge with existing so moving one endpoint doesn't wipe the other (and so partial updates persist).
+			const existing = edgeEndpointMeta.get(id) ?? {};
+			const merged = { ...existing };
+			if (payload.sourceSide !== undefined) merged.sourceSide = payload.sourceSide;
+			if (payload.sourceOffset !== undefined) merged.sourceOffset = payload.sourceOffset;
+			if (payload.targetSide !== undefined) merged.targetSide = payload.targetSide;
+			if (payload.targetOffset !== undefined) merged.targetOffset = payload.targetOffset;
+			edgeEndpointMeta = new Map(edgeEndpointMeta).set(id, merged);
 			edgeLayoutVersion++;
 			scheduleAutoSave('endpoint-drag');
 		},
@@ -710,6 +717,21 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 			publishing = false;
 		}
 	}
+
+	function handleClearDiagram() {
+		if (readOnly || !programId) return;
+		if (typeof window !== 'undefined') {
+			const ok = window.confirm('Clear this diagram and start over?');
+			if (!ok) return;
+		}
+		ownNodes = [] as unknown as Node[];
+		ownEdges = [] as unknown as Edge[];
+		edgeWaypoints = new Map();
+		edgeEndpointMeta = new Map();
+		edgeLayoutVersion++;
+		bendingEdgeIdStore.set(null);
+		scheduleAutoSave('clear-diagram');
+	}
 </script>
 
 <style>
@@ -740,7 +762,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 	elementsSelectable={!readOnly}
 	onnodedragstop={handleNodeDragStop}
 	onedgeclick={(p) => {
-		if (!readOnly && p.event.detail === 2) bendingEdgeIdStore.set(p.edge.id);
+		if (!readOnly) bendingEdgeIdStore.set(p.edge.id);
 	}}
 	onpaneclick={() => bendingEdgeIdStore.set(null)}
 	onbeforedelete={() => {
@@ -801,6 +823,14 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 			{:else}
 				Publish diagram
 			{/if}
+		</button>
+		<button
+			type="button"
+			class="btn preset-tonal min-h-[36px]"
+			disabled={saving}
+			onclick={handleClearDiagram}
+		>
+			Clear diagram
 		</button>
 		<input
 			type="file"
