@@ -79,12 +79,63 @@
 	let displayBarcodeInputEl = $state(null);
 	/** Activity feed: synced from props (and after reload), prepended by real-time events */
 	let activityFeed = $state([]);
+	/** Pending second-speak timeout for TTS repeat; cleared when new call or unmount. */
+	let ttsRepeatTimeoutId = $state(null);
 	$effect(() => {
 		activityFeed = [...(station_activity ?? [])];
 	});
 
 	/** Recent activity: max 20 items, fixed-height scroll (shows ~5 items). No View more/less. */
 	const visibleActivity = $derived(activityFeed.slice(0, 20));
+
+	/** Prefer a female voice for TTS; fallback to first available. */
+	function getFemaleVoice() {
+		if (typeof window === 'undefined' || !window.speechSynthesis) return null;
+		const voices = window.speechSynthesis.getVoices();
+		const female = voices.find(
+			(v) =>
+				/female|samantha|karen|victoria|moira|fiona|tessa|amelie/i.test(v.name) ||
+				(v.name && v.name.toLowerCase().includes('female'))
+		);
+		return female ?? voices[0] ?? null;
+	}
+
+	/** Phonetic words for letters so TTS says "ay" not "uh". */
+	const LETTER_PHONETIC = {
+		a: 'ay', b: 'bee', c: 'see', d: 'dee', e: 'ee', f: 'eff', g: 'jee', h: 'aych',
+		i: 'eye', j: 'jay', k: 'kay', l: 'ell', m: 'em', n: 'en', o: 'oh', p: 'pee',
+		q: 'cue', r: 'ar', s: 'ess', t: 'tee', u: 'you', v: 'vee', w: 'double you',
+		x: 'ex', y: 'why', z: 'zee',
+	};
+
+	/** Build alias text for TTS: letters = phonetic + digit runs; word = as-is. */
+	function aliasForSpeech(alias, pronounceAs) {
+		const raw = (alias ?? 'client').toString().trim() || 'client';
+		if (pronounceAs === 'word') return raw;
+		const segments = [];
+		let i = 0;
+		while (i < raw.length) {
+			if (/[a-zA-Z]/.test(raw[i])) {
+				let run = '';
+				while (i < raw.length && /[a-zA-Z]/.test(raw[i])) {
+					run += raw[i++];
+				}
+				for (const c of run) {
+					const ph = LETTER_PHONETIC[c.toLowerCase()];
+					if (ph) segments.push(ph);
+				}
+			} else if (/\d/.test(raw[i])) {
+				let run = '';
+				while (i < raw.length && /\d/.test(raw[i])) {
+					run += raw[i++];
+				}
+				segments.push(run);
+			} else {
+				i++;
+			}
+		}
+		return segments.length ? segments.join(' ') : raw;
+	}
 
 	function refreshBoardData() {
 		router.reload({
@@ -100,13 +151,30 @@
 		});
 	}
 
-	/** Per plan: TTS for general display — "Calling {alias}, please proceed to {station_name}". Respects admin mute/volume. */
-	function speakCallAnnouncement(alias, stationName) {
+	/** Per plan: TTS — female voice, rate 0.8, repeat 2x with 2s gap; pronounce_as letters/word. */
+	function speakCallAnnouncement(alias, stationName, pronounceAs = 'letters') {
 		if (typeof window === 'undefined' || displayAudioMuted || !window.speechSynthesis) return;
-		const text = `Calling ${alias ?? 'client'}, please proceed to ${stationName ?? 'your station'}`;
-		const u = new SpeechSynthesisUtterance(text);
-		u.volume = Math.max(0, Math.min(1, displayAudioVolume));
-		window.speechSynthesis.speak(u);
+		if (ttsRepeatTimeoutId != null) {
+			clearTimeout(ttsRepeatTimeoutId);
+			ttsRepeatTimeoutId = null;
+		}
+		const aliasSpoken = aliasForSpeech(alias, pronounceAs);
+		const stationSpoken = (stationName ?? 'your station').toString().trim() || 'your station';
+		const text = `Calling ${aliasSpoken}, please proceed to ${stationSpoken}`;
+		const doSpeak = () => {
+			if (displayAudioMuted) return;
+			const u = new SpeechSynthesisUtterance(text);
+			u.rate = 0.8;
+			u.volume = Math.max(0, Math.min(1, displayAudioVolume));
+			const voice = getFemaleVoice();
+			if (voice) u.voice = voice;
+			window.speechSynthesis.speak(u);
+		};
+		doSpeak();
+		ttsRepeatTimeoutId = setTimeout(() => {
+			doSpeak();
+			ttsRepeatTimeoutId = null;
+		}, 2000);
 	}
 
 	onMount(() => {
@@ -123,7 +191,8 @@
 			};
 			activityFeed = [item, ...activityFeed].slice(0, 20);
 			if (e.action_type === 'call') {
-				speakCallAnnouncement(e.alias, e.station_name);
+				const pronounceAs = e.pronounce_as === 'word' ? 'word' : 'letters';
+				speakCallAnnouncement(e.alias, e.station_name, pronounceAs);
 			}
 			// Per ISSUES-ELABORATION §10: refresh waiting/now serving so "Currently waiting" updates in realtime
 			refreshBoardData();
@@ -146,6 +215,7 @@
 		queueChannel.listen('.now_serving', refreshBoardData);
 		queueChannel.listen('.queue_length', refreshBoardData);
 		return () => {
+			if (ttsRepeatTimeoutId != null) clearTimeout(ttsRepeatTimeoutId);
 			echo.leave('display.activity');
 			echo.leave('global.queue');
 		};

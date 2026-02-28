@@ -12,10 +12,11 @@ class TokenService
 {
     /**
      * Create a batch of tokens. physical_id = prefix + (start_number + i). qr_code_hash is unique per token.
+     * pronounce_as: 'letters' (e.g. "A 3") or 'word' (e.g. "A3") for TTS.
      *
      * @return array{created: int, tokens: array<int, array>}
      */
-    public function batchCreate(string $prefix, int $count, int $startNumber): array
+    public function batchCreate(string $prefix, int $count, int $startNumber, string $pronounceAs = 'letters'): array
     {
         $tokens = [];
         for ($i = 0; $i < $count; $i++) {
@@ -26,6 +27,7 @@ class TokenService
             $token = new Token;
             $token->qr_code_hash = $hash;
             $token->physical_id = $physicalId;
+            $token->pronounce_as = in_array($pronounceAs, ['letters', 'word'], true) ? $pronounceAs : 'letters';
             $token->status = 'available';
             $token->save();
             $tokens[] = $token;
@@ -42,6 +44,7 @@ class TokenService
         return [
             'id' => $token->id,
             'physical_id' => $token->physical_id,
+            'pronounce_as' => $token->pronounce_as ?? 'letters',
             'qr_code_hash' => $token->qr_code_hash,
             'status' => $token->status,
         ];

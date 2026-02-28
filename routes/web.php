@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\Admin\TrackController as AdminTrackController;
 use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\CheckStatusController;
+use App\Http\Controllers\Api\PublicTriageController;
 use App\Http\Controllers\Api\SessionController as ApiSessionController;
 use App\Http\Controllers\Api\PermissionRequestController;
 use App\Http\Controllers\Api\StationController as ApiStationController;
@@ -165,6 +166,7 @@ Route::middleware(['auth', 'role:admin,supervisor,staff'])->prefix('api')->group
     Route::post('/stations/{station}/priority-first', [ApiStationController::class, 'setPriorityFirst']);
     Route::get('/stations/{station}/notes', [StationNoteController::class, 'show']);
     Route::put('/stations/{station}/notes', [StationNoteController::class, 'update']);
+    Route::put('/stations/{station}/display-settings', [ApiStationController::class, 'updateDisplaySettings']);
 });
 
 // Per 05-SECURITY-CONTROLS §2.4: public routes (no auth)
@@ -179,6 +181,11 @@ Route::get('/api/check-status/{qr_hash}', [CheckStatusController::class, 'show']
 Route::get('/display', [DisplayController::class, 'board'])->name('display');
 Route::get('/display/station/{station}', [DisplayController::class, 'stationBoard'])->name('display.station');
 Route::get('/display/status/{qr_hash}', [DisplayController::class, 'status'])->name('display.status');
+
+// Per plan: public self-serve triage (no auth; 403 when program allow_public_triage is false)
+Route::get('/triage/start', [DisplayController::class, 'publicTriage'])->name('triage.start');
+Route::get('/api/public/token-lookup', [PublicTriageController::class, 'tokenLookup']);
+Route::post('/api/public/sessions/bind', [PublicTriageController::class, 'bind']);
 
 // Per 05-SECURITY-CONTROLS §3.4: admin-only routes
 Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->group(function (): void {

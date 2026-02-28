@@ -16,6 +16,7 @@
 | `GET /display` | `Display/Board.svelte` | Informant "Now Serving" board |
 | `GET /display/station/{station}` | `Display/StationBoard.svelte` | Station-specific informant (calling, queue, activity for one station) |
 | `GET /display/status/{qr_hash}` | `Display/Status.svelte` | Client QR status check result |
+| `GET /triage/start` | `Triage/PublicStart.svelte` | Public self-serve triage: scan token, choose track, bind (when program allow_public_triage is true) |
 
 ### Authenticated Routes (All Staff)
 
@@ -324,6 +325,18 @@ Display/Board.svelte [DisplayLayout]
 
 **WebSocket subscriptions:**
 - `display.station.{station_id}` — listen for `station_activity`, `now_serving`, `queue_length`. On event, refresh or merge state; on `station_activity` with `action_type === 'call'`, trigger TTS.
+
+---
+
+### 3.4c Public Self-Serve Triage — `Triage/PublicStart.svelte`
+
+**Route:** `GET /triage/start` (public, no auth). When program `allow_public_triage` is false, page shows "Self-service is not available" and link to /display.
+
+**Purpose:** Unauthenticated clients scan their token (hidden HID input + camera modal, same pattern as display), choose a track, and bind (start visit). Category fixed to "Regular". Success → "You're in the queue" and link to /display/status/{qr_hash}.
+
+**Layout:** DisplayLayout (program name, date). Scan pattern: sr-only barcode input (refocus every 2s when modal closed), pulsing CTA + Camera icon opens Modal with QrScanner (cameraOnly). After scan: token display + track dropdown + "Start my visit" → POST /api/public/sessions/bind.
+
+**Data loaded:** Inertia props: `allowed`, `program_name`, `tracks`, `date`, `display_scan_timeout_seconds`.
 
 ---
 

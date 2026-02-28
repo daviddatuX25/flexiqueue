@@ -9,21 +9,17 @@ use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Per plan: broadcast station activity to display.board for real-time activity feed.
- * Public channel for informant display.
+ * Per plan: broadcast station display audio settings to display.station.{id}
+ * so the station display page updates mute/volume in real time when staff change them on /station/*.
  */
-class StationActivity implements ShouldBroadcastNow
+class StationDisplaySettingsUpdated implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
         public int $stationId,
-        public string $stationName,
-        public string $message,
-        public string $alias,
-        public string $actionType,
-        public string $createdAt,
-        public string $pronounceAs = 'letters'
+        public bool $displayAudioMuted,
+        public float $displayAudioVolume
     ) {}
 
     /**
@@ -32,14 +28,13 @@ class StationActivity implements ShouldBroadcastNow
     public function broadcastOn(): array
     {
         return [
-            new Channel('display.activity'),
             new Channel('display.station.'.$this->stationId),
         ];
     }
 
     public function broadcastAs(): string
     {
-        return 'station_activity';
+        return 'display_station_settings';
     }
 
     /**
@@ -48,13 +43,8 @@ class StationActivity implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'station_id' => $this->stationId,
-            'station_name' => $this->stationName,
-            'message' => $this->message,
-            'alias' => $this->alias,
-            'action_type' => $this->actionType,
-            'created_at' => $this->createdAt,
-            'pronounce_as' => $this->pronounceAs,
+            'display_audio_muted' => $this->displayAudioMuted,
+            'display_audio_volume' => $this->displayAudioVolume,
         ];
     }
 }

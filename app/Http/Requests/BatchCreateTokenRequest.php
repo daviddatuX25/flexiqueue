@@ -23,6 +23,7 @@ class BatchCreateTokenRequest extends FormRequest
             'prefix' => ['required', 'string', 'max:10'],
             'count' => ['required', 'integer', 'min:1', 'max:500'],
             'start_number' => ['required', 'integer', 'min:0'],
+            'pronounce_as' => ['sometimes', 'string', 'in:letters,word'],
         ];
     }
 }

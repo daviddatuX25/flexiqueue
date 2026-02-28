@@ -202,6 +202,7 @@ class ProgramController extends Controller
                 'display_scan_timeout_seconds' => $program->getDisplayScanTimeoutSeconds(),
                 'display_audio_muted' => $program->getDisplayAudioMuted(),
                 'display_audio_volume' => $program->getDisplayAudioVolume(),
+                'allow_public_triage' => $program->getAllowPublicTriage(),
             ],
         ];
     }

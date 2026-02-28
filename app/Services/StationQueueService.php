@@ -84,6 +84,8 @@ class StationQueueService
                 'client_capacity' => $clientCapacity,
                 'serving_count' => $servingCount,
             ],
+            'display_audio_muted' => $station->getDisplayAudioMuted(),
+            'display_audio_volume' => $station->getDisplayAudioVolume(),
             'priority_first' => $priorityFirst,
             'require_permission_before_override' => $requirePermissionBeforeOverride,
             'call_next_requires_override' => $callNextRequiresOverride,

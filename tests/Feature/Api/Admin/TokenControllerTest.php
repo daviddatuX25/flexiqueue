@@ -45,6 +45,7 @@ class TokenControllerTest extends TestCase
         $response->assertStatus(200);
         $response->assertJsonPath('tokens.0.physical_id', 'A1');
         $response->assertJsonPath('tokens.0.status', 'available');
+        $response->assertJsonPath('tokens.0.pronounce_as', 'letters');
         $response->assertJsonCount(2, 'tokens');
     }
 
@@ -113,6 +114,37 @@ class TokenControllerTest extends TestCase
         $response->assertJsonPath('tokens.1.physical_id', 'A2');
         $response->assertJsonPath('tokens.2.physical_id', 'A3');
         $this->assertDatabaseCount('tokens', 3);
+        $response->assertJsonPath('tokens.0.pronounce_as', 'letters');
+    }
+
+    public function test_batch_create_with_pronounce_as_word_persists_and_returns(): void
+    {
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/tokens/batch', [
+            'prefix' => 'B',
+            'count' => 2,
+            'start_number' => 1,
+            'pronounce_as' => 'word',
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('created', 2);
+        $response->assertJsonPath('tokens.0.physical_id', 'B1');
+        $response->assertJsonPath('tokens.0.pronounce_as', 'word');
+        $response->assertJsonPath('tokens.1.pronounce_as', 'word');
+        $this->assertDatabaseHas('tokens', ['physical_id' => 'B1', 'pronounce_as' => 'word']);
+    }
+
+    public function test_batch_create_rejects_invalid_pronounce_as(): void
+    {
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/tokens/batch', [
+            'prefix' => 'A',
+            'count' => 1,
+            'start_number' => 1,
+            'pronounce_as' => 'invalid',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['pronounce_as']);
     }
 
     public function test_batch_create_validates_required_fields(): void

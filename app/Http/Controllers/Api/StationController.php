@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Events\StationDisplaySettingsUpdated;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\SetStationPriorityFirstRequest;
+use App\Http\Requests\UpdateStationDisplaySettingsRequest;
 use App\Models\Program;
 use App\Models\Station;
 use App\Services\StationQueueService;
@@ -45,6 +47,35 @@ class StationController extends Controller
                 'id' => $station->id,
                 'priority_first_override' => $station->priority_first_override,
             ],
+        ]);
+    }
+
+    /**
+     * Update station display audio settings (mute/volume for /display/station/{id}).
+     * Per plan: controlled from staff /station/*; broadcast to display.station.{id} for real-time.
+     */
+    public function updateDisplaySettings(UpdateStationDisplaySettingsRequest $request, Station $station): JsonResponse
+    {
+        Gate::authorize('view', $station);
+
+        $settings = $station->settings ?? [];
+        if ($request->has('display_audio_muted')) {
+            $settings['display_audio_muted'] = $request->boolean('display_audio_muted');
+        }
+        if ($request->has('display_audio_volume')) {
+            $settings['display_audio_volume'] = (float) max(0, min(1, $request->input('display_audio_volume', 1)));
+        }
+        $station->update(['settings' => $settings]);
+
+        event(new StationDisplaySettingsUpdated(
+            $station->id,
+            $station->getDisplayAudioMuted(),
+            $station->getDisplayAudioVolume()
+        ));
+
+        return response()->json([
+            'display_audio_muted' => $station->getDisplayAudioMuted(),
+            'display_audio_volume' => $station->getDisplayAudioVolume(),
         ]);
     }
 

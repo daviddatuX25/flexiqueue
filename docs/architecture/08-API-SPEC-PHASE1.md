@@ -144,6 +144,27 @@
 - If `status IN ('lost', 'damaged')`, return `{ "status": "unavailable", "message": "Token marked as [status]." }`.
 - **No internal IDs** are exposed in the response (per `05-SECURITY-CONTROLS.md`).
 
+### 2.2 `GET /api/public/token-lookup` [PUBLIC]
+
+**Purpose:** Look up token by `qr_hash` or `physical_id` for public self-serve triage. Used when program has `allow_public_triage` enabled.
+**Auth:** None.
+**Query params:** `qr_hash` (string, 64-char hex) or `physical_id` (string, e.g. "A1"). One required.
+**Success (200):** `{ "physical_id": "A1", "qr_hash": "...", "status": "available" }`. Status may be `available`, `in_use`, `deactivated`, etc.
+**Not found (404):** `{ "message": "Token not found." }`
+**Public triage disabled (403):** `{ "message": "Public self-serve triage is not available." }`
+**Rate limit (429):** e.g. 30 requests per minute per IP.
+
+### 2.3 `POST /api/public/sessions/bind` [PUBLIC]
+
+**Purpose:** Bind token to a track (start visit) from public triage. Only allowed when program has `allow_public_triage` enabled.
+**Auth:** None.
+**Request:** `{ "qr_hash": "...", "track_id": 2, "client_category": "Regular" }`. `client_category` optional, default "Regular".
+**Success (201):** Same shape as staff bind (session + token). Transaction log records `staff_user_id` null (self-serve).
+**Validation (422):** Same as staff bind (token not found, track not in program, etc.).
+**Token in use (409):** Same as staff bind.
+**Public triage disabled (403):** `{ "message": "Public self-serve triage is not available." }`
+**Rate limit (429):** e.g. 20 requests per minute per IP.
+
 ---
 
 ## 3. Session Endpoints (Staff Auth)

@@ -188,7 +188,7 @@ class DisplayBoardService
             ];
         })->values()->all();
 
-        $stationActivity = $this->getStationActivity([$station->id], 15);
+        $stationActivity = $this->getStationActivity([$station->id], 20);
 
         return [
             'program_name' => $programName,
@@ -198,6 +198,8 @@ class DisplayBoardService
             'now_serving' => $nowServing,
             'waiting' => $waitingList,
             'station_activity' => $stationActivity,
+            'display_audio_muted' => $station->getDisplayAudioMuted(),
+            'display_audio_volume' => $station->getDisplayAudioVolume(),
         ];
     }
 

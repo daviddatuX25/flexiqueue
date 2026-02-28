@@ -1,6 +1,8 @@
 <script lang="ts">
 	import MobileLayout from '../../Layouts/MobileLayout.svelte';
+	import Modal from '../../Components/Modal.svelte';
 	import QrScanner from '../../Components/QrScanner.svelte';
+	import { Camera } from 'lucide-svelte';
 	import { get } from 'svelte/store';
 	import { usePage } from '@inertiajs/svelte';
 
@@ -21,10 +23,12 @@
 		activeProgram = null,
 		queueCount = 0,
 		processedToday = 0,
+		display_scan_timeout_seconds = 20,
 	}: {
 		activeProgram: ActiveProgram | null;
 		queueCount?: number;
 		processedToday?: number;
+		display_scan_timeout_seconds?: number;
 	} = $props();
 
 	const CATEGORIES = [
@@ -33,15 +37,19 @@
 		{ label: 'Incomplete Documents', value: 'Incomplete Documents' },
 	] as const;
 
-	let showCamera = $state(false);
+	let showScanner = $state(false);
 	let scannedToken = $state<{ physical_id: string; qr_hash: string; status: string } | null>(null);
 	/** Latch: ignore repeated onScan callbacks after first successful scan (stops flicker). */
 	let scanHandled = $state(false);
 	let manualPhysicalId = $state('');
+	let barcodeValue = $state('');
+	let barcodeInputEl = $state<HTMLInputElement | null>(null);
 	let selectedCategory = $state<string | null>(null);
 	let selectedTrackId = $state<number | null>(null);
 	let error = $state('');
 	let isSubmitting = $state(false);
+	let scanCountdown = $state(0);
+	let scanCountdownIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
 
 	const page = usePage();
 	function getCsrfToken(): string {
@@ -80,6 +88,84 @@
 			setDefaultTrack();
 		}
 	});
+
+	/** Refocus hidden barcode input every 2s when camera modal is closed (HID scanner). */
+	$effect(() => {
+		if (showScanner) return;
+		const id = setInterval(() => barcodeInputEl?.focus(), 2000);
+		return () => clearInterval(id);
+	});
+
+	/** Optional countdown when scanner modal is open. */
+	$effect(() => {
+		if (!showScanner) {
+			if (scanCountdownIntervalId != null) {
+				clearInterval(scanCountdownIntervalId);
+				scanCountdownIntervalId = null;
+			}
+			scanCountdown = 0;
+			return;
+		}
+		const timeout = Math.max(0, Number(display_scan_timeout_seconds) ?? 20);
+		if (timeout === 0) return;
+		let remaining = timeout;
+		scanCountdown = remaining;
+		const id = setInterval(() => {
+			remaining -= 1;
+			scanCountdown = remaining;
+			if (remaining <= 0) showScanner = false;
+		}, 1000);
+		scanCountdownIntervalId = id;
+		return () => {
+			if (scanCountdownIntervalId != null) clearInterval(scanCountdownIntervalId);
+			scanCountdownIntervalId = null;
+		};
+	});
+
+	function closeScanner() {
+		showScanner = false;
+	}
+
+	function extendScannerCountdown() {
+		scanCountdown += Math.max(0, Number(display_scan_timeout_seconds) || 20);
+	}
+
+	function onBarcodeKeydown(e: KeyboardEvent) {
+		if (e.key !== 'Enter') return;
+		const raw = barcodeValue.trim();
+		if (!raw) return;
+		e.preventDefault();
+		scanHandled = true;
+		const branchA = raw.length <= 10 && /^[A-Za-z0-9]+$/.test(raw);
+		const branchB = raw.length === 64 && /^[a-f0-9]+$/.test(raw);
+		const lastSegment = raw.includes('/') ? (raw.split('/').pop() ?? '').split('?')[0].trim() : '';
+		const branchUrl = lastSegment.length === 64 && /^[a-f0-9]+$/.test(lastSegment);
+		if (branchA) {
+			manualPhysicalId = raw;
+			handleLookup();
+		} else if (branchB || branchUrl) {
+			const hashToUse = branchUrl ? lastSegment : raw;
+			api('GET', `/api/sessions/token-lookup?qr_hash=${encodeURIComponent(hashToUse)}`).then(({ ok, data }) => {
+				const t = data as { physical_id?: string; qr_hash?: string; status?: string } | undefined;
+				if (ok && t?.physical_id && t?.qr_hash && t?.status === 'available') {
+					scannedToken = { physical_id: t.physical_id, qr_hash: t.qr_hash, status: 'available' };
+					showScanner = false;
+				} else if (t?.status === 'in_use') {
+					error = 'Token is already in use.';
+				} else if (t?.status === 'deactivated') {
+					error = 'Token deactivated.';
+				} else {
+					error = 'Token not found.';
+				}
+				scanHandled = false;
+			});
+		} else {
+			manualPhysicalId = raw.slice(0, 10);
+			handleLookup();
+		}
+		barcodeValue = '';
+		barcodeInputEl?.focus();
+	}
 
 	async function handleLookup() {
 		const id = manualPhysicalId.trim();
@@ -124,6 +210,7 @@
 			const t = data as { physical_id?: string; qr_hash?: string; status?: string } | undefined;
 			if (ok && t?.physical_id && t?.qr_hash && t?.status === 'available') {
 				scannedToken = { physical_id: t.physical_id, qr_hash: t.qr_hash, status: 'available' };
+				showScanner = false;
 			} else if (t?.status === 'in_use') {
 				error = 'Token is already in use.';
 			} else if (t?.status === 'deactivated') {
@@ -144,7 +231,7 @@
 		selectedCategory = null;
 		setDefaultTrack();
 		error = '';
-		showCamera = false;
+		showScanner = false;
 	}
 
 	/** Per ISSUES-ELABORATION §12: clear error and allow scan/lookup again without refresh (e.g. after token freed elsewhere). */
@@ -194,24 +281,37 @@
 			<h1 class="text-xl md:text-2xl font-semibold text-surface-950">Triage</h1>
 
 			{#if !scannedToken}
-				<!-- Get token: scan or enter ID (unified) -->
+				<!-- Get token: hidden HID input + pulsing CTA with camera icon opens modal (same pattern as display). -->
 				<div class="rounded-container border border-surface-200 bg-surface-50 elevation-card p-4 md:p-6 flex flex-col gap-4">
-					<p class="text-sm font-medium text-surface-950">Scan or enter token ID</p>
-					<button
-						type="button"
-						class="btn min-h-[48px] px-4 {showCamera ? 'preset-tonal' : 'preset-filled-primary-500'}"
-						onclick={() => {
-							showCamera = !showCamera;
-							error = '';
-							if (showCamera) scanHandled = false;
-							else scanHandled = true;
-						}}
+					<input
+						type="text"
+						autocomplete="off"
+						aria-label="Barcode scanner input; scan with hardware scanner or type and press Enter"
+						class="sr-only"
+						bind:value={barcodeValue}
+						bind:this={barcodeInputEl}
+						onkeydown={onBarcodeKeydown}
+					/>
+					<div
+						class="flex items-center gap-3 rounded-container border-2 border-primary-500/30 bg-primary-500/5 p-4 animate-pulse"
+						role="region"
+						aria-label="Scan or enter token ID"
 					>
-						{showCamera ? 'Stop camera' : 'Start camera'}
-					</button>
-					{#if showCamera}
-						<QrScanner active={true} onScan={handleQrScan} soundOnScan={true} />
-					{/if}
+						<p class="flex-1 text-base font-medium text-surface-950">Scan or enter token ID</p>
+						<button
+							type="button"
+							class="btn btn-icon preset-filled-primary-500 shrink-0 min-h-[48px] min-w-[48px]"
+							aria-label="Open camera to scan QR"
+							title="Tap to scan with device camera"
+							onclick={() => {
+								showScanner = true;
+								scanHandled = false;
+								error = '';
+							}}
+						>
+							<Camera class="w-6 h-6" />
+						</button>
+					</div>
 					<div class="flex items-center gap-2">
 						<span class="text-xs text-surface-950/60 shrink-0">or enter token ID</span>
 						<div class="flex-1 border-t border-surface-200"></div>
@@ -235,6 +335,23 @@
 						</div>
 					{/if}
 				</div>
+
+				<Modal open={showScanner} title="Scan QR via device" onClose={closeScanner} wide={true}>
+					{#snippet children()}
+						<div class="flex flex-col gap-3 w-full min-w-[20rem] mx-auto">
+							<QrScanner active={true} cameraOnly={true} onScan={handleQrScan} />
+							{#if scanCountdown > 0}
+								<div class="flex flex-wrap items-center justify-center gap-2">
+									<p class="text-sm text-surface-600" aria-live="polite">Closing in {scanCountdown}s</p>
+									<button type="button" class="btn preset-tonal text-sm py-1.5 px-3" onclick={extendScannerCountdown}>
+										Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)
+									</button>
+								</div>
+							{/if}
+							<button type="button" class="btn preset-tonal w-full py-3" onclick={closeScanner}>Cancel</button>
+						</div>
+					{/snippet}
+				</Modal>
 			{:else}
 				<!-- Category + track + confirm -->
 				<div class="rounded-container border border-surface-200 bg-surface-50 elevation-card p-4 md:p-6 space-y-4">

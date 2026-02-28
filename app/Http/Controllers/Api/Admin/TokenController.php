@@ -45,10 +45,12 @@ class TokenController extends Controller
      */
     public function batch(BatchCreateTokenRequest $request): JsonResponse
     {
+        $pronounceAs = $request->validated('pronounce_as') ?? 'letters';
         $result = $this->tokenService->batchCreate(
             $request->validated('prefix'),
             $request->validated('count'),
-            $request->validated('start_number')
+            $request->validated('start_number'),
+            $pronounceAs
         );
 
         return response()->json($result, 201);
@@ -119,6 +121,7 @@ class TokenController extends Controller
         return [
             'id' => $token->id,
             'physical_id' => $token->physical_id,
+            'pronounce_as' => $token->pronounce_as ?? 'letters',
             'qr_code_hash' => $token->qr_code_hash,
             'status' => $token->status,
         ];

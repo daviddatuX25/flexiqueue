@@ -59,6 +59,8 @@
             display_audio_muted?: boolean;
             /** Per plan: display board TTS volume 0-1 (admin-controlled). */
             display_audio_volume?: number;
+            /** Per plan: allow public self-serve triage at /triage/start. */
+            allow_public_triage?: boolean;
         };
     }
 
@@ -237,6 +239,8 @@
     let displayAudioMuted = $state(false);
     /** Per plan: display board audio volume 0-1 (admin-controlled). */
     let displayAudioVolume = $state(1);
+    /** Per plan: allow public self-serve triage at /triage/start. */
+    let allowPublicTriage = $state(false);
     /** Per ISSUES-ELABORATION §15: expandable "More details" for station selection. */
     let showStationSelectionDetails = $state(false);
     /** Per bead flexiqueue-5gl: expandable "More details" for priority/regular ratio (alternate mode). */
@@ -269,6 +273,7 @@
             displayScanTimeoutSeconds = Math.min(300, Math.max(0, Number(s.display_scan_timeout_seconds ?? 20)));
             displayAudioMuted = s.display_audio_muted === true;
             displayAudioVolume = Math.max(0, Math.min(1, Number(s.display_audio_volume ?? 1)));
+            allowPublicTriage = s.allow_public_triage === true;
         }
     });
 
@@ -1172,6 +1177,7 @@
                     display_scan_timeout_seconds: displayScanTimeoutSeconds,
                     display_audio_muted: displayAudioMuted,
                     display_audio_volume: displayAudioVolume,
+                    allow_public_triage: allowPublicTriage,
                 },
             },
         );
@@ -2441,6 +2447,40 @@
                                         aria-label="Display board TTS volume"
                                     />
                                     <span class="text-xs text-surface-500">{Math.round(displayAudioVolume * 100)}%</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Allow public self-serve triage (per plan) -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
+                                    Public self-serve triage
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    When enabled, clients can open /triage/start (no login) to scan their token and choose a track to start their visit.
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control pt-1">
+                                <label
+                                    for="allow-public-triage-switch"
+                                    class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors items-center"
+                                >
+                                    <div class="relative inline-block w-11 h-5">
+                                        <input
+                                            id="allow-public-triage-switch"
+                                            type="checkbox"
+                                            class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300"
+                                            bind:checked={allowPublicTriage}
+                                        />
+                                        <span
+                                            class="absolute top-0 left-0 w-5 h-5 bg-white rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none"
+                                            aria-hidden="true"
+                                        ></span>
+                                    </div>
+                                    <span class="label-text text-surface-950 font-medium">Allow public self-serve triage</span>
                                 </label>
                             </div>
                         </div>

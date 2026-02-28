@@ -62,6 +62,9 @@ These routes require NO authentication:
 - `GET /display/station/{station}` — Station-specific informant display.
 - `GET /api/check-status/{qr_hash}` — QR token status lookup.
 - `GET /display/status/{qr_hash}` — Informant status view page.
+- `GET /triage/start` — Public self-serve triage (when program allow_public_triage is true; else shows "not available").
+- `GET /api/public/token-lookup` — Token lookup for public triage; 403 when disabled; rate limited (e.g. 30/min per IP).
+- `POST /api/public/sessions/bind` — Public bind; 403 when disabled; rate limited (e.g. 20/min per IP).
 
 All other routes require authentication.
 

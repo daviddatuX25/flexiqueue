@@ -48,6 +48,39 @@ class DisplayController extends Controller
     }
 
     /**
+     * Show public self-serve triage page. When program allows, clients can scan token and choose track.
+     * When no active program or allow_public_triage is false, show "Self-service is not available".
+     */
+    public function publicTriage(): Response
+    {
+        $program = Program::query()->where('is_active', true)->with('serviceTracks:id,program_id,name,is_default')->first();
+
+        if (! $program || ! $program->getAllowPublicTriage()) {
+            return Inertia::render('Triage/PublicStart', [
+                'allowed' => false,
+                'program_name' => null,
+                'tracks' => [],
+                'date' => now()->format('F j, Y'),
+                'display_scan_timeout_seconds' => 20,
+            ]);
+        }
+
+        $tracks = $program->serviceTracks->map(fn ($t) => [
+            'id' => $t->id,
+            'name' => $t->name,
+            'is_default' => (bool) $t->is_default,
+        ])->values()->all();
+
+        return Inertia::render('Triage/PublicStart', [
+            'allowed' => true,
+            'program_name' => $program->name,
+            'tracks' => $tracks,
+            'date' => now()->format('F j, Y'),
+            'display_scan_timeout_seconds' => $program->getDisplayScanTimeoutSeconds(),
+        ]);
+    }
+
+    /**
      * Show client status after QR scan. Public. Per 08-API-SPEC §2.1 (same logic as check-status).
      * Pass display_scan_timeout_seconds from active program so Status page auto-dismiss matches board scanner setting.
      * When in_use and program has a diagram, pass diagram data for client flow view.

@@ -1,6 +1,8 @@
 <script lang="ts">
 	import MobileLayout from '../../Layouts/MobileLayout.svelte';
+	import Modal from '../../Components/Modal.svelte';
 	import QrScanner from '../../Components/QrScanner.svelte';
+	import { Volume2 } from 'lucide-svelte';
 	import { get } from 'svelte/store';
 	import { tick } from 'svelte';
 	import { usePage } from '@inertiajs/svelte';
@@ -50,6 +52,8 @@
 		balance_mode?: string;
 		next_to_call?: { session_id: number; alias: string } | null;
 		stats: { total_waiting: number; total_served_today: number; avg_service_time_minutes: number };
+		display_audio_muted?: boolean;
+		display_audio_volume?: number;
 	}
 
 	let {
@@ -99,6 +103,10 @@
 
 	/** Countdown per called session_id: when 0, No-show button enabled. Set when session enters 'called'. */
 	let noShowCountdown = $state<Record<number, number>>({});
+
+	/** Display board audio (for /display/station/{id}): saving state. */
+	let displaySettingsSaving = $state(false);
+	let showDisplayAudioModal = $state(false);
 
 	const page = usePage();
 	const authUser = $derived((get(page)?.props as { auth?: { user?: { id: number; role?: string | { value?: string } } } })?.auth?.user ?? null);
@@ -259,6 +267,23 @@
 
 	function switchStation(s: StationInfo) {
 		router.visit(`/station/${s.id}`);
+	}
+
+	async function saveDisplaySettings(updates: { display_audio_muted?: boolean; display_audio_volume?: number }) {
+		if (!station || !queue || displaySettingsSaving) return;
+		displaySettingsSaving = true;
+		const body: { display_audio_muted?: boolean; display_audio_volume?: number } = {};
+		if (updates.display_audio_muted !== undefined) body.display_audio_muted = updates.display_audio_muted;
+		if (updates.display_audio_volume !== undefined) body.display_audio_volume = updates.display_audio_volume;
+		const { ok, data } = await api('PUT', `/api/stations/${station.id}/display-settings`, body);
+		displaySettingsSaving = false;
+		if (ok && data && typeof data === 'object' && 'display_audio_muted' in data) {
+			queue = {
+				...queue,
+				display_audio_muted: (data as { display_audio_muted?: boolean }).display_audio_muted ?? queue.display_audio_muted,
+				display_audio_volume: (data as { display_audio_volume?: number }).display_audio_volume ?? queue.display_audio_volume,
+			};
+		}
 	}
 
 	async function togglePriorityFirst(priorityFirst: boolean) {
@@ -682,18 +707,33 @@
 					Serving {servingCount}/{clientCapacity}
 				</div>
 				{#if canSwitchStation}
-					<label class="label cursor-pointer gap-2">
+					<label for="priority-first-switch" class="label cursor-pointer gap-2 items-center">
 						<span class="label-text text-sm">Priority first</span>
-						<input
-							type="checkbox"
-							class="rounded border border-surface-200"
-							checked={queue?.priority_first ?? true}
-							disabled={actionLoading === 'toggle'}
-							onchange={(e) => togglePriorityFirst((e.target as HTMLInputElement).checked)}
-						/>
+						<div class="relative inline-block w-11 h-5">
+							<input
+								id="priority-first-switch"
+								type="checkbox"
+								class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+								checked={queue?.priority_first ?? true}
+								disabled={actionLoading === 'toggle'}
+								onchange={(e) => togglePriorityFirst((e.target as HTMLInputElement).checked)}
+							/>
+							<span class="absolute top-0 left-0 w-5 h-5 bg-white rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none" aria-hidden="true"></span>
+						</div>
 					</label>
 				{/if}
 			</div>
+
+			<!-- Display board audio: icon opens modal (controls TTS on /display/station/{id}); real-time via broadcast -->
+			<button
+				type="button"
+				class="btn btn-ghost btn-icon rounded-full min-h-[48px] min-w-[48px]"
+				title="Display board audio"
+				onclick={() => (showDisplayAudioModal = true)}
+				aria-label="Display board audio settings"
+			>
+				<Volume2 class="w-6 h-6 text-surface-600" />
+			</button>
 
 			<!-- Serving / Called cards (one per client) -->
 			{#each queue.serving as s (s.session_id)}
@@ -1112,4 +1152,49 @@
 			<div class="modal-backdrop" aria-hidden="true"></div>
 		</dialog>
 	{/if}
+
+	<Modal
+		open={showDisplayAudioModal}
+		title="Display board audio"
+		onClose={() => (showDisplayAudioModal = false)}
+	>
+		{#snippet children()}
+			<p class="text-sm text-surface-950/70 mb-4">Mute and volume for the public display at this station.</p>
+			<div class="flex flex-col gap-4">
+				<label for="display-audio-mute-switch" class="flex items-center justify-between cursor-pointer gap-3">
+					<span class="text-sm font-medium text-surface-950">Mute</span>
+					<div class="relative inline-block w-11 h-5">
+						<input
+							id="display-audio-mute-switch"
+							type="checkbox"
+							class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300 disabled:opacity-50"
+							checked={queue?.display_audio_muted ?? false}
+							disabled={displaySettingsSaving}
+							onchange={(e) => saveDisplaySettings({ display_audio_muted: (e.target as HTMLInputElement).checked })}
+						/>
+						<span class="absolute top-0 left-0 w-5 h-5 bg-white rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none" aria-hidden="true"></span>
+					</div>
+				</label>
+				<label class="flex flex-col gap-2">
+					<span class="text-sm font-medium text-surface-950">Volume</span>
+					<input
+						type="range"
+						min="0"
+						max="1"
+						step="0.1"
+						class="range range-sm w-full max-w-xs"
+						value={queue?.display_audio_volume ?? 1}
+						disabled={displaySettingsSaving || (queue?.display_audio_muted ?? false)}
+						oninput={(e) => {
+							const v = parseFloat((e.target as HTMLInputElement).value);
+							saveDisplaySettings({ display_audio_volume: v });
+						}}
+					/>
+				</label>
+				{#if displaySettingsSaving}
+					<span class="text-xs text-surface-950/50">Saving…</span>
+				{/if}
+			</div>
+		{/snippet}
+	</Modal>
 </MobileLayout>

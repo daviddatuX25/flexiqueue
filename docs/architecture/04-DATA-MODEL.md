@@ -59,6 +59,8 @@ Represents a government assistance event (e.g., "Social Pension Distribution").
 **Indexes:**
 - `PRIMARY KEY (id)`
 
+**Program settings (JSON column `settings`):** Optional key-value config; includes e.g. `allow_public_triage` (boolean). When true, public route `/triage/start` allows unauthenticated clients to bind a token to a track (self-serve).
+
 ---
 
 ## Table 2: `service_tracks`
@@ -147,6 +149,7 @@ Physical reusable QR card that clients carry during an event.
 | `id` | BIGINT UNSIGNED | NO | AUTO_INCREMENT | PK |
 | `qr_code_hash` | VARCHAR(64) | NO | — | SHA-256 of QR code contents; immutable after creation |
 | `physical_id` | VARCHAR(10) | NO | — | Human-readable label printed on card (e.g., "A1", "B15") |
+| `pronounce_as` | VARCHAR(10) | YES | 'letters' | TTS: 'letters' (e.g. "A 3") or 'word' (e.g. "A3") for display announcements |
 | `status` | ENUM('available', 'in_use', 'lost', 'damaged') | NO | 'available' | |
 | `current_session_id` | BIGINT UNSIGNED | YES | NULL | FK → `queue_sessions.id`; set when bound |
 | `created_at` | TIMESTAMP | NO | CURRENT_TIMESTAMP | |
@@ -210,7 +213,7 @@ Immutable audit trail. Every significant state change writes exactly one row. **
 | `id` | BIGINT UNSIGNED | NO | AUTO_INCREMENT | PK |
 | `session_id` | BIGINT UNSIGNED | NO | — | FK → `queue_sessions.id` |
 | `station_id` | BIGINT UNSIGNED | YES | NULL | FK → `stations.id`; station where action occurred |
-| `staff_user_id` | BIGINT UNSIGNED | NO | — | FK → `users.id`; who performed the action |
+| `staff_user_id` | BIGINT UNSIGNED | YES | NULL | FK → `users.id`; who performed the action; NULL for public self-serve bind |
 | `action_type` | ENUM('bind', 'check_in', 'transfer', 'override', 'complete', 'cancel', 'no_show', 'force_complete', 'identity_mismatch') | NO | — | |
 | `previous_station_id` | BIGINT UNSIGNED | YES | NULL | FK → `stations.id`; where client came from |
 | `next_station_id` | BIGINT UNSIGNED | YES | NULL | FK → `stations.id`; where client is going |
@@ -221,7 +224,7 @@ Immutable audit trail. Every significant state change writes exactly one row. **
 **Constraints:**
 - **APPEND-ONLY**: no UPDATE or DELETE allowed. Enforced in application layer (no `save()` on existing records, no `delete()` method).
 - When `action_type` IN (`override`, `force_complete`, `identity_mismatch`): `remarks` MUST be NOT NULL (application-enforced).
-- `staff_user_id` is always set — every action has an actor.
+- `staff_user_id` is set for staff actions; NULL when bind is performed via public self-serve triage (/triage/start).
 
 **Metadata JSON Schema:**
 ```json

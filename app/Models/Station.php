@@ -15,6 +15,7 @@ class Station extends Model
         'capacity',
         'client_capacity',
         'priority_first_override',
+        'settings',
         'is_active',
     ];
 
@@ -23,7 +24,22 @@ class Station extends Model
         return [
             'is_active' => 'boolean',
             'priority_first_override' => 'boolean',
+            'settings' => 'array',
         ];
+    }
+
+    /** Per plan: station display TTS mute (controlled from staff /station/*). Default false. */
+    public function getDisplayAudioMuted(): bool
+    {
+        return (bool) ($this->settings['display_audio_muted'] ?? false);
+    }
+
+    /** Per plan: station display TTS volume 0–1 (controlled from staff /station/*). Default 1. */
+    public function getDisplayAudioVolume(): float
+    {
+        $v = $this->settings['display_audio_volume'] ?? 1;
+
+        return (float) max(0, min(1, $v));
     }
 
     public function program(): BelongsTo

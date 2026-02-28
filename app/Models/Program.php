@@ -118,6 +118,12 @@ class Program extends Model
         return (float) max(0, min(1, $v));
     }
 
+    /** Per plan: allow public self-serve triage at GET /triage/start. Default false. */
+    public function getAllowPublicTriage(): bool
+    {
+        return (bool) ($this->settings['allow_public_triage'] ?? false);
+    }
+
     public function queueSessions(): HasMany
     {
         return $this->hasMany(Session::class, 'program_id');

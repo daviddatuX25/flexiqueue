@@ -12,6 +12,7 @@ class Token extends Model
     use SoftDeletes;
     protected $fillable = [
         'physical_id',
+        'pronounce_as',
         'status',
         'current_session_id',
     ];

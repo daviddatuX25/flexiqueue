@@ -35,11 +35,13 @@ class TriagePageController extends Controller
         }
 
         $footerStats = $this->stationQueueService->getProgramFooterStats($activeProgram);
+        $displayScanTimeoutSeconds = $activeProgram ? $activeProgram->getDisplayScanTimeoutSeconds() : 20;
 
         return Inertia::render('Triage/Index', [
             'activeProgram' => $programPayload,
             'queueCount' => $footerStats['queue_count'],
             'processedToday' => $footerStats['processed_today'],
+            'display_scan_timeout_seconds' => $displayScanTimeoutSeconds,
         ]);
     }
 }

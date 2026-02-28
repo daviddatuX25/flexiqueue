@@ -32,10 +32,11 @@ class SessionService
 
     /**
      * Bind token to a new session. Throws domain exceptions for 400/409 cases.
+     * When $staffUserId is null (public self-serve), transaction_log records null for audit.
      *
      * @return array{session: \App\Models\Session, token: array}
      */
-    public function bind(string $qrHash, int $trackId, ?string $clientCategory, int $staffUserId): array
+    public function bind(string $qrHash, int $trackId, ?string $clientCategory, ?int $staffUserId = null): array
     {
         $program = Program::where('is_active', true)->first();
         if (! $program) {
@@ -98,7 +99,7 @@ class SessionService
             TransactionLog::create([
                 'session_id' => $session->id,
                 'station_id' => null,
-                'staff_user_id' => $staffUserId,
+                'staff_user_id' => $staffUserId, // null for public self-serve
                 'action_type' => 'bind',
                 'next_station_id' => $firstStationId,
             ]);
@@ -114,7 +115,8 @@ class SessionService
                 "{$session->alias} registered at triage",
                 $session->alias,
                 'bind',
-                now()->toIso8601String()
+                now()->toIso8601String(),
+                $token->pronounce_as ?? 'letters'
             ));
 
             return [
@@ -164,7 +166,7 @@ class SessionService
             'action_type' => 'call',
         ]);
 
-        $session = $session->fresh(['serviceTrack', 'currentStation']);
+        $session = $session->fresh(['serviceTrack', 'currentStation', 'token']);
         $station = $session->currentStation;
         // Only indicate "priority lane" when the client has a priority classification (PWD/Senior/Pregnant), not when the program is merely priority-first.
         $isPriority = $session->isPriorityCategory();
@@ -179,7 +181,8 @@ class SessionService
             $message,
             $session->alias,
             'call',
-            now()->toIso8601String()
+            now()->toIso8601String(),
+            $session->token?->pronounce_as ?? 'letters'
         ));
 
         return [
@@ -211,7 +214,7 @@ class SessionService
             'action_type' => 'check_in',
         ]);
 
-        $session = $session->fresh(['currentStation', 'serviceTrack']);
+        $session = $session->fresh(['currentStation', 'serviceTrack', 'token']);
         $station = $session->currentStation;
         event(new StatusUpdate($session->current_station_id, $session));
         event(new NowServing($session->current_station_id, [
@@ -226,7 +229,8 @@ class SessionService
             "{$session->alias} arrived (serving)",
             $session->alias,
             'check_in',
-            now()->toIso8601String()
+            now()->toIso8601String(),
+            $session->token?->pronounce_as ?? 'letters'
         ));
 
         return ['session' => $session];

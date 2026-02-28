@@ -22,6 +22,7 @@
         physical_id: string;
         qr_code_hash: string;
         status: string;
+        pronounce_as?: string;
     }
 
     let tokens = $state<TokenItem[]>([]);
@@ -35,6 +36,8 @@
     let batchPrefix = $state("A");
     let batchStart = $state(1);
     let batchCount = $state(50);
+    /** Plan: pronounce alias as letters (e.g. A 3) or word (e.g. A3) for TTS. */
+    let batchPronounceAs = $state<"letters" | "word">("letters");
     // Selection for bulk actions
     let selectedIds = $state<Set<number>>(new Set());
     let selectAllCheckbox = $state<HTMLInputElement | null>(null);
@@ -120,6 +123,7 @@
         batchPrefix = "A";
         batchStart = 1;
         batchCount = 50;
+        batchPronounceAs = "letters";
         error = "";
         showBatchModal = true;
     }
@@ -140,6 +144,7 @@
                 prefix: batchPrefix.trim(),
                 count: batchCount,
                 start_number: batchStart,
+                pronounce_as: batchPronounceAs,
             },
         );
         submitting = false;
@@ -935,6 +940,34 @@
                             Number(batchCount) -
                             1}</span
                     >
+                </div>
+            </div>
+            <div class="form-control w-full">
+                <span class="label-text font-medium mb-1 block">Pronounce alias as</span>
+                <p class="text-sm text-surface-600 mb-2">How display TTS will speak the token ID (e.g. on call).</p>
+                <div class="flex gap-4">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input
+                            type="radio"
+                            name="batch-pronounce"
+                            value="letters"
+                            checked={batchPronounceAs === "letters"}
+                            onchange={() => (batchPronounceAs = "letters")}
+                            class="radio radio-sm"
+                        />
+                        <span>Letters (e.g. A 3)</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input
+                            type="radio"
+                            name="batch-pronounce"
+                            value="word"
+                            checked={batchPronounceAs === "word"}
+                            onchange={() => (batchPronounceAs = "word")}
+                            class="radio radio-sm"
+                        />
+                        <span>Word (e.g. A3)</span>
+                    </label>
                 </div>
             </div>
             <div
