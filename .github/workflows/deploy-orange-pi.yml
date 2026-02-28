@@ -1,16 +1,13 @@
 # Build FlexiQueue as a full deploy artifact for Orange Pi.
-# GitHub Actions is the only build source; no laptop builds.
-# Produces one tarball (code + vendor + public/build). Deploy by:
-# - With tunnel (ZeroTier etc.): set ENABLE_PI_DEPLOY=1 and PI_* secrets; deploy job pushes to Pi.
-# - No tunnel: download the artifact from this run (any machine), push tarball to Pi, SSH and extract + migrate.
-# - Fallback: SSH to Pi and run git pull only (code; vendor/build must be updated separately).
-# See docs/architecture/10-DEPLOYMENT.md.
+# Branch strategy: dev = build only; master = build + deploy (if ENABLE_PI_DEPLOY=1).
+# See docs/architecture/10-DEPLOYMENT.md §6.
 
 name: Build for Orange Pi
 
 on:
   push:
     branches:
+      - dev
       - master
   workflow_dispatch:
 
@@ -64,10 +61,10 @@ jobs:
           name: flexiqueue-deploy
           path: flexiqueue-deploy.tar.gz
 
-  # Optional: deploy to Pi when it is reachable (e.g. ZeroTier). Set repo variable ENABLE_PI_DEPLOY=1 and secrets PI_HOST, PI_USER, PI_SSH_KEY.
+  # Deploy runs only from master (prod). Set repo variable ENABLE_PI_DEPLOY=1 and secrets PI_HOST, PI_USER, PI_SSH_KEY.
   deploy:
     needs: build
-    if: vars.ENABLE_PI_DEPLOY == '1'
+    if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') && vars.ENABLE_PI_DEPLOY == '1'
     runs-on: ubuntu-latest
     steps:
       - name: Download deploy artifact

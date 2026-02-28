@@ -141,11 +141,23 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 
 ### 3.1 Install packages
 
+Use **PHP 8.2** or **PHP 8.3** depending on what your image provides (Laravel 12 supports both). Armbian 25.x Noble ships PHP 8.3.
+
+**If your Pi has PHP 8.2:**
 ```bash
 sudo apt update && sudo apt install -y \
   nginx php8.2-fpm php8.2-mysql php8.2-mbstring php8.2-xml \
   php8.2-curl php8.2-zip php8.2-gd php8.2-bcmath mariadb-server git
 ```
+
+**If your Pi has PHP 8.3 (e.g. Armbian Noble):**
+```bash
+sudo apt update && sudo apt install -y \
+  nginx php8.3-fpm php8.3-mysql php8.3-mbstring php8.3-xml \
+  php8.3-curl php8.3-zip php8.3-gd php8.3-bcmath mariadb-server git
+```
+
+Check with: `apt-cache search php | grep -E 'php[0-9]\.[0-9]-fpm'`. In Nginx and PHP-FPM config below, use the matching socket and paths (e.g. `php8.3-fpm.sock` and `/etc/php/8.3/fpm/`).
 
 ### 3.2 MariaDB
 
@@ -179,7 +191,7 @@ server {
 
     location ~ \.php$ {
         include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/var/run/php/php8.2-fpm.sock;
+        fastcgi_pass unix:/var/run/php/php8.2-fpm.sock;  # or php8.3-fpm.sock if using PHP 8.3
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         include fastcgi_params;
     }
@@ -279,7 +291,7 @@ Keep it running in a screen/tmux session, or run as a systemd service. *Expand: 
 
 Use this when the Pi is **not** reachable from GitHub (typical demo: Pi on LAN only). **No building on the laptop** — the laptop (or any machine) only downloads the pre-built artifact and pushes it to the Pi.
 
-1. **Trigger a build:** Push to `master` or run the workflow manually (Actions → “Build for Orange Pi” → Run workflow).
+1. **Trigger a build:** Push to `dev` or `master` (or run the workflow manually) (Actions → “Build for Orange Pi” → Run workflow).
 2. **Download the artifact:** From the completed run, open Artifacts and download **flexiqueue-deploy** (or use `gh run download` if you have the GitHub CLI). You get `flexiqueue-deploy.tar.gz`.
 3. **Push to the Pi:** From the same machine (any laptop):
    ```bash
@@ -304,14 +316,23 @@ Use this when the Pi is **not** reachable from GitHub (typical demo: Pi on LAN o
 
 The workflow is the **only** build source. It produces one **full deploy tarball** (code + vendor + public/build). See [.github/workflows/deploy-orange-pi.yml](../../.github/workflows/deploy-orange-pi.yml).
 
+### 6.0 Branch strategy (dev / prod)
+
+- **`dev`** — Development branch. Day-to-day work and feature branches merge here. Pushing to `dev` triggers the **build** job only (artifact is produced; you can download it and deploy to a test Pi manually). The **deploy** job does **not** run on `dev`.
+- **`master`** — Production branch. Code that is released to the Orange Pi. Pushing to `master` triggers the **build** job; the **deploy** job runs only if `ENABLE_PI_DEPLOY=1` and Pi secrets are set (see 6.2 A).
+
+**Workflow:** Develop on `dev` → test with artifact from `dev` runs if needed → merge `dev` into `master` when ready for production → push to `master` (build + optional auto-deploy to Pi).
+
+To create and push `dev` from current `master`: `git checkout -b dev && git push -u origin dev`. Then set the default branch in GitHub repo settings as needed (e.g. `dev` for PRs, `master` for production).
+
 ### 6.1 Build
 
-- **Trigger:** Push to `master` or manual `workflow_dispatch`.
+- **Trigger:** Push to `dev`, push to `master`, or manual `workflow_dispatch`.
 - **Steps:** Checkout, PHP 8.2, Node, `composer install --no-dev`, `npm ci && npm run build`, then create `flexiqueue-deploy.tar.gz` (excludes `.git`, `node_modules`, `.env`, `storage`). Upload as artifact **flexiqueue-deploy**.
 
 ### 6.2 Deploy options
 
-- **A) Pi reachable from GitHub (e.g. ZeroTier tunnel):** GitHub Actions can push the tarball to the Pi for you. In the repo: set a **variable** `ENABLE_PI_DEPLOY=1` and **secrets** `PI_HOST`, `PI_USER`, `PI_SSH_KEY` (private key for the Pi). The workflow’s **deploy** job will then run: it downloads the artifact, SCPs the tarball to the Pi, SSHs in and extracts, runs migrate, config:cache, route:cache. So the server is “triggered” only in the sense that Actions pushes the artifact to the Pi; the Pi does not pull from GitHub. If you don’t set up a tunnel (or prefer not to), use B. *Expand: ZeroTier/similar, SSH key on Pi, firewall.*
+- **A) Pi reachable from GitHub (e.g. ZeroTier tunnel):** Deploy runs **only on `master`** (not on `dev`). In the repo: set a **variable** `ENABLE_PI_DEPLOY=1` and **secrets** `PI_HOST`, `PI_USER`, `PI_SSH_KEY` (private key for the Pi). When you push to `master`, the workflow’s **deploy** job runs: it downloads the artifact, SCPs the tarball to the Pi, SSHs in and extracts, runs migrate, config:cache, route:cache. If you don’t set up a tunnel (or prefer not to), use B. *Expand: ZeroTier/similar, SSH key on Pi, firewall.*
 - **B) Pi on LAN only (typical demo):** Do **not** set `ENABLE_PI_DEPLOY` (or leave it unset). The workflow only builds and uploads the artifact. From **any** machine, download the artifact from the run and push the tarball to the Pi, then SSH and extract + migrate (Section 5). **GitHub does not trigger the Pi**; you deploy manually.
 - **C) Fallback — no artifact at hand:** If you can’t use the artifact (e.g. no way to download it), the **only** thing you do from a dev machine is **SSH to the Pi and run `git pull`** manually. That updates **code only**; `vendor/` and `public/build/` are unchanged unless you update them separately (e.g. run composer/npm on the Pi, or later push an artifact). The **function of the dev laptop in this case is only to trigger a manual git pull via SSH**, not to build.
 
@@ -345,14 +366,14 @@ php artisan route:cache
 
 1. Orange Pi: OS, SSH, swap, optional static IP, **mDNS** (Avahi) for discovery (`ssh root@orangepi.local`).
 2. (Optional / planned) Portable: headless WiFi via USB QR scanner (SSID/password payload); services start only after network is up (Section 2.1).
-3. Stack: Nginx, PHP 8.2-FPM, MariaDB; create DB and user; Nginx site.
+3. Stack: Nginx, PHP 8.2- or 8.3-FPM (per image), MariaDB; create DB and user; Nginx site.
 4. App: clone repo, `.env` (with Reverb), `php artisan key:generate` on the Pi.
 5. Get the **full deploy tarball** from GitHub Actions (download artifact or use deploy job if tunnel is set). Push to Pi and extract; migrate, seed, permissions, optional `storage:link`.
 6. Start Reverb; test in browser at `http://<pi-ip>` or `http://orangepi.local`.
 
 ### Updates
 
-1. **GitHub Actions** produces the full artifact on push to `master` (or manual run).
+1. **GitHub Actions** produces the full artifact on push to `dev` or `master` (or manual run). Deploy job runs only on `master` when `ENABLE_PI_DEPLOY=1`.
 2. **With tunnel:** If `ENABLE_PI_DEPLOY=1` and Pi secrets are set, the deploy job pushes the tarball to the Pi and runs extract + migrate + cache.
 3. **No tunnel:** From any machine, download the **flexiqueue-deploy** artifact, push the tarball to the Pi, SSH and run extract + migrate + cache + restart Reverb (Section 5).
 4. **Fallback:** If you can’t use the artifact, SSH to the Pi and run `git pull` (code only); then update vendor/build by other means if needed.
@@ -366,11 +387,11 @@ Use this when redoing the whole setup (e.g. fresh Armbian flash or clean reinsta
 | 1 | Laptop | `ssh root@<pi-ip>` (or `ssh root@armbian.local`) |
 | 2 | Pi | **Swap:** `sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab` |
 | 3 | Pi | **mDNS (optional):** `sudo apt install -y avahi-daemon && sudo systemctl enable --now avahi-daemon` |
-| 4 | Pi | **Stack:** `sudo apt update && sudo apt install -y nginx php8.2-fpm php8.2-mysql php8.2-mbstring php8.2-xml php8.2-curl php8.2-zip php8.2-gd php8.2-bcmath mariadb-server git` (if php8.2 not available, use php8.1-* and adjust Nginx/PHP paths below) |
+| 4 | Pi | **Stack:** If PHP 8.2: `sudo apt install -y nginx php8.2-fpm php8.2-mysql php8.2-mbstring php8.2-xml php8.2-curl php8.2-zip php8.2-gd php8.2-bcmath mariadb-server git`. If PHP 8.3 (e.g. Armbian Noble): use `php8.3-fpm` and `php8.3-*` in place of 8.2. Then use matching socket/paths in Nginx and pool config (e.g. `php8.3-fpm.sock`, `/etc/php/8.3/fpm/`). |
 | 5 | Pi | **MariaDB DB/user:** `sudo mysql -e "CREATE DATABASE flexiqueue; CREATE USER 'flexiqueue_user'@'localhost' IDENTIFIED BY 'your_strong_password'; GRANT ALL ON flexiqueue.* TO 'flexiqueue_user'@'localhost'; FLUSH PRIVILEGES;"` |
 | 6 | Pi | **MariaDB 512MB (optional):** `echo '[mysqld]\ninnodb_buffer_pool_size = 32M' | sudo tee /etc/mysql/mariadb.conf.d/99-flexiqueue.cnf && sudo systemctl restart mariadb` |
-| 7 | Pi | **Nginx site:** Create `/etc/nginx/sites-available/flexiqueue` with the server block from Section 3.3 (root `/var/www/flexiqueue/public`, fastcgi to `php8.2-fpm.sock`, `/app` proxy to 6001). Then: `sudo ln -s /etc/nginx/sites-available/flexiqueue /etc/nginx/sites-enabled/ && sudo rm -f /etc/nginx/sites-enabled/default && sudo nginx -t && sudo systemctl reload nginx` |
-| 8 | Pi | **PHP-FPM 512MB (optional):** In `/etc/php/8.2/fpm/pool.d/www.conf` set `pm = ondemand`, `pm.max_children = 2`, `pm.max_requests = 500`; then `sudo systemctl restart php8.2-fpm` |
+| 7 | Pi | **Nginx site:** Create `/etc/nginx/sites-available/flexiqueue` with the server block from Section 3.3 (root `/var/www/flexiqueue/public`, fastcgi to `php8.2-fpm.sock` or `php8.3-fpm.sock` to match installed PHP, `/app` proxy to 6001). Then: `sudo ln -s /etc/nginx/sites-available/flexiqueue /etc/nginx/sites-enabled/ && sudo rm -f /etc/nginx/sites-enabled/default && sudo nginx -t && sudo systemctl reload nginx` |
+| 8 | Pi | **PHP-FPM 512MB (optional):** In `/etc/php/8.2/fpm/pool.d/www.conf` or `/etc/php/8.3/fpm/pool.d/www.conf` set `pm = ondemand`, `pm.max_children = 2`, `pm.max_requests = 500`; then `sudo systemctl restart php8.2-fpm` or `php8.3-fpm` |
 | 9 | Pi | **Swappiness (optional):** `echo 'vm.swappiness = 10' | sudo tee /etc/sysctl.d/99-lowram.conf && sudo sysctl -p /etc/sysctl.d/99-lowram.conf` |
 | 10 | Pi | **Clone + env:** `sudo mkdir -p /var/www && sudo git clone https://github.com/YOUR_ORG/flexiqueue.git /var/www/flexiqueue && cd /var/www/flexiqueue && sudo cp .env.example .env` then edit `.env`: APP_ENV=production, APP_DEBUG=false, APP_URL, DB_*, QUEUE_CONNECTION=sync, SESSION_DRIVER=database, BROADCAST_CONNECTION=reverb, REVERB_* and VITE_REVERB_* (Section 4.1) |
 | 11 | Pi | **App key:** `cd /var/www/flexiqueue && php artisan key:generate` |
@@ -414,7 +435,7 @@ For Orange Pi One (512 MB) or similar low-RAM boards, use the following to avoid
 
 **Suggested Pi config snippets (apply on the Pi):**
 
-- **PHP-FPM pool** (e.g. `/etc/php/8.2/fpm/pool.d/www.conf` or a dedicated pool):
+- **PHP-FPM pool** (e.g. `/etc/php/8.2/fpm/pool.d/www.conf` or `/etc/php/8.3/fpm/pool.d/www.conf`):
   ```ini
   pm = ondemand
   pm.max_children = 2
