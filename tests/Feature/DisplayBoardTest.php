@@ -471,4 +471,85 @@ class DisplayBoardTest extends TestCase
         $this->assertArrayHasKey('estimated_wait_minutes', $props);
         $this->assertSame(0, $props['estimated_wait_minutes'], 'Single step track has no remaining steps');
     }
+
+    public function test_display_status_in_use_includes_diagram_when_program_has_diagram(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Diagram Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Desk A',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $process = \App\Models\Process::create([
+            'program_id' => $program->id,
+            'name' => 'Check-in',
+        ]);
+        $station->processes()->attach($process->id);
+        $track = ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'Main',
+            'is_default' => true,
+        ]);
+        \App\Models\TrackStep::create([
+            'track_id' => $track->id,
+            'station_id' => $station->id,
+            'process_id' => $process->id,
+            'step_order' => 1,
+            'is_required' => true,
+        ]);
+        \App\Models\ProgramDiagram::create([
+            'program_id' => $program->id,
+            'layout' => [
+                'nodes' => [
+                    ['id' => 'n1', 'type' => 'station', 'position' => ['x' => 0, 'y' => 0], 'data' => ['entityId' => $station->id]],
+                ],
+                'edges' => [],
+            ],
+        ]);
+        $hash = hash('sha256', 'diagram-'.Str::random(8));
+        $token = new \App\Models\Token;
+        $token->qr_code_hash = $hash;
+        $token->physical_id = 'D1';
+        $token->status = 'in_use';
+        $token->save();
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'D1',
+            'client_category' => 'Regular',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+            'started_at' => now(),
+        ]);
+        $token->update(['current_session_id' => $session->id]);
+
+        $response = $this->get('/display/status/'.$hash);
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->component('Display/Status')
+            ->has('diagram')
+            ->has('diagram_program')
+            ->has('diagram_tracks')
+            ->has('diagram_stations')
+            ->has('diagram_processes')
+            ->has('diagram_staff')
+            ->where('diagram_track_id', $track->id)
+        );
+        $props = $response->viewData('page')['props'];
+        $this->assertIsArray($props['diagram']['nodes']);
+        $this->assertCount(1, $props['diagram']['nodes']);
+        $this->assertSame(['id' => $program->id, 'name' => 'Diagram Program'], $props['diagram_program']);
+        $this->assertCount(1, $props['diagram_tracks']);
+        $this->assertSame($track->id, $props['diagram_tracks'][0]['id']);
+    }
 }

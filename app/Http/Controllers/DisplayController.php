@@ -3,6 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\Program;
+use App\Models\ProgramStationAssignment;
+use App\Models\ServiceTrack;
+use App\Models\Station;
 use App\Services\CheckStatusService;
 use App\Services\DisplayBoardService;
 use Inertia\Inertia;
@@ -31,6 +34,7 @@ class DisplayController extends Controller
     /**
      * Show client status after QR scan. Public. Per 08-API-SPEC §2.1 (same logic as check-status).
      * Pass display_scan_timeout_seconds from active program so Status page auto-dismiss matches board scanner setting.
+     * When in_use and program has a diagram, pass diagram data for client flow view.
      */
     public function status(string $qr_hash): Response
     {
@@ -42,6 +46,10 @@ class DisplayController extends Controller
         $inertiaProps['display_scan_timeout_seconds'] = $program ? $program->getDisplayScanTimeoutSeconds() : 20;
         $inertiaProps['program_name'] = $program?->name;
         $inertiaProps['date'] = now()->format('F j, Y');
+
+        if ($data['result'] === 'in_use' && ! empty($data['program_id']) && ! empty($data['track_id'])) {
+            $this->addDiagramProps($inertiaProps, (int) $data['program_id'], (int) $data['track_id']);
+        }
 
         return Inertia::render('Display/Status', $inertiaProps);
     }
@@ -71,5 +79,80 @@ class DisplayController extends Controller
         }
 
         return $base;
+    }
+
+    /**
+     * Add diagram props when program has a saved diagram (for client flow view).
+     *
+     * @param  array<string, mixed>  $inertiaProps
+     */
+    private function addDiagramProps(array &$inertiaProps, int $programId, int $trackId): void
+    {
+        $program = Program::query()->with('diagram')->find($programId);
+        if (! $program || ! $program->diagram) {
+            return;
+        }
+
+        $layout = $program->diagram->layout;
+        if (! is_array($layout) || empty($layout['nodes'])) {
+            return;
+        }
+
+        $tracks = $program->serviceTracks()
+            ->with(['trackSteps.process', 'trackSteps.station'])
+            ->orderBy('name')
+            ->get()
+            ->map(fn (ServiceTrack $t) => [
+                'id' => $t->id,
+                'name' => $t->name,
+                'steps' => $t->trackSteps->map(fn ($s) => [
+                    'station_id' => $s->station_id,
+                    'process_id' => $s->process_id,
+                    'step_order' => $s->step_order,
+                ])->values()->all(),
+            ])->values()->all();
+
+        $processes = $program->processes()
+            ->orderBy('name')
+            ->get()
+            ->map(fn ($p) => [
+                'id' => $p->id,
+                'name' => $p->name,
+            ])->values()->all();
+
+        $stations = $program->stations()
+            ->with('processes')
+            ->orderBy('name')
+            ->get()
+            ->map(fn (Station $s) => [
+                'id' => $s->id,
+                'name' => $s->name,
+                'process_ids' => $s->processes->pluck('id')->values()->all(),
+            ])->values()->all();
+
+        $seen = [];
+        $staffList = [];
+        foreach (ProgramStationAssignment::where('program_id', $program->id)->with('user:id,name')->get() as $a) {
+            $uid = $a->user_id;
+            if (! in_array($uid, $seen, true)) {
+                $seen[] = $uid;
+                $staffList[] = ['id' => $a->user->id, 'name' => $a->user->name];
+            }
+        }
+        foreach ($program->supervisedBy()->get() as $u) {
+            if (! in_array($u->id, $seen, true)) {
+                $seen[] = $u->id;
+                $staffList[] = ['id' => $u->id, 'name' => $u->name];
+            }
+        }
+        usort($staffList, fn ($a, $b) => strcmp($a['name'], $b['name']));
+
+        $inertiaProps['diagram'] = $layout;
+        $inertiaProps['diagram_program'] = ['id' => $program->id, 'name' => $program->name];
+        $inertiaProps['diagram_tracks'] = $tracks;
+        $inertiaProps['diagram_stations'] = $stations;
+        $inertiaProps['diagram_processes'] = $processes;
+        $inertiaProps['diagram_staff'] = $staffList;
+        $inertiaProps['diagram_track_id'] = $trackId;
     }
 }

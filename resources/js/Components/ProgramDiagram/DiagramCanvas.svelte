@@ -6,31 +6,67 @@
 	import '@xyflow/svelte/dist/style.css';
 	import DiagramFlowContent from './DiagramFlowContent.svelte';
 
+	interface LayoutShape {
+		viewport?: { x?: number; y?: number; zoom?: number };
+		nodes: Array<Record<string, unknown>>;
+		edges?: Array<Record<string, unknown>>;
+	}
+
 	interface ProgramDiagramProps {
 		program: { id: number; name: string } | null;
 		tracks: Array<{ id: number; name: string; steps?: Array<{ station_id: number; process_id: number; step_order: number }> }>;
 		stations: Array<{ id: number; name: string; process_ids?: number[] }>;
 		processes: Array<{ id: number; name: string }>;
 		readOnly?: boolean;
+		/** When provided (e.g. Display/Status client view), use instead of fetching from API. Skips diagram and staff fetches. */
+		initialLayout?: LayoutShape | null;
+		/** Lock selected track for client view. */
+		initialSelectedTrackId?: number | null;
+		/** Staff list when using initialLayout (avoids fetch). */
+		initialStaffList?: Array<{ id: number; name: string }>;
 	}
 
-	let { program = null, tracks = [], stations = [], processes = [], readOnly = false }: ProgramDiagramProps = $props();
+	let {
+		program = null,
+		tracks = [],
+		stations = [],
+		processes = [],
+		readOnly = false,
+		initialLayout = null,
+		initialSelectedTrackId = null,
+		initialStaffList = [],
+	}: ProgramDiagramProps = $props();
 
-	let layoutFromApi = $state<{ viewport?: { x: number; y: number; zoom: number }; nodes: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>> } | null>(null);
+	let layoutFromApi = $state<LayoutShape | null>(null);
 	let loadError = $state<string | null>(null);
 	let staffList = $state<Array<{ id: number; name: string }>>([]);
 	/** Diagram v2: which track's flow lines are shown. Default to first track, not None. */
 	let selectedTrackId = $state<number | null>(null);
 
-	/** Default to first track when tracks load and none is selected. */
+	/** When initialLayout provided, use it; otherwise default to first track or initialSelectedTrackId. */
 	$effect(() => {
 		const t = tracks;
-		if (Array.isArray(t) && t.length > 0 && selectedTrackId == null) {
+		const initTrack = initialSelectedTrackId;
+		if (initTrack != null) {
+			selectedTrackId = initTrack;
+		} else if (Array.isArray(t) && t.length > 0 && selectedTrackId == null) {
 			selectedTrackId = t[0].id;
 		}
 	});
 
+	/** When initialLayout provided, use it and initialStaffList; otherwise fetch from API. */
 	$effect(() => {
+		const initLayout = initialLayout;
+		if (initLayout && initLayout.nodes && Array.isArray(initLayout.nodes) && initLayout.nodes.length > 0) {
+			layoutFromApi = {
+				viewport: initLayout.viewport,
+				nodes: initLayout.nodes,
+				edges: Array.isArray(initLayout.edges) ? initLayout.edges : [],
+			};
+			staffList = Array.isArray(initialStaffList) ? [...initialStaffList] : [];
+			loadError = null;
+			return;
+		}
 		const id = program?.id;
 		if (!id) {
 			layoutFromApi = null;

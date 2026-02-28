@@ -391,8 +391,18 @@
         const url = (p?.url as string) ?? "";
         const search = url.includes("?") ? url.slice(url.indexOf("?")) : "";
         const tab = new URLSearchParams(search).get("tab");
-        const valid: (typeof activeTab)[] = ["overview", "processes", "stations", "staff", "tracks", "diagram", "settings"];
-        if (tab && valid.includes(tab as (typeof activeTab))) activeTab = tab as typeof activeTab;
+        if (tab && VALID_TABS.includes(tab as TabId)) activeTab = tab as TabId;
+    });
+    // Persist tab to localStorage so users return to the same tab when navigating back
+    $effect(() => {
+        const tab = activeTab;
+        const pid = program?.id;
+        if (!pid || typeof window === "undefined") return;
+        try {
+            localStorage.setItem(TAB_STORAGE_KEY(pid), tab);
+        } catch {
+            /* ignore */
+        }
     });
     const diagramViewMode = $derived(
         (() => {

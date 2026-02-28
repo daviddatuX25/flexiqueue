@@ -3,10 +3,12 @@
 	 * Display/Status.svelte — client QR status result. Per 09-UI-ROUTES-PHASE1 §3.5.
 	 * Data from server (check-status logic). Dismiss returns to /display. Auto-dismiss uses display_scan_timeout_seconds from program settings.
 	 * Hidden barcode input allows continuous scanning: scan next ticket without reopening camera (per display scanner plan).
+	 * When in_use and program has a diagram, shows client's track flow (read-only, no modifying actions).
 	 */
 	import { onDestroy, tick } from 'svelte';
 	import { Link, router } from '@inertiajs/svelte';
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
+	import DiagramCanvas from '../../Components/ProgramDiagram/DiagramCanvas.svelte';
 
 	let {
 		error = null,
@@ -21,7 +23,22 @@
 		display_scan_timeout_seconds = 20,
 		program_name = null,
 		date = '',
+		diagram = null,
+		diagram_program = null,
+		diagram_tracks = [],
+		diagram_stations = [],
+		diagram_processes = [],
+		diagram_staff = [],
+		diagram_track_id = null,
 	} = $props();
+
+	const showDiagram = $derived(
+		diagram &&
+			diagram_program &&
+			Array.isArray(diagram.nodes) &&
+			diagram.nodes.length > 0 &&
+			Array.isArray(diagram_tracks)
+	);
 
 	const dismissSeconds = Math.max(0, Number(display_scan_timeout_seconds) || 20);
 	let countdown = $state(dismissSeconds);
@@ -133,6 +150,24 @@
 							</li>
 						{/each}
 					</ul>
+				</div>
+			{/if}
+
+			{#if showDiagram}
+				<div class="w-full">
+					<h2 class="font-semibold text-surface-950 mb-3">Your flow</h2>
+					<div class="overflow-x-auto -mx-2 sm:mx-0">
+						<DiagramCanvas
+							program={diagram_program}
+							tracks={diagram_tracks}
+							stations={diagram_stations}
+							processes={diagram_processes}
+							readOnly={true}
+							initialLayout={diagram}
+							initialSelectedTrackId={diagram_track_id}
+							initialStaffList={diagram_staff}
+						/>
+					</div>
 				</div>
 			{/if}
 		{/if}

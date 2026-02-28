@@ -50,6 +50,8 @@ class CheckStatusService
             'result' => 'in_use',
             'alias' => $session->alias,
             'track' => $track?->name ?? '—',
+            'track_id' => $track?->id,
+            'program_id' => $session->program_id,
             'client_category' => $session->client_category ?? 'Regular',
             'status' => $session->status,
             'current_station' => $session->currentStation?->name ?? '—',
