@@ -32,6 +32,22 @@ class DisplayController extends Controller
     }
 
     /**
+     * Show station-specific display (calling, queue, activity for one station). Public.
+     * Per plan: 404 when station inactive or not in active program.
+     */
+    public function stationBoard(Station $station): Response
+    {
+        $program = Program::query()->where('is_active', true)->first();
+        if (! $program || $station->program_id !== $program->id || ! $station->is_active) {
+            abort(404);
+        }
+
+        $data = $this->displayBoardService->getStationBoardData($station);
+
+        return Inertia::render('Display/StationBoard', $data);
+    }
+
+    /**
      * Show client status after QR scan. Public. Per 08-API-SPEC §2.1 (same logic as check-status).
      * Pass display_scan_timeout_seconds from active program so Status page auto-dismiss matches board scanner setting.
      * When in_use and program has a diagram, pass diagram data for client flow view.

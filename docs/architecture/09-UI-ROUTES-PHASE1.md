@@ -14,6 +14,7 @@
 |-------|---------------|---------|
 | `GET /login` | `Auth/Login.svelte` | Staff login form |
 | `GET /display` | `Display/Board.svelte` | Informant "Now Serving" board |
+| `GET /display/station/{station}` | `Display/StationBoard.svelte` | Station-specific informant (calling, queue, activity for one station) |
 | `GET /display/status/{qr_hash}` | `Display/Status.svelte` | Client QR status check result |
 
 ### Authenticated Routes (All Staff)
@@ -307,8 +308,22 @@ Display/Board.svelte [DisplayLayout]
 **Data loaded:** Initial data via Inertia props (fetched from dashboard stats endpoint or dedicated display endpoint).
 
 **WebSocket subscriptions:**
-- `global.queue` — listen for `NowServing`, `QueueLength`, `SystemAnnouncement`, `SessionCompleted`.
-- Auto-update all sections in real-time. No manual refresh needed.
+- `display.activity` — listen for `station_activity`, `staff_availability`, `program_status`, `display_settings`.
+- `global.queue` — listen for `NowServing`, `QueueLength`.
+- TTS on `station_activity` when `action_type === 'call'` (phrase: "Calling {alias}, please proceed to {station_name}"). Mute/volume from admin (Program Settings) or `.display_settings` broadcast.
+
+---
+
+### 3.4b Station-Specific Display — `Display/StationBoard.svelte`
+
+**Route:** `GET /display/station/{station}` (public, no auth). 404 when station not found, inactive, or not in active program.
+
+**Purpose:** Single-station informant: calling, now serving, waiting list, and recent activity for that station only. TTS on call ("Calling {alias}"). Mute and volume controls on the page (persisted in localStorage).
+
+**Data loaded:** Initial data via Inertia props: `program_name`, `date`, `station_name`, `station_id`, `now_serving`, `waiting`, `station_activity`.
+
+**WebSocket subscriptions:**
+- `display.station.{station_id}` — listen for `station_activity`, `now_serving`, `queue_length`. On event, refresh or merge state; on `station_activity` with `action_type === 'call'`, trigger TTS.
 
 ---
 

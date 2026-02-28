@@ -26,6 +26,7 @@ class QueueLengthUpdated implements ShouldBroadcastNow
     {
         return [
             new Channel('global.queue'),
+            new Channel('display.station.'.$this->stationId),
         ];
     }
 

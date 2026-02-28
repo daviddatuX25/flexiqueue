@@ -34,6 +34,7 @@
         Rocket,
         ChevronLeft,
         ChevronRight,
+        Volume2,
     } from "lucide-svelte";
 
     interface ProgramItem {
@@ -54,6 +55,10 @@
             alternate_priority_first?: boolean;
             /** Per flexiqueue-87p: display board scan countdown (0 = no auto-close). */
             display_scan_timeout_seconds?: number;
+            /** Per plan: display board TTS mute (admin-controlled). */
+            display_audio_muted?: boolean;
+            /** Per plan: display board TTS volume 0-1 (admin-controlled). */
+            display_audio_volume?: number;
         };
     }
 
@@ -228,6 +233,10 @@
     let settingsAlternatePriorityFirst = $state(true);
     /** Per flexiqueue-87p: display board scan countdown in seconds; 0 = no auto-close. */
     let displayScanTimeoutSeconds = $state(20);
+    /** Per plan: display board audio mute (admin-controlled). */
+    let displayAudioMuted = $state(false);
+    /** Per plan: display board audio volume 0-1 (admin-controlled). */
+    let displayAudioVolume = $state(1);
     /** Per ISSUES-ELABORATION §15: expandable "More details" for station selection. */
     let showStationSelectionDetails = $state(false);
     /** Per bead flexiqueue-5gl: expandable "More details" for priority/regular ratio (alternate mode). */
@@ -258,6 +267,8 @@
             settingsAlternateRatioR = ar[1] ?? 1;
             settingsAlternatePriorityFirst = s.alternate_priority_first !== false;
             displayScanTimeoutSeconds = Math.min(300, Math.max(0, Number(s.display_scan_timeout_seconds ?? 20)));
+            displayAudioMuted = s.display_audio_muted === true;
+            displayAudioVolume = Math.max(0, Math.min(1, Number(s.display_audio_volume ?? 1)));
         }
     });
 
@@ -1159,6 +1170,8 @@
                     ],
                     alternate_priority_first: settingsAlternatePriorityFirst,
                     display_scan_timeout_seconds: displayScanTimeoutSeconds,
+                    display_audio_muted: displayAudioMuted,
+                    display_audio_volume: displayAudioVolume,
                 },
             },
         );
@@ -2386,6 +2399,48 @@
                                         bind:value={displayScanTimeoutSeconds}
                                     />
                                     <span class="text-sm text-surface-600">seconds (0–300, 0 = no auto-close)</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Display board audio: TTS mute and volume (per plan) -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3
+                                    class="font-medium text-surface-950 flex items-center gap-2"
+                                >
+                                    <Volume2 class="w-4 h-4 text-surface-500" /> Display board audio
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    Mute and volume for the general display board TTS announcements (e.g. "Calling A3, please proceed to...").
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control space-y-3">
+                                <label
+                                    class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        class="checkbox"
+                                        bind:checked={displayAudioMuted}
+                                    />
+                                    <span class="label-text text-surface-950 font-medium">Mute display board TTS</span>
+                                </label>
+                                <label class="flex flex-col gap-1">
+                                    <span class="text-sm text-surface-600">Volume (0–100%)</span>
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="1"
+                                        step="0.1"
+                                        class="range range-sm w-48 max-w-full"
+                                        bind:value={displayAudioVolume}
+                                        disabled={displayAudioMuted}
+                                        aria-label="Display board TTS volume"
+                                    />
+                                    <span class="text-xs text-surface-500">{Math.round(displayAudioVolume * 100)}%</span>
                                 </label>
                             </div>
                         </div>

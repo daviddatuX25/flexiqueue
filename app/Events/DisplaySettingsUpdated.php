@@ -9,18 +9,16 @@ use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Per 08-API-SPEC-PHASE1 §3.2: broadcast now_serving to global.queue when serving state changes.
+ * Per plan: broadcast display audio settings to display.activity so the general display board
+ * can update mute/volume in real time when admin changes them in Program Settings.
  */
-class NowServing implements ShouldBroadcastNow
+class DisplaySettingsUpdated implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
-    /**
-     * @param  array<string, mixed>  $payload
-     */
     public function __construct(
-        public int $stationId,
-        public array $payload
+        public bool $displayAudioMuted,
+        public float $displayAudioVolume
     ) {}
 
     /**
@@ -29,14 +27,13 @@ class NowServing implements ShouldBroadcastNow
     public function broadcastOn(): array
     {
         return [
-            new Channel('global.queue'),
-            new Channel('display.station.'.$this->stationId),
+            new Channel('display.activity'),
         ];
     }
 
     public function broadcastAs(): string
     {
-        return 'now_serving';
+        return 'display_settings';
     }
 
     /**
@@ -44,6 +41,9 @@ class NowServing implements ShouldBroadcastNow
      */
     public function broadcastWith(): array
     {
-        return array_merge(['station_id' => $this->stationId], $this->payload);
+        return [
+            'display_audio_muted' => $this->displayAudioMuted,
+            'display_audio_volume' => $this->displayAudioVolume,
+        ];
     }
 }

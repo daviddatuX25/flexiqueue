@@ -104,6 +104,20 @@ class Program extends Model
         return $v === null ? 20 : max(0, (int) $v);
     }
 
+    /** Per plan: display board audio mute (admin-controlled). Default false. */
+    public function getDisplayAudioMuted(): bool
+    {
+        return (bool) ($this->settings['display_audio_muted'] ?? false);
+    }
+
+    /** Per plan: display board audio volume 0–1 (admin-controlled). Default 1. */
+    public function getDisplayAudioVolume(): float
+    {
+        $v = $this->settings['display_audio_volume'] ?? 1;
+
+        return (float) max(0, min(1, $v));
+    }
+
     public function queueSessions(): HasMany
     {
         return $this->hasMany(Session::class, 'program_id');

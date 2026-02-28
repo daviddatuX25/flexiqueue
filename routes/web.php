@@ -177,6 +177,7 @@ Route::get('/api/check-status/{qr_hash}', [CheckStatusController::class, 'show']
 
 // Per 09-UI-ROUTES: client-facing informant display (no auth)
 Route::get('/display', [DisplayController::class, 'board'])->name('display');
+Route::get('/display/station/{station}', [DisplayController::class, 'stationBoard'])->name('display.station');
 Route::get('/display/status/{qr_hash}', [DisplayController::class, 'status'])->name('display.status');
 
 // Per 05-SECURITY-CONTROLS §3.4: admin-only routes

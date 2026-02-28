@@ -114,6 +114,53 @@ class ProgramControllerTest extends TestCase
         $this->assertFalse($settings['require_permission_before_override']);
     }
 
+    /** Per plan: display_audio_volume must be 0-1; invalid value returns 422. */
+    public function test_update_rejects_display_audio_volume_out_of_range(): void
+    {
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/programs/{$program->id}", [
+            'name' => 'P',
+            'description' => null,
+            'settings' => ['display_audio_volume' => 1.5],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['settings.display_audio_volume']);
+    }
+
+    /** Per plan: valid display_audio_muted and display_audio_volume are persisted. */
+    public function test_update_persists_display_audio_settings(): void
+    {
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/programs/{$program->id}", [
+            'name' => 'P',
+            'description' => null,
+            'settings' => [
+                'display_audio_muted' => true,
+                'display_audio_volume' => 0.5,
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('program.settings.display_audio_muted', true);
+        $response->assertJsonPath('program.settings.display_audio_volume', 0.5);
+        $program->refresh();
+        $this->assertTrue($program->getDisplayAudioMuted());
+        $this->assertSame(0.5, $program->getDisplayAudioVolume());
+    }
+
     public function test_update_persists_station_selection_mode(): void
     {
         $program = Program::create([

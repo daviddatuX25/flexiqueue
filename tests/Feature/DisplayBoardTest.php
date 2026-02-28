@@ -552,4 +552,234 @@ class DisplayBoardTest extends TestCase
         $this->assertCount(1, $props['diagram_tracks']);
         $this->assertSame($track->id, $props['diagram_tracks'][0]['id']);
     }
+
+    /** Per plan: station display 404 for nonexistent station id. */
+    public function test_display_station_returns_404_for_nonexistent_station(): void
+    {
+        $response = $this->get('/display/station/99999');
+
+        $response->assertStatus(404);
+    }
+
+    /** Per plan: station display 404 when station is inactive. */
+    public function test_display_station_returns_404_for_inactive_station(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Inactive Desk',
+            'capacity' => 1,
+            'is_active' => false,
+        ]);
+
+        $response = $this->get('/display/station/'.$station->id);
+
+        $response->assertStatus(404);
+    }
+
+    /** Per plan: station display 404 when no active program. */
+    public function test_display_station_returns_404_when_no_active_program(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Inactive Program',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $user->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Desk 1',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+
+        $response = $this->get('/display/station/'.$station->id);
+
+        $response->assertStatus(404);
+    }
+
+    /** Per plan: station display 404 when station belongs to different program than active. */
+    public function test_display_station_returns_404_when_station_from_different_program(): void
+    {
+        $user = User::factory()->create();
+        $activeProgram = Program::create([
+            'name' => 'Active',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $otherProgram = Program::create([
+            'name' => 'Other',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $user->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $otherProgram->id,
+            'name' => 'Other Desk',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+
+        $response = $this->get('/display/station/'.$station->id);
+
+        $response->assertStatus(404);
+    }
+
+    /** Per plan: station display 200 with correct Inertia component and props for valid active station. */
+    public function test_display_station_returns_200_with_station_scoped_data(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Cash Assistance',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Verification Desk',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+
+        $response = $this->get('/display/station/'.$station->id);
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->component('Display/StationBoard')
+            ->has('program_name')
+            ->has('date')
+            ->has('station_name')
+            ->has('station_id')
+            ->has('now_serving')
+            ->has('waiting')
+            ->has('station_activity')
+        );
+        $props = $response->viewData('page')['props'];
+        $this->assertSame('Cash Assistance', $props['program_name']);
+        $this->assertSame('Verification Desk', $props['station_name']);
+        $this->assertSame($station->id, $props['station_id']);
+        $this->assertIsArray($props['now_serving']);
+        $this->assertIsArray($props['waiting']);
+        $this->assertIsArray($props['station_activity']);
+    }
+
+    /** Per plan: station display includes now_serving and waiting shape when sessions at station. */
+    public function test_display_station_includes_now_serving_and_waiting_with_sessions(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Test Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Interview',
+            'capacity' => 2,
+            'is_active' => true,
+        ]);
+        $track = ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'Default',
+            'is_default' => true,
+        ]);
+        \App\Models\TrackStep::create([
+            'track_id' => $track->id,
+            'station_id' => $station->id,
+            'step_order' => 1,
+            'is_required' => true,
+        ]);
+        $token1 = new \App\Models\Token;
+        $token1->qr_code_hash = hash('sha256', Str::random(16));
+        $token1->physical_id = 'A1';
+        $token1->status = 'in_use';
+        $token1->save();
+        $session1 = Session::create([
+            'token_id' => $token1->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'A1',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'status' => 'called',
+            'started_at' => now(),
+        ]);
+        $token1->update(['current_session_id' => $session1->id]);
+        $token2 = new \App\Models\Token;
+        $token2->qr_code_hash = hash('sha256', Str::random(16));
+        $token2->physical_id = 'A2';
+        $token2->status = 'in_use';
+        $token2->save();
+        Session::create([
+            'token_id' => $token2->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'A2',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'station_queue_position' => 1,
+            'status' => 'waiting',
+            'started_at' => now(),
+        ]);
+        $token2->update(['current_session_id' => Session::where('alias', 'A2')->first()->id]);
+
+        $response = $this->get('/display/station/'.$station->id);
+
+        $response->assertStatus(200);
+        $props = $response->viewData('page')['props'];
+        $this->assertCount(1, $props['now_serving']);
+        $this->assertSame('A1', $props['now_serving'][0]['alias']);
+        $this->assertSame('called', $props['now_serving'][0]['status']);
+        $this->assertCount(1, $props['waiting']);
+        $this->assertSame('A2', $props['waiting'][0]['alias']);
+        $this->assertSame(1, $props['waiting'][0]['position']);
+    }
+
+    /** Per plan: general display returns display_audio_muted and display_audio_volume from program settings. */
+    public function test_display_board_includes_display_audio_settings_when_program_has_them(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+            'settings' => [
+                'display_audio_muted' => true,
+                'display_audio_volume' => 0.5,
+            ],
+        ]);
+
+        $response = $this->get('/display');
+
+        $response->assertStatus(200);
+        $props = $response->viewData('page')['props'];
+        $this->assertArrayHasKey('display_audio_muted', $props);
+        $this->assertArrayHasKey('display_audio_volume', $props);
+        $this->assertTrue($props['display_audio_muted']);
+        $this->assertSame(0.5, $props['display_audio_volume']);
+    }
+
+    /** Per plan: general display returns default display_audio when no program. */
+    public function test_display_board_returns_default_display_audio_when_no_program(): void
+    {
+        $response = $this->get('/display');
+
+        $response->assertStatus(200);
+        $props = $response->viewData('page')['props'];
+        $this->assertArrayHasKey('display_audio_muted', $props);
+        $this->assertArrayHasKey('display_audio_volume', $props);
+        $this->assertFalse($props['display_audio_muted']);
+        $this->assertSame(1.0, $props['display_audio_volume']);
+    }
 }

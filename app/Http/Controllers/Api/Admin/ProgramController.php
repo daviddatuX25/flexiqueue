@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Admin;
 
+use App\Events\DisplaySettingsUpdated;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreProgramRequest;
 use App\Http\Requests\UpdateProgramRequest;
@@ -81,7 +82,12 @@ class ProgramController extends Controller
 
         $program->update($validated);
 
-        return response()->json(['program' => $this->programResource($program->fresh())]);
+        $program = $program->fresh();
+        if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings))) {
+            event(new DisplaySettingsUpdated($program->getDisplayAudioMuted(), $program->getDisplayAudioVolume()));
+        }
+
+        return response()->json(['program' => $this->programResource($program)]);
     }
 
     /**
@@ -194,6 +200,8 @@ class ProgramController extends Controller
                 ],
                 'alternate_priority_first' => (bool) ($settings['alternate_priority_first'] ?? true),
                 'display_scan_timeout_seconds' => $program->getDisplayScanTimeoutSeconds(),
+                'display_audio_muted' => $program->getDisplayAudioMuted(),
+                'display_audio_volume' => $program->getDisplayAudioVolume(),
             ],
         ];
     }

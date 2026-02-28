@@ -875,10 +875,28 @@ All admin endpoints require `auth` + `role:admin` middleware.
 **Events:**
 | Event | Payload | Trigger |
 |-------|---------|---------|
-| `NowServing` | `{ entries: [{ alias, station_name, track }] }` | Any session starts being served |
-| `QueueLength` | `{ station_id, station_name, count }` | Queue count changes at any station |
+| `NowServing` | `{ station_id, ... }` | Any session starts being served |
+| `queue_length` | `{ station_id }` | Queue count changes at any station |
 | `SystemAnnouncement` | `{ message, priority }` | Admin broadcasts a message |
 | `SessionCompleted` | `{ alias, station_name }` | Session completed (update display) |
+
+### 7.3 `display.activity` (Public Broadcast)
+
+**Auth:** None. Used by the general informant display board.
+
+**Events:**
+| Event | Payload | Trigger |
+|-------|---------|---------|
+| `station_activity` | `{ station_id, station_name, message, alias, action_type, created_at }` | Bind, call, or check-in at a station |
+| `staff_availability` | — | Staff availability status changed |
+| `program_status` | `{ program_is_paused }` | Program paused or resumed |
+| `display_settings` | `{ display_audio_muted, display_audio_volume }` | Admin updated display board audio (Program Settings) |
+
+### 7.4 `display.station.{id}` (Public Broadcast)
+
+**Auth:** None. Used by the station-specific informant display (`Display/StationBoard.svelte`).
+
+**Events:** Same as `display.activity` for station-scoped events, plus `now_serving` and `queue_length` from `global.queue` — all broadcast to `display.station.{station_id}` when the event applies to that station. Payloads include `station_id` where relevant.
 
 ---
 

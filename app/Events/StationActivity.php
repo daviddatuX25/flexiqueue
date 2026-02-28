@@ -32,6 +32,7 @@ class StationActivity implements ShouldBroadcastNow
     {
         return [
             new Channel('display.activity'),
+            new Channel('display.station.'.$this->stationId),
         ];
     }
 

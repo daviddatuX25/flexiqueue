@@ -33,13 +33,22 @@
 		staff_online = 0,
 		display_scan_timeout_seconds = 20,
 		program_is_paused = false,
+		display_audio_muted = false,
+		display_audio_volume = 1,
 	} = $props();
 
 	/** Synced from prop + .program_status; when true, show "Program is paused" overlay (real-time). */
 	let programIsPaused = $state(false);
+	/** Per plan: display board TTS mute/volume — from props and .display_settings broadcast. */
+	let displayAudioMuted = $state(false);
+	let displayAudioVolume = $state(1);
 
 	$effect(() => {
 		programIsPaused = !!program_is_paused;
+	});
+	$effect(() => {
+		displayAudioMuted = !!display_audio_muted;
+		displayAudioVolume = Math.max(0, Math.min(1, Number(display_audio_volume ?? 1)));
 	});
 
 	/** Open camera modal when URL has ?scan=1 (e.g. "Scan again" from Status page). */
@@ -78,7 +87,26 @@
 	const visibleActivity = $derived(activityFeed.slice(0, 20));
 
 	function refreshBoardData() {
-		router.reload({ only: ['now_serving', 'waiting_by_station', 'total_in_queue', 'station_activity', 'program_is_paused'] });
+		router.reload({
+			only: [
+				'now_serving',
+				'waiting_by_station',
+				'total_in_queue',
+				'station_activity',
+				'program_is_paused',
+				'display_audio_muted',
+				'display_audio_volume',
+			],
+		});
+	}
+
+	/** Per plan: TTS for general display — "Calling {alias}, please proceed to {station_name}". Respects admin mute/volume. */
+	function speakCallAnnouncement(alias, stationName) {
+		if (typeof window === 'undefined' || displayAudioMuted || !window.speechSynthesis) return;
+		const text = `Calling ${alias ?? 'client'}, please proceed to ${stationName ?? 'your station'}`;
+		const u = new SpeechSynthesisUtterance(text);
+		u.volume = Math.max(0, Math.min(1, displayAudioVolume));
+		window.speechSynthesis.speak(u);
 	}
 
 	onMount(() => {
@@ -94,6 +122,9 @@
 				created_at: e.created_at ?? new Date().toISOString(),
 			};
 			activityFeed = [item, ...activityFeed].slice(0, 20);
+			if (e.action_type === 'call') {
+				speakCallAnnouncement(e.alias, e.station_name);
+			}
 			// Per ISSUES-ELABORATION §10: refresh waiting/now serving so "Currently waiting" updates in realtime
 			refreshBoardData();
 		});
@@ -104,6 +135,11 @@
 		// Program paused/resumed → show or hide blocker overlay in real time
 		activityChannel.listen('.program_status', (e) => {
 			programIsPaused = !!e.program_is_paused;
+		});
+		// Per plan: admin changed display board audio (mute/volume) → update local state for TTS
+		activityChannel.listen('.display_settings', (e) => {
+			displayAudioMuted = !!e.display_audio_muted;
+			displayAudioVolume = Math.max(0, Math.min(1, Number(e.display_audio_volume ?? 1)));
 		});
 		// Real-time: refresh Now Serving and waiting list when serve/transfer/complete (not only on activity)
 		const queueChannel = echo.channel('global.queue');

@@ -34,6 +34,8 @@ class UpdateProgramRequest extends FormRequest
             // Per bead flexiqueue-5gl: which queue is served first in alternate mode (default: priority first).
             'settings.alternate_priority_first' => ['sometimes', 'boolean'],
             'settings.display_scan_timeout_seconds' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:300'],
+            'settings.display_audio_muted' => ['sometimes', 'boolean'],
+            'settings.display_audio_volume' => ['sometimes', 'numeric', 'min:0', 'max:1'],
         ];
     }
 }

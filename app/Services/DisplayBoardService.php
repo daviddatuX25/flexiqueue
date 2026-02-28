@@ -34,6 +34,8 @@ class DisplayBoardService
                 'staff_online' => 0,
                 'display_scan_timeout_seconds' => 20,
                 'program_is_paused' => false,
+                'display_audio_muted' => false,
+                'display_audio_volume' => 1.0,
             ];
         }
 
@@ -131,6 +133,71 @@ class DisplayBoardService
             'staff_online' => $staffOnline,
             'display_scan_timeout_seconds' => $program->getDisplayScanTimeoutSeconds(),
             'program_is_paused' => (bool) $program->is_paused,
+            'display_audio_muted' => $program->getDisplayAudioMuted(),
+            'display_audio_volume' => $program->getDisplayAudioVolume(),
+        ];
+    }
+
+    /**
+     * Get board data for a single station's display. Caller must ensure station belongs to active program.
+     * Per plan: station-specific informant display (calling, queue, activity for one station).
+     *
+     * @return array{program_name: string|null, date: string, station_name: string, station_id: int, now_serving: array, waiting: array, station_activity: array}
+     */
+    public function getStationBoardData(Station $station): array
+    {
+        $program = $station->program;
+        $programName = $program?->name;
+        $date = now()->format('F j, Y');
+
+        $servingAndCalled = Session::query()
+            ->where('program_id', $station->program_id)
+            ->where('current_station_id', $station->id)
+            ->whereIn('status', ['serving', 'called'])
+            ->with(['serviceTrack.trackSteps.process'])
+            ->orderBy('started_at')
+            ->get();
+
+        $waiting = Session::query()
+            ->where('program_id', $station->program_id)
+            ->where('current_station_id', $station->id)
+            ->where('status', 'waiting')
+            ->with(['serviceTrack.trackSteps.process'])
+            ->orderBy('station_queue_position')
+            ->orderBy('started_at')
+            ->get();
+
+        $nowServing = $servingAndCalled->map(function (Session $s) {
+            $process = $this->currentProcessForSession($s);
+
+            return [
+                'alias' => $s->alias,
+                'status' => $s->status,
+                'track' => $s->serviceTrack?->name ?? '—',
+                'process_name' => $process ? $process['process_name'] : null,
+            ];
+        })->values()->all();
+
+        $waitingList = $waiting->map(function (Session $s, int $index) {
+            $process = $this->currentProcessForSession($s);
+
+            return [
+                'alias' => $s->alias,
+                'process_name' => $process ? $process['process_name'] : null,
+                'position' => $index + 1,
+            ];
+        })->values()->all();
+
+        $stationActivity = $this->getStationActivity([$station->id], 15);
+
+        return [
+            'program_name' => $programName,
+            'date' => $date,
+            'station_name' => $station->name,
+            'station_id' => $station->id,
+            'now_serving' => $nowServing,
+            'waiting' => $waitingList,
+            'station_activity' => $stationActivity,
         ];
     }
 

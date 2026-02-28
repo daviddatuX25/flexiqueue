@@ -59,6 +59,7 @@ FlexiQueue operates on a **closed local network** with no internet exposure. The
 
 These routes require NO authentication:
 - `GET /display` — Informant display board.
+- `GET /display/station/{station}` — Station-specific informant display.
 - `GET /api/check-status/{qr_hash}` — QR token status lookup.
 - `GET /display/status/{qr_hash}` — Informant status view page.
 
