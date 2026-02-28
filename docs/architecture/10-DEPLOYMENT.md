@@ -332,9 +332,11 @@ To create and push `dev` from current `master`: `git checkout -b dev && git push
 
 ### 6.2 Deploy options
 
-- **A) Pi reachable from GitHub (e.g. ZeroTier tunnel):** Deploy runs **only on `master`** (not on `dev`). In the repo: set a **variable** `ENABLE_PI_DEPLOY=1` and **secrets** `PI_HOST`, `PI_USER`, `PI_SSH_KEY` (private key for the Pi). When you push to `master`, the workflow’s **deploy** job runs: it downloads the artifact, SCPs the tarball to the Pi, SSHs in and extracts, runs migrate, config:cache, route:cache. If you don’t set up a tunnel (or prefer not to), use B. *Expand: ZeroTier/similar, SSH key on Pi, firewall.*
-- **B) Pi on LAN only (typical demo):** Do **not** set `ENABLE_PI_DEPLOY` (or leave it unset). The workflow only builds and uploads the artifact. From **any** machine, download the artifact from the run and push the tarball to the Pi, then SSH and extract + migrate (Section 5). **GitHub does not trigger the Pi**; you deploy manually.
-- **C) Fallback — no artifact at hand:** If you can’t use the artifact (e.g. no way to download it), the **only** thing you do from a dev machine is **SSH to the Pi and run `git pull`** manually. That updates **code only**; `vendor/` and `public/build/` are unchanged unless you update them separately (e.g. run composer/npm on the Pi, or later push an artifact). The **function of the dev laptop in this case is only to trigger a manual git pull via SSH**, not to build.
+**Recommended when the Pi is on your LAN (no ZeroTier):** Leave `ENABLE_PI_DEPLOY` **unset**. Use **Actions to build** → **you download the artifact** from the run (Actions → completed run → Artifacts → **flexiqueue-deploy**) → **from your laptop:** `scp flexiqueue-deploy.tar.gz root@<pi-ip>:/tmp/` → **SSH to the Pi** and run extract + migrate (Section 5). No tunnel, no deploy secrets, no ZeroTier required.
+
+- **A) Pi reachable from GitHub (e.g. ZeroTier tunnel):** Optional. Only if you want GitHub to push to the Pi automatically. Set **variable** `ENABLE_PI_DEPLOY=1` and **secrets** `PI_HOST`, `PI_USER`, `PI_SSH_KEY`. Deploy runs **only on `master`**. Without a tunnel, this job never runs. *Expand: ZeroTier/similar, SSH key on Pi, firewall.*
+- **B) Pi on LAN only (typical):** Do **not** set `ENABLE_PI_DEPLOY`. The workflow only builds and uploads the artifact. You download the artifact, push the tarball to the Pi from your machine, then SSH and extract + migrate (Section 5). **This is the normal flow when you don’t use ZeroTier.**
+- **C) Fallback — no artifact at hand:** SSH to the Pi and run `git pull` only. That updates **code only**; `vendor/` and `public/build/` are unchanged unless you update them separately (e.g. push an artifact later).
 
 *Expand: Secrets best practices, deploy on tag vs branch.*
 
