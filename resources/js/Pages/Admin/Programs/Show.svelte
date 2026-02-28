@@ -126,13 +126,28 @@
         stats?: ProgramStats;
     } = $props();
 
-    const queryTab =
-        typeof window !== "undefined"
-            ? new URLSearchParams(window.location.search).get("tab")
-            : null;
-    let activeTab = $state<
-        "tracks" | "processes" | "stations" | "overview" | "settings" | "staff" | "diagram"
-    >((queryTab as any) || "overview");
+    const VALID_TABS = ["overview", "processes", "stations", "staff", "tracks", "diagram", "settings"] as const;
+    type TabId = (typeof VALID_TABS)[number];
+    const TAB_STORAGE_KEY = (programId: number) =>
+        `flexiqueue:admin-program-tab-${programId}`;
+
+    function getInitialTab(): TabId {
+        if (typeof window === "undefined") return "overview";
+        const fromUrl = new URLSearchParams(window.location.search).get("tab");
+        if (fromUrl && VALID_TABS.includes(fromUrl as TabId)) return fromUrl as TabId;
+        const pid = program?.id;
+        if (pid) {
+            try {
+                const stored = localStorage.getItem(TAB_STORAGE_KEY(pid));
+                if (stored && VALID_TABS.includes(stored as TabId)) return stored as TabId;
+            } catch {
+                /* ignore */
+            }
+        }
+        return "overview";
+    }
+
+    let activeTab = $state<TabId>(getInitialTab());
     /** Tab nav scroll: ref and scroll indicators for left/right arrows (no scrollbar). */
     let tabListEl = $state<HTMLDivElement | null>(null);
     let canScrollLeft = $state(false);

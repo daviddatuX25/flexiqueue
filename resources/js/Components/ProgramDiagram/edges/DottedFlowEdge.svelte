@@ -2,9 +2,10 @@
 	/**
 	 * Diagram v2: Animated directional flow edge.
 	 * - Thick dotted line with arrow pointing toward the target.
-	 * - Supports multiple bend midpoints and draggable endpoints on process box sides.
+	 * - Supports multiple bend midpoints.
 	 */
 	import { getContext } from 'svelte';
+	import { get } from 'svelte/store';
 	import { Position, getSmoothStepPath } from '@xyflow/system';
 	import { useSvelteFlow } from '@xyflow/svelte';
 	import type { SmoothStepEdgeProps } from '@xyflow/svelte';
@@ -44,6 +45,8 @@
 
 	const ctx = getContext<{
 		bendingEdgeIdStore?: { subscribe: (fn: (v: string | null) => void) => () => void };
+		selectedWaypointIndexStore?: { subscribe: (fn: (v: number | null) => void) => () => void; set: (v: number | null) => void };
+		onWaypointSelect?: (edgeId: string, index: number) => void;
 		onWaypointUpdate?: (id: string, waypoints: Waypoint[]) => void;
 		onEndpointUpdate?: (
 			id: string,
@@ -73,13 +76,24 @@
 		});
 	});
 
-	// Initialise waypoints from persisted edge data once; after the user edits they are pure local state.
+	// Sync local selectedWaypointIndex from store when this edge is the bending edge (survives remount).
 	$effect(() => {
-		if (waypoints.length) return;
+		const store = ctx?.selectedWaypointIndexStore;
+		if (!store || bendingEdgeId !== id) return;
+		return store.subscribe((value) => {
+			selectedWaypointIndex = value;
+		});
+	});
+
+	// Initialise waypoints from persisted edge data; sync when parent clears (e.g. process box click).
+	$effect(() => {
 		const d = data as { waypoints?: Waypoint[]; waypoint?: Waypoint } | undefined;
-		if (d?.waypoints && Array.isArray(d.waypoints) && d.waypoints.length) {
-			waypoints = d.waypoints.map((wp) => ({ x: wp.x, y: wp.y }));
-		} else if (d?.waypoint) {
+		if (Array.isArray(d?.waypoints)) {
+			waypoints = d.waypoints.length ? d.waypoints.map((wp) => ({ x: wp.x, y: wp.y })) : [];
+			return;
+		}
+		if (waypoints.length) return;
+		if (d?.waypoint) {
 			waypoints = [{ x: d.waypoint.x, y: d.waypoint.y }];
 		}
 	});
@@ -129,15 +143,41 @@
 		};
 	});
 
+	/** Process handle default size so endpoint projects to correct top/bottom when node has no measured dimensions. */
+	const PROCESS_HANDLE_WIDTH = 80;
+	const PROCESS_HANDLE_HEIGHT = 28;
+
+	/** Compute node position in flow coordinates; for child nodes (e.g. process_handle inside station_group), sum positions up the parent chain. */
+	function getPositionInFlow(nodeId: string | undefined): { x: number; y: number } | null {
+		if (!nodeId) return null;
+		const api: any = svelteFlow;
+		let x = 0;
+		let y = 0;
+		let currentId: string | null = nodeId;
+		while (currentId) {
+			const n = api?.getNode?.(currentId);
+			if (!n) return null;
+			const pos = (n as { position?: { x: number; y: number } }).position ?? { x: 0, y: 0 };
+			x += pos.x;
+			y += pos.y;
+			currentId = (n as { parentId?: string }).parentId ?? null;
+		}
+		return { x, y };
+	}
+
 	function getNodeBox(nodeId?: string): { x: number; y: number; width: number; height: number } | null {
 		if (!nodeId) return null;
 		const api: any = svelteFlow;
 		const node = api?.getNode?.(nodeId);
 		if (!node) return null;
-		const abs = (node as any).positionAbsolute ?? (node as any).position;
-		const width = (node as any).width ?? 0;
-		const height = (node as any).height ?? 0;
+		const abs = getPositionInFlow(nodeId);
 		if (!abs || typeof abs.x !== 'number' || typeof abs.y !== 'number') return null;
+		let width = (node as any).width ?? 0;
+		let height = (node as any).height ?? 0;
+		if (!width || !height) {
+			width = width || PROCESS_HANDLE_WIDTH;
+			height = height || PROCESS_HANDLE_HEIGHT;
+		}
 		return { x: abs.x, y: abs.y, width, height };
 	}
 
@@ -254,6 +294,7 @@
 		(e.currentTarget as HTMLElement)?.setPointerCapture?.(e.pointerId);
 		draggingWaypointIndex = index;
 		selectedWaypointIndex = index;
+		ctx?.onWaypointSelect?.(id, index);
 	}
 
 	function handleWaypointPointerDown(index: number, e: PointerEvent) {
@@ -282,27 +323,81 @@
 		startWaypointDrag(bestIndex, e);
 	}
 
+	/** Project point P onto segment A->B; return param t in [0,1] and squared distance from P to segment. */
+	function projectOntoSegment(
+		px: number,
+		py: number,
+		ax: number,
+		ay: number,
+		bx: number,
+		by: number
+	): { t: number; distSq: number } {
+		const abx = bx - ax;
+		const aby = by - ay;
+		const apx = px - ax;
+		const apy = py - ay;
+		const abLenSq = abx * abx + aby * aby;
+		const t = abLenSq > 1e-10 ? Math.max(0, Math.min(1, (apx * abx + apy * aby) / abLenSq)) : 0;
+		const closestX = ax + t * abx;
+		const closestY = ay + t * aby;
+		const dx = px - closestX;
+		const dy = py - closestY;
+		return { t, distSq: dx * dx + dy * dy };
+	}
+
 	function handleDoubleClick(e: MouseEvent) {
 		if (!ctx?.onWaypointUpdate || ctx.readOnly) return;
 		e.preventDefault();
 		e.stopPropagation();
 		const pos = svelteFlow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
 		if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return;
-		const next = [...waypoints, { x: pos.x, y: pos.y }];
+		const pts: Waypoint[] = [
+			{ x: sourcePoint.x, y: sourcePoint.y },
+			...waypoints,
+			{ x: targetPoint.x, y: targetPoint.y },
+		];
+		let insertAt = pts.length - 1; // default: before target (append to waypoints)
+		let bestDistSq = Infinity;
+		for (let i = 0; i < pts.length - 1; i++) {
+			const { distSq } = projectOntoSegment(
+				pos.x,
+				pos.y,
+				pts[i].x,
+				pts[i].y,
+				pts[i + 1].x,
+				pts[i + 1].y
+			);
+			if (distSq < bestDistSq) {
+				bestDistSq = distSq;
+				insertAt = i;
+			}
+		}
+		// insertAt is the segment index; new waypoint goes at waypoints index insertAt (after source + insertAt - 1 waypoints)
+		const next = [...waypoints.slice(0, insertAt), { x: pos.x, y: pos.y }, ...waypoints.slice(insertAt)];
 		waypoints = next;
-		selectedWaypointIndex = next.length - 1;
+		const newIndex = insertAt;
+		selectedWaypointIndex = newIndex;
+		ctx.onWaypointSelect?.(id, newIndex);
 		ctx.onWaypointUpdate(id, next);
 	}
 
 	function handleKeyDown(e: KeyboardEvent) {
 		if (e.key !== 'Delete' && e.key !== 'Backspace') return;
 		if (!isBending || waypoints.length === 0 || !ctx?.onWaypointUpdate) return;
-		if (selectedWaypointIndex === null) return;
+		// Use store value so delete works after remount (local selectedWaypointIndex can be reset).
+		const idx = ctx?.selectedWaypointIndexStore != null ? get(ctx.selectedWaypointIndexStore) : selectedWaypointIndex;
+		if (idx === null || idx === undefined || idx < 0 || idx >= waypoints.length) return;
 		e.preventDefault();
-		const idx = selectedWaypointIndex;
 		const next = waypoints.filter((_, i) => i !== idx);
 		waypoints = next;
-		selectedWaypointIndex = null;
+		// After delete: keep next midpoint selected so consecutive Delete works without re-clicking (avoids lost click on remount).
+		if (next.length > 0) {
+			selectedWaypointIndex = 0;
+			ctx?.selectedWaypointIndexStore?.set(0);
+		} else {
+			selectedWaypointIndex = null;
+			ctx?.selectedWaypointIndexStore?.set(null);
+		}
 		ctx.onWaypointUpdate(id, next);
 	}
 
@@ -441,37 +536,5 @@
 				onpointerdown={(e) => handleWaypointPointerDown(index, e)}
 			/>
 		{/each}
-	{/if}
-
-	{#if showEndpointHandles}
-		<!-- Endpoint handles at the root/target of the edge, constrained to their process boxes. -->
-		<circle
-			cx={sourcePoint.x}
-			cy={sourcePoint.y}
-			r={6}
-			fill="white"
-			stroke={color}
-			stroke-width={2}
-			class="nodrag nopan"
-			role="button"
-			tabindex="0"
-			aria-label="Drag source endpoint"
-			style="cursor: {draggingEndpoint === 'source' ? 'grabbing' : 'grab'};"
-			onpointerdown={(e) => startEndpointDrag('source', e)}
-		/>
-		<circle
-			cx={targetPoint.x}
-			cy={targetPoint.y}
-			r={6}
-			fill="white"
-			stroke={color}
-			stroke-width={2}
-			class="nodrag nopan"
-			role="button"
-			tabindex="0"
-			aria-label="Drag target endpoint"
-			style="cursor: {draggingEndpoint === 'target' ? 'grabbing' : 'grab'};"
-			onpointerdown={(e) => startEndpointDrag('target', e)}
-		/>
 	{/if}
 </g>

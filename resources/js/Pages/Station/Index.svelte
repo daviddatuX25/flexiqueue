@@ -242,20 +242,6 @@
 		return () => clearInterval(iv);
 	});
 
-	// #region agent log
-	$effect(() => {
-		const open = !!noShowModalSession || showOverrideModal || showForceCompleteModal || !!callNextSession;
-		if (!open) return;
-		tick().then(() => {
-			const dialog = document.querySelector('dialog[open]');
-			if (!dialog) return;
-			const cs = getComputedStyle(dialog);
-			const rect = dialog.getBoundingClientRect();
-			fetch('http://127.0.0.1:7245/ingest/315b3bef-aa43-40ce-b2fe-4cd06d9bf0f1',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b03ec3'},body:JSON.stringify({sessionId:'b03ec3',location:'Station/Index.svelte:inline-dialog',message:'inline dialog open',data:{display:cs.display,alignItems:cs.alignItems,justifyContent:cs.justifyContent,position:cs.position,width:cs.width,height:cs.height,margin:cs.margin,rect:{top:rect.top,left:rect.left,width:rect.width,height:rect.height},viewport:{w:window.innerWidth,h:window.innerHeight},childCount:dialog.children.length},timestamp:Date.now(),hypothesisId:'H1-H5'})}).catch(()=>{});
-		});
-	});
-	// #endregion
-
 	function formatDuration(iso: string): string {
 		const d = new Date(iso);
 		const now = new Date();

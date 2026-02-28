@@ -19,6 +19,24 @@ class UpdateProgramDiagramRequest extends FormRequest
     }
 
     /**
+     * Ensure layout has nodes and edges (default empty) so "no diagram yet" is valid.
+     */
+    protected function prepareForValidation(): void
+    {
+        $layout = $this->input('layout', []);
+        if (! is_array($layout)) {
+            return;
+        }
+        if (! array_key_exists('nodes', $layout)) {
+            $layout['nodes'] = [];
+        }
+        if (! array_key_exists('edges', $layout)) {
+            $layout['edges'] = [];
+        }
+        $this->merge(['layout' => $layout]);
+    }
+
+    /**
      * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
      */
     public function rules(): array
@@ -31,7 +49,7 @@ class UpdateProgramDiagramRequest extends FormRequest
             'layout.viewport.x' => ['sometimes', 'numeric'],
             'layout.viewport.y' => ['sometimes', 'numeric'],
             'layout.viewport.zoom' => ['sometimes', 'numeric', 'min:0.1', 'max:2'],
-            'layout.nodes' => ['required', 'array'],
+            'layout.nodes' => ['sometimes', 'array'],
             'layout.nodes.*.id' => ['required', 'string'],
             'layout.nodes.*.type' => ['required', 'string', 'in:'.$nodeTypes],
             'layout.nodes.*.position' => ['required', 'array'],

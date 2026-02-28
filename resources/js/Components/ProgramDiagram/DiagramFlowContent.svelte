@@ -4,7 +4,7 @@
 	 */
 import { setContext } from 'svelte';
 	import { tick } from 'svelte';
-	import { writable } from 'svelte/store';
+	import { get, writable } from 'svelte/store';
 	import { SvelteFlow, Background, Controls, Panel } from '@xyflow/svelte';
 	import type { Node, Edge } from '@xyflow/svelte';
 	import { useViewport, useSvelteFlow } from '@xyflow/svelte';
@@ -129,6 +129,8 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 
 	/** Edge bending state: which edge is currently in bend mode, and per-edge layout metadata. */
 	const bendingEdgeIdStore = writable<string | null>(null);
+	/** Selected midpoint index for the current bending edge (persisted so Delete/Backspace work after remounts). */
+	const selectedWaypointIndexStore = writable<number | null>(null);
 	let edgeWaypoints = new Map<string, { x: number; y: number }[]>();
 	let edgeEndpointMeta = new Map<
 		string,
@@ -153,6 +155,10 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 
 	setContext('diagramFlow', {
 		bendingEdgeIdStore,
+		selectedWaypointIndexStore,
+		onWaypointSelect(_edgeId: string, index: number) {
+			selectedWaypointIndexStore.set(index);
+		},
 		onWaypointUpdate(id: string, waypoints: { x: number; y: number }[]) {
 			edgeWaypoints = new Map(edgeWaypoints).set(id, waypoints);
 			edgeLayoutVersion++;
@@ -178,12 +184,55 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 			edgeLayoutVersion++;
 			scheduleAutoSave('endpoint-drag');
 		},
+		onProcessHandleClick(nodeId: string) {
+			if (readOnly) return;
+			const currentEdges = ownEdges as Array<{
+				id: string;
+				source: string;
+				target: string;
+			}>;
+			if (!currentEdges.length) return;
+			let changed = false;
+			const nextMeta = new Map(edgeEndpointMeta);
+			const nextWaypoints = new Map(edgeWaypoints);
+			for (const edge of currentEdges) {
+				const isSource = edge.source === nodeId;
+				const isTarget = edge.target === nodeId;
+				if (!isSource && !isTarget) continue;
+				const existing = (nextMeta.get(edge.id) ?? {}) as {
+					sourceSide?: 'top' | 'right' | 'bottom' | 'left';
+					targetSide?: 'top' | 'right' | 'bottom' | 'left';
+					sourceOffset?: number;
+					targetOffset?: number;
+				};
+				const updated = { ...existing };
+				if (isSource) {
+					const side = existing.sourceSide ?? 'top';
+					if (side === 'top') updated.sourceSide = 'bottom';
+					else if (side === 'bottom') updated.sourceSide = 'top';
+				}
+				if (isTarget) {
+					const side = existing.targetSide ?? 'top';
+					if (side === 'top') updated.targetSide = 'bottom';
+					else if (side === 'bottom') updated.targetSide = 'top';
+				}
+				nextMeta.set(edge.id, updated);
+				nextWaypoints.set(edge.id, []); // Remove all midpoints for this edge when process box is clicked
+				changed = true;
+			}
+			if (!changed) return;
+			edgeEndpointMeta = nextMeta;
+			edgeWaypoints = nextWaypoints;
+			edgeLayoutVersion++;
+			scheduleAutoSave('process-handle-click-swap');
+		},
 		get readOnly() {
 			return readOnly;
 		},
 	});
 	let imageUploading = $state(false);
 	let imageInputEl = $state<HTMLInputElement | undefined>(undefined);
+	let fullscreen = $state(false);
 
 	function scheduleAutoSave(reason?: string) {
 		if (readOnly || !programId) return;
@@ -198,9 +247,6 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 			}
 			handleSave();
 		}, 800);
-		if (reason) {
-			console.debug?.('Scheduling diagram auto-save:', reason);
-		}
 	}
 
 	/** Tracks last loaded layout so we only reset when layoutFromApi actually changes (not when entityLookups/staffList loads). */
@@ -263,7 +309,58 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 			edgeEndpointMeta = new Map();
 			edgeLayoutVersion++;
 		}
-		ownNodes = loadedNodes as unknown as Node[];
+		// Clamp process_handle nodes back inside their station group zones on load so they
+		// never appear outside the station, even after refresh.
+		const handleWidth = 80;
+		const handleHeight = 28;
+		const TOP_ZONE_HEIGHT_LOCAL = 48;
+		const BOTTOM_ZONE_HEIGHT_LOCAL = 48;
+		const nodesById = new Map(
+			loadedNodes.map((n) => [String((n as { id?: string }).id ?? ''), n]) as Array<[string, unknown]>
+		);
+		const clampedNodes = loadedNodes.map((n) => {
+			const node = n as {
+				id?: string;
+				type?: string;
+				parentId?: string;
+				position?: { x: number; y: number };
+				width?: number;
+				height?: number;
+				data?: Record<string, unknown>;
+			};
+			if (node.type !== 'process_handle' || !node.parentId || !node.position) return n;
+			const parent = nodesById.get(String(node.parentId)) as
+				| { width?: number; height?: number }
+				| undefined;
+			const parentWidth = typeof parent?.width === 'number' ? parent.width : 280;
+			const parentHeight = typeof parent?.height === 'number' ? parent.height : 280;
+			const topZoneYMax = TOP_ZONE_HEIGHT_LOCAL - handleHeight;
+			const bottomZoneYMin = parentHeight - BOTTOM_ZONE_HEIGHT_LOCAL - handleHeight;
+			const bottomZoneYMax = parentHeight - handleHeight;
+			const pos = node.position;
+			const centerX = pos.x + handleWidth / 2;
+			const centerY = pos.y + handleHeight / 2;
+			const side: 'top' | 'bottom' = centerY < parentHeight / 2 ? 'top' : 'bottom';
+			const x = Math.max(0, Math.min(parentWidth - handleWidth, centerX - handleWidth / 2));
+			const y =
+				side === 'top'
+					? Math.max(0, Math.min(topZoneYMax, pos.y))
+					: Math.max(bottomZoneYMin, Math.min(bottomZoneYMax, pos.y));
+			const data = (node.data ?? {}) as Record<string, unknown>;
+			return {
+				...node,
+				position: { x, y },
+				data: { ...data, side },
+			};
+		});
+		// Ensure rooms (shapes) are behind stations: set zIndex by type when loading
+		const nodesWithZ = clampedNodes.map((n) => {
+			const node = n as { type?: string; zIndex?: number };
+			if (node.type === 'shape') return { ...node, zIndex: 0 };
+			if (node.type === 'station_group') return { ...node, zIndex: 10 };
+			return n;
+		});
+		ownNodes = nodesWithZ as unknown as Node[];
 		ownEdges = [];
 		if (vp && typeof vp.x === 'number' && typeof vp.y === 'number' && typeof vp.zoom === 'number') {
 			setViewport({ x: vp.x, y: vp.y, zoom: vp.zoom });
@@ -328,7 +425,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 						type: 'dottedFlow',
 						data: {
 							trackColor: color,
-							...(waypoints && waypoints.length ? { waypoints } : {}),
+							...(Array.isArray(waypoints) ? { waypoints } : {}),
 							...(endpoints ?? {}),
 						},
 					});
@@ -345,7 +442,14 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		const raw = e.dataTransfer?.getData('application/json');
 		if (!raw) return;
 		try {
-			const payload = JSON.parse(raw) as { type?: string; entityId?: number; label?: string; text?: string; url?: string };
+			const payload = JSON.parse(raw) as {
+				type?: string;
+				entityId?: number;
+				label?: string;
+				text?: string;
+				url?: string;
+				backgroundColor?: string;
+			};
 			const type = payload.type ?? 'station';
 			const allowed = ['station', 'track', 'process', 'staff', 'client_seat', 'shape', 'text', 'image'];
 			if (!allowed.includes(type)) return;
@@ -370,6 +474,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 					position,
 					width: parentWidth,
 					height: parentHeight,
+					zIndex: 10,
 					data: {
 						label: station.name,
 						stationId: station.id,
@@ -423,7 +528,11 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 			if (type === 'text') {
 				data = { text: payload.text ?? 'Text' };
 			} else if (type === 'shape') {
-				data = { shape: 'rectangle', label: payload.label ?? 'Room' };
+				data = {
+					shape: 'rectangle',
+					label: payload.label ?? 'Room',
+					backgroundColor: payload.backgroundColor ?? 'rgba(248,250,252,0.9)',
+				};
 			} else if (type === 'image') {
 				data = { url: payload.url ?? '' };
 			} else {
@@ -431,12 +540,14 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 				data = { label };
 				if (payload.entityId != null) data.entityId = payload.entityId;
 			}
-			const newNode = {
+			const newNode: Record<string, unknown> = {
 				id: crypto.randomUUID(),
 				type,
 				position,
 				data,
 			};
+			if (type === 'shape') (newNode as { zIndex?: number }).zIndex = 0;
+			if (type === 'station_group') (newNode as { zIndex?: number }).zIndex = 10;
 			ownNodes = [...ownNodes, newNode as unknown as Node];
 			scheduleAutoSave('drop-node');
 		} catch {
@@ -448,6 +559,10 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		e.preventDefault();
 		e.stopPropagation();
 		if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+	}
+
+	function dragPayload(type: string, entityId: number | undefined, label: string) {
+		return JSON.stringify({ type, entityId, label });
 	}
 
 	async function handleSave() {
@@ -489,6 +604,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 				}
 				if (n.width != null && typeof n.width === 'number') obj.width = n.width;
 				if (n.height != null && typeof n.height === 'number') obj.height = n.height;
+				if (typeof (n as { zIndex?: number }).zIndex === 'number') obj.zIndex = (n as { zIndex: number }).zIndex;
 				return obj;
 			});
 			/** Sanitize edges: include only id, source, target, type, data (for trackColor/waypoint). */
@@ -538,8 +654,13 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 					errs && typeof errs === 'object'
 						? (Object.values(errs).flat()[0] as string | undefined)
 						: undefined;
+				const nodesCount = Array.isArray(ownNodes) ? ownNodes.length : 0;
+				const isNodesRequiredError =
+					firstErr && (String(firstErr).includes('layout.nodes') || String(firstErr).toLowerCase().includes('nodes field is required'));
 				let message: string;
-				if (firstErr) {
+				if (isNodesRequiredError && nodesCount === 0) {
+					message = 'Add stations or shapes to build your diagram, then it will save automatically.';
+				} else if (firstErr) {
 					message = firstErr;
 				} else if (errMsg) {
 					message = errMsg;
@@ -550,9 +671,9 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 				} else {
 					message = `Failed to save diagram (${res.status}).`;
 				}
-			console.error?.('Failed to save diagram response', res.status, data);
-			setSaveStatus('error');
-			toast(message, 'error');
+				console.error?.('Failed to save diagram response', res.status, data);
+				setSaveStatus('error');
+				toast(message, 'error');
 			}
 	} catch (err) {
 		setSaveStatus('error');
@@ -667,37 +788,64 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 	}
 
 	function validateDiagramForPublish(): { ok: boolean; errors: string[] } {
-		const errors: string[] = [];
+		const errorSet = new Set<string>();
 		const nodes = ownNodes as Array<{ type?: string; data?: Record<string, unknown> }>;
 		const handleKeys = buildHandleKeySet(nodes);
+		const handleProcessIds = new Set<number>();
+		for (const node of nodes) {
+			if (node.type !== 'process_handle' || !node.data) continue;
+			const pidRaw = node.data.processId as unknown;
+			const pid = typeof pidRaw === 'number' ? pidRaw : parseInt(String(pidRaw ?? ''), 10);
+			if (!Number.isNaN(pid)) handleProcessIds.add(pid);
+		}
 
-		const checkedTracks =
-			selectedTrackId != null ? tracks.filter((t) => t.id === selectedTrackId) : tracks;
-
-		for (const track of checkedTracks) {
+		for (const track of tracks) {
 			const steps = track.steps ?? [];
 			if (!Array.isArray(steps) || steps.length === 0) {
-				errors.push(`Track "${track.name}" has no steps configured.`);
+				errorSet.add(`Track "${track.name}" has no steps configured.`);
 				continue;
 			}
+			let missingPidCount = 0;
+			let missingOnCanvasCount = 0;
+			let sidNullCount = 0;
 			for (const step of steps) {
-				const sid = (step as { station_id?: number }).station_id;
-				const pid = (step as { process_id?: number }).process_id;
-				if (sid == null || pid == null) {
-					errors.push(
-						`Track "${track.name}" has a step with missing station or process. Check track configuration.`
-					);
+				const s = step as Record<string, unknown>;
+				const sidRaw =
+					(s.station_id as unknown) ??
+					(s.stationId as unknown);
+				const sid =
+					typeof sidRaw === 'number'
+						? sidRaw
+						: typeof sidRaw === 'string'
+							? parseInt(sidRaw, 10)
+							: undefined;
+				const pid =
+					(s.process_id as number | undefined) ??
+					(typeof s.processId === 'number' ? (s.processId as number) : undefined) ??
+					(typeof s.processId === 'string' ? parseInt(s.processId as string, 10) : undefined);
+				if (pid == null) {
+					missingPidCount++;
+					errorSet.add(`Track "${track.name}" has a step with missing process. Check track configuration.`);
+					continue;
+				}
+				// If station_id is missing/null in steps, fall back to validating by process_id only.
+				if (sid == null || Number.isNaN(sid)) {
+					sidNullCount++;
+					if (!handleProcessIds.has(pid)) {
+						missingOnCanvasCount++;
+						errorSet.add(`Track "${track.name}": process ${pid} is missing from the diagram.`);
+					}
 					continue;
 				}
 				const key = `${sid},${pid}`;
 				if (!handleKeys.has(key)) {
-					errors.push(
-						`Track "${track.name}": step for station ${sid} / process ${pid} is missing from the diagram.`
-					);
+					missingOnCanvasCount++;
+					errorSet.add(`Track "${track.name}": step for station ${sid} / process ${pid} is missing from the diagram.`);
 				}
 			}
 		}
 
+		const errors = Array.from(errorSet);
 		return { ok: errors.length === 0, errors };
 	}
 
@@ -707,9 +855,12 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		try {
 			const result = validateDiagramForPublish();
 			if (!result.ok) {
-				const first = result.errors[0] ?? 'Diagram is not ready to publish.';
 				console.warn?.('Diagram publish validation errors', result.errors);
-				toast(first, 'error');
+				const message =
+					result.errors.length === 0
+						? 'Diagram is not ready to publish.'
+						: result.errors.join('\n');
+				toast(message, 'error');
 				return;
 			}
 			toast('Diagram passed publish checks.', 'success');
@@ -730,6 +881,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		edgeEndpointMeta = new Map();
 		edgeLayoutVersion++;
 		bendingEdgeIdStore.set(null);
+		selectedWaypointIndexStore.set(null);
 		scheduleAutoSave('clear-diagram');
 	}
 </script>
@@ -738,9 +890,17 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 	:global(.svelte-flow__edges) {
 		z-index: 10 !important;
 	}
+	/* Hide selection box and ring for text/room when not editing (cleaner look when unfocused) */
+	:global(.svelte-flow__node-text.selected:not(.is-editing)),
+	:global(.svelte-flow__node-shape.selected:not(.is-editing)) {
+		box-shadow: none !important;
+		outline: none !important;
+		border: none !important;
+	}
 </style>
 
-<svelte:window />
+<svelte:window onkeydown={(e) => { if (fullscreen && e.key === 'Escape') fullscreen = false; }} />
+{#if !fullscreen}
 <div
 	class="min-h-[360px] w-full"
 	ondrop={handleDrop}
@@ -762,9 +922,19 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 	elementsSelectable={!readOnly}
 	onnodedragstop={handleNodeDragStop}
 	onedgeclick={(p) => {
-		if (!readOnly) bendingEdgeIdStore.set(p.edge.id);
+		if (!readOnly) {
+			const previousBendingId = get(bendingEdgeIdStore);
+			bendingEdgeIdStore.set(p.edge.id);
+			// Only clear midpoint selection when switching to another edge; keep selection when re-clicking same edge.
+			if (previousBendingId !== p.edge.id) {
+				selectedWaypointIndexStore.set(null);
+			}
+		}
 	}}
-	onpaneclick={() => bendingEdgeIdStore.set(null)}
+	onpaneclick={() => {
+		bendingEdgeIdStore.set(null);
+		selectedWaypointIndexStore.set(null);
+	}}
 	onbeforedelete={() => {
 		scheduleAutoSave('delete');
 		return Promise.resolve(true);
@@ -792,7 +962,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		</Panel>
 	{/if}
 	{#if !readOnly}
-	<Panel position="top-left" class="flex flex-col gap-2 max-w-[200px]">
+	<Panel position="top-left" class="flex flex-col gap-2 max-w-[200px] opacity-70 hover:opacity-100 transition-opacity">
 		<p class="text-xs font-semibold text-surface-700">Flow (track)</p>
 		<div class="flex flex-wrap gap-1">
 			<button
@@ -851,7 +1021,224 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 				Add image
 			{/if}
 		</button>
+		<button
+			type="button"
+			class="btn preset-tonal min-h-[36px]"
+			title="Fullscreen canvas"
+			onclick={() => (fullscreen = true)}
+		>
+			Fullscreen
+		</button>
 	</Panel>
 	{/if}
 </SvelteFlow>
 </div>
+{/if}
+
+{#if fullscreen}
+	<!-- Modal backdrop: click to close -->
+	<button
+		type="button"
+		class="fixed inset-0 z-[9998] bg-black/40 cursor-default border-0 p-0 w-full h-full"
+		aria-label="Exit fullscreen"
+		onclick={() => (fullscreen = false)}
+	></button>
+	<!-- Fullscreen canvas: same content in a fixed overlay -->
+	<div
+		class="fixed inset-4 z-[9999] rounded-lg border-2 border-surface-300 bg-surface-50 shadow-2xl flex flex-col overflow-hidden md:inset-8"
+		role="dialog"
+		aria-modal="true"
+		aria-label="Diagram fullscreen"
+		tabindex="-1"
+		onclick={(e) => e.stopPropagation()}
+		onkeydown={(e) => e.stopPropagation()}
+	>
+		<div class="flex items-center justify-end shrink-0 px-2 py-2 border-b border-surface-200 bg-surface-100">
+			<button
+				type="button"
+				class="btn preset-tonal min-h-[40px] min-w-[40px] rounded-full"
+				title="Exit fullscreen"
+				aria-label="Exit fullscreen"
+				onclick={() => (fullscreen = false)}
+			>
+				✕
+			</button>
+		</div>
+		<div class="flex-1 min-h-0 flex flex-row overflow-hidden">
+			<aside class="w-52 border-r border-surface-200 p-3 bg-surface-100 shrink-0 overflow-y-auto" aria-label="Diagram entities">
+				<p class="text-xs font-semibold text-surface-700 mb-1.5">Stations</p>
+				<ul class="space-y-1 mb-4">
+					{#each stations as station (station.id)}
+						<li>
+							<div
+								class="cursor-grab active:cursor-grabbing rounded-lg border border-surface-300 bg-surface-50 px-2 py-1.5 text-sm text-surface-950 hover:bg-surface-200/80"
+								role="button"
+								tabindex="0"
+								draggable="true"
+								ondragstart={(e) => {
+									const dt = e.dataTransfer;
+									if (dt) {
+										dt.setData('application/json', dragPayload('station', station.id, station.name));
+										dt.effectAllowed = 'copy';
+									}
+								}}
+							>
+								{station.name}
+							</div>
+						</li>
+					{/each}
+				</ul>
+				{#if stations.length === 0}
+					<p class="text-xs text-surface-500 mb-4">Add stations in the Stations tab first.</p>
+				{/if}
+				<p class="text-xs font-semibold text-surface-700 mb-1.5">Decorations</p>
+				<div class="space-y-1">
+					<div
+						class="cursor-grab active:cursor-grabbing rounded-lg border border-dashed border-surface-400 bg-surface-50 px-2 py-1.5 text-xs text-surface-700 hover:bg-surface-200/80"
+						role="button"
+						tabindex="0"
+						draggable="true"
+						ondragstart={(e) => {
+							const dt = e.dataTransfer;
+							if (dt) {
+								dt.setData('application/json', dragPayload('shape', undefined, 'Room'));
+								dt.effectAllowed = 'copy';
+							}
+						}}
+					>
+						Add room
+					</div>
+					<div
+						class="cursor-grab active:cursor-grabbing rounded-lg border border-surface-400 bg-surface-100 px-2 py-1.5 text-xs text-surface-700 hover:bg-surface-200/80"
+						role="button"
+						tabindex="0"
+						draggable="true"
+						ondragstart={(e) => {
+							const dt = e.dataTransfer;
+							if (dt) {
+								dt.setData('application/json', JSON.stringify({ type: 'text', text: 'Text' }));
+								dt.effectAllowed = 'copy';
+							}
+						}}
+					>
+						Add text
+					</div>
+				</div>
+			</aside>
+			<div class="flex-1 min-h-0 flex flex-col">
+			<div
+				class="h-full w-full min-h-[360px] flex-1 min-h-0"
+				ondrop={handleDrop}
+				ondragover={handleDragOver}
+				role="presentation"
+			>
+				<SvelteFlow
+					bind:nodes={ownNodes}
+					bind:edges={ownEdges}
+					ondrop={handleDrop}
+					ondragover={handleDragOver}
+					deleteKey={['Backspace', 'Delete']}
+					nodeTypes={nodeTypes}
+					edgeTypes={edgeTypes}
+					zIndexMode="manual"
+					nodesDraggable={!readOnly}
+					elementsSelectable={!readOnly}
+					onnodedragstop={handleNodeDragStop}
+					onedgeclick={(p) => {
+						if (!readOnly) {
+							const previousBendingId = get(bendingEdgeIdStore);
+							bendingEdgeIdStore.set(p.edge.id);
+							if (previousBendingId !== p.edge.id) selectedWaypointIndexStore.set(null);
+						}
+					}}
+					onpaneclick={() => {
+						bendingEdgeIdStore.set(null);
+						selectedWaypointIndexStore.set(null);
+					}}
+					onbeforedelete={() => {
+						scheduleAutoSave('delete');
+						return Promise.resolve(true);
+					}}
+					zoomOnDoubleClick={false}
+					class="w-full h-full"
+				>
+					<Background />
+					<Controls />
+					{#if !readOnly}
+						<Panel position="bottom-center" class="pointer-events-none">
+							{#if saveStatus === 'saving'}
+								<div class="pointer-events-auto rounded bg-surface-100/80 px-3 py-1 text-xs shadow border border-surface-200">Saving…</div>
+							{:else if saveStatus === 'saved'}
+								<div class="pointer-events-auto rounded bg-surface-100/80 px-3 py-1 text-xs shadow border border-surface-200">Saved</div>
+							{:else if saveStatus === 'error'}
+								<div class="pointer-events-auto rounded bg-error-100/90 px-3 py-1 text-xs shadow border border-error-200 text-error-700">Save failed</div>
+							{/if}
+						</Panel>
+						<Panel position="top-left" class="flex flex-col gap-2 max-w-[200px] opacity-70 hover:opacity-100 transition-opacity">
+							<p class="text-xs font-semibold text-surface-700">Flow (track)</p>
+							<div class="flex flex-wrap gap-1">
+								<button
+									type="button"
+									class="btn preset-tonal text-xs min-h-[32px] px-2 {selectedTrackId === null ? 'ring-2 ring-primary-500' : ''}"
+									onclick={() => onTrackSelect(null)}
+								>
+									None
+								</button>
+								{#each tracks as track (track.id)}
+									<button
+										type="button"
+										class="btn preset-tonal text-xs min-h-[32px] px-2 {selectedTrackId === track.id ? 'ring-2 ring-primary-500' : ''}"
+										onclick={() => onTrackSelect(track.id)}
+									>
+										{track.name}
+									</button>
+								{/each}
+							</div>
+							<button
+								type="button"
+								class="btn preset-filled-primary-500 min-h-[40px]"
+								disabled={saving || publishing}
+								onclick={handlePublish}
+							>
+								{#if publishing}
+									Checking…
+								{:else}
+									Publish diagram
+								{/if}
+							</button>
+							<button
+								type="button"
+								class="btn preset-tonal min-h-[36px]"
+								disabled={saving}
+								onclick={handleClearDiagram}
+							>
+								Clear diagram
+							</button>
+							<button
+								type="button"
+								class="btn preset-tonal min-h-[36px]"
+								disabled={imageUploading}
+								onclick={() => imageInputEl?.click()}
+							>
+								{#if imageUploading}
+									Uploading...
+								{:else}
+									Add image
+								{/if}
+							</button>
+							<button
+								type="button"
+								class="btn preset-tonal min-h-[36px]"
+								title="Exit fullscreen"
+								onclick={() => (fullscreen = false)}
+							>
+								Exit fullscreen
+							</button>
+						</Panel>
+					{/if}
+				</SvelteFlow>
+			</div>
+			</div>
+		</div>
+	</div>
+{/if}
