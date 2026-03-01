@@ -25,3 +25,21 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Dev-only (excluded from prod tarball and branch)
+/docs
+/docs v1
+/e2e
+/other files
+AGENTS.md
+CHANGELOG.md
+apply_ui_fixes.js
+patch_*.js
+manuscript*
+planning-prompt*.md
+ui_tasks.json
+dottedflowedge*.txt
+last23*.jsonl
+nul
+root@*
+*.docx
