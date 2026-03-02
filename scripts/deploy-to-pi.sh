@@ -17,8 +17,12 @@ cd "$(dirname "$0")/.."
 PI_HOST="${PI_HOST:-}"
 PI_USER="${PI_USER:-root}"
 BUILD=0
+USE_SAIL=0
 for arg in "$@"; do
-  [ "$arg" = "--build" ] && BUILD=1
+  case "$arg" in
+    --build) BUILD=1 ;;
+    --sail)  USE_SAIL=1 ;;
+  esac
 done
 
 # Interactive host prompt when PI_HOST is not provided
@@ -50,8 +54,21 @@ if [ "$BUILD" -eq 0 ]; then
 fi
 
 if [ "$BUILD" -eq 1 ]; then
-  echo "Building tarball (host, no Docker)..."
-  ./scripts/build-deploy-tarball.sh
+  # Prefer Sail when --sail or when host PHP is missing (e.g. WSL without PHP)
+  if [ "$USE_SAIL" -eq 0 ] && command -v php >/dev/null 2>&1; then
+    echo "Building tarball (host)..."
+    ./scripts/build-deploy-tarball.sh
+  elif [ "$USE_SAIL" -eq 1 ] || ! command -v php >/dev/null 2>&1; then
+    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+      echo "Building tarball (Sail/Docker)..."
+      ./scripts/build-deploy-tarball-sail.sh
+    else
+      echo "ERROR: Host PHP not found and Docker is not running."
+      echo "  Options: 1) Start Docker and run: ./scripts/deploy-to-pi.sh --build --sail"
+      echo "           2) Install PHP in WSL: sudo apt install php php-cli php-mbstring php-xml php-curl php-zip unzip"
+      exit 1
+    fi
+  fi
 else
   echo "Using existing flexiqueue-deploy.tar.gz (run with --build to rebuild first)."
 fi
