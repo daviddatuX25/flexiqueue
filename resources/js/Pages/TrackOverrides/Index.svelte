@@ -63,6 +63,15 @@
 	let approveCustomPath = $state<number[]>([]);
 	let approveCustomAddStationId = $state<number | ''>('');
 
+	/** Real-time tick for live expiry countdowns (client-side, no polling). */
+	let nowMs = $state(Date.now());
+	$effect(() => {
+		const id = setInterval(() => {
+			nowMs = Date.now();
+		}, 1000);
+		return () => clearInterval(id);
+	});
+
 	const page = usePage();
 
 	// Real-time: staff sees when their request is approved/rejected without reload
@@ -208,11 +217,11 @@
 		}
 	}
 
-	function formatExpiry(iso: string | null): string {
+	function formatExpiry(iso: string | null, now: number): string {
 		if (!iso) return '';
 		try {
 			const d = new Date(iso);
-			const diff = Math.max(0, Math.round((d.getTime() - Date.now()) / 1000));
+			const diff = Math.max(0, Math.round((d.getTime() - now) / 1000));
 			if (diff <= 0) return 'Expired';
 			const m = Math.floor(diff / 60);
 			const s = diff % 60;
@@ -258,7 +267,7 @@
 						</button>
 						{#if tempCodeGenerated}
 							<p class="text-xl font-mono font-bold tracking-widest text-primary-500">{tempCodeGenerated}</p>
-							<p class="text-xs text-surface-950/60">{formatExpiry(tempCodeExpiresAt)}</p>
+							<p class="text-xs text-surface-950/60">{formatExpiry(tempCodeExpiresAt, nowMs)}</p>
 						{/if}
 					</div>
 					<div class="flex flex-col gap-2">
@@ -272,7 +281,7 @@
 						</button>
 						{#if tempQrDataUri}
 							<img src={tempQrDataUri} alt="Temporary QR" class="w-28 h-28" />
-							<p class="text-xs text-surface-950/60">{formatExpiry(tempQrExpiresAt)}</p>
+							<p class="text-xs text-surface-950/60">{formatExpiry(tempQrExpiresAt, nowMs)}</p>
 						{/if}
 					</div>
 				</div>
@@ -290,7 +299,7 @@
 								{#if a.used_at}
 									<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm text-surface-950">Used</span>
 								{:else if a.expires_at}
-									<span class="text-surface-950/50">{formatExpiry(a.expires_at)}</span>
+									<span class="text-surface-950/50">{formatExpiry(a.expires_at, nowMs)}</span>
 								{:else}
 									<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm text-surface-950">No expiry</span>
 								{/if}

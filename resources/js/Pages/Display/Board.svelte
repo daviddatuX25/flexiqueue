@@ -37,6 +37,7 @@
 		display_audio_muted = false,
 		display_audio_volume = 1,
 		display_tts_voice = null,
+		enable_display_hid_barcode = true,
 	} = $props();
 
 	/** Synced from prop + .program_status; when true, show "Program is paused" overlay (real-time). */
@@ -248,9 +249,9 @@
 		scanCountdown += extra;
 	}
 
-	/** Refocus hidden barcode input every 2s when camera modal is closed (so HID scanner keeps working). */
+	/** Refocus hidden barcode input every 2s when camera modal is closed (so HID scanner keeps working). Only when admin enabled HID. */
 	$effect(() => {
-		if (showScanner) return;
+		if (showScanner || !enable_display_hid_barcode) return;
 		const id = setInterval(() => {
 			displayBarcodeInputEl?.focus();
 		}, 2000);

@@ -175,7 +175,7 @@
         </div>
     </div>
 
-    <StatusFooter {queueCount} {processedToday} />
+    <StatusFooter {queueCount} {processedToday} fixed={false} />
 
     <Toast />
 </div>

@@ -5,14 +5,17 @@
      * Per flexiqueue-j4n: Availability is a drop-up menu (Available | On break | Away); offline = read-only.
      * Per flexiqueue-eym: On break shows full-screen overlay with Resume button.
      */
-    import { usePage } from "@inertiajs/svelte";
-    import { Wifi, WifiOff, Users, CheckCircle2, Clock, ChevronUp, Play } from "lucide-svelte";
+    import { usePage, router } from "@inertiajs/svelte";
+    import { Users, CheckCircle2, Clock, ChevronUp, Play } from "lucide-svelte";
 
-    let { queueCount = 0, processedToday = 0 } = $props();
+    /** When true (default), footer is fixed to viewport bottom. When false, it flows in a parent fixed container (e.g. MobileLayout). */
+    let { queueCount = 0, processedToday = 0, fixed = true } = $props();
 
     const page = usePage();
     const user = $derived($page.props?.auth?.user ?? null);
     const csrfToken = $derived($page.props?.csrf_token ?? "");
+    const activeProgram = $derived($page.props?.activeProgram ?? null);
+    const role = $derived(user?.role ?? "");
 
     let networkConnected = $state(
         typeof navigator !== "undefined" ? navigator.onLine : true,
@@ -27,6 +30,21 @@
     /** Per eym: full-screen overlay when on break (only after user selected On break and PATCH succeeded) */
     let showOnBreakOverlay = $state(false);
     let resumeButtonEl = $state(null);
+
+    const programMode = $derived(
+        activeProgram && activeProgram.is_active && !activeProgram.is_paused
+            ? "ongoing"
+            : "standby",
+    );
+    const programLabel = $derived(
+        programMode === "ongoing" ? "Ongoing program" : "Stand by",
+    );
+    const connectionLabel = $derived(
+        networkConnected ? "Connected" : "Offline",
+    );
+    const isProgramClickable = $derived(
+        !!user && networkConnected && programMode === "ongoing",
+    );
 
     $effect(() => {
         const u = $page.props?.auth?.user;
@@ -166,29 +184,52 @@
         if (!networkConnected) return;
         menuOpen = !menuOpen;
     }
+
+    function handleProgramClick() {
+        if (!isProgramClickable) return;
+
+        const program = activeProgram;
+        const r = role;
+
+        if (r === "admin" && program?.id) {
+            router.visit(`/admin/programs/${program.id}`);
+        } else {
+            router.visit("/station");
+        }
+    }
 </script>
 
 <footer
-    class="shrink-0 bg-white border-t border-surface-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-y-3 text-xs font-medium text-surface-600 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)] z-40"
+    class="shrink-0 bg-white border-t border-surface-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-y-3 text-xs font-medium text-surface-600 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)] z-40 {fixed ? 'fixed bottom-0 left-0 right-0' : ''}"
     role="status"
     aria-live="polite"
 >
     <div class="flex items-center gap-3">
-        <!-- Network Status -->
-        <div
-            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full {networkConnected
-                ? 'bg-success-50 text-success-700 border border-success-100'
-                : 'bg-error-50 text-error-700 border border-error-100'}"
-            aria-label="Network status"
+        <!-- Program + Connection status -->
+        <button
+            type="button"
+            class="flex flex-col items-start justify-center px-3 py-1.5 rounded-full border text-left transition-all duration-200 shadow-sm min-w-[9rem]
+                {programMode === 'ongoing'
+                    ? 'bg-success-50 text-success-800 border-success-200'
+                    : 'bg-surface-100 text-surface-800 border-surface-200'}
+                {isProgramClickable ? 'cursor-pointer hover:bg-success-100' : 'cursor-default'}"
+            onclick={handleProgramClick}
+            disabled={!isProgramClickable}
+            aria-label="{programLabel} — {connectionLabel}"
         >
-            {#if networkConnected}
-                <Wifi class="w-3.5 h-3.5" />
-                <span>Connected</span>
-            {:else}
-                <WifiOff class="w-3.5 h-3.5 animate-pulse" />
-                <span>Offline</span>
-            {/if}
-        </div>
+            <span class="text-[0.72rem] font-semibold uppercase tracking-wide">
+                {programLabel}
+            </span>
+            <span class="mt-0.5 inline-flex items-center gap-1 text-[0.7rem] text-surface-600">
+                <span
+                    class="w-1.5 h-1.5 rounded-full animate-pulse {networkConnected
+                        ? 'bg-success-500 shadow-[0_0_4px_rgba(34,197,94,0.7)]'
+                        : 'bg-error-500 shadow-[0_0_4px_rgba(239,68,68,0.7)]'}"
+                    aria-hidden="true"
+                ></span>
+                <span>{connectionLabel}</span>
+            </span>
+        </button>
 
         <!-- Availability Status (per j4n: drop-up selector; offline = read-only) -->
         {#if user}

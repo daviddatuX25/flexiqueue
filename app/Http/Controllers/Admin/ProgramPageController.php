@@ -155,6 +155,8 @@ class ProgramPageController extends Controller
                     'display_audio_volume' => $program->getDisplayAudioVolume(),
                     'display_tts_voice' => $program->getDisplayTtsVoice(),
                     'allow_public_triage' => $program->getAllowPublicTriage(),
+                    'enable_display_hid_barcode' => $program->getEnableDisplayHidBarcode(),
+                    'enable_public_triage_hid_barcode' => $program->getEnablePublicTriageHidBarcode(),
                 ],
             ],
             'tracks' => $tracks,

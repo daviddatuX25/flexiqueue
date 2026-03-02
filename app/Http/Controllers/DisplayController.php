@@ -62,6 +62,7 @@ class DisplayController extends Controller
                 'tracks' => [],
                 'date' => now()->format('F j, Y'),
                 'display_scan_timeout_seconds' => 20,
+                'enable_public_triage_hid_barcode' => true,
             ]);
         }
 
@@ -77,6 +78,7 @@ class DisplayController extends Controller
             'tracks' => $tracks,
             'date' => now()->format('F j, Y'),
             'display_scan_timeout_seconds' => $program->getDisplayScanTimeoutSeconds(),
+            'enable_public_triage_hid_barcode' => $program->getEnablePublicTriageHidBarcode(),
         ]);
     }
 

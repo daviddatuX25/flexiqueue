@@ -54,6 +54,23 @@
 	let isSubmitting = $state(false);
 	let scanCountdown = $state(0);
 	let scanCountdownIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
+	/** Per barcode-hid plan: staff-side switch to enable/disable HID barcode auto-focus (avoids Android keyboard when Off). */
+	let hidEnabled = $state(true);
+	/** When true, user is in the "manual token input" focus window; pause HID refocus for 10s then return focus to hidden input. */
+	let manualFocusActive = $state(false);
+	let manualFocusTimeoutId = $state<ReturnType<typeof setTimeout> | null>(null);
+
+	const MANUAL_FOCUS_SECONDS = 10;
+
+	function startManualFocusWindow() {
+		if (manualFocusTimeoutId != null) clearTimeout(manualFocusTimeoutId);
+		manualFocusActive = true;
+		manualFocusTimeoutId = setTimeout(() => {
+			manualFocusTimeoutId = null;
+			manualFocusActive = false;
+			if (hidEnabled) barcodeInputEl?.focus();
+		}, MANUAL_FOCUS_SECONDS * 1000);
+	}
 
 	const page = usePage();
 	function getCsrfToken(): string {
@@ -93,9 +110,9 @@
 		}
 	});
 
-	/** Refocus hidden barcode input every 10s when camera modal is closed (HID scanner). Disabled while modal is open. */
+	/** Refocus hidden barcode input every 10s when camera modal is closed (HID scanner). Only when staff switch is On and not in manual-input window. */
 	$effect(() => {
-		if (showScanner) return;
+		if (showScanner || !hidEnabled || manualFocusActive) return;
 		const id = setInterval(() => barcodeInputEl?.focus(), 10000);
 		return () => clearInterval(id);
 	});
@@ -170,7 +187,7 @@
 			handleLookup();
 		}
 		barcodeValue = '';
-		barcodeInputEl?.focus();
+		if (hidEnabled) barcodeInputEl?.focus();
 	}
 
 	async function handleLookup() {
@@ -322,15 +339,24 @@
 						<span class="text-xs text-surface-950/60 shrink-0">or enter token ID</span>
 						<div class="flex-1 border-t border-surface-200"></div>
 					</div>
-					<div class="flex gap-2">
-						<input
-							type="text"
-							class="input flex-1 rounded-container border border-surface-200 px-3 min-h-[48px]"
-							placeholder="e.g. A1"
-							bind:value={manualPhysicalId}
-							onkeydown={(e) => e.key === 'Enter' && handleLookup()}
-						/>
-						<button type="button" class="btn preset-filled-primary-500 min-h-[48px] min-w-[48px] px-4" onclick={handleLookup}>Look up</button>
+					<div class="flex flex-col gap-2">
+						<div class="flex items-center gap-2">
+							<label class="label cursor-pointer justify-start gap-2 py-0">
+								<input type="checkbox" class="checkbox checkbox-sm" bind:checked={hidEnabled} />
+								<span class="label-text text-sm text-surface-700">HID barcode scanner on</span>
+							</label>
+						</div>
+						<div class="flex gap-2">
+							<input
+								type="text"
+								class="input flex-1 rounded-container border border-surface-200 px-3 min-h-[48px]"
+								placeholder="e.g. A1"
+								bind:value={manualPhysicalId}
+								onfocus={startManualFocusWindow}
+								onkeydown={(e) => e.key === 'Enter' && handleLookup()}
+							/>
+							<button type="button" class="btn preset-filled-primary-500 min-h-[48px] min-w-[48px] px-4" onclick={handleLookup}>Look up</button>
+						</div>
 					</div>
 					{#if error}
 						<div class="rounded-container bg-error-100 text-error-900 border border-error-300 p-3 md:p-4 text-sm flex flex-col gap-3">

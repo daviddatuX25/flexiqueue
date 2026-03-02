@@ -139,6 +139,22 @@ class Program extends Model
         return (bool) ($settings['allow_public_triage'] ?? false);
     }
 
+    /** Per barcode-hid plan: enable HID barcode input on Display board. Default true. */
+    public function getEnableDisplayHidBarcode(): bool
+    {
+        $settings = $this->settings ?? [];
+
+        return (bool) ($settings['enable_display_hid_barcode'] ?? true);
+    }
+
+    /** Per barcode-hid plan: enable HID barcode input on Public triage. Default true. */
+    public function getEnablePublicTriageHidBarcode(): bool
+    {
+        $settings = $this->settings ?? [];
+
+        return (bool) ($settings['enable_public_triage_hid_barcode'] ?? true);
+    }
+
     public function queueSessions(): HasMany
     {
         return $this->hasMany(Session::class, 'program_id');
