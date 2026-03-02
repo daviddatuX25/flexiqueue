@@ -64,5 +64,3 @@ tar -czf flexiqueue-deploy.tar.gz \
 
 composer config --unset platform.php 2>/dev/null || true
 echo "Done. Output: $(pwd)/flexiqueue-deploy.tar.gz"
-echo "Deploy: scp flexiqueue-deploy.tar.gz root@<pi-ip>:/tmp/"
-echo "Then SSH and: cd /var/www/flexiqueue && sudo tar -xzf /tmp/flexiqueue-deploy.tar.gz && sudo chown -R www-data:www-data . && php artisan migrate --force && php artisan config:cache && php artisan route:cache"

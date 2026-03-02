@@ -83,7 +83,3 @@ fi
 # Restore dev dependencies (composer install --no-dev removed Sail)
 echo "Restoring dev dependencies..."
 $SAIL exec laravel.test composer install --no-interaction 2>/dev/null || docker compose exec laravel.test composer install --no-interaction 2>/dev/null || true
-
-echo ""
-echo "Deploy: scp flexiqueue-deploy.tar.gz root@<pi-ip>:/tmp/"
-echo "Then SSH and: cd /var/www/flexiqueue && sudo tar -xzf /tmp/flexiqueue-deploy.tar.gz && sudo chown -R www-data:www-data . && php artisan migrate --force && php artisan config:cache && php artisan route:cache"

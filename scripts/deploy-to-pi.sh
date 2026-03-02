@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # One-command deploy: (optionally) build tarball, scp to Pi, SSH and apply.
+# Fully interactive: prompts for host, build tarball, then post-deploy (seed / migrate:fresh --seed).
 # Use when you're remote or want to streamline updates.
 #
 # Usage (from repo root):
@@ -73,4 +74,35 @@ ssh "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && sudo tar -xzf /tmp/flexiq
 # Optional: restart Reverb if running as systemd
 ssh "${PI_USER}@${PI_HOST}" 'sudo systemctl restart flexiqueue-reverb 2>/dev/null || true'
 
+echo ""
 echo "Done. App updated at ${PI_HOST}."
+echo ""
+echo "  Post-deploy (on Pi):"
+echo "    1) Nothing else"
+echo "    2) Run db:seed"
+echo "    3) Run migrate:fresh --seed (DROP all tables, then migrate + seed)"
+read -r -p "  Choice [1-3] (default 1): " post_choice
+post_choice="${post_choice:-1}"
+
+case "$post_choice" in
+  2)
+    echo "Running db:seed on Pi..."
+    ssh -t "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && php artisan db:seed'
+    ;;
+  3)
+    echo "WARNING: migrate:fresh will DROP ALL TABLES and recreate the database."
+    read -r -p "  Are you sure? Type 'yes' to continue: " confirm
+    if [ "$confirm" = "yes" ]; then
+      echo "Running migrate:fresh --seed on Pi..."
+      ssh -t "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && php artisan migrate:fresh --seed --force'
+    else
+      echo "Skipped migrate:fresh --seed."
+    fi
+    ;;
+  *)
+    echo "No extra steps."
+    ;;
+esac
+
+echo ""
+echo "All done."
