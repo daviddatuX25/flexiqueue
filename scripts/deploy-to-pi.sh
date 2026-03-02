@@ -49,8 +49,12 @@ if [ "$BUILD" -eq 0 ]; then
 fi
 
 if [ "$BUILD" -eq 1 ]; then
-  echo "Building tarball (host, no Docker)..."
-  ./scripts/build-deploy-tarball.sh
+  echo "Building tarball..."
+  if [ -f ./scripts/build-deploy-tarball-sail.sh ]; then
+    ./scripts/build-deploy-tarball-sail.sh
+  else
+    ./scripts/build-deploy-tarball.sh
+  fi
 else
   echo "Using existing flexiqueue-deploy.tar.gz (run with --build to rebuild first)."
 fi
