@@ -5,6 +5,8 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
+    "dev:sail": "./scripts/dev-start-sail.sh",
+    "dev:local": "./scripts/dev-start-local.sh",
     "test:e2e": "playwright test",
     "test:e2e:report": "playwright show-report --host 0.0.0.0"
   },
