@@ -20,11 +20,32 @@ for arg in "$@"; do
   [ "$arg" = "--build" ] && BUILD=1
 done
 
+# Interactive host prompt when PI_HOST is not provided
 if [ -z "$PI_HOST" ]; then
-  echo "Usage: PI_HOST=<pi-ip-or-hostname> ./scripts/deploy-to-pi.sh [--build]"
-  echo "Example: PI_HOST=orangepi.local ./scripts/deploy-to-pi.sh"
-  echo "Example: PI_HOST=orangepi.local ./scripts/deploy-to-pi.sh --build"
-  exit 1
+  echo ""
+  echo "  FlexiQueue — Deploy to Pi"
+  echo "  —————————————————————————"
+  read -r -p "  Pi host (IP or hostname): " PI_HOST
+  PI_HOST="$(echo "$PI_HOST" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  if [ -z "$PI_HOST" ]; then
+    echo "No host given. Exiting."
+    exit 1
+  fi
+fi
+
+# Decide whether to build tarball
+if [ "$BUILD" -eq 0 ]; then
+  if [ -f flexiqueue-deploy.tar.gz ]; then
+    # Ask user if they want to rebuild
+    read -r -p "  Build tarball first? [y/N]: " do_build
+    case "${do_build^^}" in
+      Y|YES) BUILD=1 ;;
+      *) BUILD=0 ;;
+    esac
+  else
+    echo "No existing flexiqueue-deploy.tar.gz; will build first."
+    BUILD=1
+  fi
 fi
 
 if [ "$BUILD" -eq 1 ]; then
