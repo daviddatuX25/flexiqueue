@@ -23,12 +23,15 @@
 		tracks = [],
 		date = '',
 		display_scan_timeout_seconds = 20,
+		/** Per barcode-hid plan: when false, hidden HID input is disabled (no auto-focus) so mobile keyboard doesn't open. */
+		enable_public_triage_hid_barcode = true,
 	}: {
 		allowed: boolean;
 		program_name: string | null;
 		tracks: Track[];
 		date: string;
 		display_scan_timeout_seconds?: number;
+		enable_public_triage_hid_barcode?: boolean;
 	} = $props();
 
 	const page = usePage();
@@ -109,9 +112,9 @@
 		};
 	});
 
-	/** Refocus hidden barcode input every 10s when camera modal is closed. Disabled while modal is open. */
+	/** Refocus hidden barcode input every 10s when camera modal is closed. Only when program enables HID. */
 	$effect(() => {
-		if (showScanner) return;
+		if (showScanner || !enable_public_triage_hid_barcode) return;
 		const id = setInterval(() => barcodeInputEl?.focus(), 10000);
 		return () => clearInterval(id);
 	});
@@ -181,16 +184,16 @@
 		const raw = barcodeValue.trim();
 		if (!raw) return;
 		e.preventDefault();
-		scanHandled = true;
-		const isHash = (s: string) => s.length === 64 && /^[a-f0-9]+$/.test(s);
-		const physicalId = raw.length <= 10 && /^[A-Za-z0-9]+$/.test(raw) ? raw : '';
-		const qrHash = raw.includes('/') ? (raw.split('/').pop() ?? '').split('?')[0].trim() : (isHash(raw) ? raw : '');
-		doTokenLookup(qrHash, physicalId || raw).then((ok) => {
-			if (ok) showScanner = false;
-			scanHandled = false;
-			barcodeValue = '';
-			barcodeInputEl?.focus();
-		});
+			scanHandled = true;
+			const isHash = (s: string) => s.length === 64 && /^[a-f0-9]+$/.test(s);
+			const physicalId = raw.length <= 10 && /^[A-Za-z0-9]+$/.test(raw) ? raw : '';
+			const qrHash = raw.includes('/') ? (raw.split('/').pop() ?? '').split('?')[0].trim() : (isHash(raw) ? raw : '');
+			doTokenLookup(qrHash, physicalId || raw).then((ok) => {
+				if (ok) showScanner = false;
+				scanHandled = false;
+				barcodeValue = '';
+				if (enable_public_triage_hid_barcode) barcodeInputEl?.focus();
+			});
 	}
 
 	async function handleBind() {

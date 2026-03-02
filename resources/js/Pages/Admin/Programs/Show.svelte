@@ -65,6 +65,10 @@
             display_tts_voice?: string | null;
             /** Per plan: allow public self-serve triage at /triage/start. */
             allow_public_triage?: boolean;
+            /** Per barcode-hid: enable HID barcode on Display board. Default true. */
+            enable_display_hid_barcode?: boolean;
+            /** Per barcode-hid: enable HID barcode on Public triage. Default true. */
+            enable_public_triage_hid_barcode?: boolean;
         };
     }
 
@@ -249,6 +253,10 @@
     let availableTtsVoices = $state<{ name: string; lang: string }[]>([]);
     /** Per plan: allow public self-serve triage at /triage/start. */
     let allowPublicTriage = $state(false);
+    /** Per barcode-hid: enable HID barcode on Display board. Default true. */
+    let enableDisplayHidBarcode = $state(true);
+    /** Per barcode-hid: enable HID barcode on Public triage. Default true. */
+    let enablePublicTriageHidBarcode = $state(true);
     /** Per ISSUES-ELABORATION §15: expandable "More details" for station selection. */
     let showStationSelectionDetails = $state(false);
     /** Per bead flexiqueue-5gl: expandable "More details" for priority/regular ratio (alternate mode). */
@@ -283,6 +291,8 @@
             displayAudioVolume = Math.max(0, Math.min(1, Number(s.display_audio_volume ?? 1)));
             displayTtsVoice = s.display_tts_voice ?? "";
             allowPublicTriage = s.allow_public_triage === true;
+            enableDisplayHidBarcode = (s.enable_display_hid_barcode ?? true) === true;
+            enablePublicTriageHidBarcode = (s.enable_public_triage_hid_barcode ?? true) === true;
         }
     });
 
@@ -1194,6 +1204,8 @@
                     display_audio_volume: displayAudioVolume,
                     display_tts_voice: displayTtsVoice || null,
                     allow_public_triage: allowPublicTriage,
+                    enable_display_hid_barcode: enableDisplayHidBarcode,
+                    enable_public_triage_hid_barcode: enablePublicTriageHidBarcode,
                 },
             },
         );
@@ -2529,6 +2541,46 @@
                                         ></span>
                                     </div>
                                     <span class="label-text text-surface-950 font-medium">Allow public self-serve triage</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- HID barcode: Display board -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
+                                    <Monitor class="w-4 h-4 text-surface-500" /> HID barcode (Display)
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    When on, the Display board keeps focus on the hidden barcode input for hardware scanners.
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control pt-1">
+                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
+                                    <input type="checkbox" class="checkbox" bind:checked={enableDisplayHidBarcode} />
+                                    <span class="label-text text-surface-950 font-medium">Enable HID barcode on Display board</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- HID barcode: Public triage -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
+                                    <Users class="w-4 h-4 text-surface-500" /> HID barcode (Public triage)
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    When on, the public triage page (/triage/start) keeps focus on the hidden barcode input for hardware scanners.
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control pt-1">
+                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
+                                    <input type="checkbox" class="checkbox" bind:checked={enablePublicTriageHidBarcode} />
+                                    <span class="label-text text-surface-950 font-medium">Enable HID barcode on Public triage</span>
                                 </label>
                             </div>
                         </div>

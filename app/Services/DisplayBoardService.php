@@ -37,6 +37,7 @@ class DisplayBoardService
                 'display_audio_muted' => false,
                 'display_audio_volume' => 1.0,
                 'display_tts_voice' => null,
+                'enable_display_hid_barcode' => true,
             ];
         }
 
@@ -137,6 +138,7 @@ class DisplayBoardService
             'display_audio_muted' => $program->getDisplayAudioMuted(),
             'display_audio_volume' => $program->getDisplayAudioVolume(),
             'display_tts_voice' => $program->getDisplayTtsVoice(),
+            'enable_display_hid_barcode' => $program->getEnableDisplayHidBarcode(),
         ];
     }
 

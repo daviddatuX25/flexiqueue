@@ -38,6 +38,8 @@ class UpdateProgramRequest extends FormRequest
             'settings.display_audio_volume' => ['sometimes', 'numeric', 'min:0', 'max:1'],
             'settings.display_tts_voice' => ['sometimes', 'nullable', 'string', 'max:500'],
             'settings.allow_public_triage' => ['sometimes', 'boolean'],
+            'settings.enable_display_hid_barcode' => ['sometimes', 'boolean'],
+            'settings.enable_public_triage_hid_barcode' => ['sometimes', 'boolean'],
         ];
     }
 }
