@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-{{-- Add class="dark" to <html> when user/brand prefers dark (Phase 0 ui-kit; toggle can be added later). --}}
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}" data-theme="flexiqueue">
 <head>
     <meta charset="utf-8">

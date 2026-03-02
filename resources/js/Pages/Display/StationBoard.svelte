@@ -6,6 +6,7 @@
 	import { onMount } from 'svelte';
 	import { router } from '@inertiajs/svelte';
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
+	import { getFemaleVoice, getVoiceByName, ensureVoicesLoaded, TTS_DEFAULT_RATE } from '../../lib/speechUtils.js';
 
 	let {
 		program_name = null,
@@ -17,10 +18,12 @@
 		station_activity = [],
 		display_audio_muted = false,
 		display_audio_volume = 1,
+		display_tts_voice = null,
 	} = $props();
 
 	let muted = $state(false);
 	let volume = $state(1);
+	let ttsVoice = $state(null);
 	/** Pending second-speak timeout; cleared when new call or unmount. */
 	let repeatTimeoutId = $state(null);
 	/** Recent activity: from props + real-time .station_activity; max 20, newest first. */
@@ -29,22 +32,14 @@
 	$effect(() => {
 		muted = !!display_audio_muted;
 		volume = Math.max(0, Math.min(1, Number(display_audio_volume ?? 1)));
+		ttsVoice = display_tts_voice ?? null;
 	});
+
+	/** Effective TTS voice: prefer synced state, fall back to prop so refresh always applies. */
+	const effectiveTtsVoice = $derived(ttsVoice ?? display_tts_voice ?? null);
 	$effect(() => {
 		activityFeed = [...(station_activity ?? [])];
 	});
-
-	/** Prefer a female voice for TTS; fallback to first available. */
-	function getFemaleVoice() {
-		if (typeof window === 'undefined' || !window.speechSynthesis) return null;
-		const voices = window.speechSynthesis.getVoices();
-		const female = voices.find(
-			(v) =>
-				/female|samantha|karen|victoria|moira|fiona|tessa|amelie/i.test(v.name) ||
-				(v.name && v.name.toLowerCase().includes('female'))
-		);
-		return female ?? voices[0] ?? null;
-	}
 
 	/** Phonetic words for letters so TTS says "ay" not "uh". */
 	const LETTER_PHONETIC = {
@@ -93,9 +88,9 @@
 		const doSpeak = () => {
 			if (muted) return;
 			const u = new SpeechSynthesisUtterance(text);
-			u.rate = 0.8;
+			u.rate = TTS_DEFAULT_RATE;
 			u.volume = Math.max(0, Math.min(1, volume));
-			const voice = getFemaleVoice();
+			const voice = (effectiveTtsVoice && getVoiceByName(effectiveTtsVoice)) || getFemaleVoice();
 			if (voice) u.voice = voice;
 			window.speechSynthesis.speak(u);
 		};
@@ -108,7 +103,7 @@
 
 	function refreshStationData() {
 		router.reload({
-			only: ['now_serving', 'waiting', 'station_activity', 'display_audio_muted', 'display_audio_volume'],
+			only: ['now_serving', 'waiting', 'station_activity', 'display_audio_muted', 'display_audio_volume', 'display_tts_voice'],
 		});
 	}
 
@@ -133,6 +128,7 @@
 	}
 
 	onMount(() => {
+		ensureVoicesLoaded();
 		if (typeof window === 'undefined' || !window.Echo || !station_id) return;
 		const echo = window.Echo;
 		const channelName = 'display.station.' + station_id;
@@ -143,6 +139,7 @@
 		ch.listen('.display_station_settings', (e) => {
 			muted = !!e.display_audio_muted;
 			volume = Math.max(0, Math.min(1, Number(e.display_audio_volume ?? 1)));
+			ttsVoice = e.display_tts_voice ?? null;
 		});
 		return () => {
 			if (repeatTimeoutId != null) clearTimeout(repeatTimeoutId);

@@ -1,5 +1,46 @@
 # Orange Pi setup helpers
 
+**New? Start with [Beginner deployment guide](../../docs/BEGINNER-DEPLOYMENT-GUIDE.md).**
+
+**Full deployment runbook** (first-time install, SQLite for prod to save RAM, Nginx, verify): see [docs/architecture/10-DEPLOYMENT.md](../../docs/architecture/10-DEPLOYMENT.md). Use SQLite on Orange Pi One to avoid running MariaDB and save memory.
+
+The deploy tarball **includes this folder** (`scripts/pi/`): Reverb systemd unit, zerotier-when-idle, nginx config, update-from-url. After a full deploy they live at `/var/www/flexiqueue/scripts/pi/` on the Pi.
+
+---
+
+## Copy scripts to Pi without full deploy
+
+Use this when you only want to update or add the Pi helper scripts (Reverb service, zerotier-when-idle, nginx config) without running a full tarball deploy.
+
+**From your PC** (repo root). Replace `<pi-ip>` with the Pi’s IP (local or ZeroTier):
+
+```bash
+# Create scripts dir on Pi if needed, then copy scripts/pi into it
+ssh root@<pi-ip> "mkdir -p /var/www/flexiqueue/scripts"
+scp -r scripts/pi root@<pi-ip>:/var/www/flexiqueue/scripts/
+```
+
+**Then on the Pi**, install from the copied files:
+
+```bash
+# Reverb: start at boot and restart on failure
+sudo cp /var/www/flexiqueue/scripts/pi/flexiqueue-reverb.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now flexiqueue-reverb
+
+# ZeroTier when idle (optional): copy to /usr/local/bin and add cron
+sudo cp /var/www/flexiqueue/scripts/pi/zerotier-when-idle.sh /usr/local/bin/zerotier-when-idle
+sudo chmod +x /usr/local/bin/zerotier-when-idle
+# Then: sudo crontab -e and add: */5 * * * * /usr/local/bin/zerotier-when-idle
+
+# Nginx config (only if not already set up): copy to sites-available and enable
+# sudo cp /var/www/flexiqueue/scripts/pi/nginx-flexiqueue.conf /etc/nginx/sites-available/flexiqueue
+# sudo ln -sf /etc/nginx/sites-available/flexiqueue /etc/nginx/sites-enabled/
+# sudo nginx -t && sudo systemctl reload nginx
+```
+
+---
+
 ## Remote update from URL
 
 **File:** `update-from-url.sh` — run on the Pi to update the app by downloading the tarball from a URL (e.g. GitHub Releases, your file server). Use when you can't scp from your PC.
@@ -21,7 +62,7 @@ sudo chmod +x /usr/local/bin/flexiqueue-update
 sudo flexiqueue-update "https://your-server.com/flexiqueue-deploy.tar.gz"
 ```
 
-For full deployment runbook, see dev branch `docs/architecture/10-DEPLOYMENT.md`.
+For full deployment runbook (including SQLite option and start-fresh steps), see [docs/architecture/10-DEPLOYMENT.md](../../docs/architecture/10-DEPLOYMENT.md).
 
 ---
 

@@ -19,16 +19,19 @@ echo "Building inside container (composer, npm, tar)..."
 $SAIL exec laravel.test bash -c '
   set -e
   cd /var/www/html
-  echo "Composer install --no-dev..."
-  composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction
+  echo "Composer install --no-dev (platform PHP 8.3 for Orange Pi prod)..."
+  composer config platform.php 8.3
+  composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --ignore-platform-reqs
   echo "npm ci && npm run build..."
   npm ci && npm run build
-  echo "Creating tarball (production-only files)..."
+  echo "Creating tarball (production-only files; includes scripts/pi/ for Reverb, zerotier-when-idle, nginx, etc.)..."
   tar -czf /tmp/flexiqueue-deploy.tar.gz \
     --exclude=.git \
     --exclude=node_modules \
     --exclude=.env \
-    --exclude=".env.*" \
+    --exclude=.env.example \
+    --exclude=.env.backup \
+    --exclude=.env.production \
     --exclude=storage \
     --exclude=.phpunit.cache \
     --exclude=.phpunit.result.cache \

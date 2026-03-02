@@ -36,6 +36,7 @@ class DisplayBoardService
                 'program_is_paused' => false,
                 'display_audio_muted' => false,
                 'display_audio_volume' => 1.0,
+                'display_tts_voice' => null,
             ];
         }
 
@@ -135,6 +136,7 @@ class DisplayBoardService
             'program_is_paused' => (bool) $program->is_paused,
             'display_audio_muted' => $program->getDisplayAudioMuted(),
             'display_audio_volume' => $program->getDisplayAudioVolume(),
+            'display_tts_voice' => $program->getDisplayTtsVoice(),
         ];
     }
 
@@ -146,6 +148,7 @@ class DisplayBoardService
      */
     public function getStationBoardData(Station $station): array
     {
+        $station->loadMissing('program');
         $program = $station->program;
         $programName = $program?->name;
         $date = now()->format('F j, Y');
@@ -200,6 +203,7 @@ class DisplayBoardService
             'station_activity' => $stationActivity,
             'display_audio_muted' => $station->getDisplayAudioMuted(),
             'display_audio_volume' => $station->getDisplayAudioVolume(),
+            'display_tts_voice' => $station->getDisplayTtsVoice(),
         ];
     }
 

@@ -5,8 +5,10 @@
     import FlowDiagram from "../../../Components/FlowDiagram.svelte";
     import DiagramCanvas from "../../../Components/ProgramDiagram/DiagramCanvas.svelte";
     import { get } from "svelte/store";
+    import { onMount } from "svelte";
     import { Link, router, usePage } from "@inertiajs/svelte";
     import { toast } from "../../../stores/toastStore.js";
+    import { ensureVoicesLoaded, speakSample } from "../../../lib/speechUtils.js";
 
     import {
         Plus,
@@ -59,6 +61,8 @@
             display_audio_muted?: boolean;
             /** Per plan: display board TTS volume 0-1 (admin-controlled). */
             display_audio_volume?: number;
+            /** Preferred TTS voice name for call announcements (SpeechSynthesisVoice.name). Null = default / prefer female. */
+            display_tts_voice?: string | null;
             /** Per plan: allow public self-serve triage at /triage/start. */
             allow_public_triage?: boolean;
         };
@@ -116,7 +120,7 @@
     }
 
     let {
-        program,
+        program = undefined,
         tracks = [],
         processes = [],
         stations = [],
@@ -126,10 +130,10 @@
             completed_sessions: 0,
         },
     }: {
-        program: ProgramItem;
-        tracks: TrackItem[];
+        program?: ProgramItem | null;
+        tracks?: TrackItem[];
         processes?: ProcessItem[];
-        stations: StationItem[];
+        stations?: StationItem[];
         stats?: ProgramStats;
     } = $props();
 
@@ -239,6 +243,10 @@
     let displayAudioMuted = $state(false);
     /** Per plan: display board audio volume 0-1 (admin-controlled). */
     let displayAudioVolume = $state(1);
+    /** Preferred TTS voice name for call announcements. Empty = use browser default (prefer female). */
+    let displayTtsVoice = $state("");
+    /** Available browser voices for TTS dropdown (loaded on mount). */
+    let availableTtsVoices = $state<{ name: string; lang: string }[]>([]);
     /** Per plan: allow public self-serve triage at /triage/start. */
     let allowPublicTriage = $state(false);
     /** Per ISSUES-ELABORATION §15: expandable "More details" for station selection. */
@@ -273,8 +281,15 @@
             displayScanTimeoutSeconds = Math.min(300, Math.max(0, Number(s.display_scan_timeout_seconds ?? 20)));
             displayAudioMuted = s.display_audio_muted === true;
             displayAudioVolume = Math.max(0, Math.min(1, Number(s.display_audio_volume ?? 1)));
+            displayTtsVoice = s.display_tts_voice ?? "";
             allowPublicTriage = s.allow_public_triage === true;
         }
+    });
+
+    onMount(() => {
+        ensureVoicesLoaded((voices) => {
+            availableTtsVoices = voices.map((v) => ({ name: v.name, lang: v.lang || "" }));
+        });
     });
 
     $effect(() => {
@@ -1177,6 +1192,7 @@
                     display_scan_timeout_seconds: displayScanTimeoutSeconds,
                     display_audio_muted: displayAudioMuted,
                     display_audio_volume: displayAudioVolume,
+                    display_tts_voice: displayTtsVoice || null,
                     allow_public_triage: allowPublicTriage,
                 },
             },
@@ -1349,10 +1365,18 @@
 </script>
 
 <svelte:head>
-    <title>{program.name} — Programs — FlexiQueue</title>
+    <title>{program?.name ?? "Program"} — Programs — FlexiQueue</title>
 </svelte:head>
 
 <AdminLayout>
+    {#if !program}
+        <div class="p-6 text-surface-600">
+            <p>Program not found or still loading.</p>
+            <Link href="/admin/programs" class="btn preset-tonal btn-sm mt-4 inline-flex">
+                Back to Programs
+            </Link>
+        </div>
+    {:else}
     <div class="flex flex-col gap-6">
         <!-- Back link -->
         <div>
@@ -2448,6 +2472,30 @@
                                     />
                                     <span class="text-xs text-surface-500">{Math.round(displayAudioVolume * 100)}%</span>
                                 </label>
+                                <label class="flex flex-col gap-1">
+                                    <span class="text-sm text-surface-600">TTS voice</span>
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <select
+                                            class="select select-sm bg-white border border-surface-300 rounded-lg"
+                                            bind:value={displayTtsVoice}
+                                            aria-label="Display board TTS voice"
+                                        >
+                                            <option value="">Default (Microsoft Sonia Online)</option>
+                                            {#each availableTtsVoices as voice}
+                                                <option value={voice.name}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
+                                            {/each}
+                                        </select>
+                                        <button
+                                            type="button"
+                                            class="btn preset-tonal btn-sm"
+                                            onclick={() => speakSample("Calling A 3, please proceed to window 1.", displayTtsVoice || null)}
+                                            aria-label="Play sample phrase with selected voice"
+                                        >
+                                            Play sample
+                                        </button>
+                                    </div>
+                                    <span class="text-xs text-surface-500">Voice used for “Calling…” announcements on display and station boards.</span>
+                                </label>
                             </div>
                         </div>
 
@@ -2749,6 +2797,7 @@
             </div>
         {/if}
     </div>
+    {/if}
 </AdminLayout>
 
 <Modal open={showCreateModal} title="Add Track" onClose={closeModals}>

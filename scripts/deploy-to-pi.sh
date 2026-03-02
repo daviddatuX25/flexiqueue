@@ -8,7 +8,7 @@
 #   PI_HOST=orangepi.local PI_USER=root ./scripts/deploy-to-pi.sh --build
 #
 # Requires: flexiqueue-deploy.tar.gz in repo root (or run with --build).
-# Pi must have: /var/www/flexiqueue, .env already set up (first-time setup is separate).
+# Pi must have: /var/www/flexiqueue (and database/database.sqlite for SQLite). If .env is missing, it is created from .env.prod in the tarball on first deploy.
 
 set -e
 cd "$(dirname "$0")/.."
@@ -17,23 +17,25 @@ PI_HOST="${PI_HOST:-}"
 PI_USER="${PI_USER:-root}"
 BUILD=0
 for arg in "$@"; do
-  case "$arg" in
-    --build) BUILD=1 ;;
-  esac
+  [ "$arg" = "--build" ] && BUILD=1
 done
 
 if [ -z "$PI_HOST" ]; then
   echo "Usage: PI_HOST=<pi-ip-or-hostname> ./scripts/deploy-to-pi.sh [--build]"
+  echo "Example: PI_HOST=orangepi.local ./scripts/deploy-to-pi.sh"
   echo "Example: PI_HOST=orangepi.local ./scripts/deploy-to-pi.sh --build"
   exit 1
 fi
 
 if [ "$BUILD" -eq 1 ]; then
+  echo "Building tarball..."
   if [ -f ./scripts/build-deploy-tarball-sail.sh ]; then
     ./scripts/build-deploy-tarball-sail.sh
   else
     ./scripts/build-deploy-tarball.sh
   fi
+else
+  echo "Using existing flexiqueue-deploy.tar.gz (run with --build to rebuild first)."
 fi
 
 if [ ! -f flexiqueue-deploy.tar.gz ]; then
@@ -44,8 +46,8 @@ fi
 echo "Copying tarball to ${PI_USER}@${PI_HOST}..."
 scp flexiqueue-deploy.tar.gz "${PI_USER}@${PI_HOST}:/tmp/"
 
-echo "Applying on Pi (extract, chown, migrate, cache)..."
-ssh "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && sudo tar -xzf /tmp/flexiqueue-deploy.tar.gz && sudo chown -R www-data:www-data . && php artisan migrate --force && php artisan config:cache && php artisan route:cache'
+echo "Applying on Pi (extract, chown, storage + database writable, migrate, cache, storage:link)..."
+ssh "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && sudo tar -xzf /tmp/flexiqueue-deploy.tar.gz && sudo chown -R www-data:www-data . && sudo mkdir -p storage/app/public storage/framework/cache storage/framework/sessions storage/framework/views storage/logs && sudo chown -R www-data:www-data storage && sudo chown -R www-data:www-data database && sudo chmod 775 database && (test -f database/database.sqlite && sudo chmod 664 database/database.sqlite || true) && if test -f .env.prod && test ! -f .env; then sudo cp .env.prod .env && sudo chown www-data:www-data .env; fi && php artisan migrate --force && php artisan config:cache && php artisan route:cache && php artisan storage:link'
 
 # Optional: restart Reverb if running as systemd
 ssh "${PI_USER}@${PI_HOST}" 'sudo systemctl restart flexiqueue-reverb 2>/dev/null || true'

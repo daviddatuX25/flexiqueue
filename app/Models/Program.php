@@ -99,7 +99,8 @@ class Program extends Model
     /** Per flexiqueue-87p: display board scan auto-close. 0 = no auto-close; default 20 seconds. */
     public function getDisplayScanTimeoutSeconds(): int
     {
-        $v = $this->settings['display_scan_timeout_seconds'] ?? null;
+        $settings = $this->settings ?? [];
+        $v = $settings['display_scan_timeout_seconds'] ?? null;
 
         return $v === null ? 20 : max(0, (int) $v);
     }
@@ -107,21 +108,35 @@ class Program extends Model
     /** Per plan: display board audio mute (admin-controlled). Default false. */
     public function getDisplayAudioMuted(): bool
     {
-        return (bool) ($this->settings['display_audio_muted'] ?? false);
+        $settings = $this->settings ?? [];
+
+        return (bool) ($settings['display_audio_muted'] ?? false);
     }
 
     /** Per plan: display board audio volume 0–1 (admin-controlled). Default 1. */
     public function getDisplayAudioVolume(): float
     {
-        $v = $this->settings['display_audio_volume'] ?? 1;
+        $settings = $this->settings ?? [];
+        $v = $settings['display_audio_volume'] ?? 1;
 
         return (float) max(0, min(1, $v));
+    }
+
+    /** Preferred TTS voice name for call announcements (browser SpeechSynthesisVoice.name). Null = use browser default (Microsoft Sonia Online / female). */
+    public function getDisplayTtsVoice(): ?string
+    {
+        $settings = $this->settings ?? [];
+        $v = $settings['display_tts_voice'] ?? null;
+
+        return $v !== null && $v !== '' ? (string) $v : null;
     }
 
     /** Per plan: allow public self-serve triage at GET /triage/start. Default false. */
     public function getAllowPublicTriage(): bool
     {
-        return (bool) ($this->settings['allow_public_triage'] ?? false);
+        $settings = $this->settings ?? [];
+
+        return (bool) ($settings['allow_public_triage'] ?? false);
     }
 
     public function queueSessions(): HasMany

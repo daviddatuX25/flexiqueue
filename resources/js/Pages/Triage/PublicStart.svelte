@@ -63,6 +63,10 @@
 	let scannedToken = $state<{ physical_id: string; qr_hash: string; status: string } | null>(null);
 	let selectedTrackId = $state<number | null>(null);
 	let error = $state('');
+
+	/** When track count is at or below this, show buttons instead of dropdown. */
+	const MAX_TRACKS_FOR_BUTTONS = 4;
+	const showTrackButtons = $derived(tracks.length <= MAX_TRACKS_FOR_BUTTONS);
 	let isSubmitting = $state(false);
 	let bindSuccess = $state(false);
 	let scanCountdown = $state(0);
@@ -89,12 +93,14 @@
 		}
 		const timeout = Math.max(0, Number(display_scan_timeout_seconds) || 20);
 		if (timeout === 0) return;
-		let remaining = timeout;
-		scanCountdown = remaining;
+		scanCountdown = timeout;
 		const id = setInterval(() => {
-			remaining -= 1;
-			scanCountdown = remaining;
-			if (remaining <= 0) showScanner = false;
+			scanCountdown = scanCountdown - 1;
+			if (scanCountdown <= 0) {
+				clearInterval(id);
+				scanCountdownIntervalId = null;
+				queueMicrotask(() => { showScanner = false; });
+			}
 		}, 1000);
 		scanCountdownIntervalId = id;
 		return () => {
@@ -103,9 +109,10 @@
 		};
 	});
 
+	/** Refocus hidden barcode input every 10s when camera modal is closed. Disabled while modal is open. */
 	$effect(() => {
 		if (showScanner) return;
-		const id = setInterval(() => barcodeInputEl?.focus(), 2000);
+		const id = setInterval(() => barcodeInputEl?.focus(), 10000);
 		return () => clearInterval(id);
 	});
 
@@ -271,7 +278,7 @@
 				<Modal open={showScanner} title="Scan QR" onClose={closeScanner} wide={true}>
 					{#snippet children()}
 						<div class="flex flex-col gap-3">
-							<QrScanner active={true} cameraOnly={true} onScan={handleQrScan} />
+							<QrScanner active={showScanner} cameraOnly={true} onScan={handleQrScan} />
 							{#if scanCountdown > 0}
 								<p class="text-sm text-surface-600">Closing in {scanCountdown}s</p>
 								<button type="button" class="btn preset-tonal text-sm" onclick={extendCountdown}>
@@ -286,16 +293,30 @@
 				<div class="rounded-container border border-surface-200 bg-surface-50 p-4 md:p-6 space-y-4">
 					<p class="font-medium text-surface-950">Token: <span class="font-mono text-primary-500">{scannedToken.physical_id}</span></p>
 					<div>
-						<label for="public-track" class="block text-sm font-medium text-surface-950 mb-2">Choose track</label>
-						<select
-							id="public-track"
-							class="w-full rounded-container border border-surface-200 px-3 py-2 min-h-[48px]"
-							bind:value={selectedTrackId}
-						>
-							{#each tracks as track (track.id)}
-								<option value={track.id}>{track.name}</option>
-							{/each}
-						</select>
+						<p class="text-sm font-medium text-surface-950 mb-2">Choose track</p>
+						{#if showTrackButtons}
+							<div class="flex flex-wrap gap-2">
+								{#each tracks as track (track.id)}
+									<button
+										type="button"
+										class="btn min-h-[48px] px-4 py-2 {selectedTrackId === track.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
+										onclick={() => (selectedTrackId = track.id)}
+									>
+										{track.name}
+									</button>
+								{/each}
+							</div>
+						{:else}
+							<select
+								id="public-track"
+								class="w-full rounded-container border border-surface-200 px-3 py-2 min-h-[48px]"
+								bind:value={selectedTrackId}
+							>
+								{#each tracks as track (track.id)}
+									<option value={track.id}>{track.name}</option>
+								{/each}
+							</select>
+						{/if}
 					</div>
 					{#if error}
 						<p class="text-sm text-error-600">{error}</p>

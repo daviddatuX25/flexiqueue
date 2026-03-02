@@ -19,6 +19,7 @@
 	import QrScanner from '../../Components/QrScanner.svelte';
 	import UserAvatar from '../../Components/UserAvatar.svelte';
 	import { Camera } from 'lucide-svelte';
+	import { getFemaleVoice, getVoiceByName, ensureVoicesLoaded, TTS_DEFAULT_RATE } from '../../lib/speechUtils.js';
 
 	const page = usePage();
 
@@ -35,13 +36,15 @@
 		program_is_paused = false,
 		display_audio_muted = false,
 		display_audio_volume = 1,
+		display_tts_voice = null,
 	} = $props();
 
 	/** Synced from prop + .program_status; when true, show "Program is paused" overlay (real-time). */
 	let programIsPaused = $state(false);
-	/** Per plan: display board TTS mute/volume — from props and .display_settings broadcast. */
+	/** Per plan: display board TTS mute/volume/voice — from props and .display_settings broadcast. */
 	let displayAudioMuted = $state(false);
 	let displayAudioVolume = $state(1);
+	let displayTtsVoice = $state(null);
 
 	$effect(() => {
 		programIsPaused = !!program_is_paused;
@@ -49,7 +52,11 @@
 	$effect(() => {
 		displayAudioMuted = !!display_audio_muted;
 		displayAudioVolume = Math.max(0, Math.min(1, Number(display_audio_volume ?? 1)));
+		displayTtsVoice = display_tts_voice ?? null;
 	});
+
+	/** Effective TTS voice: prefer synced state, fall back to prop so refresh/reload always applies. */
+	const effectiveTtsVoice = $derived(displayTtsVoice ?? display_tts_voice ?? null);
 
 	/** Open camera modal when URL has ?scan=1 (e.g. "Scan again" from Status page). */
 	$effect(() => {
@@ -87,18 +94,6 @@
 
 	/** Recent activity: max 20 items, fixed-height scroll (shows ~5 items). No View more/less. */
 	const visibleActivity = $derived(activityFeed.slice(0, 20));
-
-	/** Prefer a female voice for TTS; fallback to first available. */
-	function getFemaleVoice() {
-		if (typeof window === 'undefined' || !window.speechSynthesis) return null;
-		const voices = window.speechSynthesis.getVoices();
-		const female = voices.find(
-			(v) =>
-				/female|samantha|karen|victoria|moira|fiona|tessa|amelie/i.test(v.name) ||
-				(v.name && v.name.toLowerCase().includes('female'))
-		);
-		return female ?? voices[0] ?? null;
-	}
 
 	/** Phonetic words for letters so TTS says "ay" not "uh". */
 	const LETTER_PHONETIC = {
@@ -147,6 +142,7 @@
 				'program_is_paused',
 				'display_audio_muted',
 				'display_audio_volume',
+				'display_tts_voice',
 			],
 		});
 	}
@@ -164,9 +160,9 @@
 		const doSpeak = () => {
 			if (displayAudioMuted) return;
 			const u = new SpeechSynthesisUtterance(text);
-			u.rate = 0.8;
+			u.rate = TTS_DEFAULT_RATE;
 			u.volume = Math.max(0, Math.min(1, displayAudioVolume));
-			const voice = getFemaleVoice();
+			const voice = (effectiveTtsVoice && getVoiceByName(effectiveTtsVoice)) || getFemaleVoice();
 			if (voice) u.voice = voice;
 			window.speechSynthesis.speak(u);
 		};
@@ -178,6 +174,7 @@
 	}
 
 	onMount(() => {
+		ensureVoicesLoaded();
 		if (typeof window === 'undefined' || !window.Echo) return;
 		const echo = window.Echo;
 		const activityChannel = echo.channel('display.activity');
@@ -205,10 +202,11 @@
 		activityChannel.listen('.program_status', (e) => {
 			programIsPaused = !!e.program_is_paused;
 		});
-		// Per plan: admin changed display board audio (mute/volume) → update local state for TTS
+		// Per plan: admin changed display board audio (mute/volume/voice) → update local state for TTS
 		activityChannel.listen('.display_settings', (e) => {
 			displayAudioMuted = !!e.display_audio_muted;
 			displayAudioVolume = Math.max(0, Math.min(1, Number(e.display_audio_volume ?? 1)));
+			displayTtsVoice = e.display_tts_voice ?? null;
 		});
 		// Real-time: refresh Now Serving and waiting list when serve/transfer/complete (not only on activity)
 		const queueChannel = echo.channel('global.queue');
@@ -270,14 +268,13 @@
 		}
 		const timeout = Math.max(0, Number(display_scan_timeout_seconds) || 20);
 		if (timeout === 0) return;
-		let remaining = timeout;
-		scanCountdown = remaining;
+		scanCountdown = timeout;
 		const id = setInterval(() => {
-			remaining -= 1;
-			scanCountdown = remaining;
-			if (remaining <= 0) {
+			scanCountdown = scanCountdown - 1;
+			if (scanCountdown <= 0) {
 				clearInterval(id);
-				showScanner = false;
+				scanCountdownIntervalId = null;
+				queueMicrotask(() => { showScanner = false; });
 			}
 		}, 1000);
 		scanCountdownIntervalId = id;

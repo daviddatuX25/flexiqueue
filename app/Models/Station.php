@@ -42,6 +42,17 @@ class Station extends Model
         return (float) max(0, min(1, $v));
     }
 
+    /** Preferred TTS voice name for this station (overrides program). Null = use program default. */
+    public function getDisplayTtsVoice(): ?string
+    {
+        $v = $this->settings['display_tts_voice'] ?? null;
+        if ($v !== null && $v !== '') {
+            return (string) $v;
+        }
+
+        return $this->program?->getDisplayTtsVoice();
+    }
+
     public function program(): BelongsTo
     {
         return $this->belongsTo(Program::class);

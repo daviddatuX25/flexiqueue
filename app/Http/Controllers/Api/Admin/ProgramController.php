@@ -83,8 +83,8 @@ class ProgramController extends Controller
         $program->update($validated);
 
         $program = $program->fresh();
-        if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings))) {
-            event(new DisplaySettingsUpdated($program->getDisplayAudioMuted(), $program->getDisplayAudioVolume()));
+        if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('display_tts_voice', $settings))) {
+            event(new DisplaySettingsUpdated($program->getDisplayAudioMuted(), $program->getDisplayAudioVolume(), $program->getDisplayTtsVoice()));
         }
 
         return response()->json(['program' => $this->programResource($program)]);
@@ -202,6 +202,7 @@ class ProgramController extends Controller
                 'display_scan_timeout_seconds' => $program->getDisplayScanTimeoutSeconds(),
                 'display_audio_muted' => $program->getDisplayAudioMuted(),
                 'display_audio_volume' => $program->getDisplayAudioVolume(),
+                'display_tts_voice' => $program->getDisplayTtsVoice(),
                 'allow_public_triage' => $program->getAllowPublicTriage(),
             ],
         ];

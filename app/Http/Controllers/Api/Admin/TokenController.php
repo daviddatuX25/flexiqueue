@@ -57,24 +57,32 @@ class TokenController extends Controller
     }
 
     /**
-     * Update token status. Admin can set available (reactivate) or deactivated.
+     * Update token. Admin can set status (available/deactivated) and/or pronounce_as (letters/word).
      * Cannot deactivate a token that is in_use.
      */
     public function update(UpdateTokenRequest $request, Token $token): JsonResponse
     {
-        $status = $request->validated('status');
+        $updates = [];
 
-        if ($status === 'deactivated' && $token->status === 'in_use') {
-            return response()->json([
-                'message' => 'Cannot deactivate token in use. Mark it available first.',
-            ], 409);
+        if ($request->has('status')) {
+            $status = $request->validated('status');
+            if ($status === 'deactivated' && $token->status === 'in_use') {
+                return response()->json([
+                    'message' => 'Cannot deactivate token in use. Mark it available first.',
+                ], 409);
+            }
+            $updates['status'] = $status;
+            $updates['current_session_id'] = $status !== 'in_use' ? null : $token->current_session_id;
         }
 
-        $token->update([
-            'status' => $status,
-            'current_session_id' => $status !== 'in_use' ? null : $token->current_session_id,
-        ]);
-        $token->refresh();
+        if ($request->has('pronounce_as')) {
+            $updates['pronounce_as'] = $request->validated('pronounce_as');
+        }
+
+        if (! empty($updates)) {
+            $token->update($updates);
+            $token->refresh();
+        }
 
         return response()->json(['token' => $this->tokenResource($token)]);
     }

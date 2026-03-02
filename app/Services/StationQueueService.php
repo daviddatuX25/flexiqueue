@@ -86,6 +86,7 @@ class StationQueueService
             ],
             'display_audio_muted' => $station->getDisplayAudioMuted(),
             'display_audio_volume' => $station->getDisplayAudioVolume(),
+            'display_tts_voice' => $station->getDisplayTtsVoice(),
             'priority_first' => $priorityFirst,
             'require_permission_before_override' => $requirePermissionBeforeOverride,
             'call_next_requires_override' => $callNextRequiresOverride,

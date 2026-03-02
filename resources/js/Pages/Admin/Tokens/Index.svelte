@@ -15,6 +15,7 @@
         PlayCircle,
         XCircle,
         ChevronDown,
+        Pencil,
     } from "lucide-svelte";
 
     interface TokenItem {
@@ -23,6 +24,17 @@
         qr_code_hash: string;
         status: string;
         pronounce_as?: string;
+    }
+
+    interface PrintSettingsApi {
+        cards_per_page?: number;
+        paper?: string;
+        orientation?: string;
+        show_hint?: boolean;
+        show_cut_lines?: boolean;
+        logo_url?: string;
+        footer_text?: string;
+        bg_image_url?: string;
     }
 
     let tokens = $state<TokenItem[]>([]);
@@ -42,6 +54,10 @@
     let selectedIds = $state<Set<number>>(new Set());
     let selectAllCheckbox = $state<HTMLInputElement | null>(null);
     let selectAllCheckboxMobile = $state<HTMLInputElement | null>(null);
+    // Edit single token modal
+    let editToken = $state<TokenItem | null>(null);
+    let editPronounceAs = $state<"letters" | "word">("letters");
+
     // Print modal (uniform flow: select template then print)
     let showPrintModal = $state(false);
     let printSettings = $state({
@@ -78,7 +94,12 @@
         body?: object,
     ): Promise<{
         ok: boolean;
-        data?: { tokens?: TokenItem[]; token?: TokenItem; created?: number };
+        data?: {
+            tokens?: TokenItem[];
+            token?: TokenItem;
+            created?: number;
+            print_settings?: PrintSettingsApi;
+        };
         message?: string;
     }> {
         const res = await fetch(url, {
@@ -175,6 +196,36 @@
             );
         } else {
             error = message ?? "Failed to update status.";
+        }
+    }
+
+    function openEditModal(token: TokenItem) {
+        editToken = token;
+        editPronounceAs = (token.pronounce_as === "word" ? "word" : "letters") as "letters" | "word";
+        error = "";
+    }
+
+    function closeEditModal() {
+        editToken = null;
+    }
+
+    async function saveEdit() {
+        if (!editToken) return;
+        submitting = true;
+        error = "";
+        const { ok, data, message } = await api(
+            "PUT",
+            `/api/admin/tokens/${editToken.id}`,
+            { pronounce_as: editPronounceAs },
+        );
+        submitting = false;
+        if (ok && data?.token) {
+            tokens = tokens.map((t) =>
+                t.id === editToken!.id ? { ...t, pronounce_as: data.token.pronounce_as } : t,
+            );
+            closeEditModal();
+        } else {
+            error = message ?? "Failed to update token.";
         }
     }
 
@@ -443,33 +494,44 @@
             </div>
         </div>
 
-        {#if someSelected}
-            <div
-                class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-container border border-primary-200 bg-primary-50/50 p-4 shadow-sm"
-                role="toolbar"
-                aria-label="Bulk actions"
-            >
+        <!-- Bulk actions: always visible; buttons disabled when no selection -->
+        <div
+            class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-container border border-surface-200 bg-surface-50 p-3 sm:p-4 shadow-sm {someSelected ? 'border-primary-200 bg-primary-50/50' : ''}"
+            role="toolbar"
+            aria-label="Bulk actions"
+        >
                 <div class="flex items-center gap-3">
-                    <span
-                        class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary-500 text-white text-xs font-bold shadow-sm"
-                    >
-                        {selectedIds.size}
-                    </span>
-                    <span class="text-sm font-semibold text-surface-900">
-                        token{selectedIds.size > 1 ? "s" : ""} selected
-                    </span>
+                    {#if someSelected}
+                        <span
+                            class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary-500 text-white text-xs font-bold shadow-sm"
+                        >
+                            {selectedIds.size}
+                        </span>
+                        <span class="text-sm font-semibold text-surface-900">
+                            token{selectedIds.size > 1 ? "s" : ""} selected
+                        </span>
+                    {:else}
+                        <span class="text-sm text-surface-600">
+                            Select tokens below for bulk print, deactivate, or delete.
+                        </span>
+                    {/if}
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-sm font-medium text-surface-600">
+                        {someSelected ? `${selectedIds.size} selected` : "Select tokens for bulk actions"}
+                    </span>
                     <button
                         type="button"
-                        class="btn btn-sm preset-filled-primary-500 flex items-center gap-1.5 shadow-sm"
+                        class="btn btn-sm preset-filled-primary-500 flex items-center gap-1.5 shadow-sm min-h-[2.25rem] disabled:opacity-50 disabled:cursor-not-allowed"
                         onclick={() => openPrintModal([...selectedIds])}
+                        disabled={!someSelected || submitting}
+                        title={!someSelected ? "Select tokens to print" : "Print selected"}
                     >
                         <Printer class="w-3.5 h-3.5" /> Print
                     </button>
                     <button
                         type="button"
-                        class="btn btn-sm preset-tonal text-surface-700 hover:text-surface-950 flex items-center gap-1.5 shadow-sm transition-colors"
+                        class="btn btn-sm preset-tonal text-surface-700 hover:text-surface-950 flex items-center gap-1.5 shadow-sm transition-colors min-h-[2.25rem] disabled:opacity-50 disabled:cursor-not-allowed"
                         onclick={handleBatchDeactivate}
                         disabled={submitting || selectedAvailableCount === 0}
                         title={selectedAvailableCount === 0
@@ -481,32 +543,29 @@
                     </button>
                     <button
                         type="button"
-                        class="btn btn-sm preset-outlined bg-white text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1.5 shadow-sm transition-colors"
+                        class="btn btn-sm preset-outlined bg-white text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1.5 shadow-sm transition-colors min-h-[2.25rem] disabled:opacity-50 disabled:cursor-not-allowed"
                         onclick={handleBatchDelete}
                         disabled={submitting ||
-                            selectedForPrint.some((t) => t.status === "in_use")}
-                        title={selectedForPrint.some(
-                            (t) => t.status === "in_use",
-                        )
+                            selectedForPrint.some((t) => t.status === "in_use") ||
+                            !someSelected}
+                        title={selectedForPrint.some((t) => t.status === "in_use")
                             ? "Cannot delete tokens in use. Deselect them first."
-                            : ""}
+                            : !someSelected ? "Select tokens to delete" : "Delete selected"}
                     >
                         <Trash2 class="w-3.5 h-3.5" />
                         {submitting ? "Deleting…" : "Delete"}
                     </button>
-                    <div
-                        class="w-px h-6 bg-surface-200 mx-1 hidden sm:block"
-                    ></div>
-                    <button
-                        type="button"
-                        class="btn btn-sm preset-tonal text-surface-600 hover:text-surface-900 flex items-center gap-1"
-                        onclick={() => (selectedIds = new Set())}
-                    >
-                        <XCircle class="w-3.5 h-3.5" /> Clear
-                    </button>
+                    {#if someSelected}
+                        <button
+                            type="button"
+                            class="btn btn-sm preset-tonal text-surface-600 hover:text-surface-900 flex items-center gap-1 min-h-[2.25rem]"
+                            onclick={() => (selectedIds = new Set())}
+                        >
+                            <XCircle class="w-3.5 h-3.5" /> Clear
+                        </button>
+                    {/if}
                 </div>
             </div>
-        {/if}
 
         <!-- Filter bar per 09-UI-ROUTES §3.9 -->
         <div
@@ -599,31 +658,21 @@
                 </p>
             </div>
         {:else}
-            <!-- Desktop Table View -->
-            <div class="table-container mt-2 hidden md:block max-w-5xl">
-                <table class="table table-zebra relative w-full">
+            <!-- Desktop Table View: compact, touch-friendly; row actions always visible, disabled when selection active -->
+            <div class="table-container mt-2 hidden md:block overflow-x-auto rounded-container border border-surface-200 shadow-sm w-max max-w-full">
+                <table class="table table-zebra relative w-max text-sm">
                     <thead>
-                        <tr>
-                            <th class="w-12 text-center">
-                                <input
-                                    type="checkbox"
-                                    class="checkbox checkbox-sm"
-                                    bind:this={selectAllCheckbox}
-                                    checked={allSelected}
-                                    onchange={toggleSelectAll}
-                                    aria-label="Select all available or deactivated"
-                                    disabled={selectableForDelete.length === 0}
-                                />
-                            </th>
-                            <th class="w-48 text-left">Physical ID</th>
-                            <th class="w-32">Status</th>
-                            <th class="w-64 text-right">Actions</th>
+                        <tr class="border-b border-surface-200">
+                            <th class="w-10 py-2 px-2 text-center text-surface-600 font-medium">Select</th>
+                            <th class="w-36 py-2 px-3 text-left text-surface-600 font-medium">Physical ID</th>
+                            <th class="w-28 py-2 px-3 text-surface-600 font-medium">Status</th>
+                            <th class="py-2 px-3 text-right text-surface-600 font-medium whitespace-nowrap">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {#each tokens as token (token.id)}
-                            <tr>
-                                <td class="text-center">
+                            <tr class="border-b border-surface-100 hover:bg-surface-50/80 transition-colors">
+                                <td class="py-2 px-2 text-center align-middle">
                                     {#if token.status === "available" || token.status === "deactivated"}
                                         <input
                                             type="checkbox"
@@ -645,92 +694,102 @@
                                         </div>
                                     {/if}
                                 </td>
-                                <td>
+                                <td class="py-2 px-3 align-middle">
                                     <span
-                                        class="font-mono font-bold text-surface-900"
+                                        class="font-mono font-semibold text-surface-900"
                                     >
                                         {token.physical_id}
                                     </span>
                                 </td>
-                                <td>
+                                <td class="py-2 px-3 align-middle">
                                     {#if token.status === "available"}
                                         <span
-                                            class="badge preset-filled-success-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 w-max"
+                                            class="badge preset-filled-success-500 text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 w-max font-medium"
                                         >
-                                            <CheckCircle2 class="w-3.5 h-3.5" />
+                                            <CheckCircle2 class="w-3 h-3" />
                                             Available
                                         </span>
                                     {:else if token.status === "in_use"}
                                         <span
-                                            class="badge preset-filled-primary-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 w-max"
+                                            class="badge preset-filled-primary-500 text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 w-max font-medium"
                                         >
-                                            <PlayCircle class="w-3.5 h-3.5" /> In
-                                            use
+                                            <PlayCircle class="w-3 h-3" /> In use
                                         </span>
                                     {:else if token.status === "deactivated"}
                                         <span
-                                            class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 w-max text-surface-600"
+                                            class="badge preset-tonal text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 w-max font-medium text-surface-600"
                                         >
-                                            <Ban class="w-3.5 h-3.5" /> Deactivated
+                                            <Ban class="w-3 h-3" /> Deactivated
                                         </span>
                                     {:else}
                                         <span
-                                            class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
+                                            class="badge preset-tonal text-[10px] px-2 py-0.5 rounded-full font-medium"
                                         >
                                             {token.status}
                                         </span>
                                     {/if}
                                 </td>
-                                <td class="text-right">
-                                    {#if !someSelected}
-                                        <div class="flex items-center justify-end gap-2">
+                                <td class="py-2 px-3 text-right align-middle">
+                                    <div class="flex items-center justify-end gap-1.5 flex-wrap {someSelected ? 'opacity-60 pointer-events-none' : ''}">
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm preset-outlined bg-white text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onclick={() => openEditModal(token)}
+                                            disabled={someSelected || submitting}
+                                            title="Edit token"
+                                        >
+                                            <Pencil class="w-3.5 h-3.5" /> Edit
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm preset-outlined bg-white text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onclick={() => openPrintModal([token.id])}
+                                            disabled={someSelected || submitting}
+                                            title="Print token"
+                                        >
+                                            <Printer class="w-3.5 h-3.5" />
+                                        </button>
+                                        {#if token.status === "in_use"}
                                             <button
                                                 type="button"
-                                                class="btn btn-sm preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1.5 shadow-sm px-3 py-1.5 transition-colors"
-                                                onclick={() => openPrintModal([token.id])}
+                                                class="btn btn-sm preset-outlined bg-white text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                onclick={() => setTokenStatus(token, "available")}
+                                                disabled={someSelected || submitting}
+                                                title="Mark available"
                                             >
-                                                <Printer class="w-3.5 h-3.5" /> Print
+                                                <CheckCircle2 class="w-3.5 h-3.5" />
                                             </button>
-
-                                            {#if token.status === "in_use"}
-                                                <button
-                                                    type="button"
-                                                    class="btn btn-sm preset-outlined bg-white text-surface-700 flex items-center gap-1.5 shadow-sm px-3 py-1.5 transition-colors"
-                                                    onclick={() => setTokenStatus(token, "available")}
-                                                    disabled={submitting}
-                                                >
-                                                    <CheckCircle2 class="w-3.5 h-3.5" /> Available
-                                                </button>
-                                            {:else if token.status === "available"}
-                                                <button
-                                                    type="button"
-                                                    class="btn btn-sm preset-outlined bg-white text-surface-700 flex items-center gap-1.5 shadow-sm px-3 py-1.5 transition-colors"
-                                                    onclick={() => setTokenStatus(token, "deactivated")}
-                                                    disabled={submitting}
-                                                >
-                                                    <Ban class="w-3.5 h-3.5" /> Deactivate
-                                                </button>
-                                            {:else if token.status === "deactivated"}
-                                                <button
-                                                    type="button"
-                                                    class="btn btn-sm preset-outlined bg-white text-surface-700 flex items-center gap-1.5 shadow-sm px-3 py-1.5 transition-colors"
-                                                    onclick={() => setTokenStatus(token, "available")}
-                                                    disabled={submitting}
-                                                >
-                                                    <CheckCircle2 class="w-3.5 h-3.5" /> Activate
-                                                </button>
-                                            {/if}
-
+                                        {:else if token.status === "available"}
                                             <button
                                                 type="button"
-                                                class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center gap-1.5 shadow-sm px-3 py-1.5 transition-colors"
-                                                onclick={() => handleDeleteToken(token)}
-                                                disabled={submitting || token.status === "in_use"}
+                                                class="btn btn-sm preset-outlined bg-white text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                onclick={() => setTokenStatus(token, "deactivated")}
+                                                disabled={someSelected || submitting}
+                                                title="Deactivate"
                                             >
-                                                <Trash2 class="w-3.5 h-3.5" /> Delete
+                                                <Ban class="w-3.5 h-3.5" />
                                             </button>
-                                        </div>
-                                    {/if}
+                                        {:else if token.status === "deactivated"}
+                                            <button
+                                                type="button"
+                                                class="btn btn-sm preset-outlined bg-white text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                onclick={() => setTokenStatus(token, "available")}
+                                                disabled={someSelected || submitting}
+                                                title="Activate"
+                                            >
+                                                <CheckCircle2 class="w-3.5 h-3.5" />
+                                            </button>
+                                        {/if}
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onclick={() => handleDeleteToken(token)}
+                                            disabled={someSelected || submitting || token.status === "in_use"}
+                                            title="Delete token"
+                                        >
+                                            <Trash2 class="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         {/each}
@@ -738,7 +797,7 @@
                 </table>
             </div>
 
-            <!-- Mobile Card View -->
+            <!-- Mobile Card View: compact, actions always visible, disabled when selection active -->
             <div
                 class="md:hidden mt-4 mb-2 flex items-center justify-between px-1"
             >
@@ -756,57 +815,54 @@
                     Select All
                 </label>
             </div>
-            <div class="grid grid-cols-1 gap-4 md:hidden">
+            <div class="grid grid-cols-1 gap-3 md:hidden">
                 {#each tokens as token (token.id)}
                     <div
-                        class="card bg-surface-50 border border-surface-200 shadow-sm p-4 flex flex-col gap-3"
+                        class="card bg-surface-50 border border-surface-200 shadow-sm p-3 flex flex-col gap-2 rounded-lg"
                     >
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center gap-3">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex items-center gap-2 min-w-0">
                                 {#if token.status === "available" || token.status === "deactivated"}
                                     <input
                                         type="checkbox"
-                                        class="checkbox checkbox-sm"
+                                        class="checkbox checkbox-sm shrink-0"
                                         checked={selectedIds.has(token.id)}
                                         onchange={() => toggleSelect(token.id)}
                                         aria-label="Select {token.physical_id}"
                                     />
                                 {:else}
-                                    <Ban
-                                        class="w-4 h-4 text-surface-300"
-                                        title="In use"
-                                    />
+                                    <span title="In use" aria-label="In use"><Ban
+                                        class="w-4 h-4 text-surface-300 shrink-0"
+                                    /></span>
                                 {/if}
-                                <div>
-                                    <span
-                                        class="font-mono font-bold text-surface-900 block"
-                                    >
-                                        {token.physical_id}
-                                    </span>
-                                </div>
+                                <span
+                                    class="font-mono font-semibold text-surface-900 truncate"
+                                >
+                                    {token.physical_id}
+                                </span>
                             </div>
-                            <div>
+                            <div class="shrink-0">
                                 {#if token.status === "available"}
                                     <span
-                                        class="badge preset-filled-success-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5"
+                                        class="badge preset-filled-success-500 text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 font-medium"
                                     >
-                                        <CheckCircle2 class="w-3.5 h-3.5" /> Available
+                                        <CheckCircle2 class="w-3 h-3" /> Available
                                     </span>
                                 {:else if token.status === "in_use"}
                                     <span
-                                        class="badge preset-filled-primary-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5"
+                                        class="badge preset-filled-primary-500 text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 font-medium"
                                     >
-                                        <PlayCircle class="w-3.5 h-3.5" /> In use
+                                        <PlayCircle class="w-3 h-3" /> In use
                                     </span>
                                 {:else if token.status === "deactivated"}
                                     <span
-                                        class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 text-surface-600"
+                                        class="badge preset-tonal text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 font-medium text-surface-600"
                                     >
-                                        <Ban class="w-3.5 h-3.5" /> Deactivated
+                                        <Ban class="w-3 h-3" /> Deactivated
                                     </span>
                                 {:else}
                                     <span
-                                        class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
+                                        class="badge preset-tonal text-[10px] px-2 py-0.5 rounded-full font-medium"
                                     >
                                         {token.status}
                                     </span>
@@ -814,54 +870,66 @@
                             </div>
                         </div>
 
-                        {#if !someSelected}
-                            <div class="pt-3 border-t border-surface-200 flex flex-wrap items-center justify-end gap-2">
+                        <div class="pt-2 border-t border-surface-200 flex flex-wrap items-center gap-2 min-h-[2.75rem] {someSelected ? 'opacity-60 pointer-events-none' : ''}">
+                            <button
+                                type="button"
+                                class="btn btn-sm preset-outlined bg-white text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                onclick={() => openEditModal(token)}
+                                disabled={someSelected || submitting}
+                                aria-label="Edit token"
+                            >
+                                <Pencil class="w-3.5 h-3.5" /> Edit
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-sm preset-outlined bg-white text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                onclick={() => openPrintModal([token.id])}
+                                disabled={someSelected || submitting}
+                                aria-label="Print token"
+                            >
+                                <Printer class="w-3.5 h-3.5" />
+                            </button>
+                            {#if token.status === "in_use"}
                                 <button
                                     type="button"
-                                    class="btn btn-sm preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1.5 shadow-sm hover:bg-surface-50 px-3 py-1.5"
-                                    onclick={() => openPrintModal([token.id])}
+                                    class="btn btn-sm preset-outlined bg-white text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onclick={() => setTokenStatus(token, "available")}
+                                    disabled={someSelected || submitting}
+                                    aria-label="Mark available"
                                 >
-                                    <Printer class="w-3.5 h-3.5" /> Print
+                                    <CheckCircle2 class="w-3.5 h-3.5" />
                                 </button>
-                                {#if token.status === "in_use"}
-                                    <button
-                                        type="button"
-                                        class="btn btn-sm flex-1 preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1 px-3 py-1.5 shadow-sm transition-colors hover:bg-surface-50"
-                                        onclick={() => setTokenStatus(token, "available")}
-                                        disabled={submitting}
-                                    >
-                                        <CheckCircle2 class="w-3.5 h-3.5" /> Available
-                                    </button>
-                                {:else if token.status === "available"}
-                                    <button
-                                        type="button"
-                                        class="btn btn-sm flex-1 preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1 px-3 py-1.5 shadow-sm transition-colors hover:bg-surface-50"
-                                        onclick={() => setTokenStatus(token, "deactivated")}
-                                        disabled={submitting}
-                                    >
-                                        <Ban class="w-3.5 h-3.5" /> Deactivate
-                                    </button>
-                                {:else if token.status === "deactivated"}
-                                    <button
-                                        type="button"
-                                        class="btn btn-sm flex-1 preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1 px-3 py-1.5 shadow-sm transition-colors hover:bg-surface-50"
-                                        onclick={() => setTokenStatus(token, "available")}
-                                        disabled={submitting}
-                                    >
-                                        <CheckCircle2 class="w-3.5 h-3.5" /> Activate
-                                    </button>
-                                {/if}
+                            {:else if token.status === "available"}
                                 <button
                                     type="button"
-                                    class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center justify-center p-2 shadow-sm shrink-0"
-                                    onclick={() => handleDeleteToken(token)}
-                                    disabled={submitting || token.status === "in_use"}
-                                    aria-label="Delete token"
+                                    class="btn btn-sm preset-outlined bg-white text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onclick={() => setTokenStatus(token, "deactivated")}
+                                    disabled={someSelected || submitting}
+                                    aria-label="Deactivate"
                                 >
-                                    <Trash2 class="w-4 h-4" />
+                                    <Ban class="w-3.5 h-3.5" />
                                 </button>
-                            </div>
-                        {/if}
+                            {:else if token.status === "deactivated"}
+                                <button
+                                    type="button"
+                                    class="btn btn-sm preset-outlined bg-white text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onclick={() => setTokenStatus(token, "available")}
+                                    disabled={someSelected || submitting}
+                                    aria-label="Activate"
+                                >
+                                    <CheckCircle2 class="w-3.5 h-3.5" />
+                                </button>
+                            {/if}
+                            <button
+                                type="button"
+                                class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center justify-center min-h-[2.5rem] w-10 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                                onclick={() => handleDeleteToken(token)}
+                                disabled={someSelected || submitting || token.status === "in_use"}
+                                aria-label="Delete token"
+                            >
+                                <Trash2 class="w-4 h-4" />
+                            </button>
+                        </div>
                     </div>
                 {/each}
             </div>
@@ -990,6 +1058,76 @@
                 </button>
             </div>
         </form>
+    {/snippet}
+</Modal>
+
+<Modal
+    open={editToken !== null}
+    title="Edit token"
+    onClose={closeEditModal}
+>
+    {#snippet children()}
+        {#if editToken}
+            <form
+                onsubmit={(e) => {
+                    e.preventDefault();
+                    saveEdit();
+                }}
+                class="flex flex-col gap-4"
+            >
+                <div class="form-control w-full">
+                    <div class="label"><span class="label-text font-medium">Physical ID</span></div>
+                    <p class="font-mono font-semibold text-surface-900 px-3 py-2 bg-surface-100 rounded-container border border-surface-200">
+                        {editToken.physical_id}
+                    </p>
+                    <p class="label-text-alt mt-1">Token ID cannot be changed.</p>
+                </div>
+                <div class="form-control w-full">
+                    <span class="label-text font-medium mb-2 block">Pronounce as (TTS)</span>
+                    <p class="text-sm text-surface-600 mb-2">How display/TTS will speak this token (e.g. on call).</p>
+                    <div class="flex gap-4">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="radio"
+                                name="edit-pronounce"
+                                value="letters"
+                                checked={editPronounceAs === "letters"}
+                                onchange={() => (editPronounceAs = "letters")}
+                                class="radio radio-sm"
+                            />
+                            <span>Letters (e.g. A 3)</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="radio"
+                                name="edit-pronounce"
+                                value="word"
+                                checked={editPronounceAs === "word"}
+                                onchange={() => (editPronounceAs = "word")}
+                                class="radio radio-sm"
+                            />
+                            <span>Word (e.g. A3)</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-3 mt-4 pt-4 border-t border-surface-200">
+                    <button
+                        type="button"
+                        class="btn preset-tonal"
+                        onclick={closeEditModal}
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        class="btn preset-filled-primary-500 shadow-sm"
+                        disabled={submitting}
+                    >
+                        {submitting ? "Saving…" : "Save"}
+                    </button>
+                </div>
+            </form>
+        {/if}
     {/snippet}
 </Modal>
 

@@ -4,8 +4,9 @@
 	import QrScanner from '../../Components/QrScanner.svelte';
 	import { Volume2 } from 'lucide-svelte';
 	import { get } from 'svelte/store';
-	import { tick } from 'svelte';
+	import { tick, onMount } from 'svelte';
 	import { usePage } from '@inertiajs/svelte';
+	import { ensureVoicesLoaded, speakSample } from '../../lib/speechUtils.js';
 	import { router } from '@inertiajs/svelte';
 
 	type AuthType = 'pin' | 'qr' | 'request_approval';
@@ -54,6 +55,7 @@
 		stats: { total_waiting: number; total_served_today: number; avg_service_time_minutes: number };
 		display_audio_muted?: boolean;
 		display_audio_volume?: number;
+		display_tts_voice?: string | null;
 	}
 
 	let {
@@ -63,6 +65,7 @@
 		canSwitchStation = false,
 		queueCount = 0,
 		processedToday = 0,
+		display_scan_timeout_seconds = 20,
 	}: {
 		station: StationInfo | null;
 		stations: StationInfo[];
@@ -70,6 +73,7 @@
 		canSwitchStation: boolean;
 		queueCount?: number;
 		processedToday?: number;
+		display_scan_timeout_seconds?: number;
 	} = $props();
 
 	let queue = $state<QueueData | null>(null);
@@ -95,6 +99,10 @@
 	let showCallNextOverrideModal = $state(false);
 	let callNextSession = $state<{ session_id: number; alias: string } | null>(null);
 
+	/** Scanner modal countdown (when showQrScanner): decrement scanCountdown so Extend works. */
+	let scanCountdown = $state(0);
+	let scanCountdownIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
+
 	/** Station notes: shared note visible to staff at this station. Real-time via Reverb. */
 	let stationNote = $state<{ message: string; author_name?: string; updated_at?: string } | null>(null);
 	let noteMessage = $state('');
@@ -107,6 +115,8 @@
 	/** Display board audio (for /display/station/{id}): saving state. */
 	let displaySettingsSaving = $state(false);
 	let showDisplayAudioModal = $state(false);
+	/** Available browser TTS voices for dropdown (loaded on mount). */
+	let availableTtsVoices = $state<{ name: string; lang: string }[]>([]);
 
 	const page = usePage();
 	const authUser = $derived((get(page)?.props as { auth?: { user?: { id: number; role?: string | { value?: string } } } })?.auth?.user ?? null);
@@ -250,6 +260,39 @@
 		return () => clearInterval(iv);
 	});
 
+	/** Scanner modal countdown: decrement scanCountdown so Extend adds time correctly. */
+	$effect(() => {
+		if (!showQrScanner) {
+			if (scanCountdownIntervalId != null) {
+				clearInterval(scanCountdownIntervalId);
+				scanCountdownIntervalId = null;
+			}
+			scanCountdown = 0;
+			return;
+		}
+		const timeout = Math.max(0, Number(display_scan_timeout_seconds) ?? 20);
+		if (timeout === 0) return;
+		scanCountdown = timeout;
+		const id = setInterval(() => {
+			scanCountdown = scanCountdown - 1;
+			if (scanCountdown <= 0) {
+				clearInterval(id);
+				scanCountdownIntervalId = null;
+				// Defer close to avoid "Cannot transition to a new state, already under transition"
+				queueMicrotask(() => { showQrScanner = false; });
+			}
+		}, 1000);
+		scanCountdownIntervalId = id;
+		return () => {
+			if (scanCountdownIntervalId != null) clearInterval(scanCountdownIntervalId);
+			scanCountdownIntervalId = null;
+		};
+	});
+
+	function extendScannerCountdown() {
+		scanCountdown += Math.max(0, Number(display_scan_timeout_seconds) || 20);
+	}
+
 	function formatDuration(iso: string): string {
 		const d = new Date(iso);
 		const now = new Date();
@@ -269,19 +312,40 @@
 		router.visit(`/station/${s.id}`);
 	}
 
-	async function saveDisplaySettings(updates: { display_audio_muted?: boolean; display_audio_volume?: number }) {
+	onMount(() => {
+		ensureVoicesLoaded((voices) => {
+			availableTtsVoices = voices.map((v) => ({ name: v.name, lang: v.lang || '' }));
+		});
+	});
+
+	async function saveDisplaySettings(updates: {
+		display_audio_muted?: boolean;
+		display_audio_volume?: number;
+		display_tts_voice?: string | null;
+	}) {
 		if (!station || !queue || displaySettingsSaving) return;
 		displaySettingsSaving = true;
-		const body: { display_audio_muted?: boolean; display_audio_volume?: number } = {};
+		const body: {
+			display_audio_muted?: boolean;
+			display_audio_volume?: number;
+			display_tts_voice?: string | null;
+		} = {};
 		if (updates.display_audio_muted !== undefined) body.display_audio_muted = updates.display_audio_muted;
 		if (updates.display_audio_volume !== undefined) body.display_audio_volume = updates.display_audio_volume;
+		if (updates.display_tts_voice !== undefined) body.display_tts_voice = updates.display_tts_voice;
 		const { ok, data } = await api('PUT', `/api/stations/${station.id}/display-settings`, body);
 		displaySettingsSaving = false;
 		if (ok && data && typeof data === 'object' && 'display_audio_muted' in data) {
+			const d = data as {
+				display_audio_muted?: boolean;
+				display_audio_volume?: number;
+				display_tts_voice?: string | null;
+			};
 			queue = {
 				...queue,
-				display_audio_muted: (data as { display_audio_muted?: boolean }).display_audio_muted ?? queue.display_audio_muted,
-				display_audio_volume: (data as { display_audio_volume?: number }).display_audio_volume ?? queue.display_audio_volume,
+				display_audio_muted: d.display_audio_muted ?? queue.display_audio_muted,
+				display_audio_volume: d.display_audio_volume ?? queue.display_audio_volume,
+				display_tts_voice: d.display_tts_voice ?? queue.display_tts_voice,
 			};
 		}
 	}
@@ -663,7 +727,7 @@
 </svelte:head>
 
 <MobileLayout headerTitle={station?.name ?? 'Station'} {queueCount} {processedToday}>
-	<div class="flex flex-col gap-4 md:gap-6 text-surface-950 w-full max-w-2xl mx-auto px-4 md:px-6 py-4 md:py-6">
+	<div class="flex flex-col gap-4 md:gap-6 text-surface-950 w-full max-w-2xl md:max-w-5xl lg:max-w-6xl mx-auto px-4 md:px-6 py-4 md:py-6">
 		{#if !station}
 			<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-6 md:p-8 text-center text-surface-950/80">
 				{#if canSwitchStation && stations.length > 0}
@@ -687,12 +751,15 @@
 		{:else if error}
 			<div class="rounded-container bg-error-100 text-error-900 border border-error-300 p-4 md:p-5">{error}</div>
 		{:else if queue}
+			<!-- Station switcher (pill bar) -->
 			{#if canSwitchStation && stations.length > 1}
-				<div class="flex gap-2 overflow-x-auto pb-2 -mx-1">
+				<div class="flex gap-2 overflow-x-auto pb-1 -mx-1" role="tablist" aria-label="Switch station">
 					{#each stations as s (s.id)}
 						<button
 							type="button"
-							class="btn btn-sm shrink-0 min-h-[44px] {s.id === station.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
+							role="tab"
+							aria-selected={s.id === station.id}
+							class="btn btn-sm shrink-0 min-h-[44px] px-4 {s.id === station.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
 							onclick={() => switchStation(s)}
 						>
 							{s.name}
@@ -701,195 +768,176 @@
 				</div>
 			{/if}
 
-			<!-- Capacity indicator and Priority first toggle -->
-			<div class="flex flex-wrap items-center justify-between gap-3 py-1">
-				<div class="text-sm text-surface-950/70">
-					Serving {servingCount}/{clientCapacity}
-				</div>
-				{#if canSwitchStation}
-					<label for="priority-first-switch" class="label cursor-pointer gap-2 items-center">
-						<span class="label-text text-sm">Priority first</span>
-						<div class="relative inline-block w-11 h-5">
-							<input
-								id="priority-first-switch"
-								type="checkbox"
-								class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-								checked={queue?.priority_first ?? true}
-								disabled={actionLoading === 'toggle'}
-								onchange={(e) => togglePriorityFirst((e.target as HTMLInputElement).checked)}
-							/>
-							<span class="absolute top-0 left-0 w-5 h-5 bg-white rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none" aria-hidden="true"></span>
-						</div>
-					</label>
-				{/if}
-			</div>
-
-			<!-- Display board audio: icon opens modal (controls TTS on /display/station/{id}); real-time via broadcast -->
-			<button
-				type="button"
-				class="btn btn-ghost btn-icon rounded-full min-h-[48px] min-w-[48px]"
-				title="Display board audio"
-				onclick={() => (showDisplayAudioModal = true)}
-				aria-label="Display board audio settings"
-			>
-				<Volume2 class="w-6 h-6 text-surface-600" />
-			</button>
-
-			<!-- Serving / Called cards (one per client) -->
-			{#each queue.serving as s (s.session_id)}
-				<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5 space-y-3">
-					<p class="text-xs font-medium text-surface-950/70 uppercase tracking-wide">
-						{s.status === 'called' ? 'Calling' : 'Now Serving'}
-					</p>
-					<p class="text-4xl font-bold text-primary-500 tabular-nums">{s.alias}</p>
-					<!-- Client type and current process (1-station-many-process) -->
-					<div class="flex flex-wrap gap-2">
-						{#if s.process_name}
-							<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500/20 text-primary-700" title="Current process">{s.process_name}</span>
-						{/if}
-						<span class="text-xs px-2 py-0.5 rounded preset-outlined text-surface-950">{s.track}</span>
-						<span class="badge {categoryBadgeClass(s.client_category)} text-sm font-semibold text-surface-950">
-							{s.client_category ?? 'Regular'}
-						</span>
-					</div>
-					<p class="text-sm text-surface-950/70">
-						Step {s.current_step_order} of {s.total_steps}
-						{#if s.status === 'serving'}
-							· Started {formatDuration(s.started_at)} ago
-						{/if}
-					</p>
-
-					<div class="flex flex-col gap-2 pt-2">
-						{#if s.status === 'called'}
-							<!-- Called: Serve + No-show (No-show disabled until timer) -->
-							<button
-								type="button"
-								class="btn preset-filled-primary-500 btn-lg"
-								disabled={!!actionLoading}
-								onclick={() => serve(s)}
-							>
-								{actionLoading === `serve-${s.session_id}` ? 'Processing…' : 'Serve'}
-							</button>
-							<button
-								type="button"
-								class="btn btn-sm {s.no_show_attempts >= 2 ? 'preset-filled-warning-500' : 'preset-tonal'}"
-								disabled={!!actionLoading || !canNoShow(s)}
-								onclick={() => openNoShowModal(s)}
-							>
-								{noShowButtonLabel(s)}
-							</button>
-						{:else}
-							<!-- Serving: Transfer or Complete -->
-							{#if isLastStep(s)}
-								<button
-									type="button"
-									class="btn preset-filled-primary-500 btn-lg"
-									disabled={!!actionLoading}
-									onclick={() => complete(s)}
-								>
-									{actionLoading === `complete-${s.session_id}` ? 'Completing…' : 'Complete Session'}
-								</button>
-							{:else}
-								<button
-									type="button"
-									class="btn preset-filled-primary-500 btn-lg"
-									disabled={!!actionLoading}
-									onclick={() => transfer(s)}
-								>
-									{actionLoading === `transfer-${s.session_id}` ? 'Transferring…' : 'Send to next process'}
-								</button>
-							{/if}
-							<div class="flex flex-wrap gap-2">
-								<button
-									type="button"
-									class="btn preset-outlined btn-sm"
-									disabled={!!actionLoading}
-									onclick={() => openOverrideModal(s)}
-								>
-									Override
-								</button>
-								<button
-									type="button"
-									class="btn preset-filled-warning-500 btn-sm"
-									disabled={!!actionLoading}
-									onclick={() => openForceCompleteModal(s)}
-								>
-									Force Complete
-								</button>
-								<button
-									type="button"
-									class="btn preset-tonal btn-sm"
-									disabled={!!actionLoading}
-									onclick={() => cancel(s)}
-								>
-									Cancel
-								</button>
+			<!-- Toolbar: capacity, priority, display audio (single row, wraps on small) -->
+			<div class="flex flex-wrap items-center justify-between gap-3 py-2 px-3 rounded-container bg-surface-50/80 border border-surface-200 elevation-card">
+				<div class="flex items-center gap-3 min-h-[44px]">
+					<span class="text-sm font-medium text-surface-950/80 tabular-nums" aria-label="Serving count">
+						Serving {servingCount}/{clientCapacity}
+					</span>
+					{#if canSwitchStation}
+						<label for="priority-first-switch" class="label cursor-pointer gap-2 items-center min-h-[44px]">
+							<span class="label-text text-sm">Priority first</span>
+							<div class="relative inline-block w-11 h-5">
+								<input
+									id="priority-first-switch"
+									type="checkbox"
+									class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+									checked={queue?.priority_first ?? true}
+									disabled={actionLoading === 'toggle'}
+									onchange={(e) => togglePriorityFirst((e.target as HTMLInputElement).checked)}
+								/>
+								<span class="absolute top-0 left-0 w-5 h-5 bg-white rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none" aria-hidden="true"></span>
 							</div>
-						{/if}
-					</div>
-				</div>
-			{/each}
-
-			<!-- Call Next (when capacity allows) -->
-			{#if queue.serving.length === 0 || !atCapacity}
-				<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-6 md:p-8 text-center">
-					<p class="text-surface-950/70 font-medium mb-4">
-						{queue.serving.length > 0 ? 'Call another client' : 'No client active'}
-					</p>
-					{#if queue.waiting.length > 0 && !atCapacity}
-						{@const nextSession = queue.next_to_call ? queue.waiting.find((w) => w.session_id === queue.next_to_call!.session_id) ?? queue.waiting[0] : queue.waiting[0]}
-						<p class="text-sm text-surface-950/60 mb-3">
-							Next: <span class="font-mono font-semibold text-surface-950">{nextSession.alias}</span>
-							<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm ml-1 text-surface-950">{nextSession.client_category ?? 'Regular'}</span>
-							({nextSession.track}{#if nextSession.process_name}) — {nextSession.process_name}{/if})
-						</p>
-						<button
-							type="button"
-							class="btn preset-filled-primary-500 btn-lg"
-							disabled={!!actionLoading}
-							onclick={callNext}
-						>
-							{actionLoading === 'call' ? 'Calling…' : 'Call Next'}
-						</button>
-					{:else if atCapacity}
-						<p class="text-sm text-surface-950/60">At capacity ({servingCount}/{clientCapacity}). Transfer or complete a client first.</p>
-					{:else}
-						<p class="text-sm text-surface-950/60">Queue is empty</p>
-						<p class="text-xs text-surface-950/50 mt-1">
-							Tip: Sessions from triage go to the track's first station. Assign staff to that station in Admin → Users.
-						</p>
+						</label>
 					{/if}
 				</div>
-			{/if}
-
-			<!-- Queue preview with client type -->
-			{#if queue.waiting.length > 0}
-				<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5">
-					<p class="text-xs font-medium text-surface-950/70 uppercase tracking-wide mb-2">
-						Queue — Next {queue.waiting.length}
-					</p>
-					<ul class="space-y-2">
-						{#each queue.waiting as w (w.session_id)}
-							<li class="flex justify-between items-center text-sm gap-2 text-surface-950">
-								<div class="flex items-center gap-2 min-w-0">
-									<span class="font-mono font-medium">{w.alias}</span>
-									<span class="badge {categoryBadgeClass(w.client_category)} badge-sm">{w.client_category ?? 'Regular'}</span>
-									{#if w.process_name}
-										<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80">{w.process_name}</span>
-									{/if}
-								</div>
-								<span class="text-surface-950/60 shrink-0">{w.track} · {formatDuration(w.queued_at)}</span>
-							</li>
-						{/each}
-					</ul>
-				</div>
-			{/if}
-
-			<div class="rounded-container bg-surface-50 border border-surface-200 p-4 md:p-5 text-center text-sm text-surface-950/70">
-				Today: {queue.stats.total_served_today} served · Avg {queue.stats.avg_service_time_minutes} min
+				<button
+					type="button"
+					class="btn preset-tonal btn-sm gap-2 min-h-[44px] min-w-[44px] md:min-w-[auto] px-3"
+					title="Display board audio"
+					onclick={() => (showDisplayAudioModal = true)}
+					aria-label="Display board audio settings"
+				>
+					<Volume2 class="w-5 h-5 text-surface-600 shrink-0" />
+					<span class="hidden md:inline text-sm">Display audio</span>
+				</button>
 			</div>
 
-			<!-- Station notes (shared, real-time). Creator prominent for many-staff clarity. -->
+			<!-- Main content: grid on desktop, stack on mobile -->
+			<div class="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">
+				<!-- Left: Active (serving + call next) -->
+				<div class="lg:col-span-7 flex flex-col gap-4 md:gap-5">
+					<!-- Serving / Called cards (one per client) -->
+					{#each queue.serving as s (s.session_id)}
+						<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5 space-y-3">
+							<p class="text-xs font-medium text-surface-950/70 uppercase tracking-wide">
+								{s.status === 'called' ? 'Calling' : 'Now Serving'}
+							</p>
+							<p class="text-2xl md:text-4xl font-bold text-primary-500 tabular-nums">{s.alias}</p>
+							<div class="flex flex-wrap gap-2">
+								{#if s.process_name}
+									<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500/20 text-primary-700" title="Current process">{s.process_name}</span>
+								{/if}
+								<span class="text-xs px-2 py-0.5 rounded preset-outlined text-surface-950">{s.track}</span>
+								<span class="badge {categoryBadgeClass(s.client_category)} text-sm font-semibold text-surface-950">
+									{s.client_category ?? 'Regular'}
+								</span>
+							</div>
+							<p class="text-sm text-surface-950/70">
+								Step {s.current_step_order} of {s.total_steps}
+								{#if s.status === 'serving'}
+									· Started {formatDuration(s.started_at)} ago
+								{/if}
+							</p>
+							<div class="flex flex-col gap-2 pt-2">
+								{#if s.status === 'called'}
+									<button
+										type="button"
+										class="btn preset-filled-primary-500 btn-lg min-h-[48px]"
+										disabled={!!actionLoading}
+										onclick={() => serve(s)}
+									>
+										{actionLoading === `serve-${s.session_id}` ? 'Processing…' : 'Serve'}
+									</button>
+									<button
+										type="button"
+										class="btn btn-sm min-h-[44px] {s.no_show_attempts >= 2 ? 'preset-filled-warning-500' : 'preset-tonal'}"
+										disabled={!!actionLoading || !canNoShow(s)}
+										onclick={() => openNoShowModal(s)}
+									>
+										{noShowButtonLabel(s)}
+									</button>
+								{:else}
+									{#if isLastStep(s)}
+										<button
+											type="button"
+											class="btn preset-filled-primary-500 btn-lg min-h-[48px]"
+											disabled={!!actionLoading}
+											onclick={() => complete(s)}
+										>
+											{actionLoading === `complete-${s.session_id}` ? 'Completing…' : 'Complete Session'}
+										</button>
+									{:else}
+										<button
+											type="button"
+											class="btn preset-filled-primary-500 btn-lg min-h-[48px]"
+											disabled={!!actionLoading}
+											onclick={() => transfer(s)}
+										>
+											{actionLoading === `transfer-${s.session_id}` ? 'Transferring…' : 'Send to next process'}
+										</button>
+									{/if}
+									<div class="flex flex-wrap gap-2">
+										<button type="button" class="btn preset-outlined btn-sm min-h-[44px]" disabled={!!actionLoading} onclick={() => openOverrideModal(s)}>Override</button>
+										<button type="button" class="btn preset-filled-warning-500 btn-sm min-h-[44px]" disabled={!!actionLoading} onclick={() => openForceCompleteModal(s)}>Force Complete</button>
+										<button type="button" class="btn preset-tonal btn-sm min-h-[44px]" disabled={!!actionLoading} onclick={() => cancel(s)}>Cancel</button>
+									</div>
+								{/if}
+							</div>
+						</div>
+					{/each}
+
+					<!-- Call Next (when capacity allows) -->
+					{#if queue.serving.length === 0 || !atCapacity}
+						<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-5 md:p-6 text-center">
+							<p class="text-surface-950/70 font-medium mb-3 text-sm md:text-base">
+								{queue.serving.length > 0 ? 'Call another client' : 'No client active'}
+							</p>
+							{#if queue.waiting.length > 0 && !atCapacity}
+								{@const nextSession = queue.next_to_call ? queue.waiting.find((w) => w.session_id === queue.next_to_call!.session_id) ?? queue.waiting[0] : queue.waiting[0]}
+								<p class="text-sm text-surface-950/60 mb-3">
+									Next: <span class="font-mono font-semibold text-surface-950">{nextSession.alias}</span>
+									<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm ml-1 text-surface-950">{nextSession.client_category ?? 'Regular'}</span>
+									({nextSession.track}{#if nextSession.process_name}) — {nextSession.process_name}{/if})
+								</p>
+								<button
+									type="button"
+									class="btn preset-filled-primary-500 btn-lg min-h-[52px] w-full sm:w-auto px-8"
+									disabled={!!actionLoading}
+									onclick={callNext}
+								>
+									{actionLoading === 'call' ? 'Calling…' : 'Call Next'}
+								</button>
+							{:else if atCapacity}
+								<p class="text-sm text-surface-950/60">At capacity ({servingCount}/{clientCapacity}). Transfer or complete a client first.</p>
+							{:else}
+								<p class="text-sm text-surface-950/60">Queue is empty</p>
+								<p class="text-xs text-surface-950/50 mt-1">
+									Tip: Sessions from triage go to the track's first station. Assign staff to that station in Admin → Users.
+								</p>
+							{/if}
+						</div>
+					{/if}
+				</div>
+
+				<!-- Right: Queue + stats (desktop) / below left on mobile -->
+				<div class="lg:col-span-5 flex flex-col gap-4 md:gap-5">
+					{#if queue.waiting.length > 0}
+						<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5">
+							<h3 class="text-xs font-semibold text-surface-950/80 uppercase tracking-wide mb-3">Waiting — {queue.waiting.length}</h3>
+							<ul class="space-y-2 max-h-[280px] lg:max-h-[360px] overflow-y-auto">
+								{#each queue.waiting as w (w.session_id)}
+									<li class="flex justify-between items-center text-sm gap-2 text-surface-950 py-1.5 border-b border-surface-100 last:border-0">
+										<div class="flex items-center gap-2 min-w-0">
+											<span class="font-mono font-medium tabular-nums">{w.alias}</span>
+											<span class="badge {categoryBadgeClass(w.client_category)} badge-sm shrink-0">{w.client_category ?? 'Regular'}</span>
+											{#if w.process_name}
+												<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80 truncate max-w-[8rem]">{w.process_name}</span>
+											{/if}
+										</div>
+										<span class="text-surface-950/60 shrink-0 text-xs">{w.track} · {formatDuration(w.queued_at)}</span>
+									</li>
+								{/each}
+							</ul>
+						</div>
+					{/if}
+					<div class="rounded-container bg-surface-50 border border-surface-200 p-4 md:p-5 text-center text-sm text-surface-950/70">
+						Today: <strong class="text-surface-950">{queue.stats.total_served_today}</strong> served · Avg <strong class="text-surface-950">{queue.stats.avg_service_time_minutes}</strong> min
+					</div>
+				</div>
+
+				<!-- Station notes: full width -->
+				<div class="lg:col-span-12">
 			<details class="rounded-box bg-surface-50 border border-surface-200 elevation-card overflow-hidden" open={notesExpanded}>
 				<summary class="cursor-pointer px-4 py-3 font-medium text-surface-950 select-none flex items-center justify-between gap-2 min-h-[48px]">
 					<span>Station notes</span>
@@ -936,6 +984,8 @@
 					</form>
 				</div>
 			</details>
+				</div>
+			</div>
 		{/if}
 	</div>
 
@@ -1025,7 +1075,13 @@
 				{:else if authType === 'qr'}
 					<div class="form-control w-full mt-2">
 						<QrScanner active={showQrScanner} onScan={handleQrScan} soundOnScan={true} />
-						<button type="button" class="btn preset-tonal btn-xs mt-1" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
+						{#if showQrScanner && scanCountdown > 0}
+							<div class="flex flex-wrap items-center gap-2 mt-2">
+								<span class="text-sm text-surface-950/70" aria-live="polite">Closing in {scanCountdown}s</span>
+								<button type="button" class="btn preset-tonal btn-sm min-h-[2.75rem] px-3" onclick={extendScannerCountdown}>Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)</button>
+							</div>
+						{/if}
+						<button type="button" class="btn preset-tonal btn-sm mt-1 min-h-[2.75rem]" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
 						{#if tempQrScanToken}<p class="text-xs text-success-500 mt-1">✓ QR scanned</p>{/if}
 					</div>
 				{/if}
@@ -1098,7 +1154,13 @@
 				{:else if authType === 'qr'}
 					<div class="form-control w-full mt-2">
 						<QrScanner active={showQrScanner} onScan={handleQrScan} soundOnScan={true} />
-						<button type="button" class="btn preset-tonal btn-xs mt-1" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
+						{#if showQrScanner && scanCountdown > 0}
+							<div class="flex flex-wrap items-center gap-2 mt-2">
+								<span class="text-sm text-surface-950/70" aria-live="polite">Closing in {scanCountdown}s</span>
+								<button type="button" class="btn preset-tonal btn-sm min-h-[2.75rem] px-3" onclick={extendScannerCountdown}>Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)</button>
+							</div>
+						{/if}
+						<button type="button" class="btn preset-tonal btn-sm mt-1 min-h-[2.75rem]" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
 						{#if tempQrScanToken}<p class="text-xs text-success-500 mt-1">✓ QR scanned</p>{/if}
 					</div>
 				{/if}
@@ -1137,7 +1199,13 @@
 				{:else if authType === 'qr'}
 					<div class="form-control w-full mt-2">
 						<QrScanner active={showQrScanner} onScan={handleQrScan} soundOnScan={true} />
-						<button type="button" class="btn preset-tonal btn-xs mt-1" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
+						{#if showQrScanner && scanCountdown > 0}
+							<div class="flex flex-wrap items-center gap-2 mt-2">
+								<span class="text-sm text-surface-950/70" aria-live="polite">Closing in {scanCountdown}s</span>
+								<button type="button" class="btn preset-tonal btn-sm min-h-[2.75rem] px-3" onclick={extendScannerCountdown}>Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)</button>
+							</div>
+						{/if}
+						<button type="button" class="btn preset-tonal btn-sm mt-1 min-h-[2.75rem]" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
 						{#if tempQrScanToken}<p class="text-xs text-success-500 mt-1">✓ QR scanned</p>{/if}
 					</div>
 				{/if}
@@ -1190,6 +1258,35 @@
 							saveDisplaySettings({ display_audio_volume: v });
 						}}
 					/>
+				</label>
+				<label class="flex flex-col gap-2">
+					<span class="text-sm font-medium text-surface-950">TTS voice</span>
+					<div class="flex flex-wrap items-center gap-2">
+						<select
+							class="select select-sm bg-white border border-surface-300 rounded-lg"
+							value={queue?.display_tts_voice ?? ''}
+							disabled={displaySettingsSaving}
+							aria-label="Display TTS voice"
+							onchange={(e) => {
+								const val = (e.target as HTMLSelectElement).value;
+								saveDisplaySettings({ display_tts_voice: val || null });
+							}}
+						>
+							<option value="">Use program default</option>
+							{#each availableTtsVoices as voice}
+								<option value={voice.name}>{voice.name}{voice.lang ? ` (${voice.lang})` : ''}</option>
+							{/each}
+						</select>
+						<button
+							type="button"
+							class="btn preset-tonal btn-sm"
+							onclick={() => speakSample("Calling A 3, please proceed to window 1.", (queue?.display_tts_voice ?? '') || null)}
+							aria-label="Play sample phrase with selected voice"
+						>
+							Play sample
+						</button>
+					</div>
+					<span class="text-xs text-surface-500">Voice for “Calling…” on this station’s display.</span>
 				</label>
 				{#if displaySettingsSaving}
 					<span class="text-xs text-surface-950/50">Saving…</span>

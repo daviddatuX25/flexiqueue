@@ -1,5 +1,5 @@
 ---
-description: Stack version pins, critical anti-patterns, and conventions for Laravel 12 + Inertia.js + Svelte 5 + DaisyUI 5
+description: Stack version pins, critical anti-patterns, and conventions for Laravel 12 + Inertia.js + Svelte 5 + Skeleton UI
 alwaysApply: true
 ---
 
@@ -45,6 +45,7 @@ alwaysApply: true
 ## Component System
 
 - **Theme**: FlexiQueue custom Skeleton theme in `resources/css/themes/flexiqueue.css`; see `docs/architecture/07-UI-UX-SPECS.md` and `SKELETON-COMPONENT-MAPPING.md`
+- **UI approach**: Stay on Skeleton + flexiqueue theme; use incremental UI improvements only (no full ui-kit migration).
 - **Reference**: See `public/dev/components.html` for live component examples
 - **Spec**: See `docs/architecture/07-UI-UX-SPECS.md` for design tokens and patterns
 - **Touch targets**: Minimum 48x48px for mobile (staff phones)

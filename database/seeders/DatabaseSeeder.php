@@ -15,10 +15,13 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 /**
- * MSWDO Tagudin–realistic seeder.
+ * MSWDO Tagudin–realistic seeder (per MSWDO Program Seeder Specification).
  * 1 admin + 6 staff with Filipino names.
- * Programs: AICS, Social Pension, Supplemental Feeding, Certificate of Indigency.
+ * Programs: AICS (Regular + Priority tracks), Social Pension, Supplemental Feeding,
+ *   Certificate of Indigency, Senior Citizen/OSCA ID, PWD ID, Solo Parent ID, 4Ps Inquiry.
+ * Program settings (priority_first, balance_mode, allow_public_triage, etc.) set per spec.
  * Password for all: "password". Override PIN: "123456".
+ * track_steps include station_id for SQLite (NOT NULL on SQLite).
  *
  * Login credentials:
  *   Admin:  admin@tagudinmswdo.gov.ph / password
@@ -78,6 +81,18 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Financial and material assistance for medical, educational, burial, transport, and food needs. DSWD devolved program.',
                 'is_active' => true,
                 'created_by' => $admin->id,
+                'settings' => [
+                    'priority_first' => true,
+                    'balance_mode' => 'alternate',
+                    'alternate_ratio' => [2, 1],
+                    'no_show_timer_seconds' => 10,
+                    'require_permission_before_override' => true,
+                    'station_selection_mode' => 'fixed',
+                    'display_scan_timeout_seconds' => 20,
+                    'display_audio_muted' => false,
+                    'display_audio_volume' => 1,
+                    'allow_public_triage' => true,
+                ],
             ]
         );
 
@@ -107,7 +122,7 @@ class DatabaseSeeder extends Seeder
             $aicsStations[] = $station;
         }
 
-        $aicsTrack = ServiceTrack::updateOrCreate(
+        $aicsTrackRegular = ServiceTrack::updateOrCreate(
             ['program_id' => $aics->id, 'name' => 'Regular'],
             [
                 'description' => 'Standard lane',
@@ -118,8 +133,31 @@ class DatabaseSeeder extends Seeder
 
         foreach (range(0, 3) as $i) {
             TrackStep::updateOrCreate(
-                ['track_id' => $aicsTrack->id, 'step_order' => $i + 1],
+                ['track_id' => $aicsTrackRegular->id, 'step_order' => $i + 1],
                 [
+                    'station_id' => $aicsStations[$i]->id,
+                    'process_id' => $aicsProcs[$i]->id,
+                    'is_required' => true,
+                    'estimated_minutes' => 5,
+                ]
+            );
+        }
+
+        // AICS Priority track (PWD, Senior, Pregnant) — same processes/stations
+        $aicsTrackPriority = ServiceTrack::updateOrCreate(
+            ['program_id' => $aics->id, 'name' => 'Priority'],
+            [
+                'description' => 'PWD, Senior, Pregnant',
+                'is_default' => false,
+                'color_code' => '#eab308',
+            ]
+        );
+
+        foreach (range(0, 3) as $i) {
+            TrackStep::updateOrCreate(
+                ['track_id' => $aicsTrackPriority->id, 'step_order' => $i + 1],
+                [
+                    'station_id' => $aicsStations[$i]->id,
                     'process_id' => $aicsProcs[$i]->id,
                     'is_required' => true,
                     'estimated_minutes' => 5,
@@ -146,6 +184,17 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Monthly pension for qualified indigent senior citizens. DSWD devolved program.',
                 'is_active' => false,
                 'created_by' => $admin->id,
+                'settings' => [
+                    'priority_first' => true,
+                    'balance_mode' => 'fifo',
+                    'no_show_timer_seconds' => 10,
+                    'require_permission_before_override' => true,
+                    'station_selection_mode' => 'fixed',
+                    'display_scan_timeout_seconds' => 20,
+                    'display_audio_muted' => false,
+                    'display_audio_volume' => 1,
+                    'allow_public_triage' => false,
+                ],
             ]
         );
 
@@ -186,10 +235,13 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
+        // Step 1->Window 1, Step 2->Window 2, Steps 3&4->Window 3 (Payout)
+        $socpenStepStationIndex = [0, 1, 2, 2];
         foreach ([0, 1, 2, 3] as $i) {
             TrackStep::updateOrCreate(
                 ['track_id' => $socpenTrack->id, 'step_order' => $i + 1],
                 [
+                    'station_id' => $socpenStations[$socpenStepStationIndex[$i]]->id,
                     'process_id' => $socpenProcs[$i]->id,
                     'is_required' => true,
                     'estimated_minutes' => 5,
@@ -214,6 +266,17 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Daily feeding for undernourished children. DSWD devolved program.',
                 'is_active' => false,
                 'created_by' => $admin->id,
+                'settings' => [
+                    'priority_first' => true,
+                    'balance_mode' => 'fifo',
+                    'no_show_timer_seconds' => 10,
+                    'require_permission_before_override' => true,
+                    'station_selection_mode' => 'fixed',
+                    'display_scan_timeout_seconds' => 20,
+                    'display_audio_muted' => false,
+                    'display_audio_volume' => 1,
+                    'allow_public_triage' => false,
+                ],
             ]
         );
 
@@ -254,6 +317,7 @@ class DatabaseSeeder extends Seeder
             TrackStep::updateOrCreate(
                 ['track_id' => $feedingTrack->id, 'step_order' => $i + 1],
                 [
+                    'station_id' => $feedingStations[$i]->id,
                     'process_id' => $feedingProcs[$i]->id,
                     'is_required' => true,
                     'estimated_minutes' => 10,
@@ -265,9 +329,20 @@ class DatabaseSeeder extends Seeder
         $cert = Program::updateOrCreate(
             ['name' => 'Certificate of Indigency'],
             [
-                'description' => 'Municipal certificate for accessing indigent funds and medical assistance.',
+                'description' => 'Municipal certificate for accessing indigent funds, PAO, and hospital discounts.',
                 'is_active' => false,
                 'created_by' => $admin->id,
+                'settings' => [
+                    'priority_first' => true,
+                    'balance_mode' => 'fifo',
+                    'no_show_timer_seconds' => 10,
+                    'require_permission_before_override' => true,
+                    'station_selection_mode' => 'fixed',
+                    'display_scan_timeout_seconds' => 20,
+                    'display_audio_muted' => false,
+                    'display_audio_volume' => 1,
+                    'allow_public_triage' => false,
+                ],
             ]
         );
 
@@ -308,6 +383,7 @@ class DatabaseSeeder extends Seeder
             TrackStep::updateOrCreate(
                 ['track_id' => $certTrack->id, 'step_order' => $i + 1],
                 [
+                    'station_id' => $certStations[$i]->id,
                     'process_id' => $certProcs[$i]->id,
                     'is_required' => true,
                     'estimated_minutes' => 5,
@@ -315,63 +391,297 @@ class DatabaseSeeder extends Seeder
             );
         }
 
-        // --- E2E Test Program (backward compatibility) ---
-        $e2e = Program::updateOrCreate(
-            ['name' => 'E2E Test Program'],
+        // --- Senior Citizen / OSCA ID and Booklet Issuance ---
+        $seniorId = Program::updateOrCreate(
+            ['name' => 'Senior Citizen / OSCA ID and Booklet Issuance'],
             [
-                'description' => 'Minimal program for E2E tests (manage steps, etc.)',
+                'description' => 'Issuance of Senior Citizen ID and medicine/grocery booklet (60+ years).',
                 'is_active' => false,
                 'created_by' => $admin->id,
+                'settings' => [
+                    'priority_first' => true,
+                    'balance_mode' => 'fifo',
+                    'no_show_timer_seconds' => 10,
+                    'require_permission_before_override' => true,
+                    'station_selection_mode' => 'fixed',
+                    'display_scan_timeout_seconds' => 20,
+                    'display_audio_muted' => false,
+                    'display_audio_volume' => 1,
+                    'allow_public_triage' => false,
+                ],
             ]
         );
 
-        $e2eProcs = [];
-        foreach (['Verification', 'Interview'] as $name) {
-            $e2eProcs[] = Process::updateOrCreate(
-                ['program_id' => $e2e->id, 'name' => $name],
-                ['description' => null]
+        $seniorIdProcs = [];
+        foreach (
+            [
+                ['name' => 'Document Check', 'description' => 'Verify birth certificate, valid ID'],
+                ['name' => 'Interview / Encoding', 'description' => 'Encode details, confirm eligibility'],
+                ['name' => 'ID & Booklet Release', 'description' => 'Issue Senior Citizen ID and booklet'],
+            ] as $p
+        ) {
+            $seniorIdProcs[] = Process::updateOrCreate(
+                ['program_id' => $seniorId->id, 'name' => $p['name']],
+                ['description' => $p['description']]
             );
         }
 
-        $e2eS1 = Station::updateOrCreate(
-            ['program_id' => $e2e->id, 'name' => 'Verification'],
-            ['capacity' => 1, 'client_capacity' => 1, 'is_active' => true]
-        );
-        $e2eS1->processes()->sync([$e2eProcs[0]->id]);
+        $seniorIdStations = [];
+        foreach (['Window 1 – Documents', 'Window 2 – Interview', 'Window 3 – Release'] as $i => $name) {
+            $station = Station::updateOrCreate(
+                ['program_id' => $seniorId->id, 'name' => $name],
+                ['capacity' => 1, 'client_capacity' => 2, 'is_active' => true]
+            );
+            $station->processes()->sync([$seniorIdProcs[$i]->id]);
+            $seniorIdStations[] = $station;
+        }
 
-        $e2eS2 = Station::updateOrCreate(
-            ['program_id' => $e2e->id, 'name' => 'Interview'],
-            ['capacity' => 1, 'client_capacity' => 1, 'is_active' => true]
-        );
-        $e2eS2->processes()->sync([$e2eProcs[1]->id]);
-
-        $e2eTrack = ServiceTrack::updateOrCreate(
-            ['program_id' => $e2e->id, 'name' => 'Regular'],
+        $seniorIdTrack = ServiceTrack::updateOrCreate(
+            ['program_id' => $seniorId->id, 'name' => 'Regular'],
             [
-                'description' => 'Regular lane',
+                'description' => 'Standard lane',
                 'is_default' => true,
-                'color_code' => '#22c55e',
+                'color_code' => '#0ea5e9',
             ]
         );
 
-        TrackStep::updateOrCreate(
-            ['track_id' => $e2eTrack->id, 'step_order' => 1],
-            ['process_id' => $e2eProcs[0]->id, 'is_required' => true]
-        );
-        TrackStep::updateOrCreate(
-            ['track_id' => $e2eTrack->id, 'step_order' => 2],
-            ['process_id' => $e2eProcs[1]->id, 'is_required' => true]
+        foreach (range(0, 2) as $i) {
+            TrackStep::updateOrCreate(
+                ['track_id' => $seniorIdTrack->id, 'step_order' => $i + 1],
+                [
+                    'station_id' => $seniorIdStations[$i]->id,
+                    'process_id' => $seniorIdProcs[$i]->id,
+                    'is_required' => true,
+                    'estimated_minutes' => 8,
+                ]
+            );
+        }
+
+        foreach (range(0, 2) as $i) {
+            ProgramStationAssignment::updateOrCreate(
+                ['program_id' => $seniorId->id, 'user_id' => $staff[$i]->id],
+                ['station_id' => $seniorIdStations[$i]->id]
+            );
+        }
+
+        // --- PWD ID and Assistance ---
+        $pwd = Program::updateOrCreate(
+            ['name' => 'PWD ID and Assistance'],
+            [
+                'description' => 'PWD ID issuance and/or financial/educational assistance. Barangay cert, medical docs.',
+                'is_active' => false,
+                'created_by' => $admin->id,
+                'settings' => [
+                    'priority_first' => true,
+                    'balance_mode' => 'fifo',
+                    'no_show_timer_seconds' => 10,
+                    'require_permission_before_override' => true,
+                    'station_selection_mode' => 'fixed',
+                    'display_scan_timeout_seconds' => 20,
+                    'display_audio_muted' => false,
+                    'display_audio_volume' => 1,
+                    'allow_public_triage' => false,
+                ],
+            ]
         );
 
-        ProgramStationAssignment::updateOrCreate(
-            ['program_id' => $e2e->id, 'user_id' => $staff[0]->id],
-            ['station_id' => $e2eS1->id]
+        $pwdProcs = [];
+        foreach (
+            [
+                ['name' => 'Document Verification', 'description' => 'Barangay cert, PWD ID, medical/educational docs'],
+                ['name' => 'Assessment', 'description' => 'Needs assessment by social worker'],
+                ['name' => 'ID / Assistance Release', 'description' => 'Issue ID or disburse assistance'],
+            ] as $p
+        ) {
+            $pwdProcs[] = Process::updateOrCreate(
+                ['program_id' => $pwd->id, 'name' => $p['name']],
+                ['description' => $p['description']]
+            );
+        }
+
+        $pwdStations = [];
+        foreach (['Verification Window', 'Assessment Window', 'Release Window'] as $i => $name) {
+            $station = Station::updateOrCreate(
+                ['program_id' => $pwd->id, 'name' => $name],
+                ['capacity' => 1, 'client_capacity' => 2, 'is_active' => true]
+            );
+            $station->processes()->sync([$pwdProcs[$i]->id]);
+            $pwdStations[] = $station;
+        }
+
+        $pwdTrack = ServiceTrack::updateOrCreate(
+            ['program_id' => $pwd->id, 'name' => 'Regular'],
+            [
+                'description' => 'Standard lane',
+                'is_default' => true,
+                'color_code' => '#ec4899',
+            ]
         );
-        ProgramStationAssignment::updateOrCreate(
-            ['program_id' => $e2e->id, 'user_id' => $staff[1]->id],
-            ['station_id' => $e2eS2->id]
+
+        foreach (range(0, 2) as $i) {
+            TrackStep::updateOrCreate(
+                ['track_id' => $pwdTrack->id, 'step_order' => $i + 1],
+                [
+                    'station_id' => $pwdStations[$i]->id,
+                    'process_id' => $pwdProcs[$i]->id,
+                    'is_required' => true,
+                    'estimated_minutes' => 8,
+                ]
+            );
+        }
+
+        foreach (range(0, 2) as $i) {
+            ProgramStationAssignment::updateOrCreate(
+                ['program_id' => $pwd->id, 'user_id' => $staff[$i + 3]->id],
+                ['station_id' => $pwdStations[$i]->id]
+            );
+        }
+
+        // --- Solo Parent ID Issuance ---
+        $soloParent = Program::updateOrCreate(
+            ['name' => 'Solo Parent ID Issuance'],
+            [
+                'description' => 'Issuance of Solo Parent ID for discounts and privileges under law.',
+                'is_active' => false,
+                'created_by' => $admin->id,
+                'settings' => [
+                    'priority_first' => true,
+                    'balance_mode' => 'fifo',
+                    'no_show_timer_seconds' => 10,
+                    'require_permission_before_override' => true,
+                    'station_selection_mode' => 'fixed',
+                    'display_scan_timeout_seconds' => 20,
+                    'display_audio_muted' => false,
+                    'display_audio_volume' => 1,
+                    'allow_public_triage' => false,
+                ],
+            ]
         );
-        $e2e->supervisedBy()->syncWithoutDetaching([$staff[5]->id]);
+
+        $soloParentProcs = [];
+        foreach (
+            [
+                ['name' => 'Document Verification', 'description' => 'Proof of solo parent status, valid IDs'],
+                ['name' => 'Interview', 'description' => 'Confirm eligibility'],
+                ['name' => 'Issuance', 'description' => 'Print and release Solo Parent ID'],
+            ] as $p
+        ) {
+            $soloParentProcs[] = Process::updateOrCreate(
+                ['program_id' => $soloParent->id, 'name' => $p['name']],
+                ['description' => $p['description']]
+            );
+        }
+
+        $soloParentStations = [];
+        foreach (['Window 1 – Documents', 'Window 2 – Interview', 'Window 3 – Issuance'] as $i => $name) {
+            $station = Station::updateOrCreate(
+                ['program_id' => $soloParent->id, 'name' => $name],
+                ['capacity' => 1, 'client_capacity' => 2, 'is_active' => true]
+            );
+            $station->processes()->sync([$soloParentProcs[$i]->id]);
+            $soloParentStations[] = $station;
+        }
+
+        $soloParentTrack = ServiceTrack::updateOrCreate(
+            ['program_id' => $soloParent->id, 'name' => 'Regular'],
+            [
+                'description' => 'Standard lane',
+                'is_default' => true,
+                'color_code' => '#14b8a6',
+            ]
+        );
+
+        foreach (range(0, 2) as $i) {
+            TrackStep::updateOrCreate(
+                ['track_id' => $soloParentTrack->id, 'step_order' => $i + 1],
+                [
+                    'station_id' => $soloParentStations[$i]->id,
+                    'process_id' => $soloParentProcs[$i]->id,
+                    'is_required' => true,
+                    'estimated_minutes' => 5,
+                ]
+            );
+        }
+
+        foreach (range(0, 2) as $i) {
+            ProgramStationAssignment::updateOrCreate(
+                ['program_id' => $soloParent->id, 'user_id' => $staff[$i]->id],
+                ['station_id' => $soloParentStations[$i]->id]
+            );
+        }
+
+        // --- 4Ps (Pantawid Pamilyang Pilipino Program) – LGU Inquiry / Orientation ---
+        $fourPs = Program::updateOrCreate(
+            ['name' => '4Ps Inquiry / Orientation'],
+            [
+                'description' => '4Ps inquiries, Listahanan status, grievance, or beneficiary orientation at LGU.',
+                'is_active' => false,
+                'created_by' => $admin->id,
+                'settings' => [
+                    'priority_first' => true,
+                    'balance_mode' => 'fifo',
+                    'no_show_timer_seconds' => 10,
+                    'require_permission_before_override' => true,
+                    'station_selection_mode' => 'fixed',
+                    'display_scan_timeout_seconds' => 20,
+                    'display_audio_muted' => false,
+                    'display_audio_volume' => 1,
+                    'allow_public_triage' => false,
+                ],
+            ]
+        );
+
+        $fourPsProcs = [];
+        foreach (
+            [
+                ['name' => 'Inquiry / Reception', 'description' => 'Receive client, check concern'],
+                ['name' => 'Assessment or Orientation', 'description' => 'Explain 4Ps or assess grievance'],
+                ['name' => 'Referral / Encoding', 'description' => 'Refer to DSWD or encode as needed'],
+            ] as $p
+        ) {
+            $fourPsProcs[] = Process::updateOrCreate(
+                ['program_id' => $fourPs->id, 'name' => $p['name']],
+                ['description' => $p['description']]
+            );
+        }
+
+        $fourPsStations = [];
+        foreach (['Inquiry Window', 'Orientation Area', 'Release/Referral Window'] as $i => $name) {
+            $station = Station::updateOrCreate(
+                ['program_id' => $fourPs->id, 'name' => $name],
+                ['capacity' => 1, 'client_capacity' => 2, 'is_active' => true]
+            );
+            $station->processes()->sync([$fourPsProcs[$i]->id]);
+            $fourPsStations[] = $station;
+        }
+
+        $fourPsTrack = ServiceTrack::updateOrCreate(
+            ['program_id' => $fourPs->id, 'name' => 'Regular'],
+            [
+                'description' => 'Standard lane',
+                'is_default' => true,
+                'color_code' => '#84cc16',
+            ]
+        );
+
+        foreach (range(0, 2) as $i) {
+            TrackStep::updateOrCreate(
+                ['track_id' => $fourPsTrack->id, 'step_order' => $i + 1],
+                [
+                    'station_id' => $fourPsStations[$i]->id,
+                    'process_id' => $fourPsProcs[$i]->id,
+                    'is_required' => true,
+                    'estimated_minutes' => 10,
+                ]
+            );
+        }
+
+        foreach (range(0, 2) as $i) {
+            ProgramStationAssignment::updateOrCreate(
+                ['program_id' => $fourPs->id, 'user_id' => $staff[$i + 3]->id],
+                ['station_id' => $fourPsStations[$i]->id]
+            );
+        }
 
         // AICS is active by default; staff assigned_station_id reflects their AICS station
         // (ProgramService::syncAssignedStationId runs on activate; AICS is already active)

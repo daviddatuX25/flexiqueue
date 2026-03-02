@@ -11,13 +11,16 @@ return new class extends Migration
      */
     public function up(): void
     {
-        DB::statement("ALTER TABLE tokens MODIFY COLUMN status ENUM('available', 'in_use', 'deactivated') DEFAULT 'available'");
+        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+            DB::statement("ALTER TABLE tokens MODIFY COLUMN status ENUM('available', 'in_use', 'deactivated') DEFAULT 'available'");
+        }
     }
 
     public function down(): void
     {
-        // Migrate deactivated back to available before reverting enum
         DB::table('tokens')->where('status', 'deactivated')->update(['status' => 'available']);
-        DB::statement("ALTER TABLE tokens MODIFY COLUMN status ENUM('available', 'in_use') DEFAULT 'available'");
+        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+            DB::statement("ALTER TABLE tokens MODIFY COLUMN status ENUM('available', 'in_use') DEFAULT 'available'");
+        }
     }
 };

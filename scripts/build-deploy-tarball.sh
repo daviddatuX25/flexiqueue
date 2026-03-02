@@ -6,19 +6,22 @@
 set -e
 cd "$(dirname "$0")/.."
 
-echo "Installing Composer dependencies (--no-dev)..."
-composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction
+echo "Installing Composer dependencies (--no-dev, platform PHP 8.3 for Orange Pi prod)..."
+composer config platform.php 8.3
+composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --ignore-platform-reqs
 
 echo "Installing npm and building..."
 npm ci
 npm run build
 
-echo "Creating deploy tarball (production-only files)..."
+echo "Creating deploy tarball (production-only files; includes scripts/pi/ for Reverb, zerotier-when-idle, nginx, etc.)..."
 tar -czf flexiqueue-deploy.tar.gz \
   --exclude='.git' \
   --exclude='node_modules' \
   --exclude='.env' \
-  --exclude='.env.*' \
+  --exclude='.env.example' \
+  --exclude='.env.backup' \
+  --exclude='.env.production' \
   --exclude='storage' \
   --exclude='.phpunit.cache' \
   --exclude='.phpunit.result.cache' \
@@ -59,6 +62,7 @@ tar -czf flexiqueue-deploy.tar.gz \
   --exclude='scripts/import-phase1-beads.sh' \
   .
 
+composer config --unset platform.php 2>/dev/null || true
 echo "Done. Output: $(pwd)/flexiqueue-deploy.tar.gz"
 echo "Deploy: scp flexiqueue-deploy.tar.gz root@<pi-ip>:/tmp/"
 echo "Then SSH and: cd /var/www/flexiqueue && sudo tar -xzf /tmp/flexiqueue-deploy.tar.gz && sudo chown -R www-data:www-data . && php artisan migrate --force && php artisan config:cache && php artisan route:cache"

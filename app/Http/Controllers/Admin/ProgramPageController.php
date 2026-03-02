@@ -39,6 +39,31 @@ class ProgramPageController extends Controller
      */
     public function show(Program $program): Response
     {
+        try {
+            return $this->buildProgramShowResponse($program);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return Inertia::render('Admin/Programs/Show', [
+                'program' => null,
+                'tracks' => [],
+                'processes' => [],
+                'stations' => [],
+                'stats' => [
+                    'total_sessions' => 0,
+                    'active_sessions' => 0,
+                    'completed_sessions' => 0,
+                ],
+                'tab_order' => ['Overview', 'Processes', 'Stations', 'Staff', 'Track', 'Diagram', 'Settings'],
+            ]);
+        }
+    }
+
+    /**
+     * Build the Program Show Inertia payload (extracted for try/catch in show()).
+     */
+    private function buildProgramShowResponse(Program $program): Response
+    {
         $tracks = $program->serviceTracks()
             ->with(['trackSteps.process'])
             ->orderBy('name')
@@ -126,6 +151,10 @@ class ProgramPageController extends Controller
                     'display_scan_timeout_seconds' => array_key_exists('display_scan_timeout_seconds', $settings)
                         ? (int) $settings['display_scan_timeout_seconds']
                         : 20,
+                    'display_audio_muted' => $program->getDisplayAudioMuted(),
+                    'display_audio_volume' => $program->getDisplayAudioVolume(),
+                    'display_tts_voice' => $program->getDisplayTtsVoice(),
+                    'allow_public_triage' => $program->getAllowPublicTriage(),
                 ],
             ],
             'tracks' => $tracks,

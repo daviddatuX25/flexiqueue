@@ -33,13 +33,16 @@ return new class extends Migration
         // Update supervisor -> staff
         DB::table('users')->where('role', 'supervisor')->update(['role' => 'staff']);
 
-        // Alter enum: remove supervisor (MariaDB/MySQL)
-        DB::statement("ALTER TABLE users MODIFY COLUMN role ENUM('admin', 'staff') DEFAULT 'staff'");
+        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+            DB::statement("ALTER TABLE users MODIFY COLUMN role ENUM('admin', 'staff') DEFAULT 'staff'");
+        }
     }
 
     public function down(): void
     {
-        DB::statement("ALTER TABLE users MODIFY COLUMN role ENUM('admin', 'supervisor', 'staff') DEFAULT 'staff'");
+        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+            DB::statement("ALTER TABLE users MODIFY COLUMN role ENUM('admin', 'supervisor', 'staff') DEFAULT 'staff'");
+        }
         DB::table('program_supervisors')->truncate();
     }
 };

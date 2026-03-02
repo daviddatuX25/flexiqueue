@@ -34,8 +34,19 @@
 	let barcodeInputValue = $state('');
 	let barcodeInputEl = $state<HTMLInputElement | null>(null);
 
-	const SCAN_CONFIG = { fps: 5, qrbox: { width: 250, height: 250 } } as const;
+	// html5-qrcode requires qrbox dimensions >= 50px; function avoids error on small viewports (mobile).
+	const SCAN_CONFIG = {
+		fps: 5,
+		qrbox: (viewfinderWidth: number, viewfinderHeight: number) => ({
+			width: Math.max(50, Math.min(250, viewfinderWidth || 250)),
+			height: Math.max(50, Math.min(250, viewfinderHeight || 250)),
+		}),
+	} as const;
 	const STORAGE_KEY = 'flexiqueue_last_camera_id';
+
+	/** Prefer back camera on mobile (Android/iOS). */
+	const FACING_ENVIRONMENT = { facingMode: 'environment' } as const;
+	const FACING_USER = { facingMode: 'user' } as const;
 
 	function playBeep() {
 		try {
@@ -108,10 +119,52 @@
 	}
 
 	async function stopScanner() {
-		if (html5Qrcode?.isScanning) {
-			await html5Qrcode.stop();
+		if (!html5Qrcode) return;
+		try {
+			if (html5Qrcode.isScanning) {
+				await html5Qrcode.stop();
+			}
+		} catch {
+			// html5-qrcode can throw "Cannot transition to a new state, already under transition"
+			// when stop() is called while start() is still in progress (e.g. user closes modal during init).
+			// Swallow so teardown (effect cleanup, onDestroy) doesn't leave unhandled rejections.
+		} finally {
+			html5Qrcode = null;
 		}
-		html5Qrcode = null;
+	}
+
+	/**
+	 * On Android (and some mobile browsers), getCameras() returns [] until camera permission is granted.
+	 * Try starting with facingMode first to trigger the permission prompt; then enumerate to get the list.
+	 */
+	async function tryStartWithFacingMode(): Promise<boolean> {
+		try {
+			await startCamera(FACING_ENVIRONMENT);
+			mode = 'camera';
+			// After permission, enumerate so we can show "Switch camera" and get device IDs.
+			const list = await loadCameras();
+			if (list.length > 0) {
+				cameras = list;
+				selectedCameraId = list[0]?.id ?? null;
+				if (selectedCameraId && typeof localStorage !== 'undefined') {
+					localStorage.setItem(STORAGE_KEY, selectedCameraId);
+				}
+			}
+			return true;
+		} catch {
+			try {
+				await startCamera(FACING_USER);
+				mode = 'camera';
+				const list = await loadCameras();
+				if (list.length > 0) {
+					cameras = list;
+					selectedCameraId = list[0]?.id ?? null;
+				}
+				return true;
+			} catch {
+				return false;
+			}
+		}
 	}
 
 	async function initScanner() {
@@ -121,10 +174,14 @@
 		mode = 'camera';
 
 		try {
-			const list = await loadCameras();
+			let list = await loadCameras();
+			// Mobile (e.g. Android): enumeration often empty until permission granted. Try starting with constraint first.
 			if (list.length === 0) {
-				errorMessage = 'No camera found.';
-				mode = showFileFallback ? 'file' : 'error';
+				const started = await tryStartWithFacingMode();
+				if (!started) {
+					errorMessage = 'No camera found or permission denied.';
+					mode = showFileFallback ? 'file' : 'error';
+				}
 				return;
 			}
 			cameras = list;
@@ -197,7 +254,15 @@
 
 	$effect(() => {
 		if (active) {
-			initScanner();
+			// When used in a modal (cameraOnly), wait one frame so the dialog is visible and the container has dimensions.
+			const start = () => initScanner();
+			const id = cameraOnly
+				? requestAnimationFrame(() => requestAnimationFrame(start))
+				: requestAnimationFrame(start);
+			return () => {
+				cancelAnimationFrame(id);
+				stopScanner();
+			};
 		} else {
 			stopScanner();
 			cameras = [];
@@ -241,7 +306,7 @@
 				<span class="text-xs text-surface-950/60">Or use camera below</span>
 			</div>
 		{/if}
-		{#if mode === 'camera' && cameras.length > 1}
+		{#if mode === 'camera' && cameras.length >= 1}
 			<div class="flex flex-col gap-1">
 				<label for="qr-camera-select" class="text-xs font-medium text-surface-950/70">Camera</label>
 				<select

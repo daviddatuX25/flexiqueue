@@ -1,4 +1,5 @@
-/* FlexiQueue custom theme — per 07-UI-UX-SPECS.md Section 2.2, adapted for Skeleton. */
+/* FlexiQueue custom theme — per 07-UI-UX-SPECS.md Section 2.2, adapted for Skeleton.
+ * Primary (emerald green) and surface (cool gray base, white cards) match public/ui-kit-preview-branded.html. */
 
 [data-theme='flexiqueue'] {
 	color-scheme: light;
@@ -43,18 +44,18 @@
 	--shadow-raised: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.07);
 	--shadow-modal: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
 
-	/* Primary: #2563EB — blue */
-	--color-primary-50: oklch(0.92 0.04 264);
-	--color-primary-100: oklch(0.84 0.08 264);
-	--color-primary-200: oklch(0.77 0.11 264);
-	--color-primary-300: oklch(0.7 0.15 264);
-	--color-primary-400: oklch(0.63 0.19 264);
-	--color-primary-500: oklch(0.5456 0.2031 264.05);
-	--color-primary-600: oklch(0.52 0.19 264);
-	--color-primary-700: oklch(0.46 0.17 264);
-	--color-primary-800: oklch(0.4 0.14 264);
-	--color-primary-900: oklch(0.34 0.11 264);
-	--color-primary-950: oklch(0.28 0.08 264);
+	/* Primary: Emerald/teal green — matches public/ui-kit-preview-branded.html */
+	--color-primary-50: #ecfdf5;
+	--color-primary-100: #d1fae5;
+	--color-primary-200: #a7f3d0;
+	--color-primary-300: #6ee7b7;
+	--color-primary-400: #34d399;
+	--color-primary-500: #10b981;
+	--color-primary-600: #059669;
+	--color-primary-700: #047857;
+	--color-primary-800: #065f46;
+	--color-primary-900: #064e3b;
+	--color-primary-950: #022c22;
 	--color-primary-contrast-dark: var(--color-primary-950);
 	--color-primary-contrast-light: var(--color-primary-50);
 	--color-primary-contrast-50: var(--color-primary-contrast-dark);
@@ -199,18 +200,18 @@
 	--color-error-contrast-900: var(--color-error-contrast-light);
 	--color-error-contrast-950: var(--color-error-contrast-light);
 
-	/* Surface — base backgrounds per 07-UI-UX-SPECS */
-	--color-surface-50: oklch(1 0 0);
-	--color-surface-100: oklch(0.985 0.002 240);
-	--color-surface-200: oklch(0.92 0.004 240);
-	--color-surface-300: oklch(0.88 0.004 240);
-	--color-surface-400: oklch(0.62 0 0);
-	--color-surface-500: oklch(0.51 0.013 255.71);
-	--color-surface-600: oklch(0.45 0.012 255);
-	--color-surface-700: oklch(0.39 0.012 255);
-	--color-surface-800: oklch(0.32 0.01 255);
-	--color-surface-900: oklch(0.25 0.01 285);
-	--color-surface-950: oklch(0.1457 0.014 285.82);
+	/* Surface — base backgrounds; matches ui-kit-preview-branded (cool gray base, white cards) */
+	--color-surface-50: #f8fafc;
+	--color-surface-100: #ffffff;
+	--color-surface-200: #f1f5f9;
+	--color-surface-300: #e2e8f0;
+	--color-surface-400: #cbd5e1;
+	--color-surface-500: #94a3b8;
+	--color-surface-600: #64748b;
+	--color-surface-700: #475569;
+	--color-surface-800: #334155;
+	--color-surface-900: #1e293b;
+	--color-surface-950: #0f172a;
 	--color-surface-contrast-dark: var(--color-surface-950);
 	--color-surface-contrast-light: var(--color-surface-50);
 	--color-surface-contrast-50: var(--color-surface-contrast-dark);

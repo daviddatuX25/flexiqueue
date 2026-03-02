@@ -25,12 +25,16 @@ return new class extends Migration
                 'status' => 'available',
             ]);
 
-        DB::statement("ALTER TABLE tokens MODIFY COLUMN status ENUM('available', 'in_use') DEFAULT 'available'");
+        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+            DB::statement("ALTER TABLE tokens MODIFY COLUMN status ENUM('available', 'in_use') DEFAULT 'available'");
+        }
     }
 
     public function down(): void
     {
-        DB::statement("ALTER TABLE tokens MODIFY COLUMN status ENUM('available', 'in_use', 'lost', 'damaged') DEFAULT 'available'");
+        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+            DB::statement("ALTER TABLE tokens MODIFY COLUMN status ENUM('available', 'in_use', 'lost', 'damaged') DEFAULT 'available'");
+        }
 
         // Restore: previously soft-deleted become lost (best-effort)
         DB::table('tokens')

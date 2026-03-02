@@ -37,6 +37,7 @@ class StationPageController extends Controller
 
         $stationsList = [];
         $tracksList = [];
+        $displayScanTimeoutSeconds = 20;
         if ($program) {
             $stationsList = $program->stations()
                 ->where('is_active', true)
@@ -51,6 +52,7 @@ class StationPageController extends Controller
                 ->map(fn ($t) => ['id' => $t->id, 'name' => $t->name])
                 ->values()
                 ->all();
+            $displayScanTimeoutSeconds = $program->getDisplayScanTimeoutSeconds();
         }
 
         return Inertia::render('Station/Index', [
@@ -63,6 +65,7 @@ class StationPageController extends Controller
             'canSwitchStation' => $user->isAdmin() || $user->isSupervisorForAnyProgram(),
             'queueCount' => $footerStats['queue_count'],
             'processedToday' => $footerStats['processed_today'],
+            'display_scan_timeout_seconds' => $displayScanTimeoutSeconds,
         ]);
     }
 }

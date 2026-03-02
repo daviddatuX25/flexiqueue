@@ -22,6 +22,7 @@ class UpdateStationDisplaySettingsRequest extends FormRequest
         return [
             'display_audio_muted' => ['sometimes', 'boolean'],
             'display_audio_volume' => ['sometimes', 'numeric', 'min:0', 'max:1'],
+            'display_tts_voice' => ['sometimes', 'nullable', 'string', 'max:500'],
         ];
     }
 }

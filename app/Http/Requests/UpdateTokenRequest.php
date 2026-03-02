@@ -21,7 +21,8 @@ class UpdateTokenRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'status' => ['required', 'string', 'in:available,deactivated'],
+            'status' => ['sometimes', 'required', 'string', 'in:available,deactivated'],
+            'pronounce_as' => ['sometimes', 'required', 'string', 'in:letters,word'],
         ];
     }
 }

@@ -37,6 +37,10 @@
 		{ label: 'Incomplete Documents', value: 'Incomplete Documents' },
 	] as const;
 
+	/** When track count is at or below this, show buttons instead of dropdown. */
+	const MAX_TRACKS_FOR_BUTTONS = 4;
+	const showTrackButtons = $derived((activeProgram?.tracks?.length ?? 0) <= MAX_TRACKS_FOR_BUTTONS);
+
 	let showScanner = $state(false);
 	let scannedToken = $state<{ physical_id: string; qr_hash: string; status: string } | null>(null);
 	/** Latch: ignore repeated onScan callbacks after first successful scan (stops flicker). */
@@ -89,10 +93,10 @@
 		}
 	});
 
-	/** Refocus hidden barcode input every 2s when camera modal is closed (HID scanner). */
+	/** Refocus hidden barcode input every 10s when camera modal is closed (HID scanner). Disabled while modal is open. */
 	$effect(() => {
 		if (showScanner) return;
-		const id = setInterval(() => barcodeInputEl?.focus(), 2000);
+		const id = setInterval(() => barcodeInputEl?.focus(), 10000);
 		return () => clearInterval(id);
 	});
 
@@ -108,12 +112,14 @@
 		}
 		const timeout = Math.max(0, Number(display_scan_timeout_seconds) ?? 20);
 		if (timeout === 0) return;
-		let remaining = timeout;
-		scanCountdown = remaining;
+		scanCountdown = timeout;
 		const id = setInterval(() => {
-			remaining -= 1;
-			scanCountdown = remaining;
-			if (remaining <= 0) showScanner = false;
+			scanCountdown = scanCountdown - 1;
+			if (scanCountdown <= 0) {
+				clearInterval(id);
+				scanCountdownIntervalId = null;
+				queueMicrotask(() => { showScanner = false; });
+			}
 		}, 1000);
 		scanCountdownIntervalId = id;
 		return () => {
@@ -339,7 +345,7 @@
 				<Modal open={showScanner} title="Scan QR via device" onClose={closeScanner} wide={true}>
 					{#snippet children()}
 						<div class="flex flex-col gap-3 w-full min-w-[20rem] mx-auto">
-							<QrScanner active={true} cameraOnly={true} onScan={handleQrScan} />
+							<QrScanner active={showScanner} cameraOnly={true} onScan={handleQrScan} />
 							{#if scanCountdown > 0}
 								<div class="flex flex-wrap items-center justify-center gap-2">
 									<p class="text-sm text-surface-600" aria-live="polite">Closing in {scanCountdown}s</p>
@@ -373,12 +379,26 @@
 					</div>
 
 					<div>
-						<label for="triage-track" class="block text-sm font-medium text-surface-950 mb-2">Track</label>
-						<select id="triage-track" class="w-full rounded-container border border-surface-200 px-3 py-2 min-h-[48px]" bind:value={selectedTrackId}>
-							{#each activeProgram?.tracks ?? [] as track (track.id)}
-								<option value={track.id}>{track.name}</option>
-							{/each}
-						</select>
+						<p class="text-sm font-medium text-surface-950 mb-2">Track</p>
+						{#if showTrackButtons}
+							<div class="flex flex-wrap gap-2">
+								{#each activeProgram?.tracks ?? [] as track (track.id)}
+									<button
+										type="button"
+										class="btn min-h-[48px] px-4 py-2 {selectedTrackId === track.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
+										onclick={() => (selectedTrackId = track.id)}
+									>
+										{track.name}
+									</button>
+								{/each}
+							</div>
+						{:else}
+							<select id="triage-track" class="w-full rounded-container border border-surface-200 px-3 py-2 min-h-[48px]" bind:value={selectedTrackId}>
+								{#each activeProgram?.tracks ?? [] as track (track.id)}
+									<option value={track.id}>{track.name}</option>
+								{/each}
+							</select>
+						{/if}
 					</div>
 
 					{#if error}

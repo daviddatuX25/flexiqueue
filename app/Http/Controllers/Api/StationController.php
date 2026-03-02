@@ -65,17 +65,23 @@ class StationController extends Controller
         if ($request->has('display_audio_volume')) {
             $settings['display_audio_volume'] = (float) max(0, min(1, $request->input('display_audio_volume', 1)));
         }
+        if (array_key_exists('display_tts_voice', $request->all())) {
+            $v = $request->input('display_tts_voice');
+            $settings['display_tts_voice'] = $v !== null && $v !== '' ? (string) $v : null;
+        }
         $station->update(['settings' => $settings]);
 
         event(new StationDisplaySettingsUpdated(
             $station->id,
             $station->getDisplayAudioMuted(),
-            $station->getDisplayAudioVolume()
+            $station->getDisplayAudioVolume(),
+            $station->getDisplayTtsVoice()
         ));
 
         return response()->json([
             'display_audio_muted' => $station->getDisplayAudioMuted(),
             'display_audio_volume' => $station->getDisplayAudioVolume(),
+            'display_tts_voice' => $station->getDisplayTtsVoice(),
         ]);
     }
 
