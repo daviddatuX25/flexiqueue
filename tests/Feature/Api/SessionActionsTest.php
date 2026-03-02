@@ -116,6 +116,9 @@ class SessionActionsTest extends TestCase
         $this->token->update(['current_session_id' => $this->session->id]);
     }
 
+    /**
+     * Guards Call Next on SQLite: transaction_logs must accept action_type 'call' (migrations 2025_02_15 + 2026_03_02).
+     */
     public function test_call_waiting_session_returns_200_and_sets_called(): void
     {
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/call");
