@@ -8,6 +8,7 @@
     import { router } from "@inertiajs/svelte";
     import StatusFooter from "./StatusFooter.svelte";
     import Toast from "../Components/Toast.svelte";
+    import ThemeToggle from "../Components/ThemeToggle.svelte";
     import OfflineBanner from "../Components/OfflineBanner.svelte";
     import UserAvatar from "../Components/UserAvatar.svelte";
 
@@ -44,6 +45,7 @@
             >
         </div>
         <div class="flex items-center gap-1.5 shrink-0">
+            <ThemeToggle />
             <span class="text-xs px-2 py-0.5 rounded preset-filled-tertiary-500"
                 >{roleLabel}</span
             >

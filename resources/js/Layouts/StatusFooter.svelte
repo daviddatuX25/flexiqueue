@@ -200,15 +200,15 @@
 </script>
 
 <footer
-    class="shrink-0 bg-white border-t border-surface-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-y-3 text-xs font-medium text-surface-600 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)] z-40 {fixed ? 'fixed bottom-0 left-0 right-0' : ''}"
+    class="shrink-0 bg-surface-50 border-t border-surface-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-y-3 text-xs font-medium text-surface-600 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)] z-40 {fixed ? 'fixed bottom-0 left-0 right-0' : ''}"
     role="status"
     aria-live="polite"
 >
     <div class="flex items-center gap-3">
-        <!-- Program + Connection status -->
+        <!-- Program + Connection status: compact but tappable -->
         <button
             type="button"
-            class="flex flex-col items-start justify-center px-3 py-1.5 rounded-full border text-left transition-all duration-200 shadow-sm min-w-[9rem]
+            class="flex flex-col items-start justify-center gap-0.5 px-3 py-1.5 min-h-[44px] rounded-full border text-left transition-all duration-200 shadow-sm w-max
                 {programMode === 'ongoing'
                     ? 'bg-success-50 text-success-800 border-success-200'
                     : 'bg-surface-100 text-surface-800 border-surface-200'}
@@ -217,12 +217,12 @@
             disabled={!isProgramClickable}
             aria-label="{programLabel} — {connectionLabel}"
         >
-            <span class="text-[0.72rem] font-semibold uppercase tracking-wide">
+            <span class="text-[0.72rem] font-semibold uppercase tracking-wide leading-tight whitespace-nowrap">
                 {programLabel}
             </span>
-            <span class="mt-0.5 inline-flex items-center gap-1 text-[0.7rem] text-surface-600">
+            <span class="inline-flex items-center gap-1 text-[0.72rem] whitespace-nowrap {programMode === 'ongoing' ? 'text-success-800' : 'text-surface-600'}">
                 <span
-                    class="w-1.5 h-1.5 rounded-full animate-pulse {networkConnected
+                    class="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse {networkConnected
                         ? 'bg-success-500 shadow-[0_0_4px_rgba(34,197,94,0.7)]'
                         : 'bg-error-500 shadow-[0_0_4px_rgba(239,68,68,0.7)]'}"
                     aria-hidden="true"
@@ -295,7 +295,7 @@
                     {#if menuOpen}
                         <ul
                             role="listbox"
-                            class="absolute bottom-full left-0 mb-1 min-w-[10rem] py-1 rounded-lg border border-surface-200 bg-white shadow-lg z-50"
+                            class="absolute bottom-full left-0 mb-1 min-w-[10rem] py-1 rounded-lg border border-surface-200 bg-surface-50 shadow-lg z-50"
                             aria-label="Set availability"
                         >
                             {#each menuOptions as opt}

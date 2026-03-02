@@ -1442,20 +1442,20 @@
             </div>
         </div>
 
-        <!-- Status banner + primary actions -->
+        <!-- Status banner + primary actions (dark mode styling via .program-status-banner in theme) -->
         {#if program.is_active && !program.is_paused}
             <div
-                class="rounded-container border-l-4 border-l-success-500 border border-success-200 bg-success-50 shadow-sm p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5 transition-all"
+                class="program-status-banner program-status-banner--live rounded-container border-l-4 border-l-success-500 border border-success-200 bg-success-50 shadow-sm p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5 transition-all"
             >
                 <div class="flex gap-3">
-                    <div class="mt-0.5">
+                    <div class="mt-0.5 program-status-banner__icon">
                         <CheckCircle class="w-5 h-5 text-success-600" />
                     </div>
                     <div>
-                        <h3 class="font-semibold text-success-900">
+                        <h3 class="program-status-banner__title font-semibold text-success-900">
                             Program is Live
                         </h3>
-                        <p class="text-sm text-success-800/80 mt-0.5">
+                        <p class="program-status-banner__desc text-sm text-success-800/80 mt-0.5">
                             Queue times are being actively recorded and tracked.
                         </p>
                     </div>
@@ -1463,16 +1463,16 @@
                 <div class="flex flex-wrap items-center gap-3">
                     <Link
                         href="/station"
-                        class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm hover:shadow-md transition-shadow"
+                        class="program-status-banner__btn program-status-banner__btn--view btn preset-filled-primary-500 flex items-center gap-2 shadow-sm hover:shadow-md transition-shadow"
                         title="Open station interface to manage the queue"
                     >
                         <Activity class="w-4 h-4" />
                         View Program
                     </Link>
-                    <div class="h-6 w-px bg-success-200 hidden sm:block"></div>
+                    <div class="h-6 w-px bg-success-200 hidden sm:block program-status-banner__divider"></div>
                     <button
                         type="button"
-                        class="btn preset-tonal flex items-center gap-2 text-warning-700 bg-warning-100 hover:bg-warning-200 transition-colors"
+                        class="program-status-banner__btn program-status-banner__btn--pause btn preset-tonal flex items-center gap-2 text-warning-700 bg-warning-100 hover:bg-warning-200 transition-colors"
                         disabled={submitting}
                         onclick={handlePause}
                     >
@@ -1480,7 +1480,7 @@
                     </button>
                     <button
                         type="button"
-                        class="btn preset-tonal flex items-center gap-2 text-error-700 bg-error-100 hover:bg-error-200 transition-colors"
+                        class="program-status-banner__btn program-status-banner__btn--stop btn preset-tonal flex items-center gap-2 text-error-700 bg-error-100 hover:bg-error-200 transition-colors"
                         disabled={submitting}
                         onclick={openStopConfirm}
                         aria-label="Stop session"
@@ -1491,7 +1491,7 @@
             </div>
         {:else if program.is_active && program.is_paused}
             <div
-                class="rounded-container border-l-4 border-l-warning-500 border border-warning-200 bg-warning-50 shadow-sm p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5 transition-all"
+                class="program-status-banner program-status-banner--paused rounded-container border-l-4 border-l-warning-500 border border-warning-200 bg-warning-50 shadow-sm p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5 transition-all"
             >
                 <div class="flex gap-3">
                     <div class="mt-0.5">
@@ -1881,7 +1881,7 @@
                                                 class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded preset-filled-success-500 shadow-sm flex items-center gap-1"
                                             >
                                                 <span
-                                                    class="w-1.5 h-1.5 rounded-full bg-white/80 shrink-0 animate-pulse"
+                                                    class="w-1.5 h-1.5 rounded-full bg-surface-950/80 shrink-0 animate-pulse"
                                                 ></span> Active
                                             </span>
                                         {:else}
@@ -2287,7 +2287,7 @@
                                         >
                                             {#each track.steps ?? [] as step, i}
                                                 <span
-                                                    class="inline-block px-2 py-0.5 bg-white border border-surface-200 rounded text-xs shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                                                    class="inline-block px-2 py-0.5 bg-surface-50 border border-surface-200 rounded text-xs shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
                                                     >{step.process_name}</span
                                                 >
                                                 {#if i < (track.steps ?? []).length - 1}
@@ -2305,7 +2305,7 @@
                             >
                                 <button
                                     type="button"
-                                    class="btn preset-tonal btn-sm flex items-center gap-1.5 bg-white border border-surface-200 shadow-sm hover:bg-surface-50"
+                                    class="btn preset-tonal btn-sm flex items-center gap-1.5 bg-surface-50 border border-surface-200 shadow-sm hover:bg-surface-50"
                                     onclick={() => openStepModal(track)}
                                     disabled={submitting}
                                 >
@@ -2391,7 +2391,7 @@
                                         <input
                                             id="no-show-timer-min"
                                             type="number"
-                                            class="input rounded-container border border-surface-200 px-3 py-2 w-16 text-surface-950 bg-white shadow-sm text-center"
+                                            class="input rounded-container border border-surface-200 px-3 py-2 w-16 text-surface-950 bg-surface-50 shadow-sm text-center"
                                             min="0"
                                             max="10"
                                             bind:value={noShowTimerMinutes}
@@ -2403,7 +2403,7 @@
                                         <input
                                             id="no-show-timer-sec"
                                             type="number"
-                                            class="input rounded-container border border-surface-200 px-3 py-2 w-16 text-surface-950 bg-white shadow-sm text-center"
+                                            class="input rounded-container border border-surface-200 px-3 py-2 w-16 text-surface-950 bg-surface-50 shadow-sm text-center"
                                             min="0"
                                             max="59"
                                             bind:value={noShowTimerSeconds}
@@ -2435,7 +2435,7 @@
                                     <input
                                         id="informant-desk-activity-buffer"
                                         type="number"
-                                        class="input rounded-container border border-surface-200 px-3 py-2 w-20 text-surface-950 bg-white shadow-sm text-center"
+                                        class="input rounded-container border border-surface-200 px-3 py-2 w-20 text-surface-950 bg-surface-50 shadow-sm text-center"
                                         min="0"
                                         max="300"
                                         bind:value={displayScanTimeoutSeconds}
@@ -2488,7 +2488,7 @@
                                     <span class="text-sm text-surface-600">TTS voice</span>
                                     <div class="flex flex-wrap items-center gap-2">
                                         <select
-                                            class="select select-sm bg-white border border-surface-300 rounded-lg"
+                                            class="select select-sm bg-surface-50 border border-surface-300 rounded-lg"
                                             bind:value={displayTtsVoice}
                                             aria-label="Display board TTS voice"
                                         >
@@ -2536,7 +2536,7 @@
                                             bind:checked={allowPublicTriage}
                                         />
                                         <span
-                                            class="absolute top-0 left-0 w-5 h-5 bg-white rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none"
+                                            class="absolute top-0 left-0 w-5 h-5 bg-surface-950 rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none"
                                             aria-hidden="true"
                                         ></span>
                                     </div>
@@ -2638,7 +2638,7 @@
                             <div class="sm:w-2/3 form-control space-y-3">
                                 <select
                                     id="balance-mode"
-                                    class="select rounded-container border border-surface-200 px-3 py-2 w-full text-surface-950 bg-white shadow-sm"
+                                    class="select rounded-container border border-surface-200 px-3 py-2 w-full text-surface-950 bg-surface-50 shadow-sm"
                                     bind:value={settingsBalanceMode}
                                     disabled={settingsPriorityFirst}
                                 >
@@ -2666,7 +2666,7 @@
                                                 <span class="text-xs text-surface-600">Priority</span>
                                                 <input
                                                     type="number"
-                                                    class="input rounded border border-surface-300 px-2 py-1.5 w-16 text-center text-surface-950 bg-white"
+                                                    class="input rounded border border-surface-300 px-2 py-1.5 w-16 text-center text-surface-950 bg-surface-50"
                                                     min="1"
                                                     max="10"
                                                     bind:value={
@@ -2682,7 +2682,7 @@
                                                 <span class="text-xs text-surface-600">Regular</span>
                                                 <input
                                                     type="number"
-                                                    class="input rounded border border-surface-300 px-2 py-1.5 w-16 text-center text-surface-950 bg-white"
+                                                    class="input rounded border border-surface-300 px-2 py-1.5 w-16 text-center text-surface-950 bg-surface-50"
                                                     min="1"
                                                     max="10"
                                                     bind:value={
@@ -2749,7 +2749,7 @@
                             <div class="sm:w-2/3 form-control">
                                 <select
                                     id="station-selection-mode"
-                                    class="select rounded-container border border-surface-200 px-3 py-2 w-full text-surface-950 bg-white shadow-sm"
+                                    class="select rounded-container border border-surface-200 px-3 py-2 w-full text-surface-950 bg-surface-50 shadow-sm"
                                     bind:value={settingsStationSelectionMode}
                                 >
                                     <option value="fixed"

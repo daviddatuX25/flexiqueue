@@ -24,7 +24,7 @@
                         class="text-xs px-2 py-0.5 rounded preset-filled-success-500 badge-sm gap-1 flex items-center"
                     >
                         <div
-                            class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"
+                            class="w-1.5 h-1.5 bg-surface-950 rounded-full animate-pulse"
                         ></div>
                         Live
                     </span>

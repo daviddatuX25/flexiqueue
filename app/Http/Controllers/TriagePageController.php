@@ -25,6 +25,8 @@ class TriagePageController extends Controller
             $programPayload = [
                 'id' => $activeProgram->id,
                 'name' => $activeProgram->name,
+                'is_active' => $activeProgram->is_active,
+                'is_paused' => $activeProgram->is_paused,
                 'tracks' => $activeProgram->serviceTracks->map(fn ($t) => [
                     'id' => $t->id,
                     'name' => $t->name,

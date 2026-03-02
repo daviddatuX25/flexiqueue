@@ -369,7 +369,7 @@
                             </label>
                             <select
                                 id="filter-program"
-                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-white shadow-sm w-full"
+                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full"
                                 bind:value={filterProgramId}
                                 onchange={() => {
                                     filterStationId = "";
@@ -392,7 +392,7 @@
                             <input
                                 id="filter-from"
                                 type="date"
-                                class="input rounded-container border border-surface-200 px-3 py-2 text-sm bg-white shadow-sm w-full"
+                                class="input rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full"
                                 bind:value={filterFrom}
                             />
                         </div>
@@ -406,7 +406,7 @@
                             <input
                                 id="filter-to"
                                 type="date"
-                                class="input rounded-container border border-surface-200 px-3 py-2 text-sm bg-white shadow-sm w-full"
+                                class="input rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full"
                                 bind:value={filterTo}
                             />
                         </div>
@@ -422,7 +422,7 @@
                             </label>
                             <select
                                 id="filter-program-session"
-                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-white shadow-sm w-full"
+                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full"
                                 bind:value={filterProgramSessionId}
                                 disabled={programSessionsLoading}
                             >
@@ -443,7 +443,7 @@
                             </label>
                             <select
                                 id="filter-action"
-                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-white shadow-sm w-full"
+                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full"
                                 bind:value={filterActionType}
                             >
                                 <option value="">All actions</option>
@@ -463,7 +463,7 @@
                             </label>
                             <select
                                 id="filter-station"
-                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-white shadow-sm w-full"
+                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full"
                                 bind:value={filterStationId}
                             >
                                 <option value="">All stations</option>
@@ -481,7 +481,7 @@
                             </label>
                             <select
                                 id="filter-staff"
-                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-white shadow-sm w-full"
+                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full"
                                 bind:value={filterStaffUserId}
                             >
                                 <option value="">All staff</option>
@@ -568,7 +568,7 @@
             </div>
         {:else}
             <div
-                class="table-container mt-2 hidden md:block border border-surface-200 rounded-container overflow-hidden shadow-sm bg-white"
+                class="table-container mt-2 hidden md:block border border-surface-200 rounded-container overflow-hidden shadow-sm bg-surface-50"
             >
                 <table class="table table-zebra w-full relative">
                     <thead class="bg-surface-50 border-b border-surface-200">
@@ -726,7 +726,7 @@
                 <div class="flex gap-2">
                     <button
                         type="button"
-                        class="btn preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-4 py-1.5 transition-colors disabled:opacity-50"
+                        class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-4 py-1.5 transition-colors disabled:opacity-50"
                         disabled={meta.current_page <= 1}
                         onclick={() => goToPage(meta!.current_page - 1)}
                     >
@@ -734,7 +734,7 @@
                     </button>
                     <button
                         type="button"
-                        class="btn preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-4 py-1.5 transition-colors disabled:opacity-50"
+                        class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-4 py-1.5 transition-colors disabled:opacity-50"
                         disabled={meta.current_page >= totalPages}
                         onclick={() => goToPage(meta!.current_page + 1)}
                     >

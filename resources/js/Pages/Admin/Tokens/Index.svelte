@@ -479,7 +479,7 @@
             >
                 <button
                     type="button"
-                    class="btn preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex justify-center items-center gap-2 w-full sm:w-auto shadow-sm transition-colors"
+                    class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex justify-center items-center gap-2 w-full sm:w-auto shadow-sm transition-colors"
                     onclick={() => openPrintModal([])}
                 >
                     <Printer class="w-4 h-4" /> Print settings
@@ -543,7 +543,7 @@
                     </button>
                     <button
                         type="button"
-                        class="btn btn-sm preset-outlined bg-white text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1.5 shadow-sm transition-colors min-h-[2.25rem] disabled:opacity-50 disabled:cursor-not-allowed"
+                        class="btn btn-sm preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1.5 shadow-sm transition-colors min-h-[2.25rem] disabled:opacity-50 disabled:cursor-not-allowed"
                         onclick={handleBatchDelete}
                         disabled={submitting ||
                             selectedForPrint.some((t) => t.status === "in_use") ||
@@ -576,7 +576,7 @@
                     class="w-4 h-4 text-surface-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
                 />
                 <select
-                    class="select rounded-container border border-surface-200 pl-9 pr-8 py-2 w-full text-sm bg-white shadow-sm appearance-none"
+                    class="select rounded-container border border-surface-200 pl-9 pr-8 py-2 w-full text-sm bg-surface-50 shadow-sm appearance-none"
                     bind:value={filterStatus}
                     aria-label="Filter by status"
                 >
@@ -596,7 +596,7 @@
                 />
                 <input
                     type="text"
-                    class="input rounded-container border border-surface-200 pl-9 pr-3 py-2 w-full text-sm bg-white shadow-sm"
+                    class="input rounded-container border border-surface-200 pl-9 pr-3 py-2 w-full text-sm bg-surface-50 shadow-sm"
                     placeholder="Search by ID (e.g. A1)"
                     bind:value={searchQuery}
                     onkeydown={(e) => e.key === "Enter" && onFilterApply()}
@@ -733,7 +733,7 @@
                                     <div class="flex items-center justify-end gap-1.5 flex-wrap {someSelected ? 'opacity-60 pointer-events-none' : ''}">
                                         <button
                                             type="button"
-                                            class="btn btn-sm preset-outlined bg-white text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                             onclick={() => openEditModal(token)}
                                             disabled={someSelected || submitting}
                                             title="Edit token"
@@ -742,7 +742,7 @@
                                         </button>
                                         <button
                                             type="button"
-                                            class="btn btn-sm preset-outlined bg-white text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                             onclick={() => openPrintModal([token.id])}
                                             disabled={someSelected || submitting}
                                             title="Print token"
@@ -752,7 +752,7 @@
                                         {#if token.status === "in_use"}
                                             <button
                                                 type="button"
-                                                class="btn btn-sm preset-outlined bg-white text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                                 onclick={() => setTokenStatus(token, "available")}
                                                 disabled={someSelected || submitting}
                                                 title="Mark available"
@@ -762,7 +762,7 @@
                                         {:else if token.status === "available"}
                                             <button
                                                 type="button"
-                                                class="btn btn-sm preset-outlined bg-white text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                                 onclick={() => setTokenStatus(token, "deactivated")}
                                                 disabled={someSelected || submitting}
                                                 title="Deactivate"
@@ -772,7 +772,7 @@
                                         {:else if token.status === "deactivated"}
                                             <button
                                                 type="button"
-                                                class="btn btn-sm preset-outlined bg-white text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                                 onclick={() => setTokenStatus(token, "available")}
                                                 disabled={someSelected || submitting}
                                                 title="Activate"
@@ -873,7 +873,7 @@
                         <div class="pt-2 border-t border-surface-200 flex flex-wrap items-center gap-2 min-h-[2.75rem] {someSelected ? 'opacity-60 pointer-events-none' : ''}">
                             <button
                                 type="button"
-                                class="btn btn-sm preset-outlined bg-white text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                 onclick={() => openEditModal(token)}
                                 disabled={someSelected || submitting}
                                 aria-label="Edit token"
@@ -882,7 +882,7 @@
                             </button>
                             <button
                                 type="button"
-                                class="btn btn-sm preset-outlined bg-white text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                 onclick={() => openPrintModal([token.id])}
                                 disabled={someSelected || submitting}
                                 aria-label="Print token"
@@ -892,7 +892,7 @@
                             {#if token.status === "in_use"}
                                 <button
                                     type="button"
-                                    class="btn btn-sm preset-outlined bg-white text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                     onclick={() => setTokenStatus(token, "available")}
                                     disabled={someSelected || submitting}
                                     aria-label="Mark available"
@@ -902,7 +902,7 @@
                             {:else if token.status === "available"}
                                 <button
                                     type="button"
-                                    class="btn btn-sm preset-outlined bg-white text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                     onclick={() => setTokenStatus(token, "deactivated")}
                                     disabled={someSelected || submitting}
                                     aria-label="Deactivate"
@@ -912,7 +912,7 @@
                             {:else if token.status === "deactivated"}
                                 <button
                                     type="button"
-                                    class="btn btn-sm preset-outlined bg-white text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                     onclick={() => setTokenStatus(token, "available")}
                                     disabled={someSelected || submitting}
                                     aria-label="Activate"
@@ -957,7 +957,7 @@
                 <input
                     id="batch-prefix"
                     type="text"
-                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                     placeholder="e.g. A"
                     maxlength="10"
                     bind:value={batchPrefix}
@@ -972,7 +972,7 @@
                 <input
                     id="batch-start"
                     type="number"
-                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                     min="0"
                     bind:value={batchStart}
                     required
@@ -985,7 +985,7 @@
                 <input
                     id="batch-count"
                     type="number"
-                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                     min="1"
                     max="500"
                     bind:value={batchCount}
@@ -1175,7 +1175,7 @@
                     >
                     <select
                         id="print-cards"
-                        class="select rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                        class="select rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                         bind:value={printSettings.cards_per_page}
                     >
                         {#each [4, 5, 6, 7, 8] as n}
@@ -1190,7 +1190,7 @@
                     >
                     <select
                         id="print-paper"
-                        class="select rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                        class="select rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                         bind:value={printSettings.paper}
                     >
                         <option value="a4">A4</option>
@@ -1204,7 +1204,7 @@
                     >
                     <select
                         id="print-orientation"
-                        class="select rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                        class="select rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                         bind:value={printSettings.orientation}
                     >
                         <option value="portrait">Portrait</option>
@@ -1257,7 +1257,7 @@
                     <input
                         id="print-logo"
                         type="url"
-                        class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                        class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                         placeholder="https://example.com/logo.png"
                         bind:value={printSettings.logo_url}
                     />
@@ -1273,7 +1273,7 @@
                     >
                     <textarea
                         id="print-footer"
-                        class="textarea rounded-container border border-surface-200 w-full bg-white shadow-sm"
+                        class="textarea rounded-container border border-surface-200 w-full bg-surface-50 shadow-sm"
                         placeholder="Shown on each card, centered. e.g. Premise rules, office hours"
                         rows="2"
                         bind:value={printSettings.footer_text}
@@ -1291,7 +1291,7 @@
                     <input
                         id="print-bg"
                         type="text"
-                        class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                        class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                         placeholder="https://example.com/bg.png"
                         bind:value={printSettings.bg_image_url}
                     />
@@ -1312,7 +1312,7 @@
                 >
                 <button
                     type="button"
-                    class="btn preset-outlined bg-white text-surface-700 hover:bg-surface-50 shadow-sm transition-colors"
+                    class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 shadow-sm transition-colors"
                     onclick={() => savePrintSettings()}
                     disabled={submitting}
                 >

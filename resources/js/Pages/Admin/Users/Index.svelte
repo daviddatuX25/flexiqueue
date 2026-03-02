@@ -371,7 +371,7 @@
                                 {#if user.is_active}
                                     <button
                                         type="button"
-                                        class="btn btn-sm preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
+                                        class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
                                         onclick={() => openEdit(user)}
                                         disabled={submitting}
                                     >
@@ -379,7 +379,7 @@
                                     </button>
                                     <button
                                         type="button"
-                                        class="btn btn-sm preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
+                                        class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
                                         onclick={() => openReset(user)}
                                         disabled={submitting}
                                     >
@@ -387,7 +387,7 @@
                                     </button>
                                     <button
                                         type="button"
-                                        class="btn btn-sm preset-outlined bg-white text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
+                                        class="btn btn-sm preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
                                         onclick={() =>
                                             openDeactivateConfirm(user)}
                                         disabled={submitting}
@@ -397,7 +397,7 @@
                                 {:else}
                                     <button
                                         type="button"
-                                        class="btn btn-sm preset-outlined bg-white text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
+                                        class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
                                         onclick={() => openEdit(user)}
                                         disabled={submitting}
                                     >
@@ -418,7 +418,9 @@
             <div
                 class="card bg-surface-50 border border-surface-200 shadow-sm p-4 flex flex-col gap-4"
             >
-                <div class="flex items-start justify-between gap-2">
+                <div
+                    class="flex flex-col gap-3 xs:flex-row xs:items-start xs:justify-between xs:gap-2"
+                >
                     <div class="flex items-center gap-3">
                         <UserAvatar {user} size="md" />
                         <div>
@@ -430,7 +432,9 @@
                             >
                         </div>
                     </div>
-                    <div class="flex flex-col items-end gap-1.5 min-w-max">
+                    <div
+                        class="flex flex-wrap items-center gap-1.5 xs:flex-col xs:items-end xs:gap-1.5"
+                    >
                         {#if user.role === "admin"}
                             <span
                                 class="badge preset-filled-primary-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
@@ -508,7 +512,7 @@
                     {#if user.is_active}
                         <button
                             type="button"
-                            class="btn btn-sm flex-1 preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                            class="btn btn-sm flex-1 preset-outlined bg-surface-50 text-surface-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
                             onclick={() => openEdit(user)}
                             disabled={submitting}
                         >
@@ -516,7 +520,7 @@
                         </button>
                         <button
                             type="button"
-                            class="btn btn-sm flex-1 preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                            class="btn btn-sm flex-1 preset-outlined bg-surface-50 text-surface-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
                             onclick={() => openReset(user)}
                             disabled={submitting}
                         >
@@ -524,7 +528,7 @@
                         </button>
                         <button
                             type="button"
-                            class="btn btn-sm flex-1 preset-outlined bg-white text-error-600 hover:bg-error-50 border-error-200 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                            class="btn btn-sm flex-1 preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
                             onclick={() => openDeactivateConfirm(user)}
                             disabled={submitting}
                         >
@@ -533,7 +537,7 @@
                     {:else}
                         <button
                             type="button"
-                            class="btn btn-sm flex-1 preset-outlined bg-white text-surface-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                            class="btn btn-sm flex-1 preset-outlined bg-surface-50 text-surface-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
                             onclick={() => openEdit(user)}
                             disabled={submitting}
                         >
@@ -554,7 +558,7 @@
             >
             <input
                 type="text"
-                class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                 bind:value={createName}
                 placeholder="Juan Cruz"
             />
@@ -565,7 +569,7 @@
             >
             <input
                 type="email"
-                class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                 bind:value={createEmail}
                 placeholder="juan@example.com"
             />
@@ -576,7 +580,7 @@
             >
             <input
                 type="password"
-                class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                 bind:value={createPassword}
                 placeholder="Min 8 characters"
             />
@@ -586,7 +590,7 @@
                 ><span class="label-text font-medium">Role</span></label
             >
             <select
-                class="select rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                class="select rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                 bind:value={createRole}
             >
                 <option value="staff">Staff</option>
@@ -601,7 +605,7 @@
             >
             <input
                 type="text"
-                class="input rounded-container border border-surface-200 px-3 py-2 w-full max-w-xs bg-white shadow-sm text-center"
+                class="input rounded-container border border-surface-200 px-3 py-2 w-full max-w-xs bg-surface-50 shadow-sm text-center"
                 bind:value={createOverridePin}
                 placeholder="e.g. 123456"
                 maxlength="6"
@@ -644,7 +648,7 @@
                 >
                 <input
                     type="text"
-                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                     bind:value={editName}
                 />
             </div>
@@ -654,7 +658,7 @@
                 >
                 <input
                     type="email"
-                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                     bind:value={editEmail}
                 />
             </div>
@@ -663,7 +667,7 @@
                     ><span class="label-text font-medium">Role</span></label
                 >
                 <select
-                    class="select rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                    class="select rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                     bind:value={editRole}
                 >
                     <option value="staff">Staff</option>
@@ -692,7 +696,7 @@
                 >
                 <input
                     type="password"
-                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                     bind:value={editPassword}
                     placeholder="Leave blank to keep current"
                 />
@@ -705,7 +709,7 @@
                 >
                 <input
                     type="text"
-                    class="input rounded-container border border-surface-200 px-3 py-2 w-full max-w-xs bg-white shadow-sm text-center"
+                    class="input rounded-container border border-surface-200 px-3 py-2 w-full max-w-xs bg-surface-50 shadow-sm text-center"
                     bind:value={editOverridePin}
                     placeholder="Leave blank to keep or clear"
                     maxlength="6"
@@ -757,7 +761,7 @@
                 >
                 <input
                     type="password"
-                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-white shadow-sm"
+                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                     bind:value={resetPassword}
                     placeholder="Min 8 characters"
                 />

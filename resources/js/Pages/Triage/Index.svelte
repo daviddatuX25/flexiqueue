@@ -16,6 +16,8 @@
 	interface ActiveProgram {
 		id: number;
 		name: string;
+		is_active?: boolean;
+		is_paused?: boolean;
 		tracks: Track[];
 	}
 

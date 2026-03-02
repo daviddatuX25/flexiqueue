@@ -227,6 +227,240 @@
 	--color-surface-contrast-950: var(--color-surface-contrast-light);
 }
 
+/* Dark mode overrides — swap background/font and surface palette per Skeleton data-mode strategy */
+[data-theme='flexiqueue'][data-mode='dark'] {
+	color-scheme: dark;
+	--base-font-color: var(--base-font-color-dark);
+	--heading-font-color: var(--heading-font-color-dark);
+	--anchor-font-color: var(--anchor-font-color-dark);
+	--body-background-color: var(--body-background-color-dark);
+	/* Swap surface palette for dark backgrounds */
+	--color-surface-50: #0f172a;
+	--color-surface-100: #1e293b;
+	--color-surface-200: #334155;
+	--color-surface-300: #475569;
+	--color-surface-400: #64748b;
+	--color-surface-500: #94a3b8;
+	--color-surface-600: #cbd5e1;
+	--color-surface-700: #e2e8f0;
+	--color-surface-800: #f1f5f9;
+	--color-surface-900: #f8fafc;
+	--color-surface-950: #ffffff;
+}
+
+/* Light mode: form controls — soft, low-contrast (avoid harsh dark-on-light) */
+[data-theme='flexiqueue']:not([data-mode='dark']) .input,
+[data-theme='flexiqueue']:not([data-mode='dark']) .select,
+[data-theme='flexiqueue']:not([data-mode='dark']) .textarea,
+[data-theme='flexiqueue']:not([data-mode='dark']) .input-group,
+[data-theme='flexiqueue']:not([data-mode='dark']) input[type="text"],
+[data-theme='flexiqueue']:not([data-mode='dark']) input[type="email"],
+[data-theme='flexiqueue']:not([data-mode='dark']) input[type="password"],
+[data-theme='flexiqueue']:not([data-mode='dark']) input[type="number"],
+[data-theme='flexiqueue']:not([data-mode='dark']) select,
+[data-theme='flexiqueue']:not([data-mode='dark']) textarea {
+	background-color: #ffffff !important;
+	color: #0f172a;
+	border-color: #e2e8f0;
+}
+[data-theme='flexiqueue']:not([data-mode='dark']) .input::placeholder,
+[data-theme='flexiqueue']:not([data-mode='dark']) input::placeholder,
+[data-theme='flexiqueue']:not([data-mode='dark']) textarea::placeholder {
+	color: #64748b;
+}
+[data-theme='flexiqueue']:not([data-mode='dark']) .checkbox,
+[data-theme='flexiqueue']:not([data-mode='dark']) input[type="checkbox"] {
+	background-color: #ffffff;
+	border-color: #cbd5e1;
+}
+[data-theme='flexiqueue']:not([data-mode='dark']) .checkbox:checked,
+[data-theme='flexiqueue']:not([data-mode='dark']) input[type="checkbox"]:checked {
+	background-color: var(--color-primary-500);
+	border-color: var(--color-primary-500);
+}
+
+/* Dark mode: soften inputs/selects/textareas — avoid stark white, use translucent */
+[data-theme='flexiqueue'][data-mode='dark'] .input,
+[data-theme='flexiqueue'][data-mode='dark'] .select,
+[data-theme='flexiqueue'][data-mode='dark'] .textarea,
+[data-theme='flexiqueue'][data-mode='dark'] .input-group,
+[data-theme='flexiqueue'][data-mode='dark'] input[type="text"],
+[data-theme='flexiqueue'][data-mode='dark'] input[type="email"],
+[data-theme='flexiqueue'][data-mode='dark'] input[type="password"],
+[data-theme='flexiqueue'][data-mode='dark'] input[type="number"],
+[data-theme='flexiqueue'][data-mode='dark'] select,
+[data-theme='flexiqueue'][data-mode='dark'] textarea {
+	background-color: rgba(255, 255, 255, 0.08) !important;
+	color: var(--color-surface-950);
+	border-color: rgba(255, 255, 255, 0.12);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .input::placeholder,
+[data-theme='flexiqueue'][data-mode='dark'] input::placeholder,
+[data-theme='flexiqueue'][data-mode='dark'] textarea::placeholder {
+	color: rgba(255, 255, 255, 0.5);
+}
+
+/* Dark mode: soften checkboxes — translucent instead of solid white */
+[data-theme='flexiqueue'][data-mode='dark'] .checkbox,
+[data-theme='flexiqueue'][data-mode='dark'] input[type="checkbox"] {
+	background-color: rgba(255, 255, 255, 0.08);
+	border-color: rgba(255, 255, 255, 0.2);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .checkbox:checked,
+[data-theme='flexiqueue'][data-mode='dark'] input[type="checkbox"]:checked {
+	background-color: var(--color-primary-500);
+}
+
+/* Dark mode: soften preset-tonal-surface — avoid stark white on Quick Actions etc. */
+[data-theme='flexiqueue'][data-mode='dark'] .preset-tonal-surface,
+[data-theme='flexiqueue'][data-mode='dark'] .btn.preset-tonal-surface {
+	background-color: rgba(255, 255, 255, 0.08) !important;
+	color: var(--color-surface-950);
+	border-color: rgba(255, 255, 255, 0.12);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .preset-tonal-surface:hover,
+[data-theme='flexiqueue'][data-mode='dark'] .btn.preset-tonal-surface:hover {
+	background-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Program status banner (Program is Live) — dark mode: darker bg + darker buttons + readable text */
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live {
+	background-color: var(--color-success-900);
+	border-color: var(--color-success-700);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__icon {
+	color: var(--color-success-400);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__title {
+	color: var(--color-success-100);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__desc {
+	color: var(--color-success-300);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__divider {
+	background-color: var(--color-success-700);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__btn--view {
+	background-color: var(--color-primary-700) !important;
+	color: var(--color-primary-50);
+	border-color: var(--color-primary-600);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__btn--view:hover {
+	background-color: var(--color-primary-600) !important;
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__btn--pause {
+	background-color: var(--color-warning-700) !important;
+	color: var(--color-warning-50);
+	border-color: var(--color-warning-600);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__btn--pause:hover {
+	background-color: var(--color-warning-600) !important;
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__btn--stop {
+	background-color: var(--color-error-700) !important;
+	color: var(--color-error-50);
+	border-color: var(--color-error-600);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__btn--stop:hover {
+	background-color: var(--color-error-600) !important;
+}
+
+/* Program is Paused banner — dark mode */
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--paused {
+	background-color: var(--color-warning-900);
+	border-color: var(--color-warning-700);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--paused h3 {
+	color: var(--color-warning-100);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--paused p.text-sm {
+	color: var(--color-warning-300);
+}
+
+/* StatusFooter: ongoing chip — dark mode: darker bg + readable text (avoid light mint on dark theme) */
+[data-theme='flexiqueue'][data-mode='dark'] footer button[aria-label*="Ongoing"] {
+	background-color: var(--color-success-800) !important;
+	border-color: var(--color-success-600);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] footer button[aria-label*="Ongoing"] span:first-of-type {
+	color: var(--color-success-100);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] footer button[aria-label*="Ongoing"] span:last-of-type span + span {
+	color: var(--color-success-200);
+}
+
+/* StatusFooter: availability "Available" button — dark mode: darker bg + readable text */
+[data-theme='flexiqueue'][data-mode='dark'] footer button[aria-label*="Available"] {
+	background-color: var(--color-success-800) !important;
+	border-color: var(--color-success-600);
+	color: var(--color-success-100);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] footer button[aria-label*="Available"]:hover {
+	background-color: var(--color-success-700) !important;
+}
+
+/* Display footer (Board page) — dark mode: keep footer dark (surface swap would make it light) */
+[data-theme='flexiqueue'][data-mode='dark'] .display-footer {
+	background-color: #1e293b !important;
+	color: #e2e8f0;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .display-footer .display-footer__chip {
+	background-color: rgba(255, 255, 255, 0.12) !important;
+	color: #f1f5f9;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .display-footer .text-surface-300 {
+	color: #94a3b8 !important;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .display-footer .text-surface-400 {
+	color: #64748b !important;
+}
+
+/* Marquee animation — smooth horizontal scroll for staff chips (duplicated list, loop at 50%) */
+@keyframes display-footer-marquee {
+	0% { transform: translateX(0); }
+	100% { transform: translateX(-50%); }
+}
+.display-footer__marquee-inner {
+	animation: display-footer-marquee 25s linear infinite;
+}
+.display-footer__marquee-inner:hover {
+	animation-play-state: paused;
+}
+
+/* White text on green — subtle shadow for legibility, separates text from brand green */
+[data-theme='flexiqueue'] .preset-filled-primary-500,
+[data-theme='flexiqueue'] .preset-filled-success-500,
+[data-theme='flexiqueue'] .badge.preset-filled-primary-500,
+[data-theme='flexiqueue'] .badge.preset-filled-success-500,
+[data-theme='flexiqueue'] .btn.preset-filled-primary-500,
+[data-theme='flexiqueue'] .btn.preset-filled-success-500,
+[data-theme='flexiqueue'] .preset-tonal-primary,
+[data-theme='flexiqueue'] .btn.preset-tonal-primary,
+[data-theme='flexiqueue'] .bg-primary-500.text-white,
+[data-theme='flexiqueue'] .bg-primary-500.text-primary-contrast-500,
+[data-theme='flexiqueue'] .bg-success-500.text-white,
+[data-theme='flexiqueue'] .bg-success-500.text-primary-contrast-500 {
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
 /* DaisyUI compatibility utilities — per SKELETON-COMPONENT-MAPPING */
 @utility form-control {
 	display: flex;

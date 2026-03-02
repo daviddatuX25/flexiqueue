@@ -99,7 +99,7 @@
 		></button>
 		{#if showColorPicker}
 			<div
-				class="absolute bottom-full right-0 mb-1 p-2 rounded-lg bg-white border border-surface-300 shadow-lg flex flex-wrap gap-1 w-[120px]"
+				class="absolute bottom-full right-0 mb-1 p-2 rounded-lg bg-surface-50 border border-surface-300 shadow-lg flex flex-wrap gap-1 w-[120px]"
 				role="listbox"
 				aria-label="Room background color"
 			>

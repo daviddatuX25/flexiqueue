@@ -16,6 +16,9 @@
 @import '@skeletonlabs/skeleton';
 @import './themes/flexiqueue.css';
 
+/* Dark mode — data-mode strategy per Skeleton docs */
+@custom-variant dark (&:where([data-mode=dark], [data-mode=dark] *));
+
 /* Skeleton forms: explicit background/text for cross-platform consistency */
 .select,
 .input,

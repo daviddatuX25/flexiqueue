@@ -355,7 +355,7 @@
 				class="absolute inset-0 z-10 flex items-center justify-center bg-surface-950/80 rounded-container min-h-[280px]"
 				aria-live="polite"
 			>
-				<div class="card bg-white border border-surface-200 rounded-container shadow-lg p-8 max-w-md mx-4 text-center">
+				<div class="card bg-surface-50 border border-surface-200 rounded-container shadow-lg p-8 max-w-md mx-4 text-center">
 					<p class="text-xl font-semibold text-surface-950">Program is paused</p>
 					<p class="text-surface-600 mt-2">Service will resume shortly.</p>
 				</div>
@@ -417,7 +417,7 @@
 					{/if}
 					<button
 						type="button"
-						class="w-full py-3 text-base font-semibold rounded-container border-2 border-surface-300 bg-white text-surface-950 shadow-md hover:bg-surface-200 focus:ring-2 focus:ring-offset-2 focus:ring-surface-400"
+						class="w-full py-3 text-base font-semibold rounded-container border-2 border-surface-300 bg-surface-50 text-surface-950 shadow-md hover:bg-surface-200 focus:ring-2 focus:ring-offset-2 focus:ring-surface-400"
 						onclick={closeScanner}
 					>
 						Cancel
@@ -538,28 +538,30 @@
 		</div>
 	</div>
 
-	<!-- Fixed footer: staff and availability only, with photo. -->
+	<!-- Fixed footer: staff and availability only. Marquee-style single row in dark mode. -->
 	<footer
-		class="fixed bottom-0 left-0 right-0 z-30 px-4 py-3 bg-surface-800 text-surface-100 shadow-[0_-4px_12px_rgba(0,0,0,0.08)]"
+		class="display-footer fixed bottom-0 left-0 right-0 z-30 px-4 py-3 bg-surface-800 text-surface-100 shadow-[0_-4px_12px_rgba(0,0,0,0.08)]"
 		aria-label="Staff on duty"
 	>
-		<div class="flex flex-wrap items-center gap-3">
+		<div class="flex items-center gap-4 min-w-0">
 			<span class="text-xs font-semibold uppercase tracking-wider text-surface-300 shrink-0 self-center">Staff on duty</span>
 			{#if staffForBar.length > 0}
-				<div class="flex flex-wrap items-center gap-3" aria-label="Staff availability">
-					{#each staffForBar as s (s.name + (s.station_name ?? '') + (s.availability_status ?? ''))}
-						<div
-							class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-700/80 text-surface-100"
-							title="{s.name} — {availabilityLabel(s.availability_status)}"
-						>
-							<UserAvatar user={s} size="sm" />
-							<span
-								class="w-2 h-2 rounded-full shrink-0 {availabilityDotClass(s.availability_status)}"
-								aria-label="{availabilityLabel(s.availability_status)}"
-							></span>
-							<span class="text-sm max-w-[6rem] truncate">{s.name}</span>
-						</div>
-					{/each}
+				<div class="display-footer__marquee flex-1 min-w-0 overflow-hidden" aria-label="Staff availability">
+					<div class="display-footer__marquee-inner flex items-center gap-3">
+						{#each [...staffForBar, ...staffForBar] as s, i (String(i) + (s.name ?? '') + (s.station_name ?? '') + (s.availability_status ?? ''))}
+							<div
+								class="display-footer__chip inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-700/80 text-surface-100 shrink-0"
+								title="{s.name} — {availabilityLabel(s.availability_status)}"
+							>
+								<UserAvatar user={s} size="sm" />
+								<span
+									class="w-2 h-2 rounded-full shrink-0 {availabilityDotClass(s.availability_status)}"
+									aria-label="{availabilityLabel(s.availability_status)}"
+								></span>
+								<span class="text-sm max-w-[6rem] truncate">{s.name}</span>
+							</div>
+						{/each}
+					</div>
 				</div>
 			{:else}
 				<span class="text-xs text-surface-400">No staff assigned</span>

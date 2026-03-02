@@ -15,9 +15,12 @@
         LogOut,
         Menu,
         Zap,
+        X,
+        ShieldCheck,
     } from "lucide-svelte";
     import StatusFooter from "./StatusFooter.svelte";
     import Toast from "../Components/Toast.svelte";
+    import ThemeToggle from "../Components/ThemeToggle.svelte";
     import OfflineBanner from "../Components/OfflineBanner.svelte";
     import UserAvatar from "../Components/UserAvatar.svelte";
 
@@ -61,7 +64,7 @@
                 class="relative z-40 w-72 min-h-full flex flex-col bg-surface-50 border-r border-surface-200 shadow-sm"
             >
                 <!-- Brand header -->
-                <div class="h-20 flex items-center px-6 border-b border-surface-200 shrink-0">
+                <div class="h-20 flex items-center justify-between px-6 border-b border-surface-200 shrink-0">
                     <div class="flex items-center gap-3">
                         <div
                             class="w-10 h-10 rounded-xl bg-primary-500 flex items-center justify-center text-white shadow-md shrink-0"
@@ -71,6 +74,14 @@
                         </div>
                         <span class="text-xl font-bold tracking-tight text-surface-950">FlexiQueue</span>
                     </div>
+                    <!-- Mobile-only close button for sidebar drawer -->
+                    <label
+                        for="admin-drawer"
+                        class="lg:hidden inline-flex items-center justify-center p-2 rounded-lg text-surface-500 hover:text-surface-950 hover:bg-surface-100 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-surface-50 cursor-pointer"
+                        aria-label="Close menu"
+                    >
+                        <X class="w-5 h-5" aria-hidden="true" />
+                    </label>
                 </div>
 
                 <!-- Nav -->
@@ -137,20 +148,18 @@
                 </label>
                 <span class="font-semibold text-surface-950 lg:invisible lg:w-0 lg:overflow-hidden">FlexiQueue</span>
                 <div class="flex items-center gap-2 ml-auto">
-                    <span class="text-xs px-2.5 py-1 rounded-md font-semibold preset-filled-primary-500 text-primary-contrast-500">
-                        {roleLabel}
-                    </span>
-                    <button
-                        type="button"
-                        class="btn preset-tonal btn-sm lg:hidden"
-                        onclick={() => router.post("/logout")}
+                    <ThemeToggle />
+                    <span
+                        class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-semibold bg-primary-500 text-white shadow-sm border border-primary-600/20"
+                        title="Admin panel"
                     >
-                        Log out
-                    </button>
+                        <ShieldCheck class="w-4 h-4 shrink-0 opacity-90" aria-hidden="true" />
+                        <span class="capitalize">{roleLabel}</span>
+                    </span>
                 </div>
             </header>
 
-            <main class="flex-1 min-h-0 overflow-y-auto p-6 max-w-7xl">
+            <main class="flex-1 min-h-0 overflow-y-auto p-6 pb-24 max-w-7xl">
                 {#if children}
                     {@render children()}
                 {/if}

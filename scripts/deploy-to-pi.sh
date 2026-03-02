@@ -64,8 +64,8 @@ fi
 echo "Copying tarball to ${PI_USER}@${PI_HOST}..."
 scp flexiqueue-deploy.tar.gz "${PI_USER}@${PI_HOST}:/tmp/"
 
-echo "Applying on Pi (extract, chown, storage + database writable, migrate, cache, storage:link)..."
-ssh "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && sudo tar -xzf /tmp/flexiqueue-deploy.tar.gz && sudo chown -R www-data:www-data . && sudo mkdir -p storage/app/public storage/framework/cache storage/framework/sessions storage/framework/views storage/logs && sudo chown -R www-data:www-data storage && sudo chown -R www-data:www-data database && sudo chmod 775 database && (test -f database/database.sqlite && sudo chmod 664 database/database.sqlite || true) && if test -f .env.prod && test ! -f .env; then sudo cp .env.prod .env && sudo chown www-data:www-data .env; fi && php artisan migrate --force && php artisan config:cache && php artisan route:cache && php artisan storage:link'
+echo "Applying on Pi (extract, chown, storage + database writable, force SQLite env, migrate, cache, storage:link)..."
+ssh "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && sudo tar -xzf /tmp/flexiqueue-deploy.tar.gz && sudo chown -R www-data:www-data . && sudo mkdir -p storage/app/public storage/framework/cache storage/framework/sessions storage/framework/views storage/logs && sudo chown -R www-data:www-data storage && sudo chown -R www-data:www-data database && sudo chmod 775 database && (test -f database/database.sqlite && sudo chmod 664 database/database.sqlite || true) && if test -f .env.prod && test ! -f .env; then sudo cp .env.prod .env && sudo chown www-data:www-data .env; fi && sudo sed -i "s/^DB_CONNECTION=.*/DB_CONNECTION=sqlite/" .env && sudo sed -i "s/^DB_DATABASE=.*/DB_DATABASE=database\/database.sqlite/" .env && php artisan migrate --force && php artisan config:cache && php artisan route:cache && php artisan storage:link'
 
 # Optional: restart Reverb if running as systemd
 ssh "${PI_USER}@${PI_HOST}" 'sudo systemctl restart flexiqueue-reverb 2>/dev/null || true'

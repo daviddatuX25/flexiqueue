@@ -786,7 +786,7 @@
 									disabled={actionLoading === 'toggle'}
 									onchange={(e) => togglePriorityFirst((e.target as HTMLInputElement).checked)}
 								/>
-								<span class="absolute top-0 left-0 w-5 h-5 bg-white rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none" aria-hidden="true"></span>
+								<span class="absolute top-0 left-0 w-5 h-5 bg-surface-950 rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none" aria-hidden="true"></span>
 							</div>
 						</label>
 					{/if}
@@ -1240,7 +1240,7 @@
 							disabled={displaySettingsSaving}
 							onchange={(e) => saveDisplaySettings({ display_audio_muted: (e.target as HTMLInputElement).checked })}
 						/>
-						<span class="absolute top-0 left-0 w-5 h-5 bg-white rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none" aria-hidden="true"></span>
+						<span class="absolute top-0 left-0 w-5 h-5 bg-surface-950 rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none" aria-hidden="true"></span>
 					</div>
 				</label>
 				<label class="flex flex-col gap-2">
@@ -1263,7 +1263,7 @@
 					<span class="text-sm font-medium text-surface-950">TTS voice</span>
 					<div class="flex flex-wrap items-center gap-2">
 						<select
-							class="select select-sm bg-white border border-surface-300 rounded-lg"
+							class="select select-sm bg-surface-50 border border-surface-300 rounded-lg"
 							value={queue?.display_tts_voice ?? ''}
 							disabled={displaySettingsSaving}
 							aria-label="Display TTS voice"
