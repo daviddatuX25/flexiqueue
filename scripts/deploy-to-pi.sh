@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-command deploy: (optionally) build tarball, scp to Pi, SSH and apply.
-# Fully interactive: prompts for host, build tarball, then post-deploy (seed / migrate:fresh --seed).
+# Fully interactive: prompts for host, build tarball, then choose migrate --force or migrate:fresh --seed --force.
 # Use when you're remote or want to streamline updates.
 #
 # Usage (from repo root):
@@ -89,42 +89,51 @@ if [ ! -f flexiqueue-deploy.tar.gz ]; then
   exit 1
 fi
 
-echo "Copying tarball to ${PI_USER}@${PI_HOST}..."
-scp flexiqueue-deploy.tar.gz "${PI_USER}@${PI_HOST}:/tmp/"
+# Reuse one SSH connection so we only ask for password once (ControlMaster)
+CONTROL="/tmp/fq-deploy-${PI_USER}-${PI_HOST}-$$"
+cleanup_ssh() { ssh -S "$CONTROL" -O exit "${PI_USER}@${PI_HOST}" 2>/dev/null || true; rm -f "$CONTROL"; }
+trap cleanup_ssh EXIT
 
-echo "Applying on Pi (extract, chown, storage + database writable, force SQLite env, migrate with schema repair, cache, storage:link)..."
-ssh "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && sudo tar -xzf /tmp/flexiqueue-deploy.tar.gz && sudo chown -R www-data:www-data . && sudo mkdir -p storage/app/public storage/framework/cache storage/framework/sessions storage/framework/views storage/logs && sudo chown -R www-data:www-data storage && sudo chown -R www-data:www-data database && sudo chmod 775 database && (test -f database/database.sqlite && sudo chmod 664 database/database.sqlite || true) && if test -f .env.prod && test ! -f .env; then sudo cp .env.prod .env && sudo chown www-data:www-data .env; fi && sudo sed -i "s/^DB_CONNECTION=.*/DB_CONNECTION=sqlite/" .env && sudo sed -i "s/^DB_DATABASE=.*/DB_DATABASE=database\/database.sqlite/" .env && (./scripts/pi/migrate-with-repair.sh || php artisan migrate --force) && php artisan config:cache && php artisan route:cache && php artisan storage:link'
+echo "Connecting to ${PI_USER}@${PI_HOST} (one password for all steps)..."
+ssh -M -S "$CONTROL" -o ControlPersist=120 "${PI_USER}@${PI_HOST}" true
+
+echo "Copying tarball to ${PI_USER}@${PI_HOST}..."
+scp -o ControlPath="$CONTROL" flexiqueue-deploy.tar.gz "${PI_USER}@${PI_HOST}:/tmp/"
+
+echo "Applying on Pi (extract, chown, storage + database writable, force SQLite env, cache, storage:link — no migrate yet)..."
+ssh -o ControlPath="$CONTROL" "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && sudo tar -xzf /tmp/flexiqueue-deploy.tar.gz && sudo rm -f database/migrations/2025_02_15_000013_create_print_settings_table.php && sudo chown -R www-data:www-data . && sudo mkdir -p storage/app/public storage/framework/cache storage/framework/sessions storage/framework/views storage/logs && sudo chown -R www-data:www-data storage && sudo chown -R www-data:www-data database && sudo chmod 775 database && (test -f database/database.sqlite && sudo chmod 664 database/database.sqlite || true) && if test -f .env.prod && test ! -f .env; then sudo cp .env.prod .env && sudo chown www-data:www-data .env; fi && sudo sed -i "s/^DB_CONNECTION=.*/DB_CONNECTION=sqlite/" .env && sudo sed -i "s/^DB_DATABASE=.*/DB_DATABASE=database\/database.sqlite/" .env && sudo -u www-data php artisan config:cache && sudo -u www-data php artisan route:cache && sudo -u www-data php artisan storage:link'
 
 # Optional: restart Reverb if running as systemd
-ssh "${PI_USER}@${PI_HOST}" 'sudo systemctl restart flexiqueue-reverb 2>/dev/null || true'
+ssh -o ControlPath="$CONTROL" "${PI_USER}@${PI_HOST}" 'sudo systemctl restart flexiqueue-reverb 2>/dev/null || true'
 
 echo ""
 echo "Done. App updated at ${PI_HOST}."
 echo ""
-echo "  Post-deploy (on Pi):"
-echo "    1) Nothing else"
-echo "    2) Run db:seed"
-echo "    3) Run migrate:fresh --seed (DROP all tables, then migrate + seed)"
+echo "  Database (choose one, both use --force):"
+echo "    1) migrate --force (incremental; keep existing data)"
+echo "    2) migrate:fresh --seed --force (start from scratch; DROP all tables, then migrate + seed)"
+echo "    3) Skip (do not run migrate)"
 read -r -p "  Choice [1-3] (default 1): " post_choice
+post_choice="$(echo "${post_choice:-1}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 post_choice="${post_choice:-1}"
 
 case "$post_choice" in
-  2)
-    echo "Running db:seed on Pi..."
-    ssh -t "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && php artisan db:seed'
+  1)
+    echo "Running migrate --force on Pi..."
+    ssh -t -o ControlPath="$CONTROL" "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && sudo -u www-data php artisan migrate --force'
     ;;
-  3)
+  2)
     echo "WARNING: migrate:fresh will DROP ALL TABLES and recreate the database."
     read -r -p "  Are you sure? Type 'yes' to continue: " confirm
     if [ "$confirm" = "yes" ]; then
-      echo "Running migrate:fresh --seed on Pi..."
-      ssh -t "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && php artisan migrate:fresh --seed --force'
+      echo "Running migrate:fresh --seed --force on Pi..."
+      ssh -t -o ControlPath="$CONTROL" "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && sudo -u www-data php artisan migrate:fresh --seed --force'
     else
       echo "Skipped migrate:fresh --seed."
     fi
     ;;
   *)
-    echo "No extra steps."
+    echo "Skipped migrate."
     ;;
 esac
 

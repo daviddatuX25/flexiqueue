@@ -43,7 +43,7 @@ sudo chmod +x /usr/local/bin/zerotier-when-idle
 
 ## Migrate with schema repair
 
-**File:** `migrate-with-repair.sh` — runs `php artisan migrate --force`, then verifies critical schema (e.g. `tokens.pronounce_as`). If an expected column is missing but the migration is marked as run (orphaned record), removes that migration record and re-runs migrate. Prevents "table X has no column named Y" errors. Called automatically by deploy-to-pi.sh and update-from-url.sh.
+**File:** `migrate-with-repair.sh` — runs `php artisan migrate --force`. Migrations are idempotent (create print_settings only if missing; add tokens.pronounce_as only if missing; ensure migration fixes orphan state). No runtime repair logic. Called automatically by deploy-to-pi.sh and update-from-url.sh.
 
 ---
 

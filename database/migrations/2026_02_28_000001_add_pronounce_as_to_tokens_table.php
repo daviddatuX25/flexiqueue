@@ -12,6 +12,9 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (! Schema::hasTable('tokens') || Schema::hasColumn('tokens', 'pronounce_as')) {
+            return;
+        }
         Schema::table('tokens', function (Blueprint $table) {
             $table->string('pronounce_as', 10)->nullable()->default('letters')->after('physical_id');
         });

@@ -31,10 +31,11 @@ curl -fsSL -o "$TARBALL" "$URL"
 echo "Extracting in $APP_DIR..."
 cd "$APP_DIR"
 sudo tar -xzf "$TARBALL"
+sudo rm -f database/migrations/2025_02_15_000013_create_print_settings_table.php
 sudo chown -R www-data:www-data .
 
 echo "Running migrate (with schema repair) and cache..."
-sudo -u www-data ./scripts/pi/migrate-with-repair.sh || sudo -u www-data php artisan migrate --force
+sudo -u www-data ./scripts/pi/migrate-with-repair.sh
 sudo -u www-data php artisan config:cache
 sudo -u www-data php artisan route:cache
 
