@@ -39,6 +39,9 @@
     const programLabel = $derived(
         programMode === "ongoing" ? "Ongoing program" : "Stand by",
     );
+    const programLabelShort = $derived(
+        programMode === "ongoing" ? "Ongoing" : "Standby",
+    );
     const connectionLabel = $derived(
         networkConnected ? "Connected" : "Offline",
     );
@@ -200,15 +203,15 @@
 </script>
 
 <footer
-    class="shrink-0 bg-surface-50 border-t border-surface-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-y-3 text-xs font-medium text-surface-600 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)] z-40 {fixed ? 'fixed bottom-0 left-0 right-0' : ''}"
+    class="shrink-0 bg-surface-50 border-t border-surface-200 px-3 sm:px-4 py-2.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-2 text-xs font-medium text-surface-600 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)] z-40 min-w-0 {fixed ? 'fixed bottom-0 left-0 right-0' : ''}"
     role="status"
     aria-live="polite"
 >
-    <div class="flex items-center gap-3">
+    <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 shrink overflow-hidden">
         <!-- Program + Connection status: compact but tappable -->
         <button
             type="button"
-            class="flex flex-col items-start justify-center gap-0.5 px-3 py-1.5 min-h-[44px] rounded-full border text-left transition-all duration-200 shadow-sm w-max
+            class="flex flex-col items-start justify-center gap-0.5 px-2 sm:px-3 py-1.5 min-h-[44px] rounded-full border text-left transition-all duration-200 shadow-sm shrink-0
                 {programMode === 'ongoing'
                     ? 'bg-success-50 text-success-800 border-success-200'
                     : 'bg-surface-100 text-surface-800 border-surface-200'}
@@ -217,8 +220,9 @@
             disabled={!isProgramClickable}
             aria-label="{programLabel} — {connectionLabel}"
         >
-            <span class="text-[0.72rem] font-semibold uppercase tracking-wide leading-tight whitespace-nowrap">
-                {programLabel}
+                    <span class="text-[0.65rem] sm:text-[0.72rem] font-semibold uppercase tracking-wide leading-tight whitespace-nowrap">
+                <span class="sm:hidden">{programLabelShort}</span>
+                <span class="hidden sm:inline">{programLabel}</span>
             </span>
             <span class="inline-flex items-center gap-1 text-[0.72rem] whitespace-nowrap {programMode === 'ongoing' ? 'text-success-800' : 'text-surface-600'}">
                 <span
@@ -251,7 +255,7 @@
                 {:else}
                     <button
                         type="button"
-                        class="flex items-center gap-1.5 rounded-full px-3 py-1.5 border transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed
+                        class="flex items-center gap-1 sm:gap-1.5 rounded-full px-2 sm:px-3 py-1.5 border transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed shrink-0
 						{availabilityStatus === 'available'
                             ? 'bg-success-50 text-success-700 border-success-200 hover:bg-success-100'
                             : ''}
@@ -336,7 +340,7 @@
         {/if}
     </div>
 
-    <div class="flex items-center gap-5">
+    <div class="flex items-center gap-2 sm:gap-5 shrink-0">
         <div
             class="flex items-center gap-1.5 text-surface-600 hidden sm:flex"
             title="Tokens in Queue"
@@ -359,7 +363,7 @@
             >
         </div>
         <div
-            class="flex items-center gap-1.5 px-3 py-1.5 bg-surface-100/50 rounded-full border border-surface-200 text-surface-700"
+            class="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 bg-surface-100/50 rounded-full border border-surface-200 text-surface-700 shrink-0"
             title="Current Time"
         >
             <Clock class="w-3.5 h-3.5" />

@@ -59,12 +59,23 @@ if [ "$BUILD" -eq 1 ]; then
     echo "Building tarball (host)..."
     ./scripts/build-deploy-tarball.sh
   elif [ "$USE_SAIL" -eq 1 ] || ! command -v php >/dev/null 2>&1; then
-    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    # Try docker version (lighter) first; docker info can hang on WSL
+    docker_ok=0
+    if command -v docker >/dev/null 2>&1; then
+      if docker version >/dev/null 2>&1; then
+        docker_ok=1
+      elif docker info >/dev/null 2>&1; then
+        docker_ok=1
+      fi
+    fi
+    if [ "$docker_ok" -eq 1 ]; then
       echo "Building tarball (Sail/Docker)..."
       ./scripts/build-deploy-tarball-sail.sh
     else
-      echo "ERROR: Host PHP not found and Docker is not running."
-      echo "  Options: 1) Start Docker and run: ./scripts/deploy-to-pi.sh --build --sail"
+      echo "ERROR: Host PHP not found and Docker is not reachable."
+      echo "  - Docker installed? $(command -v docker 2>/dev/null || echo 'No')"
+      echo "  - Docker reachable? $(docker version 2>&1 | head -3 || docker info 2>&1 | head -3)"
+      echo "  Options: 1) Start Docker Desktop (WSL) and run: ./scripts/deploy-to-pi.sh --build --sail"
       echo "           2) Install PHP in WSL: sudo apt install php php-cli php-mbstring php-xml php-curl php-zip unzip"
       exit 1
     fi
@@ -81,8 +92,8 @@ fi
 echo "Copying tarball to ${PI_USER}@${PI_HOST}..."
 scp flexiqueue-deploy.tar.gz "${PI_USER}@${PI_HOST}:/tmp/"
 
-echo "Applying on Pi (extract, chown, storage + database writable, force SQLite env, migrate, cache, storage:link)..."
-ssh "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && sudo tar -xzf /tmp/flexiqueue-deploy.tar.gz && sudo chown -R www-data:www-data . && sudo mkdir -p storage/app/public storage/framework/cache storage/framework/sessions storage/framework/views storage/logs && sudo chown -R www-data:www-data storage && sudo chown -R www-data:www-data database && sudo chmod 775 database && (test -f database/database.sqlite && sudo chmod 664 database/database.sqlite || true) && if test -f .env.prod && test ! -f .env; then sudo cp .env.prod .env && sudo chown www-data:www-data .env; fi && sudo sed -i "s/^DB_CONNECTION=.*/DB_CONNECTION=sqlite/" .env && sudo sed -i "s/^DB_DATABASE=.*/DB_DATABASE=database\/database.sqlite/" .env && php artisan migrate --force && php artisan config:cache && php artisan route:cache && php artisan storage:link'
+echo "Applying on Pi (extract, chown, storage + database writable, force SQLite env, migrate with schema repair, cache, storage:link)..."
+ssh "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && sudo tar -xzf /tmp/flexiqueue-deploy.tar.gz && sudo chown -R www-data:www-data . && sudo mkdir -p storage/app/public storage/framework/cache storage/framework/sessions storage/framework/views storage/logs && sudo chown -R www-data:www-data storage && sudo chown -R www-data:www-data database && sudo chmod 775 database && (test -f database/database.sqlite && sudo chmod 664 database/database.sqlite || true) && if test -f .env.prod && test ! -f .env; then sudo cp .env.prod .env && sudo chown www-data:www-data .env; fi && sudo sed -i "s/^DB_CONNECTION=.*/DB_CONNECTION=sqlite/" .env && sudo sed -i "s/^DB_DATABASE=.*/DB_DATABASE=database\/database.sqlite/" .env && (./scripts/pi/migrate-with-repair.sh || php artisan migrate --force) && php artisan config:cache && php artisan route:cache && php artisan storage:link'
 
 # Optional: restart Reverb if running as systemd
 ssh "${PI_USER}@${PI_HOST}" 'sudo systemctl restart flexiqueue-reverb 2>/dev/null || true'

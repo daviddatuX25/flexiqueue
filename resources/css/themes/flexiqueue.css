@@ -279,6 +279,20 @@
 	border-color: var(--color-primary-500);
 }
 
+/* Light mode: Quick Actions and similar — soft tonal surface (light bg, dark text), not high-contrast */
+[data-theme='flexiqueue']:not([data-mode='dark']) .preset-tonal-surface,
+[data-theme='flexiqueue']:not([data-mode='dark']) .btn.preset-tonal-surface {
+	background-color: var(--color-surface-200) !important;
+	color: var(--color-surface-950) !important;
+	border-color: var(--color-surface-300);
+}
+[data-theme='flexiqueue']:not([data-mode='dark']) .preset-tonal-surface:hover,
+[data-theme='flexiqueue']:not([data-mode='dark']) .btn.preset-tonal-surface:hover {
+	background-color: var(--color-surface-300) !important;
+	color: var(--color-surface-950) !important;
+	border-color: var(--color-surface-400);
+}
+
 /* Dark mode: soften inputs/selects/textareas — avoid stark white, use translucent */
 [data-theme='flexiqueue'][data-mode='dark'] .input,
 [data-theme='flexiqueue'][data-mode='dark'] .select,
@@ -324,6 +338,32 @@
 [data-theme='flexiqueue'][data-mode='dark'] .preset-tonal-surface:hover,
 [data-theme='flexiqueue'][data-mode='dark'] .btn.preset-tonal-surface:hover {
 	background-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Program diagram canvas — light mode: light background and grid (match app theme, not system) */
+[data-theme='flexiqueue']:not([data-mode='dark']) .svelte-flow,
+[data-theme='flexiqueue']:not([data-mode='dark']) .svelte-flow.dark {
+	--xy-background-color: #f1f5f9 !important;
+	--xy-background-color-default: #f1f5f9 !important;
+	--xy-background-pattern-dots-color-default: #94a3b8 !important;
+	--xy-background-pattern-lines-color-default: #cbd5e1 !important;
+	--xy-background-pattern-cross-color-default: #cbd5e1 !important;
+	--xy-controls-button-background-color-default: #f8fafc !important;
+	--xy-controls-button-background-color-hover-default: #e2e8f0 !important;
+	--xy-controls-button-color-default: #0f172a !important;
+	--xy-controls-button-border-color-default: #e2e8f0 !important;
+}
+[data-theme='flexiqueue']:not([data-mode='dark']) .svelte-flow .svelte-flow__panel .btn.preset-tonal {
+	color: var(--color-surface-950) !important;
+	background-color: var(--color-surface-200);
+	border-color: var(--color-surface-300);
+}
+
+/* Program diagram canvas — dark mode: keep xyflow dark styling when app is dark */
+[data-theme='flexiqueue'][data-mode='dark'] .svelte-flow {
+	--xy-background-color: #141414 !important;
+	--xy-background-color-default: #141414 !important;
+	--xy-background-pattern-dots-color-default: #777 !important;
 }
 
 /* Program status banner (Program is Live) — dark mode: darker bg + darker buttons + readable text */

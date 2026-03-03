@@ -38,7 +38,7 @@
 	onkeydown={(e) => e.key === 'Escape' && handleClose()}
 >
 	<div
-		class="card bg-surface-50 rounded-container elevation-modal p-6 relative max-h-[90vh] overflow-y-auto {wide ? 'min-w-[36rem] max-w-2xl w-full' : ''}"
+		class="card bg-surface-50 rounded-container elevation-modal p-4 sm:p-6 relative max-h-[85dvh] sm:max-h-[90vh] overflow-y-auto w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] sm:max-w-2xl mx-auto {wide ? 'min-w-0 sm:min-w-[36rem] sm:w-full' : ''}"
 		role="document"
 		aria-label={title || 'Dialog'}
 		onclick={(e) => e.stopPropagation()}

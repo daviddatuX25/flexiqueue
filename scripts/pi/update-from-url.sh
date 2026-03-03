@@ -33,8 +33,8 @@ cd "$APP_DIR"
 sudo tar -xzf "$TARBALL"
 sudo chown -R www-data:www-data .
 
-echo "Running migrate and cache..."
-sudo -u www-data php artisan migrate --force
+echo "Running migrate (with schema repair) and cache..."
+sudo -u www-data ./scripts/pi/migrate-with-repair.sh || sudo -u www-data php artisan migrate --force
 sudo -u www-data php artisan config:cache
 sudo -u www-data php artisan route:cache
 

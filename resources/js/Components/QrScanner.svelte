@@ -95,7 +95,10 @@
 		return list ?? [];
 	}
 
-	async function startCamera(cameraIdOrConfig: string | { facingMode: string }) {
+	async function startCamera(
+		cameraIdOrConfig: string | { facingMode: string },
+		configOverride?: { videoConstraints?: MediaTrackConstraints }
+	) {
 		await stopScanner();
 		if (!document.getElementById(containerId)) return;
 		const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
@@ -110,9 +113,12 @@
 			],
 		};
 		html5Qrcode = new Html5Qrcode(containerId, scannerConfig);
+		const scanConfig = configOverride
+			? { ...SCAN_CONFIG, ...configOverride }
+			: SCAN_CONFIG;
 		await html5Qrcode.start(
 			cameraIdOrConfig,
-			SCAN_CONFIG,
+			scanConfig,
 			(decodedText) => handleScanSuccess(decodedText),
 			() => {}
 		);
@@ -132,6 +138,9 @@
 			html5Qrcode = null;
 		}
 	}
+
+	/** Fallback: no constraints — maximal compatibility when facingMode fails (per html5-qrcode#164). */
+	const VIDEO_ANY = { videoConstraints: {} } as const;
 
 	/**
 	 * On Android (and some mobile browsers), getCameras() returns [] until camera permission is granted.
@@ -162,7 +171,19 @@
 				}
 				return true;
 			} catch {
-				return false;
+				try {
+					// Maximal compatibility: no facingMode constraint (some devices reject both).
+					await startCamera('fallback', VIDEO_ANY);
+					mode = 'camera';
+					const list = await loadCameras();
+					if (list.length > 0) {
+						cameras = list;
+						selectedCameraId = list[0]?.id ?? null;
+					}
+					return true;
+				} catch {
+					return false;
+				}
 			}
 		}
 	}
@@ -189,6 +210,8 @@
 				typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) ?? '' : '';
 			const idInList = savedId && list.some((c) => c.id === savedId);
 			selectedCameraId = idInList ? savedId : (pickPreferredCamera(list) || list[0]?.id) ?? null;
+			// Allow camera release on mobile (getCameras acquires then releases; slow devices need time).
+			await new Promise((r) => setTimeout(r, 250));
 			await startCamera(selectedCameraId);
 			if (selectedCameraId && typeof localStorage !== 'undefined') {
 				localStorage.setItem(STORAGE_KEY, selectedCameraId);
@@ -200,6 +223,15 @@
 				errorMessage = 'Camera access was denied. Enable it in browser settings or use file scan.';
 			} else if (e?.name === 'NotFoundError' || e?.message?.toLowerCase().includes('not found')) {
 				errorMessage = 'No camera found.';
+			} else if (
+				e?.name === 'NotReadableError' ||
+				e?.message?.toLowerCase().includes('could not start') ||
+				e?.message?.toLowerCase().includes('in use')
+			) {
+				errorMessage =
+					'Camera is in use elsewhere. Close other apps using the camera and try again.';
+			} else if (e?.name === 'OverconstrainedError') {
+				errorMessage = 'Camera constraints not supported. Try a different camera or file scan.';
 			} else {
 				errorMessage = e?.message ?? 'Could not access camera.';
 			}
@@ -222,7 +254,15 @@
 				barcodeInputEl?.focus();
 			}
 		} catch (err) {
-			errorMessage = (err as Error)?.message ?? 'Could not switch camera.';
+			const e = err as { name?: string; message?: string };
+			if (e?.name === 'NotReadableError' || e?.message?.toLowerCase().includes('in use')) {
+				errorMessage =
+					'Camera is in use elsewhere. Close other apps and try again.';
+			} else if (e?.name === 'OverconstrainedError') {
+				errorMessage = 'Camera constraints not supported. Try a different camera.';
+			} else {
+				errorMessage = e?.message ?? 'Could not switch camera.';
+			}
 		}
 	}
 

@@ -4,7 +4,7 @@
 
 **Full deployment runbook** (first-time install, SQLite for prod to save RAM, Nginx, verify): see [docs/architecture/10-DEPLOYMENT.md](../../docs/architecture/10-DEPLOYMENT.md). Use SQLite on Orange Pi One to avoid running MariaDB and save memory.
 
-The deploy tarball **includes this folder** (`scripts/pi/`): Reverb systemd unit, zerotier-when-idle, nginx config, update-from-url. After a full deploy they live at `/var/www/flexiqueue/scripts/pi/` on the Pi.
+The deploy tarball **includes this folder** (`scripts/pi/`): Reverb systemd unit, zerotier-when-idle, nginx config, update-from-url, migrate-with-repair. After a full deploy they live at `/var/www/flexiqueue/scripts/pi/` on the Pi.
 
 ---
 
@@ -38,6 +38,12 @@ sudo chmod +x /usr/local/bin/zerotier-when-idle
 # sudo ln -sf /etc/nginx/sites-available/flexiqueue /etc/nginx/sites-enabled/
 # sudo nginx -t && sudo systemctl reload nginx
 ```
+
+---
+
+## Migrate with schema repair
+
+**File:** `migrate-with-repair.sh` — runs `php artisan migrate --force`, then verifies critical schema (e.g. `tokens.pronounce_as`). If an expected column is missing but the migration is marked as run (orphaned record), removes that migration record and re-runs migrate. Prevents "table X has no column named Y" errors. Called automatically by deploy-to-pi.sh and update-from-url.sh.
 
 ---
 
@@ -104,3 +110,10 @@ sudo ln -sf /etc/nginx/sites-available/flexiqueue /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+### Camera (QR scanner) on mobile
+
+The device camera requires a **secure context** (HTTPS or localhost). If you access the app over HTTP (e.g. `http://192.168.1.x` or `http://armbian.local`), the browser will deny camera access on mobile. For mobile QR scanning, either:
+
+- Use **HTTPS** (e.g. Let's Encrypt) when accessing from phones
+- Or use a hostname that resolves to localhost (e.g. `localhost` on the same device)

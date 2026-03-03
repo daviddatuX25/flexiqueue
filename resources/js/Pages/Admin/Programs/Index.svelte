@@ -254,23 +254,23 @@
 
 <AdminLayout>
     <div class="flex flex-col gap-6">
-        <div class="flex flex-wrap items-center justify-between gap-4">
+        <div class="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div>
                 <h1 class="text-2xl font-bold text-surface-950">Programs</h1>
                 <p class="text-sm text-surface-600 mt-1">
                     Manage your active queue sessions and programs.
                 </p>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
                 <Link
                     href="/admin/program-default-settings"
-                    class="btn preset-tonal flex items-center gap-2"
+                    class="btn preset-tonal flex items-center gap-2 w-full sm:w-auto justify-center"
                 >
                     Default program settings
                 </Link>
                 <button
                     type="button"
-                    class="btn preset-filled-primary-500 flex items-center gap-2"
+                    class="btn preset-filled-primary-500 flex items-center gap-2 w-full sm:w-auto justify-center order-last sm:order-none"
                     onclick={openCreate}
                 >
                     <Plus class="w-4 h-4" />

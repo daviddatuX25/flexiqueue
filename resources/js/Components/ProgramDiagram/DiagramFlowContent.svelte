@@ -121,6 +121,20 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 	const { set: setViewport } = useViewport();
 	const svelteFlow = useSvelteFlow();
 
+	/** Sync with app theme (data-mode) so diagram canvas is light in light mode, dark in dark mode. */
+	let flowColorMode = $state<'light' | 'dark'>('light');
+	$effect(() => {
+		if (typeof document === 'undefined') return;
+		const root = document.documentElement;
+		const getMode = () => (root.getAttribute('data-mode') === 'dark' ? 'dark' : 'light');
+		flowColorMode = getMode();
+		const observer = new MutationObserver(() => {
+			flowColorMode = getMode();
+		});
+		observer.observe(root, { attributes: true, attributeFilter: ['data-mode'] });
+		return () => observer.disconnect();
+	});
+
 	let saving = $state(false);
 	let saveStatus = $state<'idle' | 'saving' | 'saved' | 'error'>('idle');
 	let saveStatusTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -910,6 +924,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 <SvelteFlow
 	bind:nodes={ownNodes}
 	bind:edges={ownEdges}
+	colorMode={flowColorMode}
 	ondrop={handleDrop}
 	ondragover={handleDragOver}
 	deleteKey={['Backspace', 'Delete']}
@@ -942,7 +957,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 	zoomOnDoubleClick={false}
 	class="min-h-[360px] w-full"
 >
-	<Background />
+	<Background bgColor={flowColorMode === 'light' ? '#f1f5f9' : undefined} patternColor={flowColorMode === 'light' ? '#94a3b8' : undefined} />
 	<Controls />
 	{#if !readOnly}
 		<Panel position="bottom-center" class="pointer-events-none">
@@ -1135,6 +1150,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 				<SvelteFlow
 					bind:nodes={ownNodes}
 					bind:edges={ownEdges}
+					colorMode={flowColorMode}
 					ondrop={handleDrop}
 					ondragover={handleDragOver}
 					deleteKey={['Backspace', 'Delete']}
@@ -1162,7 +1178,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 					zoomOnDoubleClick={false}
 					class="w-full h-full"
 				>
-					<Background />
+					<Background bgColor={flowColorMode === 'light' ? '#f1f5f9' : undefined} patternColor={flowColorMode === 'light' ? '#94a3b8' : undefined} />
 					<Controls />
 					{#if !readOnly}
 						<Panel position="bottom-center" class="pointer-events-none">
