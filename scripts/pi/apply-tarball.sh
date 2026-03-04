@@ -46,8 +46,9 @@ sudo mkdir -p "$APP_DIR/storage/app/public" "$APP_DIR/storage/framework/cache" "
 sudo chown -R www-data:www-data "$APP_DIR/storage" "$APP_DIR/database"
 test -f "$APP_DIR/database/database.sqlite" && sudo chmod 664 "$APP_DIR/database/database.sqlite" || true
 
-if [ -f "$APP_DIR/.env.prod" ] && [ ! -f "$APP_DIR/.env" ]; then
-  echo "Creating .env from .env.prod..."
+# Always set .env from tarball's .env.prod so BROADCAST_CONNECTION and REVERB_* are correct (avoids 747972 / stale keys).
+if [ -f "$APP_DIR/.env.prod" ]; then
+  echo "Setting .env from .env.prod..."
   sudo cp "$APP_DIR/.env.prod" "$APP_DIR/.env"
   sudo chown www-data:www-data "$APP_DIR/.env"
 fi
