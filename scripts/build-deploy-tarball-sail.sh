@@ -33,14 +33,32 @@ else
   exit 1
 fi
 
-uid="$(id -u)"
-gid="$(id -g)"
+# Sail entrypoint expects WWWUSER/WWWGROUP (creates /.composer, then gosu $WWWUSER).
+# Without these, entrypoint fails: "mkdir: cannot create directory '/.composer': Permission denied"
+# and "failed switching to 'bash': no matching entries in passwd file".
+export WWWUSER="${WWWUSER:-$(id -u)}"
+export WWWGROUP="${WWWGROUP:-$(id -g)}"
+
+# Load Reverb keys so Vite inlines them (Echo/Pusher need VITE_REVERB_APP_KEY). .env.prod first (defaults), then .env (overrides).
+[ -f "$MAIN_REPO_ROOT/.env.prod" ] && set -a && source "$MAIN_REPO_ROOT/.env.prod" 2>/dev/null && set +a
+[ -f "$MAIN_REPO_ROOT/.env" ] && set -a && source "$MAIN_REPO_ROOT/.env" 2>/dev/null && set +a
+export VITE_REVERB_APP_KEY="${REVERB_APP_KEY:-flexiqueue-app-key}"
+export VITE_REVERB_HOST="${REVERB_HOST:-localhost}"
+export VITE_REVERB_PORT="${REVERB_PORT:-6001}"
+export VITE_REVERB_SCHEME="${REVERB_SCHEME:-http}"
+export VITE_REVERB_VIA_PROXY="${VITE_REVERB_VIA_PROXY:-true}"
 
 echo "Building inside container (prod worktree at $PROD_WORKTREE)..."
 (cd "$MAIN_REPO_ROOT" && $COMPOSE_CMD run --rm \
+  -e WWWUSER \
+  -e WWWGROUP \
+  -e VITE_REVERB_APP_KEY \
+  -e VITE_REVERB_HOST \
+  -e VITE_REVERB_PORT \
+  -e VITE_REVERB_SCHEME \
+  -e VITE_REVERB_VIA_PROXY \
   -v "$PROD_WORKTREE:/var/www/html" \
   -w /var/www/html \
-  -u "${uid}:${gid}" \
   laravel.test bash -c '
   set -e
   cd /var/www/html

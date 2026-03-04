@@ -31,13 +31,20 @@ const wsPort = viaProxy
     ? (isBrowser && window.location.port ? window.location.port : (forceTLS ? '443' : '80'))
     : envPort;
 
-window.Echo = new Echo({
-    broadcaster: 'reverb',
-    key: import.meta.env.VITE_REVERB_APP_KEY,
-    wsHost: viaProxy ? pageHost : envHost,
-    wsPort,
-    wssPort: wsPort,
-    forceTLS,
-    enabledTransports: ['ws', 'wss'],
-    disableStats: true,
-});
+// Pusher requires a non-empty key. If missing (e.g. Pi .env without REVERB_APP_KEY at build time), skip Echo
+// so pages that guard with "if (!window.Echo) return" still work; set REVERB_APP_KEY + VITE_REVERB_APP_KEY for real-time.
+const appKey = import.meta.env.VITE_REVERB_APP_KEY;
+if (appKey && String(appKey).trim() !== '') {
+    window.Echo = new Echo({
+        broadcaster: 'reverb',
+        key: appKey,
+        wsHost: viaProxy ? pageHost : envHost,
+        wsPort,
+        wssPort: wsPort,
+        forceTLS,
+        enabledTransports: ['ws', 'wss'],
+        disableStats: true,
+    });
+} else {
+    window.Echo = null;
+}

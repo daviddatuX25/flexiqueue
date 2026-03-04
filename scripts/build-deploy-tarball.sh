@@ -28,6 +28,15 @@ ensure_prod_branch "[FlexiQueue]"
 ensure_prod_worktree_temporary
 trap cleanup_prod_worktree_temporary EXIT
 
+# Load Reverb keys so Vite inlines them (Echo needs VITE_REVERB_APP_KEY). .env.prod first (defaults), then .env (overrides).
+[ -f "$REPO_ROOT/.env.prod" ] && set -a && source "$REPO_ROOT/.env.prod" 2>/dev/null && set +a
+[ -f "$REPO_ROOT/.env" ] && set -a && source "$REPO_ROOT/.env" 2>/dev/null && set +a
+export VITE_REVERB_APP_KEY="${REVERB_APP_KEY:-flexiqueue-app-key}"
+export VITE_REVERB_HOST="${REVERB_HOST:-localhost}"
+export VITE_REVERB_PORT="${REVERB_PORT:-6001}"
+export VITE_REVERB_SCHEME="${REVERB_SCHEME:-http}"
+export VITE_REVERB_VIA_PROXY="${VITE_REVERB_VIA_PROXY:-true}"
+
 echo "Building in prod worktree at $PROD_WORKTREE..."
 cd "$PROD_WORKTREE"
 

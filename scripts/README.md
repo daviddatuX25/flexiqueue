@@ -76,6 +76,8 @@ Helper scripts for local development, building, and deploying to Orange Pi or La
 
 **After a build-only run:** If your current branch is not prod, you will see a message suggesting you switch to prod (`git checkout prod`) and run `deploy-to-pi.sh` or `deploy-to-laragon.sh`, or use `deploy-via-prod-to-pi.sh` / `deploy-to-laragon.sh` from your current branch (they merge into prod and deploy). When the build is run from inside a deploy script, this message is not shown.
 
+**Reverb (WebSocket) keys for one-go build:** The frontend needs `VITE_REVERB_APP_KEY` at build time so Echo/Pusher works on the Display. Both build scripts load `.env.prod` then `.env` (so your `.env` overrides) and pass the Reverb vars into the build. Defaults in `.env.prod` and `.env.example` (`REVERB_APP_ID=flexiqueue`, `REVERB_APP_KEY=flexiqueue-app-key`, etc.) mean a single build + deploy works without running `php artisan reverb:install`. Change those in `.env.prod` (and rebuild) if you want production to use different keys.
+
 ---
 
 ## 3. Deploy from PC

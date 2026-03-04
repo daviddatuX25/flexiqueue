@@ -102,6 +102,7 @@ class SessionService
                 'staff_user_id' => $staffUserId, // null for public self-serve
                 'action_type' => 'bind',
                 'next_station_id' => $firstStationId,
+                'created_at' => now(),
             ]);
 
             event(new ClientArrived($session->fresh(['currentStation', 'serviceTrack']), $firstStationId));
@@ -164,6 +165,7 @@ class SessionService
             'station_id' => $session->current_station_id,
             'staff_user_id' => $staffUserId,
             'action_type' => 'call',
+            'created_at' => now(),
         ]);
 
         $session = $session->fresh(['serviceTrack', 'currentStation', 'token']);
@@ -212,6 +214,7 @@ class SessionService
             'station_id' => $session->current_station_id,
             'staff_user_id' => $staffUserId,
             'action_type' => 'check_in',
+            'created_at' => now(),
         ]);
 
         $session = $session->fresh(['currentStation', 'serviceTrack', 'token']);
@@ -294,6 +297,7 @@ class SessionService
                 'action_type' => 'transfer',
                 'previous_station_id' => $previousStationId,
                 'next_station_id' => $targetStationId,
+                'created_at' => now(),
             ]);
 
             $session = $session->fresh(['currentStation', 'serviceTrack', 'token']);
@@ -379,6 +383,7 @@ class SessionService
                 'staff_user_id' => $staffUserId,
                 'action_type' => 'no_show',
                 'metadata' => ['back_to_waiting' => true, 'attempt' => $session->no_show_attempts],
+                'created_at' => now(),
             ]);
 
             $session = $session->fresh(['currentStation', 'serviceTrack']);
@@ -461,6 +466,7 @@ class SessionService
                 'next_station_id' => $targetStationId,
                 'remarks' => $reason,
                 'metadata' => ['supervisor_id' => $supervisorUserId],
+                'created_at' => now(),
             ]);
 
             $session = $session->fresh(['currentStation', 'serviceTrack']);
@@ -509,6 +515,7 @@ class SessionService
                 'station_id' => $stationId,
                 'staff_user_id' => $staffUserId,
                 'action_type' => $actionType,
+                'created_at' => now(),
             ], $remarks ? ['remarks' => $remarks] : [], $metadata ? ['metadata' => $metadata] : []));
 
             $session = $session->fresh();
@@ -603,6 +610,7 @@ class SessionService
                 'next_station_id' => $targetStationId,
                 'remarks' => $reason,
                 'metadata' => ['supervisor_id' => $supervisorUserId],
+                'created_at' => now(),
             ]);
 
             $session = $session->fresh(['currentStation', 'serviceTrack']);
@@ -712,6 +720,7 @@ class SessionService
                     'next_station_id' => $firstStationId,
                     'remarks' => $reason,
                     'metadata' => ['supervisor_id' => $supervisorUserId],
+                    'created_at' => now(),
                 ]);
             }
 
