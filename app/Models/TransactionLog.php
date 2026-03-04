@@ -22,7 +22,20 @@ class TransactionLog extends Model
         'next_station_id',
         'remarks',
         'metadata',
+        'created_at',
     ];
+
+    /**
+     * Set created_at on create (table has NOT NULL; we do not use updated_at).
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (TransactionLog $log): void {
+            if (empty($log->created_at)) {
+                $log->created_at = now();
+            }
+        });
+    }
 
     protected function casts(): array
     {

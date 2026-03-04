@@ -22,6 +22,11 @@
         text: string;
     } | null>(null);
 
+    /** Digits only, max 6 — avoids browser "Please match the requested format" on pattern. */
+    function sanitizePin(value: string): string {
+        return value.replace(/\D/g, "").slice(0, 6);
+    }
+
     // Override PIN form
     let currentPassword = $state("");
     let newPin = $state("");
@@ -132,6 +137,11 @@
     async function submitPin(e: Event) {
         e.preventDefault();
         pinMessage = null;
+        const pin = sanitizePin(newPin);
+        if (pin.length !== 6) {
+            pinMessage = { type: "error", text: "Enter a 6-digit PIN." };
+            return;
+        }
         pinSubmitting = true;
         try {
             const r = await fetch("/api/profile/override-pin", {
@@ -144,7 +154,7 @@
                 credentials: "include",
                 body: JSON.stringify({
                     current_password: currentPassword,
-                    new_pin: newPin,
+                    new_pin: pin,
                 }),
             });
             const data = await r.json().catch(() => ({}));
@@ -408,10 +418,10 @@
                             id="new_pin"
                             type="password"
                             inputmode="numeric"
-                            pattern="[0-9]{6}"
                             maxlength="6"
                             class="input rounded-container border border-surface-200 px-3 py-2 w-full"
                             bind:value={newPin}
+                            oninput={(e) => { newPin = sanitizePin(e.currentTarget.value); }}
                             required
                             placeholder="000000"
                             autocomplete="off"

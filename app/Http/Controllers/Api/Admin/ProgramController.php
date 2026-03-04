@@ -83,8 +83,14 @@ class ProgramController extends Controller
         $program->update($validated);
 
         $program = $program->fresh();
-        if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('display_tts_voice', $settings))) {
-            event(new DisplaySettingsUpdated($program->getDisplayAudioMuted(), $program->getDisplayAudioVolume(), $program->getDisplayTtsVoice()));
+        if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('display_tts_voice', $settings) || array_key_exists('enable_display_hid_barcode', $settings) || array_key_exists('enable_public_triage_hid_barcode', $settings))) {
+            event(new DisplaySettingsUpdated(
+                $program->getDisplayAudioMuted(),
+                $program->getDisplayAudioVolume(),
+                $program->getDisplayTtsVoice(),
+                $program->getEnableDisplayHidBarcode(),
+                $program->getEnablePublicTriageHidBarcode()
+            ));
         }
 
         return response()->json(['program' => $this->programResource($program)]);

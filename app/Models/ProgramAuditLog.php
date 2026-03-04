@@ -19,7 +19,20 @@ class ProgramAuditLog extends Model
         'program_id',
         'staff_user_id',
         'action',
+        'created_at',
     ];
+
+    /**
+     * Set created_at on create (table has NOT NULL / useCurrent; ensure set on SQLite).
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (ProgramAuditLog $log): void {
+            if (empty($log->created_at)) {
+                $log->created_at = now();
+            }
+        });
+    }
 
     protected function casts(): array
     {

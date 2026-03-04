@@ -9,8 +9,8 @@ use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Per plan: broadcast display audio settings to display.activity so the general display board
- * can update mute/volume in real time when admin changes them in Program Settings.
+ * Per plan: broadcast display audio and HID settings to display.activity so the general display board
+ * and public triage can update in real time when admin or PIN-verified user changes them.
  */
 class DisplaySettingsUpdated implements ShouldBroadcastNow
 {
@@ -19,7 +19,9 @@ class DisplaySettingsUpdated implements ShouldBroadcastNow
     public function __construct(
         public bool $displayAudioMuted,
         public float $displayAudioVolume,
-        public ?string $displayTtsVoice = null
+        public ?string $displayTtsVoice = null,
+        public bool $enableDisplayHidBarcode = true,
+        public bool $enablePublicTriageHidBarcode = true
     ) {}
 
     /**
@@ -46,6 +48,8 @@ class DisplaySettingsUpdated implements ShouldBroadcastNow
             'display_audio_muted' => $this->displayAudioMuted,
             'display_audio_volume' => $this->displayAudioVolume,
             'display_tts_voice' => $this->displayTtsVoice,
+            'enable_display_hid_barcode' => $this->enableDisplayHidBarcode,
+            'enable_public_triage_hid_barcode' => $this->enablePublicTriageHidBarcode,
         ];
     }
 }

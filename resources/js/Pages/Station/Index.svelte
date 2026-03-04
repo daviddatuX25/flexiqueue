@@ -1070,7 +1070,7 @@
 				{:else if authType === 'pin'}
 					<div class="form-control w-full mt-2">
 						<label class="label"><span class="label-text">Enter 6-digit code from supervisor</span></label>
-						<input type="text" inputmode="numeric" pattern="[0-9]*" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} />
+						<input type="text" inputmode="numeric" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} oninput={(e) => { tempCodeEntered = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }} />
 					</div>
 				{:else if authType === 'qr'}
 					<div class="form-control w-full mt-2">
@@ -1149,7 +1149,7 @@
 				{:else if authType === 'pin'}
 					<div class="form-control w-full mt-2">
 						<label class="label"><span class="label-text">Enter 6-digit code from supervisor</span></label>
-						<input type="text" inputmode="numeric" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} />
+						<input type="text" inputmode="numeric" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} oninput={(e) => { tempCodeEntered = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }} />
 					</div>
 				{:else if authType === 'qr'}
 					<div class="form-control w-full mt-2">
@@ -1194,7 +1194,7 @@
 				{#if authType === 'pin'}
 					<div class="form-control w-full mt-2">
 						<label class="label"><span class="label-text">Enter 6-digit code from supervisor</span></label>
-						<input type="text" inputmode="numeric" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} />
+						<input type="text" inputmode="numeric" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} oninput={(e) => { tempCodeEntered = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }} />
 					</div>
 				{:else if authType === 'qr'}
 					<div class="form-control w-full mt-2">

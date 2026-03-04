@@ -97,6 +97,7 @@ class DisplayController extends Controller
         $inertiaProps['display_scan_timeout_seconds'] = $program ? $program->getDisplayScanTimeoutSeconds() : 20;
         $inertiaProps['program_name'] = $program?->name;
         $inertiaProps['date'] = now()->format('F j, Y');
+        $inertiaProps['enable_display_hid_barcode'] = $program ? $program->getEnableDisplayHidBarcode() : true;
 
         if ($data['result'] === 'in_use' && ! empty($data['program_id']) && ! empty($data['track_id'])) {
             $this->addDiagramProps($inertiaProps, (int) $data['program_id'], (int) $data['track_id']);

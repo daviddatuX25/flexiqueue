@@ -97,6 +97,11 @@
         };
     }
 
+    /** Keep override PIN to digits only, max 6 (avoids browser "Please match the requested format"). */
+    function sanitizeOverridePin(value: string): string {
+        return value.replace(/\D/g, "").slice(0, 6);
+    }
+
     function openCreate() {
         createName = "";
         createEmail = "";
@@ -607,10 +612,11 @@
                 type="text"
                 class="input rounded-container border border-surface-200 px-3 py-2 w-full max-w-xs bg-surface-50 shadow-sm text-center"
                 bind:value={createOverridePin}
+                oninput={(e) => { createOverridePin = sanitizeOverridePin(e.currentTarget.value); }}
                 placeholder="e.g. 123456"
                 maxlength="6"
                 inputmode="numeric"
-                pattern="[0-9]*"
+                autocomplete="one-time-code"
             />
             <span class="label-text-alt mt-1"
                 >Required when assigning as program supervisor. Set now so the
@@ -711,10 +717,11 @@
                     type="text"
                     class="input rounded-container border border-surface-200 px-3 py-2 w-full max-w-xs bg-surface-50 shadow-sm text-center"
                     bind:value={editOverridePin}
+                    oninput={(e) => { editOverridePin = sanitizeOverridePin(e.currentTarget.value); }}
                     placeholder="Leave blank to keep or clear"
                     maxlength="6"
                     inputmode="numeric"
-                    pattern="[0-9]*"
+                    autocomplete="one-time-code"
                 />
                 <span class="label-text-alt mt-1"
                     >Required for program supervisors. Set so the user can be

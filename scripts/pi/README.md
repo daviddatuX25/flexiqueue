@@ -6,6 +6,79 @@
 
 The deploy tarball **includes this folder** (`scripts/pi/`): Reverb systemd unit, zerotier-when-idle, nginx config, update-from-url, migrate-with-repair. After a full deploy they live at `/var/www/flexiqueue/scripts/pi/` on the Pi.
 
+Overview of all scripts (dev + Pi): [scripts/README.md](../README.md).
+
+---
+
+## Files in this folder
+
+| File | Purpose |
+|------|--------|
+| `full-setup-pi.sh` | Run **once** on the Pi: install PHP, Nginx, SQLite, app dir, nginx site, Reverb service. Optional `--hostname=...`. Then deploy from PC. |
+| `apply-tarball.sh` | Run on the Pi after tarball is at e.g. `/tmp/flexiqueue-deploy.tar.gz`: extract, cache, migrate (incremental, fresh, or skip), restart Reverb. Used by deploy-to-pi.sh via SSH; can be run manually. |
+| `migrate-with-repair.sh` | Run `php artisan migrate --force` on the Pi (idempotent migrations). |
+| `update-from-url.sh` | On Pi: download tarball from URL and apply. |
+| `flexiqueue-reverb.service` | systemd unit for Laravel Reverb (WebSocket). |
+| `zerotier-when-idle.sh` | Cron helper to start/stop ZeroTier when idle. |
+| `nginx-flexiqueue.conf` | Nginx site config for FlexiQueue. |
+
+---
+
+## Full setup (first-time on Pi)
+
+Prepare the Pi system once (PHP, Nginx, SQLite, app dir, nginx site, Reverb). Then deploy the app from your PC.
+
+1. Copy this folder to the Pi (or extract the deploy tarball into `/var/www/flexiqueue`).
+2. On the Pi: `sudo ./scripts/pi/full-setup-pi.sh` (optionally `--hostname=orangepione` for mDNS).
+3. From your PC: `PI_HOST=orangepione.local ./scripts/deploy-to-pi.sh --build` (or use the Pi IP).
+
+---
+
+## Apply tarball (update / rebuild)
+
+After the tarball is on the Pi (e.g. scp by deploy-to-pi.sh to `/tmp/flexiqueue-deploy.tar.gz`), apply it with:
+
+```bash
+sudo ./scripts/pi/apply-tarball.sh /tmp/flexiqueue-deploy.tar.gz [--migrate=incremental|fresh|skip]
+```
+
+- **incremental** (default): `migrate --force` — keep existing data.
+- **fresh**: `migrate:fresh --seed --force` — drop all tables and reseed.
+- **skip**: do not run migrations.
+
+`deploy-to-pi.sh` runs this script via SSH with the chosen migrate option (interactive prompt or `DEPLOY_MIGRATE` / `--migrate`).
+
+---
+
+## Common tasks on Pi
+
+Run on the Pi (as root or with sudo as shown):
+
+```bash
+cd /var/www/flexiqueue
+
+# Apply migrations (SQLite)
+sudo -u www-data php artisan migrate --force
+
+# Refresh caches
+sudo -u www-data php artisan config:cache
+sudo -u www-data php artisan route:cache
+sudo -u www-data php artisan view:cache
+
+# Restart Reverb (WebSocket) if installed
+sudo systemctl restart flexiqueue-reverb
+```
+
+### WebSocket (Reverb) networking model on the Pi
+
+- **Reverb listens on**: `127.0.0.1:6001` (or `0.0.0.0:6001` as the service bind), managed by `flexiqueue-reverb.service`.
+- **Browsers should connect to**: the **Nginx site** on port **80/443**, path `/app` (example: `ws://orangepione.local/app/...`).
+- **Nginx proxies**: `/app` → `http://127.0.0.1:6001`.
+
+If a browser connects directly to `ws://orangepione.local:6001/app/...` and port `6001` is blocked by firewall / network policy, you’ll see errors like “WebSocket is closed before the connection is established”. Using the Nginx proxy avoids this.
+
+Full deployment and first-time setup: [docs/architecture/10-DEPLOYMENT.md](../../docs/architecture/10-DEPLOYMENT.md).
+
 ---
 
 ## Copy scripts to Pi without full deploy

@@ -9,7 +9,14 @@
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
 	import Modal from '../../Components/Modal.svelte';
 	import QrScanner from '../../Components/QrScanner.svelte';
-	import { Camera } from 'lucide-svelte';
+	import { onMount } from 'svelte';
+	import { Camera, Settings } from 'lucide-svelte';
+	import {
+		shouldFocusHidInput,
+		shouldUseInputModeNone,
+		getLocalAllowHidOnThisDevice,
+		setLocalAllowHidOnThisDevice,
+	} from '../../lib/displayHid.js';
 
 	interface Track {
 		id: number;
@@ -74,6 +81,19 @@
 	let bindSuccess = $state(false);
 	let scanCountdown = $state(0);
 	let scanCountdownIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
+	/** Program HID setting — from props and .display_settings broadcast. */
+	let enablePublicTriageHidBarcode = $state(true);
+	/** Settings modal. */
+	let showTriageSettingsModal = $state(false);
+	let triageSettingsPin = $state('');
+	let triageSettingsError = $state('');
+	let triageSettingsSaving = $state(false);
+	let triageSettingsProgramHid = $state(true);
+	let triageSettingsLocalAllowHid = $state(false);
+
+	$effect(() => {
+		enablePublicTriageHidBarcode = enable_public_triage_hid_barcode !== false;
+	});
 
 	function setDefaultTrack() {
 		if (tracks?.length) {
@@ -112,16 +132,80 @@
 		};
 	});
 
-	/** Refocus hidden barcode input every 10s when camera modal is closed. Only when program enables HID. */
+	/** Refocus hidden barcode input every 10s when camera modal is closed. Both program and device-local must allow (per plan). */
 	$effect(() => {
-		if (showScanner || !enable_public_triage_hid_barcode) return;
-		const id = setInterval(() => barcodeInputEl?.focus(), 10000);
+		if (showScanner || !shouldFocusHidInput(enablePublicTriageHidBarcode, 'triage')) return;
+		const id = setInterval(() => {
+			if (shouldFocusHidInput(enablePublicTriageHidBarcode, 'triage')) barcodeInputEl?.focus();
+		}, 10000);
 		return () => clearInterval(id);
 	});
 
 	function closeScanner() {
 		showScanner = false;
 	}
+
+	function openTriageSettingsModal() {
+		triageSettingsProgramHid = enablePublicTriageHidBarcode;
+		triageSettingsLocalAllowHid = getLocalAllowHidOnThisDevice('triage') === true;
+		triageSettingsPin = '';
+		triageSettingsError = '';
+		showTriageSettingsModal = true;
+	}
+
+	async function saveTriageSettings() {
+		triageSettingsError = '';
+		if (!/^\d{6}$/.test(triageSettingsPin.trim())) {
+			triageSettingsError = 'Enter a 6-digit PIN.';
+			return;
+		}
+		triageSettingsSaving = true;
+		try {
+			const body = {
+				pin: triageSettingsPin.trim(),
+				enable_public_triage_hid_barcode: triageSettingsProgramHid,
+			};
+			const res = await fetch('/api/public/display-settings', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-CSRF-TOKEN': getCsrfToken(),
+					'X-Requested-With': 'XMLHttpRequest',
+				},
+				credentials: 'same-origin',
+				body: JSON.stringify(body),
+			});
+			const data = await res.json().catch(() => ({}));
+			if (res.status === 401) {
+				triageSettingsError = (data as { message?: string }).message || 'Invalid PIN.';
+				return;
+			}
+			if (!res.ok) {
+				triageSettingsError = (data as { message?: string }).message || 'Failed to save.';
+				return;
+			}
+			const d = data as { enable_public_triage_hid_barcode?: boolean };
+			enablePublicTriageHidBarcode = !!d.enable_public_triage_hid_barcode;
+			triageSettingsPin = '';
+			showTriageSettingsModal = false;
+		} finally {
+			triageSettingsSaving = false;
+		}
+	}
+
+	onMount(() => {
+		const win = window as Window & { Echo?: { channel: (n: string) => { listen: (e: string, c: (ev: unknown) => void) => void }; leave: (n: string) => void } };
+		if (!allowed || typeof window === 'undefined' || !win.Echo) return;
+		const echo = win.Echo;
+		const ch = echo.channel('display.activity');
+		ch.listen('.display_settings', (e: { enable_public_triage_hid_barcode?: boolean }) => {
+			if (typeof e.enable_public_triage_hid_barcode === 'boolean') {
+				enablePublicTriageHidBarcode = e.enable_public_triage_hid_barcode;
+			}
+		});
+		return () => echo.leave('display.activity');
+	});
 
 	function extendCountdown() {
 		const extra = Math.max(0, Number(display_scan_timeout_seconds) || 20);
@@ -192,7 +276,7 @@
 				if (ok) showScanner = false;
 				scanHandled = false;
 				barcodeValue = '';
-				if (enable_public_triage_hid_barcode) barcodeInputEl?.focus();
+				if (shouldFocusHidInput(enablePublicTriageHidBarcode, 'triage')) barcodeInputEl?.focus();
 			});
 	}
 
@@ -246,13 +330,25 @@
 				<a href="/display/status/{encodeURIComponent(scannedToken.qr_hash)}" class="btn preset-filled-primary-500">Check my status</a>
 			</div>
 		{:else}
-			<h1 class="text-xl font-bold text-surface-950">Start your visit</h1>
+			<div class="flex items-center justify-between gap-2">
+				<h1 class="text-xl font-bold text-surface-950">Start your visit</h1>
+				<button
+					type="button"
+					class="btn btn-icon preset-tonal shrink-0 min-h-[48px] min-w-[48px]"
+					aria-label="Triage settings"
+					title="Settings"
+					onclick={openTriageSettingsModal}
+				>
+					<Settings class="w-5 h-5" />
+				</button>
+			</div>
 
 			{#if !scannedToken}
 				<section>
 					<input
 						type="text"
 						autocomplete="off"
+						inputmode={shouldUseInputModeNone(enablePublicTriageHidBarcode, 'triage') ? 'none' : 'text'}
 						aria-label="Barcode scanner input"
 						class="sr-only"
 						bind:value={barcodeValue}
@@ -289,6 +385,76 @@
 								</button>
 							{/if}
 							<button type="button" class="btn preset-tonal" onclick={closeScanner}>Cancel</button>
+						</div>
+					{/snippet}
+				</Modal>
+
+				<Modal open={showTriageSettingsModal} title="Triage settings" onClose={() => (showTriageSettingsModal = false)}>
+					{#snippet children()}
+						<div class="flex flex-col gap-6">
+							<p class="text-sm text-surface-950/70">Changes to program settings require supervisor or admin PIN.</p>
+							<label class="flex flex-col gap-1">
+								<span class="text-sm font-medium text-surface-950">PIN (6 digits)</span>
+								<input
+									type="text"
+									inputmode="numeric"
+									autocomplete="off"
+									maxlength="6"
+									class="input input-sm bg-surface-50 border border-surface-300 rounded-container font-mono w-full max-w-[8rem]"
+									placeholder="000000"
+									bind:value={triageSettingsPin}
+									oninput={(e) => { triageSettingsPin = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }}
+									disabled={triageSettingsSaving}
+									aria-describedby="triage-settings-pin-error"
+								/>
+							</label>
+							{#if triageSettingsError}
+								<p id="triage-settings-pin-error" class="text-sm text-error-600">{triageSettingsError}</p>
+							{/if}
+							<div class="flex flex-col gap-4">
+								<h3 class="text-sm font-semibold text-surface-950">Program settings</h3>
+								<p class="text-xs text-surface-950/60">Apply to all triage pages.</p>
+								<label class="flex items-center gap-2 cursor-pointer">
+									<input
+										type="checkbox"
+										class="checkbox"
+										bind:checked={triageSettingsProgramHid}
+										disabled={triageSettingsSaving}
+									/>
+									<span class="text-sm text-surface-950">Allow HID barcode scanner</span>
+								</label>
+							</div>
+							<div class="border-t border-surface-200 pt-4 flex flex-col gap-2">
+								<h3 class="text-sm font-semibold text-surface-950">This device</h3>
+								<p class="text-xs text-surface-950/60">On this device only — not saved to server.</p>
+								<label class="flex items-center gap-2 cursor-pointer">
+									<input
+										type="checkbox"
+										class="checkbox"
+										bind:checked={triageSettingsLocalAllowHid}
+										onchange={() => setLocalAllowHidOnThisDevice('triage', triageSettingsLocalAllowHid)}
+									/>
+									<span class="text-sm text-surface-950">Allow HID scanner on this device</span>
+								</label>
+							</div>
+							<div class="flex flex-wrap gap-2 justify-end pt-2">
+								<button
+									type="button"
+									class="btn preset-tonal"
+									onclick={() => (showTriageSettingsModal = false)}
+									disabled={triageSettingsSaving}
+								>
+									Cancel
+								</button>
+								<button
+									type="button"
+									class="btn preset-filled-primary-500"
+									onclick={saveTriageSettings}
+									disabled={triageSettingsSaving}
+								>
+									{triageSettingsSaving ? 'Saving…' : 'Save'}
+								</button>
+							</div>
 						</div>
 					{/snippet}
 				</Modal>

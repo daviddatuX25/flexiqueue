@@ -40,9 +40,18 @@
         class="flex items-center justify-between gap-2 bg-surface-50 border-b border-surface-200 px-3 min-h-0 h-14 shrink-0"
     >
         <div class="min-w-0 flex-1 flex items-center gap-2">
-            <span class="text-base font-semibold text-surface-950 truncate"
-                >{headerTitle}</span
-            >
+            <div class="fq-mobile-header-marquee min-w-0">
+                <div class="fq-mobile-header-marquee__inner">
+                    <span class="text-base font-semibold text-surface-950 whitespace-nowrap"
+                        >{headerTitle}</span
+                    >
+                    <span
+                        class="text-base font-semibold text-surface-950 whitespace-nowrap fq-mobile-header-marquee__dup"
+                        aria-hidden="true"
+                        >{headerTitle}</span
+                    >
+                </div>
+            </div>
         </div>
         <div class="flex items-center gap-1.5 shrink-0">
             <ThemeToggle />
@@ -181,3 +190,55 @@
 
     <Toast />
 </div>
+
+<style>
+    /* Mobile-only marquee for long header titles; reduces truncation pain. */
+    .fq-mobile-header-marquee {
+        overflow: hidden;
+        width: 100%;
+    }
+
+    .fq-mobile-header-marquee__inner {
+        display: inline-flex;
+        align-items: center;
+        gap: 1.5rem;
+        width: max-content;
+        animation: fq-mobile-header-marquee 10s linear infinite;
+    }
+
+    .fq-mobile-header-marquee__dup {
+        opacity: 0.85;
+    }
+
+    @media (min-width: 640px) {
+        .fq-mobile-header-marquee {
+            overflow: visible;
+            display: flex;
+            justify-content: center;
+        }
+        .fq-mobile-header-marquee__inner {
+            animation: none;
+        }
+        .fq-mobile-header-marquee__dup {
+            display: none;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .fq-mobile-header-marquee__inner {
+            animation: none;
+        }
+        .fq-mobile-header-marquee__dup {
+            display: none;
+        }
+    }
+
+    @keyframes fq-mobile-header-marquee {
+        0% {
+            transform: translateX(0);
+        }
+        100% {
+            transform: translateX(-50%);
+        }
+    }
+</style>

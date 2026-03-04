@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\Admin\TrackController as AdminTrackController;
 use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\CheckStatusController;
+use App\Http\Controllers\Api\PublicDisplaySettingsController;
 use App\Http\Controllers\Api\PublicTriageController;
 use App\Http\Controllers\Api\SessionController as ApiSessionController;
 use App\Http\Controllers\Api\PermissionRequestController;
@@ -186,6 +187,9 @@ Route::get('/display/status/{qr_hash}', [DisplayController::class, 'status'])->n
 Route::get('/triage/start', [DisplayController::class, 'publicTriage'])->name('triage.start');
 Route::get('/api/public/token-lookup', [PublicTriageController::class, 'tokenLookup']);
 Route::post('/api/public/sessions/bind', [PublicTriageController::class, 'bind']);
+// Per plan: public display/triage settings (PIN required); rate limit 10/min by IP
+Route::post('/api/public/display-settings', [PublicDisplaySettingsController::class, 'update'])
+    ->middleware('throttle:10,1');
 
 // Per 05-SECURITY-CONTROLS §3.4: admin-only routes
 Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->group(function (): void {

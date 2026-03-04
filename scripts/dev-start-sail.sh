@@ -9,8 +9,10 @@ echo "Starting Sail containers…"
 "$sail" up -d
 
 echo "Starting dev stack (Vite + Reverb + queue)…"
+uid="$(id -u)"
+gid="$(id -g)"
 npx concurrently -n vite,reverb,queue -c green,yellow,magenta \
-  "$sail npm run dev" \
+  "$sail exec -u ${uid}:${gid} laravel.test npm run dev" \
   "$sail artisan reverb:start" \
   "$sail artisan queue:work" \
   --kill-others

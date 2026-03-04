@@ -6,7 +6,8 @@
 # Usage (from repo root):
 #   PI_HOST=orangepi.local ./scripts/deploy-to-pi.sh              # use existing tarball
 #   PI_HOST=192.168.1.50 ./scripts/deploy-to-pi.sh --build        # build then deploy
-#   PI_HOST=orangepi.local PI_USER=root ./scripts/deploy-to-pi.sh --build
+#   PI_HOST=... DEPLOY_MIGRATE=1 ./scripts/deploy-to-pi.sh --build   # non-interactive: 1=incremental, 2=fresh+seed, 3=skip
+#   PI_HOST=... ./scripts/deploy-to-pi.sh --build --migrate=incremental|fresh|skip
 #
 # Requires: flexiqueue-deploy.tar.gz in repo root (or run with --build).
 # Pi must have: /var/www/flexiqueue (and database/database.sqlite for SQLite). If .env is missing, it is created from .env.prod in the tarball on first deploy.
@@ -18,10 +19,12 @@ PI_HOST="${PI_HOST:-}"
 PI_USER="${PI_USER:-root}"
 BUILD=0
 USE_SAIL=0
+MIGRATE_ARG=""
 for arg in "$@"; do
   case "$arg" in
     --build) BUILD=1 ;;
     --sail)  USE_SAIL=1 ;;
+    --migrate=*) MIGRATE_ARG="${arg#--migrate=}" ;;
   esac
 done
 
@@ -89,6 +92,11 @@ if [ ! -f flexiqueue-deploy.tar.gz ]; then
   exit 1
 fi
 
+if [ ! -f scripts/pi/apply-tarball.sh ]; then
+  echo "Error: scripts/pi/apply-tarball.sh not found. Cannot deploy."
+  exit 1
+fi
+
 # Reuse one SSH connection so we only ask for password once (ControlMaster)
 CONTROL="/tmp/fq-deploy-${PI_USER}-${PI_HOST}-$$"
 cleanup_ssh() { ssh -S "$CONTROL" -O exit "${PI_USER}@${PI_HOST}" 2>/dev/null || true; rm -f "$CONTROL"; }
@@ -97,45 +105,47 @@ trap cleanup_ssh EXIT
 echo "Connecting to ${PI_USER}@${PI_HOST} (one password for all steps)..."
 ssh -M -S "$CONTROL" -o ControlPersist=120 "${PI_USER}@${PI_HOST}" true
 
-echo "Copying tarball to ${PI_USER}@${PI_HOST}..."
+echo "Copying tarball and apply script to ${PI_USER}@${PI_HOST}..."
 scp -o ControlPath="$CONTROL" flexiqueue-deploy.tar.gz "${PI_USER}@${PI_HOST}:/tmp/"
+scp -o ControlPath="$CONTROL" scripts/pi/apply-tarball.sh "${PI_USER}@${PI_HOST}:/tmp/fq-apply-tarball.sh"
 
-echo "Applying on Pi (extract, chown, storage + database writable, force SQLite env, cache, storage:link — no migrate yet)..."
-ssh -o ControlPath="$CONTROL" "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && sudo tar -xzf /tmp/flexiqueue-deploy.tar.gz && sudo rm -f database/migrations/2025_02_15_000013_create_print_settings_table.php && sudo chown -R www-data:www-data . && sudo mkdir -p storage/app/public storage/framework/cache storage/framework/sessions storage/framework/views storage/logs && sudo chown -R www-data:www-data storage && sudo chown -R www-data:www-data database && sudo chmod 775 database && (test -f database/database.sqlite && sudo chmod 664 database/database.sqlite || true) && if test -f .env.prod && test ! -f .env; then sudo cp .env.prod .env && sudo chown www-data:www-data .env; fi && sudo sed -i "s/^DB_CONNECTION=.*/DB_CONNECTION=sqlite/" .env && sudo sed -i "s/^DB_DATABASE=.*/DB_DATABASE=database\/database.sqlite/" .env && sudo -u www-data php artisan config:cache && sudo -u www-data php artisan route:cache && sudo -u www-data php artisan storage:link'
+# Determine migrate option: DEPLOY_MIGRATE (1=incremental, 2=fresh, 3=skip), or --migrate=, or interactive prompt
+MIGRATE_OPT=""
+if [ -n "$MIGRATE_ARG" ]; then
+  MIGRATE_OPT="$MIGRATE_ARG"
+elif [ -n "${DEPLOY_MIGRATE:-}" ]; then
+  case "${DEPLOY_MIGRATE}" in
+    1) MIGRATE_OPT="incremental" ;;
+    2) MIGRATE_OPT="fresh" ;;
+    3) MIGRATE_OPT="skip" ;;
+    *) MIGRATE_OPT="incremental" ;;
+  esac
+fi
 
-# Optional: restart Reverb if running as systemd
-ssh -o ControlPath="$CONTROL" "${PI_USER}@${PI_HOST}" 'sudo systemctl restart flexiqueue-reverb 2>/dev/null || true'
+if [ -z "$MIGRATE_OPT" ]; then
+  echo ""
+  echo "  Database (choose one):"
+  echo "    1) migrate --force (incremental; keep existing data)"
+  echo "    2) migrate:fresh --seed --force (start from scratch; DROP all tables)"
+  echo "    3) Skip (do not run migrate)"
+  read -r -p "  Choice [1-3] (default 1): " post_choice
+  post_choice="$(echo "${post_choice:-1}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  case "$post_choice" in
+    1) MIGRATE_OPT="incremental" ;;
+    2)
+      read -r -p "  Type 'yes' to DROP ALL TABLES and seed: " confirm
+      if [ "$confirm" = "yes" ]; then
+        MIGRATE_OPT="fresh"
+      else
+        MIGRATE_OPT="skip"
+      fi
+      ;;
+    *) MIGRATE_OPT="skip" ;;
+  esac
+fi
+
+echo "Applying on Pi (apply-tarball.sh --migrate=$MIGRATE_OPT)..."
+ssh -t -o ControlPath="$CONTROL" "${PI_USER}@${PI_HOST}" "sudo bash /tmp/fq-apply-tarball.sh /tmp/flexiqueue-deploy.tar.gz --migrate=$MIGRATE_OPT"
 
 echo ""
-echo "Done. App updated at ${PI_HOST}."
-echo ""
-echo "  Database (choose one, both use --force):"
-echo "    1) migrate --force (incremental; keep existing data)"
-echo "    2) migrate:fresh --seed --force (start from scratch; DROP all tables, then migrate + seed)"
-echo "    3) Skip (do not run migrate)"
-read -r -p "  Choice [1-3] (default 1): " post_choice
-post_choice="$(echo "${post_choice:-1}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-post_choice="${post_choice:-1}"
-
-case "$post_choice" in
-  1)
-    echo "Running migrate --force on Pi..."
-    ssh -t -o ControlPath="$CONTROL" "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && sudo -u www-data php artisan migrate --force'
-    ;;
-  2)
-    echo "WARNING: migrate:fresh will DROP ALL TABLES and recreate the database."
-    read -r -p "  Are you sure? Type 'yes' to continue: " confirm
-    if [ "$confirm" = "yes" ]; then
-      echo "Running migrate:fresh --seed --force on Pi..."
-      ssh -t -o ControlPath="$CONTROL" "${PI_USER}@${PI_HOST}" 'cd /var/www/flexiqueue && sudo -u www-data php artisan migrate:fresh --seed --force'
-    else
-      echo "Skipped migrate:fresh --seed."
-    fi
-    ;;
-  *)
-    echo "Skipped migrate."
-    ;;
-esac
-
-echo ""
-echo "All done."
+echo "All done. App updated at ${PI_HOST}."

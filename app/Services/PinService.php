@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\UserRole;
+use App\Models\Program;
 use App\Models\TemporaryAuthorization;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
@@ -125,6 +126,41 @@ class PinService
 
         foreach ($users as $user) {
             if (Hash::check($qrScanToken, $user->override_qr_token)) {
+                return [
+                    'verified' => true,
+                    'user_id' => $user->id,
+                    'role' => $user->role->value,
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Validate PIN for public display-settings: PIN must match a supervisor of the active program or an admin.
+     * Used by public display/triage settings API (no auth). Returns user info on success.
+     *
+     * @return array{verified: true, user_id: int, role: string}|null
+     */
+    public function validatePinForActiveProgram(string $pin): ?array
+    {
+        $program = Program::query()->where('is_active', true)->first();
+        if (! $program) {
+            return null;
+        }
+
+        $supervisorIds = $program->supervisedBy()->pluck('users.id');
+        $adminIds = User::query()->where('role', UserRole::Admin)->pluck('id');
+        $userIds = $supervisorIds->merge($adminIds)->unique()->values()->all();
+
+        $users = User::query()
+            ->whereIn('id', $userIds)
+            ->whereNotNull('override_pin')
+            ->get();
+
+        foreach ($users as $user) {
+            if (Hash::check($pin, $user->override_pin)) {
                 return [
                     'verified' => true,
                     'user_id' => $user->id,

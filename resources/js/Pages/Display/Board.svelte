@@ -12,16 +12,35 @@
 	 * bar hidden, section shows "No staff assigned". Mixed statuses → dot by status (available /
 	 * on_break / away|offline). Mobile: bar wraps. Empty state: existing copy.
 	 */
+	import { get } from 'svelte/store';
 	import { onMount } from 'svelte';
 	import { router, usePage } from '@inertiajs/svelte';
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
 	import Modal from '../../Components/Modal.svelte';
 	import QrScanner from '../../Components/QrScanner.svelte';
 	import UserAvatar from '../../Components/UserAvatar.svelte';
-	import { Camera } from 'lucide-svelte';
+	import { Camera, Settings } from 'lucide-svelte';
 	import { getFemaleVoice, getVoiceByName, ensureVoicesLoaded, TTS_DEFAULT_RATE } from '../../lib/speechUtils.js';
+	import {
+		shouldFocusHidInput,
+		shouldUseInputModeNone,
+		getLocalAllowHidOnThisDevice,
+		setLocalAllowHidOnThisDevice,
+		isMobileTouch,
+	} from '../../lib/displayHid.js';
 
 	const page = usePage();
+
+	function getCsrfToken() {
+		const p = get(page)?.props;
+		const fromProps = (p && typeof p === 'object' && 'csrf_token' in p) ? p.csrf_token : undefined;
+		if (fromProps) return fromProps;
+		if (typeof document !== 'undefined') {
+			const meta = document.querySelector('meta[name="csrf-token"]');
+			return (meta && meta.getAttribute('content')) || '';
+		}
+		return '';
+	}
 
 	let {
 		program_name = null,
@@ -46,6 +65,8 @@
 	let displayAudioMuted = $state(false);
 	let displayAudioVolume = $state(1);
 	let displayTtsVoice = $state(null);
+	/** Program HID setting — from props and .display_settings broadcast; both program and device-local decide focus. */
+	let enableDisplayHidBarcode = $state(true);
 
 	$effect(() => {
 		programIsPaused = !!program_is_paused;
@@ -54,6 +75,7 @@
 		displayAudioMuted = !!display_audio_muted;
 		displayAudioVolume = Math.max(0, Math.min(1, Number(display_audio_volume ?? 1)));
 		displayTtsVoice = display_tts_voice ?? null;
+		enableDisplayHidBarcode = enable_display_hid_barcode !== false;
 	});
 
 	/** Effective TTS voice: prefer synced state, fall back to prop so refresh/reload always applies. */
@@ -61,7 +83,8 @@
 
 	/** Open camera modal when URL has ?scan=1 (e.g. "Scan again" from Status page). */
 	$effect(() => {
-		const url = typeof page?.url === 'string' ? page.url : (typeof window !== 'undefined' ? window.location.href : '');
+		const pageData = get(page);
+		const url = typeof pageData?.url === 'string' ? pageData.url : (typeof window !== 'undefined' ? window.location.href : '');
 		try {
 			const parsed = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
 			if (parsed.searchParams.get('scan') === '1') {
@@ -89,6 +112,17 @@
 	let activityFeed = $state([]);
 	/** Pending second-speak timeout for TTS repeat; cleared when new call or unmount. */
 	let ttsRepeatTimeoutId = $state(null);
+	/** Display settings modal (PIN + program HID/volume + device-local). */
+	let showDisplaySettingsModal = $state(false);
+	let displaySettingsPin = $state('');
+	let displaySettingsError = $state('');
+	let displaySettingsSaving = $state(false);
+	let displaySettingsProgramHid = $state(true);
+	let displaySettingsMuted = $state(false);
+	let displaySettingsVolume = $state(1);
+	let displaySettingsTtsVoice = $state('');
+	let displaySettingsLocalAllowHid = $state(false);
+	let availableTtsVoices = $state([]);
 	$effect(() => {
 		activityFeed = [...(station_activity ?? [])];
 	});
@@ -174,8 +208,67 @@
 		}, 2000);
 	}
 
+	async function saveDisplaySettings() {
+		displaySettingsError = '';
+		if (!/^\d{6}$/.test(displaySettingsPin.trim())) {
+			displaySettingsError = 'Enter a 6-digit PIN.';
+			return;
+		}
+		displaySettingsSaving = true;
+		try {
+			const body = {
+				pin: displaySettingsPin.trim(),
+				enable_display_hid_barcode: displaySettingsProgramHid,
+				display_audio_muted: displaySettingsMuted,
+				display_audio_volume: displaySettingsVolume,
+				display_tts_voice: displaySettingsTtsVoice || null,
+			};
+			const res = await fetch('/api/public/display-settings', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-CSRF-TOKEN': getCsrfToken(),
+					'X-Requested-With': 'XMLHttpRequest',
+				},
+				credentials: 'same-origin',
+				body: JSON.stringify(body),
+			});
+			const data = await res.json().catch(() => ({}));
+			if (res.status === 401) {
+				displaySettingsError = data.message || 'Invalid PIN.';
+				return;
+			}
+			if (!res.ok) {
+				displaySettingsError = data.message || 'Failed to save.';
+				return;
+			}
+			displayAudioMuted = !!data.display_audio_muted;
+			displayAudioVolume = Math.max(0, Math.min(1, Number(data.display_audio_volume ?? 1)));
+			displayTtsVoice = data.display_tts_voice ?? null;
+			enableDisplayHidBarcode = !!data.enable_display_hid_barcode;
+			displaySettingsPin = '';
+			showDisplaySettingsModal = false;
+		} finally {
+			displaySettingsSaving = false;
+		}
+	}
+
+	function openDisplaySettingsModal() {
+		displaySettingsProgramHid = enableDisplayHidBarcode;
+		displaySettingsMuted = displayAudioMuted;
+		displaySettingsVolume = displayAudioVolume;
+		displaySettingsTtsVoice = displayTtsVoice ?? '';
+		displaySettingsLocalAllowHid = getLocalAllowHidOnThisDevice('display') === true;
+		displaySettingsPin = '';
+		displaySettingsError = '';
+		showDisplaySettingsModal = true;
+	}
+
 	onMount(() => {
-		ensureVoicesLoaded();
+		ensureVoicesLoaded((voices) => {
+			availableTtsVoices = (voices || []).map((v) => ({ name: v.name, lang: v.lang || '' }));
+		});
 		if (typeof window === 'undefined' || !window.Echo) return;
 		const echo = window.Echo;
 		const activityChannel = echo.channel('display.activity');
@@ -203,11 +296,12 @@
 		activityChannel.listen('.program_status', (e) => {
 			programIsPaused = !!e.program_is_paused;
 		});
-		// Per plan: admin changed display board audio (mute/volume/voice) → update local state for TTS
+		// Per plan: admin or PIN-verified user changed display settings → update local state (audio + HID flags)
 		activityChannel.listen('.display_settings', (e) => {
 			displayAudioMuted = !!e.display_audio_muted;
 			displayAudioVolume = Math.max(0, Math.min(1, Number(e.display_audio_volume ?? 1)));
 			displayTtsVoice = e.display_tts_voice ?? null;
+			if (typeof e.enable_display_hid_barcode === 'boolean') enableDisplayHidBarcode = e.enable_display_hid_barcode;
 		});
 		// Real-time: refresh Now Serving and waiting list when serve/transfer/complete (not only on activity)
 		const queueChannel = echo.channel('global.queue');
@@ -240,7 +334,7 @@
 		}
 		scanCountdown = 0;
 		showScanner = false;
-		displayBarcodeInputEl?.focus();
+		if (shouldFocusHidInput(enableDisplayHidBarcode, 'display')) displayBarcodeInputEl?.focus();
 	}
 
 	/** Add one full timeout period to the scanner modal countdown (extension time from program settings). */
@@ -249,11 +343,11 @@
 		scanCountdown += extra;
 	}
 
-	/** Refocus hidden barcode input every 2s when camera modal is closed (so HID scanner keeps working). Only when admin enabled HID. */
+	/** Refocus hidden barcode input every 2s when camera modal is closed. Both program and device-local must allow (per plan). */
 	$effect(() => {
-		if (showScanner || !enable_display_hid_barcode) return;
+		if (showScanner || !shouldFocusHidInput(enableDisplayHidBarcode, 'display')) return;
 		const id = setInterval(() => {
-			displayBarcodeInputEl?.focus();
+			if (shouldFocusHidInput(enableDisplayHidBarcode, 'display')) displayBarcodeInputEl?.focus();
 		}, 2000);
 		return () => clearInterval(id);
 	});
@@ -304,7 +398,7 @@
 		e.preventDefault();
 		handleQrScan(raw);
 		displayBarcodeValue = '';
-		displayBarcodeInputEl?.focus();
+		if (shouldFocusHidInput(enableDisplayHidBarcode, 'display')) displayBarcodeInputEl?.focus();
 	}
 
 	/** Status icon/dot class per 07-UI-UX-SPECS and StatusFooter/StationStatusTable. */
@@ -349,6 +443,7 @@
 </svelte:head>
 
 <DisplayLayout programName={program_name} {date}>
+	{#snippet children()}
 	<div class="relative">
 		{#if programIsPaused}
 			<div
@@ -364,11 +459,22 @@
 		<div class="flex flex-col gap-6 max-w-4xl mx-auto pb-28">
 			<!-- Scan section: hidden input for HID barcode; pulsing CTA + camera icon opens camera modal. Per display scanner refactor plan. -->
 		<section>
-			<h2 class="text-xl font-bold text-surface-950 mb-3">CHECK YOUR STATUS</h2>
+			<div class="flex items-center justify-between gap-2 mb-3">
+				<h2 class="text-xl font-bold text-surface-950">CHECK YOUR STATUS</h2>
+				<button
+					type="button"
+					class="btn btn-icon preset-tonal shrink-0 min-h-[48px] min-w-[48px]"
+					aria-label="Display settings"
+					title="Settings"
+					onclick={openDisplaySettingsModal}
+				>
+					<Settings class="w-5 h-5" />
+				</button>
+			</div>
 			<input
 				type="text"
 				autocomplete="off"
-				inputmode="text"
+				inputmode={shouldUseInputModeNone(enableDisplayHidBarcode, 'display') ? 'none' : 'text'}
 				aria-label="Barcode scanner input; scan with hardware scanner or type and press Enter"
 				class="sr-only"
 				bind:value={displayBarcodeValue}
@@ -422,6 +528,114 @@
 					>
 						Cancel
 					</button>
+				</div>
+			{/snippet}
+		</Modal>
+
+		<!-- Display settings modal: PIN + program HID/volume + device-local (per plan) -->
+		<Modal open={showDisplaySettingsModal} title="Display settings" onClose={() => (showDisplaySettingsModal = false)}>
+			{#snippet children()}
+				<div class="flex flex-col gap-6">
+					<p class="text-sm text-surface-950/70">Changes to program settings require supervisor or admin PIN.</p>
+					<div class="flex flex-col gap-3">
+						<label class="flex flex-col gap-1">
+							<span class="text-sm font-medium text-surface-950">PIN (6 digits)</span>
+							<input
+								type="text"
+								inputmode="numeric"
+								autocomplete="off"
+								maxlength="6"
+								class="input input-sm bg-surface-50 border border-surface-300 rounded-container font-mono w-full max-w-[8rem]"
+								placeholder="000000"
+								bind:value={displaySettingsPin}
+								oninput={(e) => { displaySettingsPin = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }}
+								disabled={displaySettingsSaving}
+								aria-describedby="display-settings-pin-error"
+							/>
+						</label>
+						{#if displaySettingsError}
+							<p id="display-settings-pin-error" class="text-sm text-error-600">{displaySettingsError}</p>
+						{/if}
+					</div>
+					<div class="flex flex-col gap-4">
+						<h3 class="text-sm font-semibold text-surface-950">Program settings</h3>
+						<p class="text-xs text-surface-950/60">Apply to all displays.</p>
+						<label class="flex items-center gap-2 cursor-pointer">
+							<input
+								type="checkbox"
+								class="checkbox"
+								bind:checked={displaySettingsProgramHid}
+								disabled={displaySettingsSaving}
+							/>
+							<span class="text-sm text-surface-950">Allow HID barcode scanner</span>
+						</label>
+						<label class="flex items-center gap-2 cursor-pointer">
+							<input
+								type="checkbox"
+								class="checkbox"
+								bind:checked={displaySettingsMuted}
+								disabled={displaySettingsSaving}
+							/>
+							<span class="text-sm text-surface-950">Mute</span>
+						</label>
+						<label class="flex flex-col gap-2">
+							<span class="text-sm font-medium text-surface-950">Volume</span>
+							<input
+								type="range"
+								min="0"
+								max="1"
+								step="0.1"
+								class="range range-sm w-full max-w-xs"
+								bind:value={displaySettingsVolume}
+								disabled={displaySettingsSaving || displaySettingsMuted}
+							/>
+						</label>
+						<label class="flex flex-col gap-2">
+							<span class="text-sm font-medium text-surface-950">TTS voice</span>
+							<select
+								class="select select-sm bg-surface-50 border border-surface-300 rounded-lg w-full max-w-xs"
+								bind:value={displaySettingsTtsVoice}
+								disabled={displaySettingsSaving}
+								aria-label="TTS voice"
+							>
+								<option value="">Use program default</option>
+								{#each availableTtsVoices as voice}
+									<option value={voice.name}>{voice.name}{voice.lang ? ` (${voice.lang})` : ''}</option>
+								{/each}
+							</select>
+						</label>
+					</div>
+					<div class="border-t border-surface-200 pt-4 flex flex-col gap-2">
+						<h3 class="text-sm font-semibold text-surface-950">This device</h3>
+						<p class="text-xs text-surface-950/60">On this device only — not saved to server.</p>
+						<label class="flex items-center gap-2 cursor-pointer">
+							<input
+								type="checkbox"
+								class="checkbox"
+								bind:checked={displaySettingsLocalAllowHid}
+								onchange={() => setLocalAllowHidOnThisDevice('display', displaySettingsLocalAllowHid)}
+							/>
+							<span class="text-sm text-surface-950">Allow HID scanner on this device</span>
+						</label>
+					</div>
+					<div class="flex flex-wrap gap-2 justify-end pt-2">
+						<button
+							type="button"
+							class="btn preset-tonal"
+							onclick={() => (showDisplaySettingsModal = false)}
+							disabled={displaySettingsSaving}
+						>
+							Cancel
+						</button>
+						<button
+							type="button"
+							class="btn preset-filled-primary-500"
+							onclick={saveDisplaySettings}
+							disabled={displaySettingsSaving}
+						>
+							{displaySettingsSaving ? 'Saving…' : 'Save'}
+						</button>
+					</div>
 				</div>
 			{/snippet}
 		</Modal>
@@ -568,4 +782,5 @@
 			{/if}
 		</div>
 	</footer>
+	{/snippet}
 </DisplayLayout>

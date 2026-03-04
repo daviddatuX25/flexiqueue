@@ -1,26 +1,52 @@
 #!/usr/bin/env bash
 # Build FlexiQueue deploy tarball using Laravel Sail (PHP + Node inside container).
-# Use when you have Sail up and want to avoid installing PHP/Node on the host.
+# Builds from a temporary prod worktree so the main repo (and dev Sail) is untouched.
 # Run from repo root: ./scripts/build-deploy-tarball-sail.sh
-# Output: flexiqueue-deploy.tar.gz in repo root.
-# Note: Runs everything in one exec so that composer install --no-dev (which removes Sail) doesn't break the script.
+# Output: flexiqueue-deploy.tar.gz in repo root (or in current worktree if run from deploy script).
 
 set -e
-cd "$(dirname "$0")/.."
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
 
-if [ -f ./vendor/bin/sail ]; then
-  SAIL="./vendor/bin/sail"
-else
-  SAIL="docker compose"
-  echo "Using docker compose (Sail binary not in vendor)."
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  echo "Error: Not inside a git repository. Run from the FlexiQueue repo root." >&2
+  exit 1
 fi
 
-echo "Building inside container (composer, npm, tar)..."
-$SAIL exec laravel.test bash -c '
+source "$SCRIPT_DIR/lib/git-worktree.sh"
+
+ensure_prod_branch "[FlexiQueue]"
+ensure_prod_worktree_temporary
+trap cleanup_prod_worktree_temporary EXIT
+
+MAIN_REPO_ROOT="$(get_main_repo_root)"
+# Use docker compose run (not sail run) so we can mount the worktree; sail run uses exec (same container/mount).
+if [ -f "$MAIN_REPO_ROOT/compose.yaml" ] || [ -f "$MAIN_REPO_ROOT/docker-compose.yml" ]; then
+  COMPOSE_CMD="docker compose"
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Docker is required for Sail build. Install Docker or run build-deploy-tarball.sh on the host." >&2
+    exit 1
+  fi
+else
+  echo "compose.yaml not found in $MAIN_REPO_ROOT." >&2
+  exit 1
+fi
+
+uid="$(id -u)"
+gid="$(id -g)"
+
+echo "Building inside container (prod worktree at $PROD_WORKTREE)..."
+(cd "$MAIN_REPO_ROOT" && $COMPOSE_CMD run --rm \
+  -v "$PROD_WORKTREE:/var/www/html" \
+  -w /var/www/html \
+  -u "${uid}:${gid}" \
+  laravel.test bash -c '
   set -e
   cd /var/www/html
   echo "Composer install --no-dev (platform PHP 8.3 for Orange Pi prod)..."
   composer config platform.php 8.3
+  rm -rf vendor
   composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --ignore-platform-reqs
   echo "npm ci && npm run build..."
   npm ci && npm run build
@@ -73,13 +99,20 @@ $SAIL exec laravel.test bash -c '
     -C /var/www/html .
   mv /tmp/flexiqueue-deploy.tar.gz /var/www/html/flexiqueue-deploy.tar.gz
   echo "Done."
-'
+')
 
-echo "Output: $(pwd)/flexiqueue-deploy.tar.gz"
+if [ ! -f "$PROD_WORKTREE/flexiqueue-deploy.tar.gz" ]; then
+  echo "Error: Build did not produce tarball in worktree. Check container output above." >&2
+  exit 1
+fi
+if [ "$PROD_WORKTREE" != "$REPO_ROOT" ]; then
+  cp "$PROD_WORKTREE/flexiqueue-deploy.tar.gz" "$REPO_ROOT/flexiqueue-deploy.tar.gz"
+fi
+
+cd "$REPO_ROOT"
+echo "Output: $REPO_ROOT/flexiqueue-deploy.tar.gz"
 if [ -f flexiqueue-deploy.tar.gz ]; then
   ls -la flexiqueue-deploy.tar.gz
 fi
 
-# Restore dev dependencies (composer install --no-dev removed Sail)
-echo "Restoring dev dependencies..."
-$SAIL exec laravel.test composer install --no-interaction 2>/dev/null || docker compose exec laravel.test composer install --no-interaction 2>/dev/null || true
+print_build_complete_message_if_not_prod

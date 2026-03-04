@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:sail": "./scripts/dev-start-sail.sh",
     "dev:local": "./scripts/dev-start-local.sh",
+    "quick-check": "bash scripts/dev/quick-check.sh",
     "test:e2e": "playwright test",
     "test:e2e:report": "playwright show-report --host 0.0.0.0"
   },

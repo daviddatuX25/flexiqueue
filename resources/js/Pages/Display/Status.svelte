@@ -9,6 +9,7 @@
 	import { Link, router } from '@inertiajs/svelte';
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
 	import DiagramCanvas from '../../Components/ProgramDiagram/DiagramCanvas.svelte';
+	import { shouldFocusHidInput, shouldUseInputModeNone } from '../../lib/displayHid.js';
 
 	let {
 		error = null,
@@ -23,6 +24,7 @@
 		display_scan_timeout_seconds = 20,
 		program_name = null,
 		date = '',
+		enable_display_hid_barcode = true,
 		diagram = null,
 		diagram_program = null,
 		diagram_tracks = [],
@@ -69,19 +71,20 @@
 			router.visit(`/display/status/${encodeURIComponent(qrHash)}`);
 		}
 		barcodeInputValue = '';
-		barcodeInputEl?.focus();
+		if (shouldFocusHidInput(enable_display_hid_barcode, 'display')) barcodeInputEl?.focus();
 	}
 
 	$effect(() => {
 		const el = barcodeInputEl;
-		if (!el) return;
+		if (!el || !shouldFocusHidInput(enable_display_hid_barcode, 'display')) return;
 		tick().then(() => el?.focus());
 	});
 
-	/** Refocus hidden barcode input every 2s (mimic /display) so HID scanner keeps working. */
+	/** Refocus hidden barcode input every 2s. Both program and device-local must allow (per plan). */
 	$effect(() => {
+		if (!shouldFocusHidInput(enable_display_hid_barcode, 'display')) return;
 		const id = setInterval(() => {
-			barcodeInputEl?.focus();
+			if (shouldFocusHidInput(enable_display_hid_barcode, 'display')) barcodeInputEl?.focus();
 		}, 2000);
 		return () => clearInterval(id);
 	});
@@ -100,7 +103,7 @@
 	<input
 		type="text"
 		autocomplete="off"
-		inputmode="text"
+		inputmode={shouldUseInputModeNone(enable_display_hid_barcode, 'display') ? 'none' : 'text'}
 		aria-label="Barcode scanner input for next ticket; scan with hardware scanner or type and press Enter"
 		class="sr-only"
 		bind:value={barcodeInputValue}
