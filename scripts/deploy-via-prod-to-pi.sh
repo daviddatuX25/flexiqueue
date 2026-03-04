@@ -36,8 +36,9 @@ CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
 msg "Current branch: ${CURRENT_BRANCH:-unknown}"
 
 if [ "$DO_MERGE" -eq 1 ]; then
-  if [[ "${ALLOW_DIRTY_DEPLOY:-0}" != "1" ]] && [[ -n "$(git status --porcelain)" ]]; then
-    msg "Working tree has uncommitted changes. Commit, stash, or set ALLOW_DIRTY_DEPLOY=1."
+  # Only block on tracked changes; ignore untracked files (e.g. flexiqueue-deploy.tar.gz)
+  if [[ "${ALLOW_DIRTY_DEPLOY:-0}" != "1" ]] && [[ -n "$(git status --porcelain -uno)" ]]; then
+    msg "Working tree has uncommitted changes (tracked files). Commit, stash, or set ALLOW_DIRTY_DEPLOY=1."
     exit 1
   fi
   ensure_prod_branch "[FlexiQueue][via-prod-to-pi]"
@@ -51,7 +52,7 @@ fi
 
 ensure_prod_branch "[FlexiQueue][via-prod-to-pi]"
 ensure_prod_worktree_fixed "[FlexiQueue][via-prod-to-pi]"
-if [[ -z "$(git -C "$PROD_WORKTREE" status --porcelain)" ]]; then
+if [[ -z "$(git -C "$PROD_WORKTREE" status --porcelain -uno)" ]]; then
   git -C "$PROD_WORKTREE" pull --ff-only >/dev/null 2>&1 || true
 fi
 
