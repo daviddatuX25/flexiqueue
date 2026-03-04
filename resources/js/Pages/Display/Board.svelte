@@ -20,7 +20,7 @@
 	import QrScanner from '../../Components/QrScanner.svelte';
 	import UserAvatar from '../../Components/UserAvatar.svelte';
 	import { Camera, Settings } from 'lucide-svelte';
-	import { getFemaleVoice, getVoiceByName, ensureVoicesLoaded, TTS_DEFAULT_RATE } from '../../lib/speechUtils.js';
+	import { getVoiceForTts, ensureVoicesLoaded, TTS_DEFAULT_RATE } from '../../lib/speechUtils.js';
 	import {
 		shouldFocusHidInput,
 		shouldUseInputModeNone,
@@ -55,6 +55,7 @@
 		program_is_paused = false,
 		display_audio_muted = false,
 		display_audio_volume = 1,
+		tts_source = 'browser',
 		display_tts_voice = null,
 		enable_display_hid_barcode = true,
 	} = $props();
@@ -64,6 +65,7 @@
 	/** Per plan: display board TTS mute/volume/voice — from props and .display_settings broadcast. */
 	let displayAudioMuted = $state(false);
 	let displayAudioVolume = $state(1);
+	let ttsSource = $state('browser');
 	let displayTtsVoice = $state(null);
 	/** Program HID setting — from props and .display_settings broadcast; both program and device-local decide focus. */
 	let enableDisplayHidBarcode = $state(true);
@@ -74,10 +76,13 @@
 	$effect(() => {
 		displayAudioMuted = !!display_audio_muted;
 		displayAudioVolume = Math.max(0, Math.min(1, Number(display_audio_volume ?? 1)));
+		ttsSource = tts_source === 'server' ? 'server' : 'browser';
 		displayTtsVoice = display_tts_voice ?? null;
 		enableDisplayHidBarcode = enable_display_hid_barcode !== false;
 	});
 
+	/** Effective TTS source: server (use API) or browser (speechSynthesis). */
+	const effectiveTtsSource = $derived(ttsSource ?? tts_source ?? 'browser');
 	/** Effective TTS voice: prefer synced state, fall back to prop so refresh/reload always applies. */
 	const effectiveTtsVoice = $derived(displayTtsVoice ?? display_tts_voice ?? null);
 
@@ -120,7 +125,9 @@
 	let displaySettingsProgramHid = $state(true);
 	let displaySettingsMuted = $state(false);
 	let displaySettingsVolume = $state(1);
+	let displaySettingsTtsSource = $state('browser');
 	let displaySettingsTtsVoice = $state('');
+	let displaySettingsServerVoices = $state([]);
 	let displaySettingsLocalAllowHid = $state(false);
 	let availableTtsVoices = $state([]);
 	$effect(() => {
@@ -177,14 +184,79 @@
 				'program_is_paused',
 				'display_audio_muted',
 				'display_audio_volume',
+				'tts_source',
 				'display_tts_voice',
 			],
 		});
 	}
 
-	/** Per plan: TTS — female voice, rate 0.8, repeat 2x with 2s gap; pronounce_as letters/word. */
-	function speakCallAnnouncement(alias, stationName, pronounceAs = 'letters') {
-		if (typeof window === 'undefined' || displayAudioMuted || !window.speechSynthesis) return;
+	/** Play pre-generated token TTS; returns Promise that resolves when playback ends or rejects on 404/error. */
+	async function playTokenTts(tokenId) {
+		const url = `/api/public/tts/token/${tokenId}`;
+		const res = await fetch(url, { credentials: 'same-origin' });
+		if (!res.ok) throw new Error(res.status === 404 ? 'No token TTS' : `TTS ${res.status}`);
+		const blob = await res.blob();
+		const objectUrl = URL.createObjectURL(blob);
+		await new Promise((resolve, reject) => {
+			const a = new Audio(objectUrl);
+			a.volume = Math.max(0, Math.min(1, displayAudioVolume));
+			a.onended = () => { URL.revokeObjectURL(objectUrl); resolve(); };
+			a.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Playback failed')); };
+			a.play().catch(reject);
+		});
+	}
+
+	/** Play TTS audio from server; returns Promise that resolves when playback ends or rejects on error/503. */
+	async function playServerTts(text, voiceId) {
+		const params = new URLSearchParams({ text });
+		if (voiceId) params.set('voice', voiceId);
+		params.set('rate', String(TTS_DEFAULT_RATE));
+		const url = `/api/public/tts?${params.toString()}`;
+		const cacheName = 'flexiqueue-tts';
+		if (typeof caches !== 'undefined') {
+			try {
+				const cache = await caches.open(cacheName);
+				const cached = await cache.match(url);
+				if (cached && cached.ok) {
+					const blob = await cached.blob();
+					const objectUrl = URL.createObjectURL(blob);
+					await new Promise((resolve, reject) => {
+						const a = new Audio(objectUrl);
+						a.volume = Math.max(0, Math.min(1, displayAudioVolume));
+						a.onended = () => { URL.revokeObjectURL(objectUrl); resolve(); };
+						a.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Playback failed')); };
+						a.play().catch(reject);
+					});
+					return;
+				}
+			} catch {
+				// Fall through to fetch
+			}
+		}
+		const res = await fetch(url, { credentials: 'same-origin' });
+		if (!res.ok) throw new Error(res.status === 503 ? 'TTS unavailable' : `TTS ${res.status}`);
+		const blob = await res.blob();
+		if (typeof caches !== 'undefined') {
+			try {
+				const cache = await caches.open(cacheName);
+				await cache.put(url, new Response(blob, { headers: { 'Content-Type': 'audio/mpeg' } }));
+			} catch {
+				// Ignore cache write errors
+			}
+		}
+		const objectUrl = URL.createObjectURL(blob);
+		await new Promise((resolve, reject) => {
+			const a = new Audio(objectUrl);
+			a.volume = Math.max(0, Math.min(1, displayAudioVolume));
+			a.onended = () => { URL.revokeObjectURL(objectUrl); resolve(); };
+			a.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Playback failed')); };
+			a.play().catch(reject);
+		});
+	}
+
+	/** Per plan: TTS — token pre-generated first, then server on-demand, then browser; repeat 2x with 2s gap. */
+	function speakCallAnnouncement(alias, stationName, pronounceAs = 'letters', tokenId = null) {
+		if (typeof window === 'undefined' || displayAudioMuted) return;
 		if (ttsRepeatTimeoutId != null) {
 			clearTimeout(ttsRepeatTimeoutId);
 			ttsRepeatTimeoutId = null;
@@ -192,20 +264,39 @@
 		const aliasSpoken = aliasForSpeech(alias, pronounceAs);
 		const stationSpoken = (stationName ?? 'your station').toString().trim() || 'your station';
 		const text = `Calling ${aliasSpoken}, please proceed to ${stationSpoken}`;
-		const doSpeak = () => {
-			if (displayAudioMuted) return;
+		const doBrowserSpeak = () => {
+			if (displayAudioMuted || !window.speechSynthesis) return;
 			const u = new SpeechSynthesisUtterance(text);
 			u.rate = TTS_DEFAULT_RATE;
 			u.volume = Math.max(0, Math.min(1, displayAudioVolume));
-			const voice = (effectiveTtsVoice && getVoiceByName(effectiveTtsVoice)) || getFemaleVoice();
+			const voice = getVoiceForTts(effectiveTtsVoice ?? null);
 			if (voice) u.voice = voice;
 			window.speechSynthesis.speak(u);
 		};
-		doSpeak();
-		ttsRepeatTimeoutId = setTimeout(() => {
-			doSpeak();
-			ttsRepeatTimeoutId = null;
-		}, 2000);
+		const doServerTtsFallback = () => {
+			playServerTts(text, effectiveTtsVoice ?? undefined).catch(() => doBrowserSpeak());
+		};
+		if (effectiveTtsSource === 'server') {
+			if (tokenId != null) {
+				playTokenTts(tokenId).catch(doServerTtsFallback);
+			} else {
+				doServerTtsFallback();
+			}
+			ttsRepeatTimeoutId = setTimeout(() => {
+				if (tokenId != null) {
+					playTokenTts(tokenId).catch(doServerTtsFallback);
+				} else {
+					doServerTtsFallback();
+				}
+				ttsRepeatTimeoutId = null;
+			}, 2000);
+		} else {
+			doBrowserSpeak();
+			ttsRepeatTimeoutId = setTimeout(() => {
+				doBrowserSpeak();
+				ttsRepeatTimeoutId = null;
+			}, 2000);
+		}
 	}
 
 	async function saveDisplaySettings() {
@@ -221,6 +312,7 @@
 				enable_display_hid_barcode: displaySettingsProgramHid,
 				display_audio_muted: displaySettingsMuted,
 				display_audio_volume: displaySettingsVolume,
+				tts_source: displaySettingsTtsSource,
 				display_tts_voice: displaySettingsTtsVoice || null,
 			};
 			const res = await fetch('/api/public/display-settings', {
@@ -245,6 +337,7 @@
 			}
 			displayAudioMuted = !!data.display_audio_muted;
 			displayAudioVolume = Math.max(0, Math.min(1, Number(data.display_audio_volume ?? 1)));
+			ttsSource = data.tts_source === 'server' ? 'server' : 'browser';
 			displayTtsVoice = data.display_tts_voice ?? null;
 			enableDisplayHidBarcode = !!data.enable_display_hid_barcode;
 			displaySettingsPin = '';
@@ -254,15 +347,23 @@
 		}
 	}
 
-	function openDisplaySettingsModal() {
+	async function openDisplaySettingsModal() {
 		displaySettingsProgramHid = enableDisplayHidBarcode;
 		displaySettingsMuted = displayAudioMuted;
 		displaySettingsVolume = displayAudioVolume;
+		displaySettingsTtsSource = ttsSource;
 		displaySettingsTtsVoice = displayTtsVoice ?? '';
 		displaySettingsLocalAllowHid = getLocalAllowHidOnThisDevice('display') === true;
 		displaySettingsPin = '';
 		displaySettingsError = '';
 		showDisplaySettingsModal = true;
+		try {
+			const res = await fetch('/api/public/tts/voices', { credentials: 'same-origin' });
+			const data = await res.json().catch(() => ({}));
+			displaySettingsServerVoices = Array.isArray(data.voices) ? data.voices : [];
+		} catch {
+			displaySettingsServerVoices = [];
+		}
 	}
 
 	onMount(() => {
@@ -283,7 +384,7 @@
 			activityFeed = [item, ...activityFeed].slice(0, 20);
 			if (e.action_type === 'call') {
 				const pronounceAs = e.pronounce_as === 'word' ? 'word' : 'letters';
-				speakCallAnnouncement(e.alias, e.station_name, pronounceAs);
+				speakCallAnnouncement(e.alias, e.station_name, pronounceAs, e.token_id ?? null);
 			}
 			// Per ISSUES-ELABORATION §10: refresh waiting/now serving so "Currently waiting" updates in realtime
 			refreshBoardData();
@@ -300,6 +401,8 @@
 		activityChannel.listen('.display_settings', (e) => {
 			displayAudioMuted = !!e.display_audio_muted;
 			displayAudioVolume = Math.max(0, Math.min(1, Number(e.display_audio_volume ?? 1)));
+			if (e.tts_source === 'server') ttsSource = 'server';
+			else ttsSource = 'browser';
 			displayTtsVoice = e.display_tts_voice ?? null;
 			if (typeof e.enable_display_hid_barcode === 'boolean') enableDisplayHidBarcode = e.enable_display_hid_barcode;
 		});
@@ -591,18 +694,45 @@
 							/>
 						</label>
 						<label class="flex flex-col gap-2">
-							<span class="text-sm font-medium text-surface-950">TTS voice</span>
+							<span class="text-sm font-medium text-surface-950">TTS source</span>
 							<select
 								class="select select-sm bg-surface-50 border border-surface-300 rounded-lg w-full max-w-xs"
-								bind:value={displaySettingsTtsVoice}
+								bind:value={displaySettingsTtsSource}
 								disabled={displaySettingsSaving}
-								aria-label="TTS voice"
+								aria-label="TTS source"
 							>
-								<option value="">Use program default</option>
-								{#each availableTtsVoices as voice}
-									<option value={voice.name}>{voice.name}{voice.lang ? ` (${voice.lang})` : ''}</option>
-								{/each}
+								<option value="browser">Browser (device voices)</option>
+								<option value="server">Server (pre-generated)</option>
 							</select>
+							<p class="text-xs text-surface-500">Server TTS needs internet to generate; playback uses cache when offline.</p>
+						</label>
+						<label class="flex flex-col gap-2">
+							<span class="text-sm font-medium text-surface-950">TTS voice</span>
+							{#if displaySettingsTtsSource === 'server'}
+								<select
+									class="select select-sm bg-surface-50 border border-surface-300 rounded-lg w-full max-w-xs"
+									bind:value={displaySettingsTtsVoice}
+									disabled={displaySettingsSaving}
+									aria-label="TTS voice (server)"
+								>
+									<option value="">Use program default</option>
+									{#each displaySettingsServerVoices as voice}
+										<option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ''}</option>
+									{/each}
+								</select>
+							{:else}
+								<select
+									class="select select-sm bg-surface-50 border border-surface-300 rounded-lg w-full max-w-xs"
+									bind:value={displaySettingsTtsVoice}
+									disabled={displaySettingsSaving}
+									aria-label="TTS voice (browser)"
+								>
+									<option value="">Use program default</option>
+									{#each availableTtsVoices as voice}
+										<option value={voice.name}>{voice.name}{voice.lang ? ` (${voice.lang})` : ''}</option>
+									{/each}
+								</select>
+							{/if}
 						</label>
 					</div>
 					<div class="border-t border-surface-200 pt-4 flex flex-col gap-2">

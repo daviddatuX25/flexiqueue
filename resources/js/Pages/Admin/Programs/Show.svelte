@@ -61,7 +61,9 @@
             display_audio_muted?: boolean;
             /** Per plan: display board TTS volume 0-1 (admin-controlled). */
             display_audio_volume?: number;
-            /** Preferred TTS voice name for call announcements (SpeechSynthesisVoice.name). Null = default / prefer female. */
+            /** TTS source: browser (device) or server (API-generated). */
+            tts_source?: 'browser' | 'server';
+            /** Preferred TTS voice (browser name or server engine ID). Null = default. */
             display_tts_voice?: string | null;
             /** Per plan: allow public self-serve triage at /triage/start. */
             allow_public_triage?: boolean;
@@ -248,9 +250,11 @@
     /** Per plan: display board audio volume 0-1 (admin-controlled). */
     let displayAudioVolume = $state(1);
     /** Preferred TTS voice name for call announcements. Empty = use browser default (prefer female). */
+    let displayTtsSource = $state<"browser" | "server">("browser");
     let displayTtsVoice = $state("");
     /** Available browser voices for TTS dropdown (loaded on mount). */
     let availableTtsVoices = $state<{ name: string; lang: string }[]>([]);
+    let serverTtsVoices = $state<{ id: string; name: string; lang: string }[]>([]);
     /** Per plan: allow public self-serve triage at /triage/start. */
     let allowPublicTriage = $state(false);
     /** Per barcode-hid: enable HID barcode on Display board. Default true. */
@@ -289,6 +293,7 @@
             displayScanTimeoutSeconds = Math.min(300, Math.max(0, Number(s.display_scan_timeout_seconds ?? 20)));
             displayAudioMuted = s.display_audio_muted === true;
             displayAudioVolume = Math.max(0, Math.min(1, Number(s.display_audio_volume ?? 1)));
+            displayTtsSource = s.tts_source === "server" ? "server" : "browser";
             displayTtsVoice = s.display_tts_voice ?? "";
             allowPublicTriage = s.allow_public_triage === true;
             enableDisplayHidBarcode = (s.enable_display_hid_barcode ?? true) === true;
@@ -300,6 +305,16 @@
         ensureVoicesLoaded((voices) => {
             availableTtsVoices = voices.map((v) => ({ name: v.name, lang: v.lang || "" }));
         });
+        fetch("/api/public/tts/voices", { credentials: "same-origin" })
+            .then((r) => r.json())
+            .then((data: { voices?: { id: string; name: string; lang?: string }[] }) => {
+                serverTtsVoices = (data.voices ?? []).map((v) => ({
+                    id: v.id,
+                    name: v.name,
+                    lang: v.lang ?? "",
+                }));
+            })
+            .catch(() => {});
     });
 
     $effect(() => {
@@ -1202,6 +1217,7 @@
                     display_scan_timeout_seconds: displayScanTimeoutSeconds,
                     display_audio_muted: displayAudioMuted,
                     display_audio_volume: displayAudioVolume,
+                    tts_source: displayTtsSource,
                     display_tts_voice: displayTtsVoice || null,
                     allow_public_triage: allowPublicTriage,
                     enable_display_hid_barcode: enableDisplayHidBarcode,
@@ -2485,22 +2501,63 @@
                                     <span class="text-xs text-surface-500">{Math.round(displayAudioVolume * 100)}%</span>
                                 </label>
                                 <label class="flex flex-col gap-1">
+                                    <span class="text-sm text-surface-600">TTS source</span>
+                                    <select
+                                        class="select select-sm bg-surface-50 border border-surface-300 rounded-lg w-fit"
+                                        bind:value={displayTtsSource}
+                                        aria-label="TTS source"
+                                    >
+                                        <option value="browser">Browser (device voices)</option>
+                                        <option value="server">Server (pre-generated)</option>
+                                    </select>
+                                    <span class="text-xs text-surface-500">Server TTS needs internet to generate; playback uses cache when offline.</span>
+                                </label>
+                                <label class="flex flex-col gap-1">
                                     <span class="text-sm text-surface-600">TTS voice</span>
                                     <div class="flex flex-wrap items-center gap-2">
-                                        <select
-                                            class="select select-sm bg-surface-50 border border-surface-300 rounded-lg"
-                                            bind:value={displayTtsVoice}
-                                            aria-label="Display board TTS voice"
-                                        >
-                                            <option value="">Default (Microsoft Sonia Online)</option>
-                                            {#each availableTtsVoices as voice}
-                                                <option value={voice.name}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
-                                            {/each}
-                                        </select>
+                                        {#if displayTtsSource === "server"}
+                                            <select
+                                                class="select select-sm bg-surface-50 border border-surface-300 rounded-lg"
+                                                bind:value={displayTtsVoice}
+                                                aria-label="Display board TTS voice (server)"
+                                            >
+                                                <option value="">Default</option>
+                                                {#each serverTtsVoices as voice}
+                                                    <option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
+                                                {/each}
+                                            </select>
+                                        {:else}
+                                            <select
+                                                class="select select-sm bg-surface-50 border border-surface-300 rounded-lg"
+                                                bind:value={displayTtsVoice}
+                                                aria-label="Display board TTS voice (browser)"
+                                            >
+                                                <option value="">Default (Microsoft Sonia Online)</option>
+                                                {#each availableTtsVoices as voice}
+                                                    <option value={voice.name}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
+                                                {/each}
+                                            </select>
+                                        {/if}
                                         <button
                                             type="button"
                                             class="btn preset-tonal btn-sm"
-                                            onclick={() => speakSample("Calling A 3, please proceed to window 1.", displayTtsVoice || null)}
+                                            onclick={async () => {
+                                                const text = "Calling A 3, please proceed to window 1.";
+                                                if (displayTtsSource === "server") {
+                                                    const params = new URLSearchParams({ text, rate: "0.84" });
+                                                    if (displayTtsVoice) params.set("voice", displayTtsVoice);
+                                                    const res = await fetch(`/api/public/tts?${params}`, { credentials: "same-origin" });
+                                                    if (res.ok) {
+                                                        const blob = await res.blob();
+                                                        const url = URL.createObjectURL(blob);
+                                                        const a = new Audio(url);
+                                                        a.onended = () => URL.revokeObjectURL(url);
+                                                        a.play().catch(() => URL.revokeObjectURL(url));
+                                                    }
+                                                } else {
+                                                    speakSample(text, displayTtsVoice || null);
+                                                }
+                                            }}
                                             aria-label="Play sample phrase with selected voice"
                                         >
                                             Play sample

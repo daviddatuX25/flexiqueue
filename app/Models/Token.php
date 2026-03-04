@@ -15,6 +15,7 @@ class Token extends Model
         'pronounce_as',
         'status',
         'current_session_id',
+        'tts_audio_path',
     ];
 
     /**

@@ -122,7 +122,16 @@ class Program extends Model
         return (float) max(0, min(1, $v));
     }
 
-    /** Preferred TTS voice name for call announcements (browser SpeechSynthesisVoice.name). Null = use browser default (Microsoft Sonia Online / female). */
+    /** TTS source: 'browser' (device speechSynthesis) or 'server' (API-generated audio). Default browser. */
+    public function getTtsSource(): string
+    {
+        $settings = $this->settings ?? [];
+        $v = $settings['tts_source'] ?? 'browser';
+
+        return $v === 'server' ? 'server' : 'browser';
+    }
+
+    /** Preferred TTS voice: browser voice name (when tts_source=browser) or engine voice ID (when tts_source=server). Null = use default. */
     public function getDisplayTtsVoice(): ?string
     {
         $settings = $this->settings ?? [];

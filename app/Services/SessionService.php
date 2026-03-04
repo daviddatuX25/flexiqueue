@@ -117,7 +117,8 @@ class SessionService
                 $session->alias,
                 'bind',
                 now()->toIso8601String(),
-                $token->pronounce_as ?? 'letters'
+                $token->pronounce_as ?? 'letters',
+                $session->token_id
             ));
 
             return [
@@ -184,7 +185,8 @@ class SessionService
             $session->alias,
             'call',
             now()->toIso8601String(),
-            $session->token?->pronounce_as ?? 'letters'
+            $session->token?->pronounce_as ?? 'letters',
+            $session->token_id
         ));
 
         return [
@@ -233,7 +235,8 @@ class SessionService
             $session->alias,
             'check_in',
             now()->toIso8601String(),
-            $session->token?->pronounce_as ?? 'letters'
+            $session->token?->pronounce_as ?? 'letters',
+            $session->token_id
         ));
 
         return ['session' => $session];

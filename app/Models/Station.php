@@ -42,7 +42,18 @@ class Station extends Model
         return (float) max(0, min(1, $v));
     }
 
-    /** Preferred TTS voice name for this station (overrides program). Null = use program default. */
+    /** TTS source for this station (overrides program when set). 'browser' | 'server'. */
+    public function getTtsSource(): string
+    {
+        $v = $this->settings['tts_source'] ?? null;
+        if ($v === 'server') {
+            return 'server';
+        }
+
+        return $this->program?->getTtsSource() ?? 'browser';
+    }
+
+    /** Preferred TTS voice for this station (overrides program). Browser voice name or engine voice ID. Null = use program default. */
     public function getDisplayTtsVoice(): ?string
     {
         $v = $this->settings['display_tts_voice'] ?? null;

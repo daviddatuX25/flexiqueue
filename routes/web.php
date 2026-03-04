@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\CheckStatusController;
 use App\Http\Controllers\Api\PublicDisplaySettingsController;
 use App\Http\Controllers\Api\PublicTriageController;
 use App\Http\Controllers\Api\SessionController as ApiSessionController;
+use App\Http\Controllers\Api\TtsController;
 use App\Http\Controllers\Api\PermissionRequestController;
 use App\Http\Controllers\Api\StationController as ApiStationController;
 use App\Http\Controllers\Api\StationNoteController;
@@ -190,6 +191,10 @@ Route::post('/api/public/sessions/bind', [PublicTriageController::class, 'bind']
 // Per plan: public display/triage settings (PIN required); rate limit 10/min by IP
 Route::post('/api/public/display-settings', [PublicDisplaySettingsController::class, 'update'])
     ->middleware('throttle:10,1');
+// Per plan: server-side TTS — stream audio (public, rate-limited); voices list for admin
+Route::get('/api/public/tts', [TtsController::class, 'stream'])->middleware('throttle:60,1');
+Route::get('/api/public/tts/voices', [TtsController::class, 'voices']);
+Route::get('/api/public/tts/token/{token}', [TtsController::class, 'token']);
 
 // Per 05-SECURITY-CONTROLS §3.4: admin-only routes
 Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->group(function (): void {

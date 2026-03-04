@@ -1,9 +1,32 @@
 /**
  * Shared TTS helpers for display call announcements.
  * Ensures a female voice is used when available; preloads voices so they're ready on first call.
+ * When offline, server-provided voice (e.g. "Microsoft Sonia Online") may not be in getVoices();
+ * we persist a device-local fallback voice name so TTS still works with no connection.
  */
 
+const TTS_FALLBACK_STORAGE_KEY = 'flexiqueue_tts_fallback_voice';
+
 let cachedFemaleVoice = null;
+
+function getStoredFallbackVoiceName() {
+	try {
+		if (typeof window !== 'undefined' && window.localStorage) {
+			const name = window.localStorage.getItem(TTS_FALLBACK_STORAGE_KEY);
+			return name && String(name).trim() ? String(name).trim() : null;
+		}
+	} catch (_) {}
+	return null;
+}
+
+function setStoredFallbackVoiceName(name) {
+	if (!name || typeof name !== 'string') return;
+	try {
+		if (typeof window !== 'undefined' && window.localStorage) {
+			window.localStorage.setItem(TTS_FALLBACK_STORAGE_KEY, name);
+		}
+	} catch (_) {}
+}
 
 /** Default speech rate: 0.84 = 5% faster than 0.8 (not 100% / 1.0). */
 export const TTS_DEFAULT_RATE = 0.84;
@@ -65,6 +88,22 @@ export function getVoiceByName(name) {
 }
 
 /**
+ * Resolve voice for TTS: preferred (server) → stored fallback (device) → default female.
+ * Persists the chosen voice so when offline we can still use the last working voice.
+ * @param {string | null} preferredVoiceName - display_tts_voice from server
+ * @returns {SpeechSynthesisVoice | null}
+ */
+export function getVoiceForTts(preferredVoiceName) {
+	if (typeof window === 'undefined' || !window.speechSynthesis) return null;
+	const voice =
+		(preferredVoiceName && getVoiceByName(preferredVoiceName)) ||
+		getVoiceByName(getStoredFallbackVoiceName()) ||
+		getFemaleVoice();
+	if (voice) setStoredFallbackVoiceName(voice.name);
+	return voice ?? null;
+}
+
+/**
  * Trigger voice loading and cache female voice when ready.
  * Chrome returns empty getVoices() until voiceschanged; call this on display page mount.
  * @param {(voices: SpeechSynthesisVoice[]) => void} [onReady] - called when voices are available (e.g. to populate a dropdown)
@@ -77,6 +116,7 @@ export function ensureVoicesLoaded(onReady) {
 		const voices = syn.getVoices();
 		if (voices.length > 0) {
 			cachedFemaleVoice = selectDefaultVoice(voices);
+			if (cachedFemaleVoice?.name) setStoredFallbackVoiceName(cachedFemaleVoice.name);
 			syn.removeEventListener('voiceschanged', onVoicesChanged);
 			if (typeof onReady === 'function') onReady(voices);
 		}
@@ -97,7 +137,7 @@ export function speakSample(text, voiceName, volume = 1) {
 	const u = new SpeechSynthesisUtterance(String(text));
 	u.rate = TTS_DEFAULT_RATE;
 	u.volume = Math.max(0, Math.min(1, Number(volume)));
-	const voice = (voiceName && getVoiceByName(voiceName)) || getFemaleVoice();
+	const voice = getVoiceForTts(voiceName || null);
 	if (voice) u.voice = voice;
 	window.speechSynthesis.speak(u);
 }

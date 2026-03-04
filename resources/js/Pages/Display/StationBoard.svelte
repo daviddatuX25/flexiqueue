@@ -6,7 +6,7 @@
 	import { onMount } from 'svelte';
 	import { router } from '@inertiajs/svelte';
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
-	import { getFemaleVoice, getVoiceByName, ensureVoicesLoaded, TTS_DEFAULT_RATE } from '../../lib/speechUtils.js';
+	import { getVoiceForTts, ensureVoicesLoaded, TTS_DEFAULT_RATE } from '../../lib/speechUtils.js';
 
 	let {
 		program_name = null,
@@ -18,11 +18,13 @@
 		station_activity = [],
 		display_audio_muted = false,
 		display_audio_volume = 1,
+		tts_source = 'browser',
 		display_tts_voice = null,
 	} = $props();
 
 	let muted = $state(false);
 	let volume = $state(1);
+	let ttsSource = $state('browser');
 	let ttsVoice = $state(null);
 	/** Pending second-speak timeout; cleared when new call or unmount. */
 	let repeatTimeoutId = $state(null);
@@ -32,9 +34,12 @@
 	$effect(() => {
 		muted = !!display_audio_muted;
 		volume = Math.max(0, Math.min(1, Number(display_audio_volume ?? 1)));
+		ttsSource = tts_source === 'server' ? 'server' : 'browser';
 		ttsVoice = display_tts_voice ?? null;
 	});
 
+	/** Effective TTS source: server (use API) or browser (speechSynthesis). */
+	const effectiveTtsSource = $derived(ttsSource ?? tts_source ?? 'browser');
 	/** Effective TTS voice: prefer synced state, fall back to prop so refresh always applies. */
 	const effectiveTtsVoice = $derived(ttsVoice ?? display_tts_voice ?? null);
 	$effect(() => {
@@ -78,32 +83,115 @@
 		return segments.length ? segments.join(' ') : raw;
 	}
 
-	function speakCall(alias, pronounceAs = 'letters') {
-		if (typeof window === 'undefined' || muted || !window.speechSynthesis) return;
+	/** Play pre-generated token TTS; returns Promise that resolves when playback ends or rejects on 404/error. */
+	async function playTokenTts(tokenId) {
+		const url = `/api/public/tts/token/${tokenId}`;
+		const res = await fetch(url, { credentials: 'same-origin' });
+		if (!res.ok) throw new Error(res.status === 404 ? 'No token TTS' : `TTS ${res.status}`);
+		const blob = await res.blob();
+		const objectUrl = URL.createObjectURL(blob);
+		await new Promise((resolve, reject) => {
+			const a = new Audio(objectUrl);
+			a.volume = Math.max(0, Math.min(1, volume));
+			a.onended = () => { URL.revokeObjectURL(objectUrl); resolve(); };
+			a.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Playback failed')); };
+			a.play().catch(reject);
+		});
+	}
+
+	/** Play TTS audio from server; returns Promise that resolves when playback ends or rejects on error/503. */
+	async function playServerTts(text, voiceId) {
+		const params = new URLSearchParams({ text });
+		if (voiceId) params.set('voice', voiceId);
+		params.set('rate', String(TTS_DEFAULT_RATE));
+		const url = `/api/public/tts?${params.toString()}`;
+		const cacheName = 'flexiqueue-tts';
+		if (typeof caches !== 'undefined') {
+			try {
+				const cache = await caches.open(cacheName);
+				const cached = await cache.match(url);
+				if (cached && cached.ok) {
+					const blob = await cached.blob();
+					const objectUrl = URL.createObjectURL(blob);
+					await new Promise((resolve, reject) => {
+						const a = new Audio(objectUrl);
+						a.volume = Math.max(0, Math.min(1, volume));
+						a.onended = () => { URL.revokeObjectURL(objectUrl); resolve(); };
+						a.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Playback failed')); };
+						a.play().catch(reject);
+					});
+					return;
+				}
+			} catch {
+				// Fall through to fetch
+			}
+		}
+		const res = await fetch(url, { credentials: 'same-origin' });
+		if (!res.ok) throw new Error(res.status === 503 ? 'TTS unavailable' : `TTS ${res.status}`);
+		const blob = await res.blob();
+		if (typeof caches !== 'undefined') {
+			try {
+				const cache = await caches.open(cacheName);
+				await cache.put(url, new Response(blob, { headers: { 'Content-Type': 'audio/mpeg' } }));
+			} catch {
+				// Ignore cache write errors
+			}
+		}
+		const objectUrl = URL.createObjectURL(blob);
+		await new Promise((resolve, reject) => {
+			const a = new Audio(objectUrl);
+			a.volume = Math.max(0, Math.min(1, volume));
+			a.onended = () => { URL.revokeObjectURL(objectUrl); resolve(); };
+			a.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Playback failed')); };
+			a.play().catch(reject);
+		});
+	}
+
+	function speakCall(alias, pronounceAs = 'letters', tokenId = null) {
+		if (typeof window === 'undefined' || muted) return;
 		if (repeatTimeoutId != null) {
 			clearTimeout(repeatTimeoutId);
 			repeatTimeoutId = null;
 		}
 		const text = 'Calling ' + aliasForSpeech(alias, pronounceAs);
-		const doSpeak = () => {
-			if (muted) return;
+		const doBrowserSpeak = () => {
+			if (muted || !window.speechSynthesis) return;
 			const u = new SpeechSynthesisUtterance(text);
 			u.rate = TTS_DEFAULT_RATE;
 			u.volume = Math.max(0, Math.min(1, volume));
-			const voice = (effectiveTtsVoice && getVoiceByName(effectiveTtsVoice)) || getFemaleVoice();
+			const voice = getVoiceForTts(effectiveTtsVoice ?? null);
 			if (voice) u.voice = voice;
 			window.speechSynthesis.speak(u);
 		};
-		doSpeak();
-		repeatTimeoutId = setTimeout(() => {
-			doSpeak();
-			repeatTimeoutId = null;
-		}, 2000);
+		const doServerTtsFallback = () => {
+			playServerTts(text, effectiveTtsVoice ?? undefined).catch(() => doBrowserSpeak());
+		};
+		if (effectiveTtsSource === 'server') {
+			if (tokenId != null) {
+				playTokenTts(tokenId).catch(doServerTtsFallback);
+			} else {
+				doServerTtsFallback();
+			}
+			repeatTimeoutId = setTimeout(() => {
+				if (tokenId != null) {
+					playTokenTts(tokenId).catch(doServerTtsFallback);
+				} else {
+					doServerTtsFallback();
+				}
+				repeatTimeoutId = null;
+			}, 2000);
+		} else {
+			doBrowserSpeak();
+			repeatTimeoutId = setTimeout(() => {
+				doBrowserSpeak();
+				repeatTimeoutId = null;
+			}, 2000);
+		}
 	}
 
 	function refreshStationData() {
 		router.reload({
-			only: ['now_serving', 'waiting', 'station_activity', 'display_audio_muted', 'display_audio_volume', 'display_tts_voice'],
+			only: ['now_serving', 'waiting', 'station_activity', 'display_audio_muted', 'display_audio_volume', 'tts_source', 'display_tts_voice'],
 		});
 	}
 
@@ -122,7 +210,7 @@
 		activityFeed = [item, ...activityFeed].slice(0, 20);
 		if (e?.action_type === 'call') {
 			const pronounceAs = e.pronounce_as === 'word' ? 'word' : 'letters';
-			speakCall(e.alias, pronounceAs);
+			speakCall(e.alias, pronounceAs, e.token_id ?? null);
 		}
 		refreshStationData();
 	}
@@ -139,6 +227,8 @@
 		ch.listen('.display_station_settings', (e) => {
 			muted = !!e.display_audio_muted;
 			volume = Math.max(0, Math.min(1, Number(e.display_audio_volume ?? 1)));
+			if (e.tts_source === 'server') ttsSource = 'server';
+			else ttsSource = 'browser';
 			ttsVoice = e.display_tts_voice ?? null;
 		});
 		return () => {

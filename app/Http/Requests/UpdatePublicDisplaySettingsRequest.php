@@ -24,6 +24,7 @@ class UpdatePublicDisplaySettingsRequest extends FormRequest
             'pin' => ['required', 'string', 'size:6', 'regex:/^\d{6}$/'],
             'display_audio_muted' => ['sometimes', 'boolean'],
             'display_audio_volume' => ['sometimes', 'numeric', 'min:0', 'max:1'],
+            'tts_source' => ['sometimes', 'string', 'in:browser,server'],
             'display_tts_voice' => ['sometimes', 'nullable', 'string', 'max:500'],
             'enable_display_hid_barcode' => ['sometimes', 'boolean'],
             'enable_public_triage_hid_barcode' => ['sometimes', 'boolean'],

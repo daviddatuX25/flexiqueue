@@ -83,13 +83,14 @@ class ProgramController extends Controller
         $program->update($validated);
 
         $program = $program->fresh();
-        if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('display_tts_voice', $settings) || array_key_exists('enable_display_hid_barcode', $settings) || array_key_exists('enable_public_triage_hid_barcode', $settings))) {
+        if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('tts_source', $settings) || array_key_exists('display_tts_voice', $settings) || array_key_exists('enable_display_hid_barcode', $settings) || array_key_exists('enable_public_triage_hid_barcode', $settings))) {
             event(new DisplaySettingsUpdated(
                 $program->getDisplayAudioMuted(),
                 $program->getDisplayAudioVolume(),
                 $program->getDisplayTtsVoice(),
                 $program->getEnableDisplayHidBarcode(),
-                $program->getEnablePublicTriageHidBarcode()
+                $program->getEnablePublicTriageHidBarcode(),
+                $program->getTtsSource()
             ));
         }
 
@@ -208,6 +209,7 @@ class ProgramController extends Controller
                 'display_scan_timeout_seconds' => $program->getDisplayScanTimeoutSeconds(),
                 'display_audio_muted' => $program->getDisplayAudioMuted(),
                 'display_audio_volume' => $program->getDisplayAudioVolume(),
+                'tts_source' => $program->getTtsSource(),
                 'display_tts_voice' => $program->getDisplayTtsVoice(),
                 'allow_public_triage' => $program->getAllowPublicTriage(),
             ],

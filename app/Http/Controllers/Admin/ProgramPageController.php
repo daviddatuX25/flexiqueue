@@ -153,6 +153,7 @@ class ProgramPageController extends Controller
                         : 20,
                     'display_audio_muted' => $program->getDisplayAudioMuted(),
                     'display_audio_volume' => $program->getDisplayAudioVolume(),
+                    'tts_source' => $program->getTtsSource(),
                     'display_tts_voice' => $program->getDisplayTtsVoice(),
                     'allow_public_triage' => $program->getAllowPublicTriage(),
                     'enable_display_hid_barcode' => $program->getEnableDisplayHidBarcode(),

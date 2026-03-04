@@ -23,7 +23,8 @@ class StationActivity implements ShouldBroadcastNow
         public string $alias,
         public string $actionType,
         public string $createdAt,
-        public string $pronounceAs = 'letters'
+        public string $pronounceAs = 'letters',
+        public ?int $tokenId = null
     ) {}
 
     /**
@@ -55,6 +56,7 @@ class StationActivity implements ShouldBroadcastNow
             'action_type' => $this->actionType,
             'created_at' => $this->createdAt,
             'pronounce_as' => $this->pronounceAs,
+            'token_id' => $this->tokenId,
         ];
     }
 }

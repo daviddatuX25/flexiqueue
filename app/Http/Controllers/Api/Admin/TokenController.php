@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\BatchCreateTokenRequest;
 use App\Http\Requests\BatchDeleteTokenRequest;
 use App\Http\Requests\UpdateTokenRequest;
+use App\Jobs\GenerateTokenTtsJob;
 use App\Models\Token;
 use App\Services\TokenService;
+use App\Services\TtsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -17,7 +19,8 @@ use Illuminate\Http\Request;
 class TokenController extends Controller
 {
     public function __construct(
-        private TokenService $tokenService
+        private TokenService $tokenService,
+        private TtsService $ttsService
     ) {}
 
     /**
@@ -52,6 +55,13 @@ class TokenController extends Controller
             $request->validated('start_number'),
             $pronounceAs
         );
+
+        if ($request->boolean('generate_tts') && $this->ttsService->isEnabled()) {
+            $tokenIds = array_column($result['tokens'], 'id');
+            if ($tokenIds !== []) {
+                GenerateTokenTtsJob::dispatch($tokenIds);
+            }
+        }
 
         return response()->json($result, 201);
     }

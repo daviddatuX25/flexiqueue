@@ -50,6 +50,8 @@
     let batchCount = $state(50);
     /** Plan: pronounce alias as letters (e.g. A 3) or word (e.g. A3) for TTS. */
     let batchPronounceAs = $state<"letters" | "word">("letters");
+    /** Generate TTS audio for offline playback (server generates in background after create). */
+    let batchGenerateTts = $state(false);
     // Selection for bulk actions
     let selectedIds = $state<Set<number>>(new Set());
     let selectAllCheckbox = $state<HTMLInputElement | null>(null);
@@ -145,6 +147,7 @@
         batchStart = 1;
         batchCount = 50;
         batchPronounceAs = "letters";
+        batchGenerateTts = false;
         error = "";
         showBatchModal = true;
     }
@@ -166,6 +169,7 @@
                 count: batchCount,
                 start_number: batchStart,
                 pronounce_as: batchPronounceAs,
+                generate_tts: batchGenerateTts,
             },
         );
         submitting = false;
@@ -1037,6 +1041,19 @@
                         <span>Word (e.g. A3)</span>
                     </label>
                 </div>
+            </div>
+            <div class="mb-4">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        class="checkbox checkbox-sm"
+                        bind:checked={batchGenerateTts}
+                    />
+                    <span class="font-medium">Generate TTS audio for offline playback</span>
+                </label>
+                <p class="text-sm text-surface-600 mt-1 ml-6">
+                    Requires internet. Audio is generated in the background after tokens are created.
+                </p>
             </div>
             <div
                 class="flex justify-end gap-3 mt-4 pt-4 border-t border-surface-100"

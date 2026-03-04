@@ -6,6 +6,7 @@ use App\Models\Session;
 use App\Models\Station;
 use App\Policies\SessionPolicy;
 use App\Policies\StationPolicy;
+use App\Services\TtsService;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
@@ -16,7 +17,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(TtsService::class, fn () => TtsService::fromConfig());
     }
 
     /**
