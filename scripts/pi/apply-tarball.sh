@@ -43,14 +43,31 @@ sudo chown -R www-data:www-data "$APP_DIR"
 
 echo "Ensuring storage and database writable..."
 sudo mkdir -p "$APP_DIR/storage/app/public" "$APP_DIR/storage/framework/cache" "$APP_DIR/storage/framework/sessions" "$APP_DIR/storage/framework/views" "$APP_DIR/storage/logs"
-sudo chown -R www-data:www-data "$APP_DIR/storage" "$APP_DIR/database"
+sudo mkdir -p "$APP_DIR/bootstrap/cache"
+sudo chown -R www-data:www-data "$APP_DIR/storage" "$APP_DIR/database" "$APP_DIR/bootstrap/cache"
 test -f "$APP_DIR/database/database.sqlite" && sudo chmod 664 "$APP_DIR/database/database.sqlite" || true
 
-# Always set .env from tarball's .env.prod so BROADCAST_CONNECTION and REVERB_* are correct (avoids 747972 / stale keys).
+# Preserve existing APP_KEY before overwriting .env (Laravel 500s if APP_KEY is empty).
+SAVED_APP_KEY=""
+if [ -f "$APP_DIR/.env" ]; then
+  SAVED_APP_KEY=$(grep -E '^APP_KEY=' "$APP_DIR/.env" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+fi
+
+# Set .env from tarball's .env.prod so BROADCAST_CONNECTION and REVERB_* are correct (avoids 747972 / stale keys).
 if [ -f "$APP_DIR/.env.prod" ]; then
   echo "Setting .env from .env.prod..."
   sudo cp "$APP_DIR/.env.prod" "$APP_DIR/.env"
   sudo chown www-data:www-data "$APP_DIR/.env"
+fi
+
+# Restore or set APP_KEY (empty APP_KEY causes internal server errors everywhere).
+if [ -n "$SAVED_APP_KEY" ]; then
+  echo "Restoring existing APP_KEY..."
+  if grep -qE '^APP_KEY=' "$APP_DIR/.env" 2>/dev/null; then
+    sudo sed -i "s|^APP_KEY=.*|APP_KEY=${SAVED_APP_KEY}|" "$APP_DIR/.env"
+  else
+    echo "APP_KEY=${SAVED_APP_KEY}" | sudo tee -a "$APP_DIR/.env" > /dev/null
+  fi
 fi
 
 # Force SQLite for Pi
@@ -61,6 +78,12 @@ fi
 
 echo "Caching config and routes..."
 cd "$APP_DIR"
+# Generate APP_KEY if still empty (e.g. first deploy)
+if ! grep -qE '^APP_KEY=base64:[A-Za-z0-9+/=]+' "$APP_DIR/.env" 2>/dev/null; then
+  echo "Generating APP_KEY..."
+  sudo -u www-data php artisan key:generate --force
+fi
+sudo -u www-data php artisan config:clear
 sudo -u www-data php artisan config:cache
 sudo -u www-data php artisan route:cache
 sudo -u www-data php artisan storage:link 2>/dev/null || true

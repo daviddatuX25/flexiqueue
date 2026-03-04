@@ -79,6 +79,26 @@ If a browser connects directly to `ws://orangepione.local:6001/app/...` and port
 
 Full deployment and first-time setup: [docs/architecture/10-DEPLOYMENT.md](../../docs/architecture/10-DEPLOYMENT.md).
 
+### Troubleshooting: "Pusher error... Failed to connect to localhost port 6001" or wrong app id/key
+
+If the backend uses old broadcast credentials (e.g. app id `747972` or key `fwa0z3...`) or Reverb isn’t running:
+
+1. **Set Reverb vars in `.env`** (must match `.env.prod` and the frontend build):
+   ```bash
+   cd /var/www/flexiqueue
+   sudo sed -i 's/^BROADCAST_CONNECTION=.*/BROADCAST_CONNECTION=reverb/' .env
+   sudo sed -i 's/^REVERB_APP_ID=.*/REVERB_APP_ID=flexiqueue/' .env
+   sudo sed -i 's/^REVERB_APP_KEY=.*/REVERB_APP_KEY=flexiqueue-prod-key/' .env
+   sudo sed -i 's/^REVERB_APP_SECRET=.*/REVERB_APP_SECRET=flexiqueue-prod-secret/' .env
+   ```
+2. **Refresh config and restart Reverb:**
+   ```bash
+   sudo -u www-data php artisan config:clear
+   sudo -u www-data php artisan config:cache
+   sudo systemctl restart flexiqueue-reverb
+   ```
+3. **Confirm Reverb is running:** `sudo systemctl status flexiqueue-reverb` (should be active). If not: `sudo systemctl start flexiqueue-reverb`.
+
 ---
 
 ## Copy scripts to Pi without full deploy

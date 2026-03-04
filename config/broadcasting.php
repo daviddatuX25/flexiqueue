@@ -13,9 +13,16 @@ return [
     |
     | Supported: "reverb", "pusher", "ably", "redis", "log", "null"
     |
+    | On local, when BROADCAST_CONNECTION=reverb we use "log" unless
+    | BROADCAST_FORCE_REVERB=1, so dev works without running Reverb and you
+    | avoid the cURL error. Set BROADCAST_FORCE_REVERB=1 and run reverb:start
+    | when you want to test real-time. Production (Pi) always uses .env.
+    |
     */
 
-    'default' => env('BROADCAST_CONNECTION', 'null'),
+    'default' => (env('APP_ENV') === 'local' && env('BROADCAST_CONNECTION') === 'reverb' && ! env('BROADCAST_FORCE_REVERB'))
+        ? 'log'
+        : env('BROADCAST_CONNECTION', 'null'),
 
     /*
     |--------------------------------------------------------------------------
