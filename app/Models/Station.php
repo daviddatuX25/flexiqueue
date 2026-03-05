@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Storage;
 
 class Station extends Model
 {
@@ -42,28 +43,6 @@ class Station extends Model
         return (float) max(0, min(1, $v));
     }
 
-    /** TTS source for this station (overrides program when set). 'browser' | 'server'. */
-    public function getTtsSource(): string
-    {
-        $v = $this->settings['tts_source'] ?? null;
-        if ($v === 'server') {
-            return 'server';
-        }
-
-        return $this->program?->getTtsSource() ?? 'browser';
-    }
-
-    /** Preferred TTS voice for this station (overrides program). Browser voice name or engine voice ID. Null = use program default. */
-    public function getDisplayTtsVoice(): ?string
-    {
-        $v = $this->settings['display_tts_voice'] ?? null;
-        if ($v !== null && $v !== '') {
-            return (string) $v;
-        }
-
-        return $this->program?->getDisplayTtsVoice();
-    }
-
     public function program(): BelongsTo
     {
         return $this->belongsTo(Program::class);
@@ -96,5 +75,30 @@ class Station extends Model
     public function note(): \Illuminate\Database\Eloquent\Relations\HasOne
     {
         return $this->hasOne(StationNote::class);
+    }
+
+    protected static function booted(): void
+    {
+        static::deleted(function (self $station): void {
+            // Remove any stored station TTS audio under tts/stations/{id}.
+            $baseDir = 'tts/stations/'.$station->id;
+            if (Storage::exists($baseDir)) {
+                Storage::deleteDirectory($baseDir);
+            }
+
+            $settings = $station->settings ?? [];
+            if (isset($settings['tts']['languages']) && is_array($settings['tts']['languages'])) {
+                foreach ($settings['tts']['languages'] as $lang => $config) {
+                    if (! empty($config['audio_path']) && Storage::exists($config['audio_path'])) {
+                        Storage::delete($config['audio_path']);
+                    }
+                    if (is_array($config)) {
+                        $settings['tts']['languages'][$lang]['audio_path'] = null;
+                        $settings['tts']['languages'][$lang]['status'] = null;
+                    }
+                }
+                $station->settings = $settings;
+            }
+        });
     }
 }

@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\TtsStreamRequest;
-use App\Models\Program;
 use App\Models\Token;
+use App\Models\TokenTtsSetting;
 use App\Services\TtsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
@@ -24,24 +24,28 @@ class TtsController extends Controller
 
     /**
      * Stream TTS audio. Query: text (required), voice (optional), rate (optional).
-     * Voice defaults to active program's display_tts_voice when tts_source=server.
+     * When voice/rate are omitted, defaults come from TokenTtsSetting (or config).
      */
     public function stream(TtsStreamRequest $request): BinaryFileResponse|Response
     {
         $text = $request->validated('text');
-        $rate = (float) ($request->validated('rate') ?? $this->ttsService->getDefaultRate());
-        $voiceId = $request->validated('voice');
+        $explicitRate = $request->validated('rate');
+        $explicitVoice = $request->validated('voice');
 
-        if ($voiceId === null || $voiceId === '') {
-            $program = Program::query()->where('is_active', true)->first();
-            if ($program && $program->getTtsSource() === 'server') {
-                $voiceId = $program->getDisplayTtsVoice() ?? $this->ttsService->getDefaultVoiceId();
-            } else {
-                $voiceId = $this->ttsService->getDefaultVoiceId();
-            }
+        $settings = TokenTtsSetting::instance();
+        $voiceId = $explicitVoice !== null && $explicitVoice !== ''
+            ? (string) $explicitVoice
+            : $settings->getEffectiveVoiceId();
+        $rate = $explicitRate !== null
+            ? (float) $explicitRate
+            : $settings->getEffectiveRate();
+
+        if ($voiceId === null) {
+            return response('', Response::HTTP_SERVICE_UNAVAILABLE)
+                ->header('Cache-Control', 'no-store');
         }
 
-        $path = $this->ttsService->getPath($text, (string) $voiceId, $rate);
+        $path = $this->ttsService->getPath($text, $voiceId, $rate);
 
         if ($path === null) {
             return response('', Response::HTTP_SERVICE_UNAVAILABLE)

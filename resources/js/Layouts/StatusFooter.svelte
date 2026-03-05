@@ -27,6 +27,8 @@
     /** Per j4n: drop-up menu open state */
     let menuOpen = $state(false);
     let availabilityWrapEl = $state(null);
+    /** Position for fixed-footer availability menu (anchored just above status chip) */
+    let menuPosition = $state({ left: 0, bottom: 0 });
     /** Per eym: full-screen overlay when on break (only after user selected On break and PATCH succeeded) */
     let showOnBreakOverlay = $state(false);
     let resumeButtonEl = $state(null);
@@ -114,6 +116,27 @@
         away: "Away",
         offline: "Offline",
     };
+
+    /** When footer is fixed, keep the menu just above the status chip (not far away). */
+    $effect(() => {
+        if (!menuOpen || !fixed || typeof window === "undefined") return;
+        const update = () => {
+            const el = availabilityWrapEl;
+            if (!el) return;
+            const rect = el.getBoundingClientRect();
+            menuPosition = {
+                left: rect.left,
+                bottom: Math.max(8, window.innerHeight - rect.top + 4),
+            };
+        };
+        update();
+        window.addEventListener("resize", update);
+        window.addEventListener("scroll", update, true);
+        return () => {
+            window.removeEventListener("resize", update);
+            window.removeEventListener("scroll", update, true);
+        };
+    });
 
     async function selectAvailability(status) {
         if (!user || isUpdating) return;
@@ -296,7 +319,7 @@
                             aria-hidden="true"
                         />
                     </button>
-                    {#if menuOpen}
+                    {#if menuOpen && !fixed}
                         <ul
                             role="listbox"
                             class="absolute bottom-full left-0 mb-1 min-w-[10rem] py-1 rounded-lg border border-surface-200 bg-surface-50 shadow-lg z-50"
@@ -373,6 +396,47 @@
             >
         </div>
     </div>
+
+    {#if menuOpen && fixed}
+        <ul
+            role="listbox"
+            class="fixed z-[90] mb-1 min-w-[10rem] py-1 rounded-lg border border-surface-200 bg-surface-50 shadow-lg"
+            style={`left: ${menuPosition.left}px; bottom: ${menuPosition.bottom}px;`}
+            aria-label="Set availability"
+        >
+            {#each menuOptions as opt}
+                <li role="option" aria-selected={availabilityStatus === opt.value}>
+                    <button
+                        type="button"
+                        class="w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-none
+                            {availabilityStatus === opt.value
+                                ? 'bg-primary-50 text-primary-700'
+                                : 'text-surface-700 hover:bg-surface-100'}"
+                        onclick={() => selectAvailability(opt.value)}
+                        disabled={isUpdating}
+                    >
+                        {#if opt.value === "available"}
+                            <span
+                                class="w-2 h-2 bg-success-500 rounded-full shrink-0"
+                                aria-hidden="true"
+                            ></span>
+                        {:else if opt.value === "on_break"}
+                            <span
+                                class="w-2 h-2 bg-warning-500 rounded-full shrink-0"
+                                aria-hidden="true"
+                            ></span>
+                        {:else}
+                            <span
+                                class="w-2 h-2 bg-surface-400 rounded-full shrink-0"
+                                aria-hidden="true"
+                            ></span>
+                        {/if}
+                        <span>{opt.label}</span>
+                    </button>
+                </li>
+            {/each}
+        </ul>
+    {/if}
 
     <!-- Per eym: full-screen on-break overlay; only Resume closes it; no backdrop click -->
     {#if showOnBreakOverlay}

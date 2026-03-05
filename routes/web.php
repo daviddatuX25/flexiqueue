@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\Admin\ProcessController as AdminProcessController;
 use App\Http\Controllers\Api\Admin\ProgramDiagramController;
 use App\Http\Controllers\Api\Admin\StepController as AdminStepController;
 use App\Http\Controllers\Api\Admin\PrintSettingsController;
+use App\Http\Controllers\Api\Admin\TokenTtsSettingsController;
 use App\Http\Controllers\Api\Admin\ProgramDefaultSettingsController;
 use App\Http\Controllers\Api\Admin\TokenController as AdminTokenController;
 use App\Http\Controllers\Api\Admin\TrackController as AdminTrackController;
@@ -93,9 +94,14 @@ Route::middleware(['auth', 'role:admin'])->prefix('api/admin')->group(function (
     Route::put('/tokens/{token}', [AdminTokenController::class, 'update']);
     Route::delete('/tokens/{token}', [AdminTokenController::class, 'destroy']);
     Route::post('/tokens/batch-delete', [AdminTokenController::class, 'batchDelete']);
+    Route::post('/tokens/regenerate-tts', [AdminTokenController::class, 'regenerateTts']);
     // Print template settings
     Route::get('/print-settings', [PrintSettingsController::class, 'show']);
     Route::put('/print-settings', [PrintSettingsController::class, 'update']);
+    // Token TTS settings (global server voice + rate)
+    Route::get('/token-tts-settings', [TokenTtsSettingsController::class, 'show']);
+    Route::put('/token-tts-settings', [TokenTtsSettingsController::class, 'update']);
+    Route::post('/print-settings/image', [PrintSettingsController::class, 'upload']);
     // Per 08-API-SPEC-PHASE1 §5.6, §5.7: User CRUD and staff assignment
     Route::get('/users', [AdminUserController::class, 'index']);
     Route::post('/users', [AdminUserController::class, 'store']);

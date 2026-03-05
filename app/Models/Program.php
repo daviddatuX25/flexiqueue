@@ -122,24 +122,6 @@ class Program extends Model
         return (float) max(0, min(1, $v));
     }
 
-    /** TTS source: 'browser' (device speechSynthesis) or 'server' (API-generated audio). Default browser. */
-    public function getTtsSource(): string
-    {
-        $settings = $this->settings ?? [];
-        $v = $settings['tts_source'] ?? 'browser';
-
-        return $v === 'server' ? 'server' : 'browser';
-    }
-
-    /** Preferred TTS voice: browser voice name (when tts_source=browser) or engine voice ID (when tts_source=server). Null = use default. */
-    public function getDisplayTtsVoice(): ?string
-    {
-        $settings = $this->settings ?? [];
-        $v = $settings['display_tts_voice'] ?? null;
-
-        return $v !== null && $v !== '' ? (string) $v : null;
-    }
-
     /** Per plan: allow public self-serve triage at GET /triage/start. Default false. */
     public function getAllowPublicTriage(): bool
     {
@@ -162,6 +144,19 @@ class Program extends Model
         $settings = $this->settings ?? [];
 
         return (bool) ($settings['enable_public_triage_hid_barcode'] ?? true);
+    }
+
+    /**
+     * Active TTS language for this program (used by displays and generation).
+     * Defaults to 'en' when not explicitly configured.
+     */
+    public function getTtsActiveLanguage(): string
+    {
+        $settings = $this->settings ?? [];
+        $lang = $settings['tts']['active_language'] ?? 'en';
+        $allowed = ['en', 'fil', 'ilo'];
+
+        return in_array($lang, $allowed, true) ? $lang : 'en';
     }
 
     public function queueSessions(): HasMany

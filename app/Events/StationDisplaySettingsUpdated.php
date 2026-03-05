@@ -20,8 +20,6 @@ class StationDisplaySettingsUpdated implements ShouldBroadcastNow
         public int $stationId,
         public bool $displayAudioMuted,
         public float $displayAudioVolume,
-        public ?string $displayTtsVoice = null,
-        public string $ttsSource = 'browser'
     ) {}
 
     /**
@@ -47,8 +45,6 @@ class StationDisplaySettingsUpdated implements ShouldBroadcastNow
         return [
             'display_audio_muted' => $this->displayAudioMuted,
             'display_audio_volume' => $this->displayAudioVolume,
-            'display_tts_voice' => $this->displayTtsVoice,
-            'tts_source' => $this->ttsSource,
         ];
     }
 }

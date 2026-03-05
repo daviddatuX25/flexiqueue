@@ -55,8 +55,6 @@
 		stats: { total_waiting: number; total_served_today: number; avg_service_time_minutes: number };
 		display_audio_muted?: boolean;
 		display_audio_volume?: number;
-		tts_source?: 'browser' | 'server';
-		display_tts_voice?: string | null;
 	}
 
 	let {
@@ -118,8 +116,6 @@
 	let showDisplayAudioModal = $state(false);
 	/** Available browser TTS voices for dropdown (loaded on mount). */
 	let availableTtsVoices = $state<{ name: string; lang: string }[]>([]);
-	/** Server TTS voices for dropdown (loaded on mount). */
-	let serverTtsVoices = $state<{ id: string; name: string; lang: string }[]>([]);
 
 	const page = usePage();
 	const authUser = $derived((get(page)?.props as { auth?: { user?: { id: number; role?: string | { value?: string } } } })?.auth?.user ?? null);
@@ -319,51 +315,31 @@
 		ensureVoicesLoaded((voices) => {
 			availableTtsVoices = voices.map((v) => ({ name: v.name, lang: v.lang || '' }));
 		});
-		fetch('/api/public/tts/voices', { credentials: 'same-origin' })
-			.then((r) => r.json())
-			.then((data: { voices?: { id: string; name: string; lang?: string }[] }) => {
-				serverTtsVoices = (data.voices ?? []).map((v) => ({
-					id: v.id,
-					name: v.name,
-					lang: v.lang ?? '',
-				}));
-			})
-			.catch(() => {});
 	});
 
 	async function saveDisplaySettings(updates: {
 		display_audio_muted?: boolean;
 		display_audio_volume?: number;
-		tts_source?: 'browser' | 'server';
-		display_tts_voice?: string | null;
 	}) {
 		if (!station || !queue || displaySettingsSaving) return;
 		displaySettingsSaving = true;
 		const body: {
 			display_audio_muted?: boolean;
 			display_audio_volume?: number;
-			tts_source?: 'browser' | 'server';
-			display_tts_voice?: string | null;
 		} = {};
 		if (updates.display_audio_muted !== undefined) body.display_audio_muted = updates.display_audio_muted;
 		if (updates.display_audio_volume !== undefined) body.display_audio_volume = updates.display_audio_volume;
-		if (updates.tts_source !== undefined) body.tts_source = updates.tts_source;
-		if (updates.display_tts_voice !== undefined) body.display_tts_voice = updates.display_tts_voice;
 		const { ok, data } = await api('PUT', `/api/stations/${station.id}/display-settings`, body);
 		displaySettingsSaving = false;
 		if (ok && data && typeof data === 'object' && 'display_audio_muted' in data) {
 			const d = data as {
 				display_audio_muted?: boolean;
 				display_audio_volume?: number;
-				tts_source?: 'browser' | 'server';
-				display_tts_voice?: string | null;
 			};
 			queue = {
 				...queue,
 				display_audio_muted: d.display_audio_muted ?? queue.display_audio_muted,
 				display_audio_volume: d.display_audio_volume ?? queue.display_audio_volume,
-				tts_source: d.tts_source ?? queue.tts_source,
-				display_tts_voice: d.display_tts_voice ?? queue.display_tts_voice,
 			};
 		}
 	}
@@ -1277,86 +1253,7 @@
 						}}
 					/>
 				</label>
-				<label class="flex flex-col gap-2">
-					<span class="text-sm font-medium text-surface-950">TTS source</span>
-					<select
-						class="select select-sm bg-surface-50 border border-surface-300 rounded-lg w-fit"
-						value={queue?.tts_source ?? 'browser'}
-						disabled={displaySettingsSaving}
-						aria-label="TTS source"
-						onchange={(e) => {
-							const val = (e.target as HTMLSelectElement).value as 'browser' | 'server';
-							saveDisplaySettings({ tts_source: val });
-						}}
-					>
-						<option value="browser">Browser (device voices)</option>
-						<option value="server">Server (pre-generated)</option>
-					</select>
-					<span class="text-xs text-surface-500">Server TTS needs internet to generate; playback uses cache when offline.</span>
-				</label>
-				<label class="flex flex-col gap-2">
-					<span class="text-sm font-medium text-surface-950">TTS voice</span>
-					<div class="flex flex-wrap items-center gap-2">
-						{#if (queue?.tts_source ?? 'browser') === 'server'}
-							<select
-								class="select select-sm bg-surface-50 border border-surface-300 rounded-lg"
-								value={queue?.display_tts_voice ?? ''}
-								disabled={displaySettingsSaving}
-								aria-label="Display TTS voice (server)"
-								onchange={(e) => {
-									const val = (e.target as HTMLSelectElement).value;
-									saveDisplaySettings({ display_tts_voice: val || null });
-								}}
-							>
-								<option value="">Use program default</option>
-								{#each serverTtsVoices as voice}
-									<option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ''}</option>
-								{/each}
-							</select>
-						{:else}
-							<select
-								class="select select-sm bg-surface-50 border border-surface-300 rounded-lg"
-								value={queue?.display_tts_voice ?? ''}
-								disabled={displaySettingsSaving}
-								aria-label="Display TTS voice (browser)"
-								onchange={(e) => {
-									const val = (e.target as HTMLSelectElement).value;
-									saveDisplaySettings({ display_tts_voice: val || null });
-								}}
-							>
-								<option value="">Use program default</option>
-								{#each availableTtsVoices as voice}
-									<option value={voice.name}>{voice.name}{voice.lang ? ` (${voice.lang})` : ''}</option>
-								{/each}
-							</select>
-						{/if}
-						<button
-							type="button"
-							class="btn preset-tonal btn-sm"
-							onclick={async () => {
-								const text = "Calling A 3, please proceed to window 1.";
-								if ((queue?.tts_source ?? 'browser') === 'server') {
-									const params = new URLSearchParams({ text, rate: '0.84' });
-									if (queue?.display_tts_voice) params.set('voice', queue.display_tts_voice);
-									const res = await fetch(`/api/public/tts?${params}`, { credentials: 'same-origin' });
-									if (res.ok) {
-										const blob = await res.blob();
-										const url = URL.createObjectURL(blob);
-										const a = new Audio(url);
-										a.onended = () => URL.revokeObjectURL(url);
-										a.play().catch(() => URL.revokeObjectURL(url));
-									}
-								} else {
-									speakSample(text, (queue?.display_tts_voice ?? '') || null);
-								}
-							}}
-							aria-label="Play sample phrase with selected voice"
-						>
-							Play sample
-						</button>
-					</div>
-					<span class="text-xs text-surface-500">Voice for “Calling…” on this station’s display.</span>
-				</label>
+				<!-- TTS source/voice are now global; station controls only mute/volume. -->
 				{#if displaySettingsSaving}
 					<span class="text-xs text-surface-950/50">Saving…</span>
 				{/if}

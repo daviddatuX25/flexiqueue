@@ -40,7 +40,7 @@ class PublicDisplaySettingsController extends Controller
         $payload = $request->validated();
         unset($payload['pin']);
 
-        foreach (['display_audio_muted', 'display_audio_volume', 'tts_source', 'display_tts_voice', 'enable_display_hid_barcode', 'enable_public_triage_hid_barcode'] as $key) {
+        foreach (['display_audio_muted', 'display_audio_volume', 'enable_display_hid_barcode', 'enable_public_triage_hid_barcode'] as $key) {
             if (array_key_exists($key, $payload)) {
                 $settings[$key] = $payload[$key];
             }
@@ -52,17 +52,13 @@ class PublicDisplaySettingsController extends Controller
         event(new DisplaySettingsUpdated(
             $program->getDisplayAudioMuted(),
             $program->getDisplayAudioVolume(),
-            $program->getDisplayTtsVoice(),
             $program->getEnableDisplayHidBarcode(),
             $program->getEnablePublicTriageHidBarcode(),
-            $program->getTtsSource()
         ));
 
         return response()->json([
             'display_audio_muted' => $program->getDisplayAudioMuted(),
             'display_audio_volume' => $program->getDisplayAudioVolume(),
-            'tts_source' => $program->getTtsSource(),
-            'display_tts_voice' => $program->getDisplayTtsVoice(),
             'enable_display_hid_barcode' => $program->getEnableDisplayHidBarcode(),
             'enable_public_triage_hid_barcode' => $program->getEnablePublicTriageHidBarcode(),
         ]);

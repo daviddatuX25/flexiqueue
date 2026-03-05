@@ -8,24 +8,26 @@
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
 	import { getVoiceForTts, ensureVoicesLoaded, TTS_DEFAULT_RATE } from '../../lib/speechUtils.js';
 
-	let {
-		program_name = null,
-		date = '',
-		station_name = '',
-		station_id = 0,
-		now_serving = [],
-		waiting = [],
-		station_activity = [],
-		display_audio_muted = false,
-		display_audio_volume = 1,
-		tts_source = 'browser',
-		display_tts_voice = null,
-	} = $props();
+let {
+	program_name = null,
+	date = '',
+	station_name = '',
+	station_id = 0,
+	now_serving = [],
+	waiting = [],
+	station_activity = [],
+	display_audio_muted = false,
+	display_audio_volume = 1,
+	tts_active_language = 'en',
+	tts_connector_phrase = null,
+	station_tts_phrase = null,
+} = $props();
 
-	let muted = $state(false);
-	let volume = $state(1);
-	let ttsSource = $state('browser');
-	let ttsVoice = $state(null);
+let muted = $state(false);
+let volume = $state(1);
+let ttsLanguage = $state('en');
+let connectorPhrase = $state(null);
+let stationPhrase = $state(null);
 	/** Pending second-speak timeout; cleared when new call or unmount. */
 	let repeatTimeoutId = $state(null);
 	/** Recent activity: from props + real-time .station_activity; max 20, newest first. */
@@ -34,14 +36,20 @@
 	$effect(() => {
 		muted = !!display_audio_muted;
 		volume = Math.max(0, Math.min(1, Number(display_audio_volume ?? 1)));
-		ttsSource = tts_source === 'server' ? 'server' : 'browser';
-		ttsVoice = display_tts_voice ?? null;
+		const lang =
+			typeof tts_active_language === 'string' && tts_active_language
+				? tts_active_language
+				: 'en';
+		ttsLanguage = ['en', 'fil', 'ilo'].includes(lang) ? lang : 'en';
+		connectorPhrase =
+			typeof tts_connector_phrase === 'string' && tts_connector_phrase.trim() !== ''
+				? tts_connector_phrase.trim()
+				: null;
+		stationPhrase =
+			typeof station_tts_phrase === 'string' && station_tts_phrase.trim() !== ''
+				? station_tts_phrase.trim()
+				: null;
 	});
-
-	/** Effective TTS source: server (use API) or browser (speechSynthesis). */
-	const effectiveTtsSource = $derived(ttsSource ?? tts_source ?? 'browser');
-	/** Effective TTS voice: prefer synced state, fall back to prop so refresh always applies. */
-	const effectiveTtsVoice = $derived(ttsVoice ?? display_tts_voice ?? null);
 	$effect(() => {
 		activityFeed = [...(station_activity ?? [])];
 	});
@@ -100,10 +108,8 @@
 	}
 
 	/** Play TTS audio from server; returns Promise that resolves when playback ends or rejects on error/503. */
-	async function playServerTts(text, voiceId) {
+	async function playServerTts(text) {
 		const params = new URLSearchParams({ text });
-		if (voiceId) params.set('voice', voiceId);
-		params.set('rate', String(TTS_DEFAULT_RATE));
 		const url = `/api/public/tts?${params.toString()}`;
 		const cacheName = 'flexiqueue-tts';
 		if (typeof caches !== 'undefined') {
@@ -153,45 +159,61 @@
 			clearTimeout(repeatTimeoutId);
 			repeatTimeoutId = null;
 		}
-		const text = 'Calling ' + aliasForSpeech(alias, pronounceAs);
+		const aliasSpoken = aliasForSpeech(alias, pronounceAs);
+		const firstText = 'Calling ' + aliasSpoken;
+		const baseStation = stationPhrase || station_name || 'your station';
+		const secondText = connectorPhrase
+			? `${connectorPhrase} ${baseStation}`
+			: baseStation;
 		const doBrowserSpeak = () => {
 			if (muted || !window.speechSynthesis) return;
-			const u = new SpeechSynthesisUtterance(text);
+			const u = new SpeechSynthesisUtterance(firstText);
 			u.rate = TTS_DEFAULT_RATE;
 			u.volume = Math.max(0, Math.min(1, volume));
-			const voice = getVoiceForTts(effectiveTtsVoice ?? null);
+			const voice = getVoiceForTts(null);
 			if (voice) u.voice = voice;
 			window.speechSynthesis.speak(u);
 		};
-		const doServerTtsFallback = () => {
-			playServerTts(text, effectiveTtsVoice ?? undefined).catch(() => doBrowserSpeak());
-		};
-		if (effectiveTtsSource === 'server') {
+		const playFirstSegment = () => {
 			if (tokenId != null) {
-				playTokenTts(tokenId).catch(doServerTtsFallback);
-			} else {
-				doServerTtsFallback();
+				return playTokenTts(tokenId).catch(() =>
+					playServerTts(firstText).catch(() => doBrowserSpeak())
+				);
 			}
-			repeatTimeoutId = setTimeout(() => {
-				if (tokenId != null) {
-					playTokenTts(tokenId).catch(doServerTtsFallback);
-				} else {
-					doServerTtsFallback();
+
+			return playServerTts(firstText).catch(() => doBrowserSpeak());
+		};
+
+		const playSecondSegment = () =>
+			playServerTts(secondText).catch(() => {
+				if (!muted && window.speechSynthesis) {
+					const u = new SpeechSynthesisUtterance(secondText);
+					u.rate = TTS_DEFAULT_RATE;
+					u.volume = Math.max(0, Math.min(1, volume));
+					const voice = getVoiceForTts(null);
+					if (voice) u.voice = voice;
+					window.speechSynthesis.speak(u);
 				}
-				repeatTimeoutId = null;
-			}, 2000);
-		} else {
-			doBrowserSpeak();
-			repeatTimeoutId = setTimeout(() => {
-				doBrowserSpeak();
-				repeatTimeoutId = null;
-			}, 2000);
-		}
+			});
+
+		const playSequence = () => {
+			playFirstSegment().then(() => {
+				if (!muted) {
+					void playSecondSegment();
+				}
+			});
+		};
+
+		playSequence();
+		repeatTimeoutId = setTimeout(() => {
+			playSequence();
+			repeatTimeoutId = null;
+		}, 2000);
 	}
 
 	function refreshStationData() {
 		router.reload({
-			only: ['now_serving', 'waiting', 'station_activity', 'display_audio_muted', 'display_audio_volume', 'tts_source', 'display_tts_voice'],
+			only: ['now_serving', 'waiting', 'station_activity', 'display_audio_muted', 'display_audio_volume'],
 		});
 	}
 
@@ -227,9 +249,6 @@
 		ch.listen('.display_station_settings', (e) => {
 			muted = !!e.display_audio_muted;
 			volume = Math.max(0, Math.min(1, Number(e.display_audio_volume ?? 1)));
-			if (e.tts_source === 'server') ttsSource = 'server';
-			else ttsSource = 'browser';
-			ttsVoice = e.display_tts_voice ?? null;
 		});
 		return () => {
 			if (repeatTimeoutId != null) clearTimeout(repeatTimeoutId);

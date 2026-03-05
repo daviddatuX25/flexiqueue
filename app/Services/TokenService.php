@@ -47,6 +47,8 @@ class TokenService
             'pronounce_as' => $token->pronounce_as ?? 'letters',
             'qr_code_hash' => $token->qr_code_hash,
             'status' => $token->status,
+            'tts_status' => $token->tts_status,
+            'has_tts_audio' => $token->tts_audio_path !== null,
         ];
     }
 }

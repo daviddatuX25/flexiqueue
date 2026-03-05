@@ -4,6 +4,8 @@ namespace Tests\Feature\Api\Admin;
 
 use App\Models\Token;
 use App\Models\User;
+use App\Jobs\GenerateTokenTtsJob;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -46,6 +48,8 @@ class TokenControllerTest extends TestCase
         $response->assertJsonPath('tokens.0.physical_id', 'A1');
         $response->assertJsonPath('tokens.0.status', 'available');
         $response->assertJsonPath('tokens.0.pronounce_as', 'letters');
+        $response->assertJsonPath('tokens.0.tts_status', null);
+        $response->assertJsonPath('tokens.0.has_tts_audio', false);
         $response->assertJsonCount(2, 'tokens');
     }
 
@@ -113,8 +117,43 @@ class TokenControllerTest extends TestCase
         $response->assertJsonPath('tokens.0.status', 'available');
         $response->assertJsonPath('tokens.1.physical_id', 'A2');
         $response->assertJsonPath('tokens.2.physical_id', 'A3');
+        $response->assertJsonPath('tokens.0.tts_status', null);
+        $response->assertJsonPath('tokens.0.has_tts_audio', false);
         $this->assertDatabaseCount('tokens', 3);
         $response->assertJsonPath('tokens.0.pronounce_as', 'letters');
+    }
+
+    public function test_batch_create_marks_tokens_for_tts_and_dispatches_job_when_server_tts_enabled(): void
+    {
+        $this->app['config']->set('tts.driver', 'elevenlabs');
+        $this->app['config']->set('tts.elevenlabs.api_key', 'fake-key');
+
+        Bus::fake();
+
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/tokens/batch', [
+            'prefix' => 'A',
+            'count' => 2,
+            'start_number' => 1,
+        ]);
+
+        $response->assertStatus(201);
+        $ids = collect($response->json('tokens'))->pluck('id')->all();
+
+        foreach ($ids as $id) {
+            $this->assertDatabaseHas('tokens', [
+                'id' => $id,
+                'tts_pre_generate_enabled' => true,
+                'tts_status' => 'generating',
+            ]);
+        }
+
+        Bus::assertDispatched(GenerateTokenTtsJob::class, function (GenerateTokenTtsJob $job) use ($ids) {
+            sort($ids);
+            $jobIds = $job->tokenIds;
+            sort($jobIds);
+
+            return $jobIds === $ids;
+        });
     }
 
     public function test_batch_create_with_pronounce_as_word_persists_and_returns(): void
@@ -219,6 +258,31 @@ class TokenControllerTest extends TestCase
         $response->assertJsonPath('deleted', 2);
         $this->assertSoftDeleted('tokens', ['id' => $t1->id]);
         $this->assertSoftDeleted('tokens', ['id' => $t2->id]);
+    }
+
+    public function test_token_delete_cleans_up_tts_files(): void
+    {
+        $token = $this->createToken('A1', 'available');
+        \Illuminate\Support\Facades\Storage::fake('local');
+
+        // Simulate legacy single-file and per-language audio paths.
+        $token->tts_audio_path = 'tts/tokens/'.$token->id.'.mp3';
+        $token->tts_settings = [
+            'languages' => [
+                'en' => ['audio_path' => 'tts/tokens/'.$token->id.'/en.mp3', 'status' => 'ready'],
+            ],
+        ];
+        $token->save();
+
+        \Illuminate\Support\Facades\Storage::put($token->tts_audio_path, 'audio');
+        \Illuminate\Support\Facades\Storage::put('tts/tokens/'.$token->id.'/en.mp3', 'audio');
+
+        $response = $this->actingAs($this->admin)->deleteJson("/api/admin/tokens/{$token->id}");
+
+        $response->assertStatus(200);
+        $this->assertSoftDeleted('tokens', ['id' => $token->id]);
+        \Illuminate\Support\Facades\Storage::assertMissing($token->tts_audio_path);
+        \Illuminate\Support\Facades\Storage::assertMissing('tts/tokens/'.$token->id.'/en.mp3');
     }
 
     public function test_batch_delete_with_in_use_returns_409(): void

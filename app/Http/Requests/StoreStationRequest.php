@@ -41,6 +41,20 @@ class StoreStationRequest extends FormRequest
                 'integer',
                 $program ? Rule::exists('processes', 'id')->where('program_id', $program->id) : 'exists:processes,id',
             ],
+            'tts' => ['sometimes', 'array'],
+            'tts.languages' => ['sometimes', 'array'],
+            'tts.languages.en' => ['sometimes', 'array'],
+            'tts.languages.en.voice_id' => ['nullable', 'string', 'max:200'],
+            'tts.languages.en.rate' => ['nullable', 'numeric', 'between:0.5,2.0'],
+            'tts.languages.en.station_phrase' => ['nullable', 'string', 'max:255'],
+            'tts.languages.fil' => ['sometimes', 'array'],
+            'tts.languages.fil.voice_id' => ['nullable', 'string', 'max:200'],
+            'tts.languages.fil.rate' => ['nullable', 'numeric', 'between:0.5,2.0'],
+            'tts.languages.fil.station_phrase' => ['nullable', 'string', 'max:255'],
+            'tts.languages.ilo' => ['sometimes', 'array'],
+            'tts.languages.ilo.voice_id' => ['nullable', 'string', 'max:200'],
+            'tts.languages.ilo.rate' => ['nullable', 'numeric', 'between:0.5,2.0'],
+            'tts.languages.ilo.station_phrase' => ['nullable', 'string', 'max:255'],
         ];
     }
 

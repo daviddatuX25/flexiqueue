@@ -19,10 +19,8 @@ class DisplaySettingsUpdated implements ShouldBroadcastNow
     public function __construct(
         public bool $displayAudioMuted,
         public float $displayAudioVolume,
-        public ?string $displayTtsVoice = null,
         public bool $enableDisplayHidBarcode = true,
         public bool $enablePublicTriageHidBarcode = true,
-        public string $ttsSource = 'browser'
     ) {}
 
     /**
@@ -48,10 +46,8 @@ class DisplaySettingsUpdated implements ShouldBroadcastNow
         return [
             'display_audio_muted' => $this->displayAudioMuted,
             'display_audio_volume' => $this->displayAudioVolume,
-            'display_tts_voice' => $this->displayTtsVoice,
             'enable_display_hid_barcode' => $this->enableDisplayHidBarcode,
             'enable_public_triage_hid_barcode' => $this->enablePublicTriageHidBarcode,
-            'tts_source' => $this->ttsSource,
         ];
     }
 }

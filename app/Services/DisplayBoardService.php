@@ -36,10 +36,30 @@ class DisplayBoardService
                 'program_is_paused' => false,
                 'display_audio_muted' => false,
                 'display_audio_volume' => 1.0,
-                'tts_source' => 'browser',
-                'display_tts_voice' => null,
                 'enable_display_hid_barcode' => true,
+                'tts_active_language' => 'en',
+                'tts_connector_phrase' => null,
+                'station_tts_by_name' => [],
             ];
+        }
+
+        $activeLanguage = $program->getTtsActiveLanguage();
+        $programSettings = $program->settings ?? [];
+        $connectorPhrase = null;
+        if (
+            isset($programSettings['tts']) &&
+            is_array($programSettings['tts']) &&
+            isset($programSettings['tts']['connector']) &&
+            is_array($programSettings['tts']['connector']) &&
+            isset($programSettings['tts']['connector']['languages']) &&
+            is_array($programSettings['tts']['connector']['languages'])
+        ) {
+            $connectorLanguages = $programSettings['tts']['connector']['languages'];
+            $connectorConfig = $connectorLanguages[$activeLanguage] ?? [];
+            if (is_array($connectorConfig) && isset($connectorConfig['connector_phrase'])) {
+                $raw = $connectorConfig['connector_phrase'];
+                $connectorPhrase = is_string($raw) && trim($raw) !== '' ? trim($raw) : null;
+            }
         }
 
         $servingAndCalled = Session::query()
@@ -125,6 +145,15 @@ class DisplayBoardService
             ->where('availability_status', 'available')
             ->count();
 
+        $stationTtsByName = $program->stations()
+            ->get()
+            ->mapWithKeys(function (Station $station) use ($activeLanguage) {
+                $phrase = $this->getStationTtsPhrase($station, $activeLanguage);
+
+                return [$station->name => $phrase];
+            })
+            ->all();
+
         return [
             'program_name' => $program->name,
             'date' => now()->format('F j, Y'),
@@ -138,9 +167,10 @@ class DisplayBoardService
             'program_is_paused' => (bool) $program->is_paused,
             'display_audio_muted' => $program->getDisplayAudioMuted(),
             'display_audio_volume' => $program->getDisplayAudioVolume(),
-            'tts_source' => $program->getTtsSource(),
-            'display_tts_voice' => $program->getDisplayTtsVoice(),
             'enable_display_hid_barcode' => $program->getEnableDisplayHidBarcode(),
+            'tts_active_language' => $activeLanguage,
+            'tts_connector_phrase' => $connectorPhrase,
+            'station_tts_by_name' => $stationTtsByName,
         ];
     }
 
@@ -197,6 +227,26 @@ class DisplayBoardService
 
         $stationActivity = $this->getStationActivity([$station->id], 20);
 
+        $activeLanguage = $program?->getTtsActiveLanguage() ?? 'en';
+        $programSettings = $program?->settings ?? [];
+        $connectorPhrase = null;
+        if (
+            isset($programSettings['tts']) &&
+            is_array($programSettings['tts']) &&
+            isset($programSettings['tts']['connector']) &&
+            is_array($programSettings['tts']['connector']) &&
+            isset($programSettings['tts']['connector']['languages']) &&
+            is_array($programSettings['tts']['connector']['languages'])
+        ) {
+            $connectorLanguages = $programSettings['tts']['connector']['languages'];
+            $connectorConfig = $connectorLanguages[$activeLanguage] ?? [];
+            if (is_array($connectorConfig) && isset($connectorConfig['connector_phrase'])) {
+                $raw = $connectorConfig['connector_phrase'];
+                $connectorPhrase = is_string($raw) && trim($raw) !== '' ? trim($raw) : null;
+            }
+        }
+        $stationPhrase = $program ? $this->getStationTtsPhrase($station, $activeLanguage) : null;
+
         return [
             'program_name' => $programName,
             'date' => $date,
@@ -207,9 +257,24 @@ class DisplayBoardService
             'station_activity' => $stationActivity,
             'display_audio_muted' => $station->getDisplayAudioMuted(),
             'display_audio_volume' => $station->getDisplayAudioVolume(),
-            'tts_source' => $station->getTtsSource(),
-            'display_tts_voice' => $station->getDisplayTtsVoice(),
+            'tts_active_language' => $activeLanguage,
+            'tts_connector_phrase' => $connectorPhrase,
+            'station_tts_phrase' => $stationPhrase,
         ];
+    }
+
+    private function getStationTtsPhrase(Station $station, string $lang): ?string
+    {
+        $settings = $station->settings ?? [];
+        $languages = $settings['tts']['languages'] ?? [];
+        $config = $languages[$lang] ?? null;
+        if (! is_array($config)) {
+            return null;
+        }
+
+        $phrase = $config['station_phrase'] ?? null;
+
+        return is_string($phrase) && trim($phrase) !== '' ? trim($phrase) : null;
     }
 
     /**

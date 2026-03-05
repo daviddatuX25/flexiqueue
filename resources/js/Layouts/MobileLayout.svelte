@@ -203,14 +203,14 @@
         align-items: center;
         gap: 1.5rem;
         width: max-content;
-        animation: fq-mobile-header-marquee 10s linear infinite;
+        animation: fq-mobile-header-marquee 5.5s linear infinite;
     }
 
     .fq-mobile-header-marquee__dup {
         opacity: 0.85;
     }
 
-    @media (min-width: 640px) {
+    @media (min-width: 768px) {
         .fq-mobile-header-marquee {
             overflow: visible;
             display: flex;

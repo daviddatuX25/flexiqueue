@@ -38,6 +38,21 @@ class StationController extends Controller
         $processIds = $data['process_ids'] ?? [];
         unset($data['process_ids']);
 
+        $tts = $data['tts'] ?? null;
+        unset($data['tts']);
+
+        if ($tts !== null) {
+            $languages = $tts['languages'] ?? [];
+            $data['settings'] = array_merge(
+                $data['settings'] ?? [],
+                [
+                    'tts' => [
+                        'languages' => $languages,
+                    ],
+                ]
+            );
+        }
+
         $data = array_merge($data, ['is_active' => true]);
         $station = $program->stations()->create($data);
 
@@ -58,7 +73,42 @@ class StationController extends Controller
         $processIds = $data['process_ids'] ?? null;
         unset($data['process_ids']);
 
+        $tts = $data['tts'] ?? null;
+        unset($data['tts']);
+
         $station->update($data);
+
+        if ($tts !== null) {
+            $settings = $station->settings ?? [];
+            $languagesInput = $tts['languages'] ?? [];
+            $existingLanguages = $settings['tts']['languages'] ?? [];
+
+            foreach (['en', 'fil', 'ilo'] as $lang) {
+                if (! isset($languagesInput[$lang]) || ! is_array($languagesInput[$lang])) {
+                    continue;
+                }
+
+                $input = $languagesInput[$lang];
+                $config = $existingLanguages[$lang] ?? [];
+
+                if (array_key_exists('voice_id', $input)) {
+                    $config['voice_id'] = $input['voice_id'] !== '' ? $input['voice_id'] : null;
+                }
+                if (array_key_exists('rate', $input) && $input['rate'] !== null && $input['rate'] !== '') {
+                    $config['rate'] = (float) $input['rate'];
+                }
+                if (array_key_exists('station_phrase', $input)) {
+                    $value = $input['station_phrase'];
+                    $config['station_phrase'] = is_string($value) && trim($value) !== '' ? trim($value) : null;
+                }
+
+                $existingLanguages[$lang] = $config;
+            }
+
+            $settings['tts']['languages'] = $existingLanguages;
+            $station->settings = $settings;
+            $station->save();
+        }
 
         if ($processIds !== null) {
             $station->processes()->sync($processIds);
@@ -147,6 +197,9 @@ class StationController extends Controller
             'is_active' => $station->is_active,
             'created_at' => $station->created_at?->toIso8601String(),
             'process_ids' => $station->processes->pluck('id')->values()->all(),
+            'tts' => [
+                'languages' => ($station->settings['tts']['languages'] ?? []),
+            ],
         ];
     }
 }

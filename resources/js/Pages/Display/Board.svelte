@@ -42,31 +42,34 @@
 		return '';
 	}
 
-	let {
-		program_name = null,
-		date = '',
-		now_serving = [],
-		waiting_by_station = [],
-		total_in_queue = 0,
-		station_activity = [],
-		staff_at_stations = [],
-		staff_online = 0,
-		display_scan_timeout_seconds = 20,
-		program_is_paused = false,
-		display_audio_muted = false,
-		display_audio_volume = 1,
-		tts_source = 'browser',
-		display_tts_voice = null,
-		enable_display_hid_barcode = true,
-	} = $props();
+let {
+	program_name = null,
+	date = '',
+	now_serving = [],
+	waiting_by_station = [],
+	total_in_queue = 0,
+	station_activity = [],
+	staff_at_stations = [],
+	staff_online = 0,
+	display_scan_timeout_seconds = 20,
+	program_is_paused = false,
+	display_audio_muted = false,
+	display_audio_volume = 1,
+	enable_display_hid_barcode = true,
+	tts_active_language = 'en',
+	tts_connector_phrase = null,
+	station_tts_by_name = {},
+} = $props();
 
-	/** Synced from prop + .program_status; when true, show "Program is paused" overlay (real-time). */
-	let programIsPaused = $state(false);
-	/** Per plan: display board TTS mute/volume/voice — from props and .display_settings broadcast. */
-	let displayAudioMuted = $state(false);
-	let displayAudioVolume = $state(1);
-	let ttsSource = $state('browser');
-	let displayTtsVoice = $state(null);
+/** Synced from prop + .program_status; when true, show "Program is paused" overlay (real-time). */
+let programIsPaused = $state(false);
+/** Per plan: display board TTS mute/volume — from props and .display_settings broadcast. */
+let displayAudioMuted = $state(false);
+let displayAudioVolume = $state(1);
+/** Active TTS language and phrases from program/station. */
+let ttsLanguage = $state('en');
+let connectorPhrase = $state(null);
+let stationTtsByName = $state({});
 	/** Program HID setting — from props and .display_settings broadcast; both program and device-local decide focus. */
 	let enableDisplayHidBarcode = $state(true);
 
@@ -76,15 +79,21 @@
 	$effect(() => {
 		displayAudioMuted = !!display_audio_muted;
 		displayAudioVolume = Math.max(0, Math.min(1, Number(display_audio_volume ?? 1)));
-		ttsSource = tts_source === 'server' ? 'server' : 'browser';
-		displayTtsVoice = display_tts_voice ?? null;
 		enableDisplayHidBarcode = enable_display_hid_barcode !== false;
+		const lang =
+			typeof tts_active_language === 'string' && tts_active_language
+				? tts_active_language
+				: 'en';
+		ttsLanguage = ['en', 'fil', 'ilo'].includes(lang) ? lang : 'en';
+		connectorPhrase =
+			typeof tts_connector_phrase === 'string' && tts_connector_phrase.trim() !== ''
+				? tts_connector_phrase.trim()
+				: null;
+		stationTtsByName =
+			station_tts_by_name && typeof station_tts_by_name === 'object'
+				? station_tts_by_name
+				: {};
 	});
-
-	/** Effective TTS source: server (use API) or browser (speechSynthesis). */
-	const effectiveTtsSource = $derived(ttsSource ?? tts_source ?? 'browser');
-	/** Effective TTS voice: prefer synced state, fall back to prop so refresh/reload always applies. */
-	const effectiveTtsVoice = $derived(displayTtsVoice ?? display_tts_voice ?? null);
 
 	/** Open camera modal when URL has ?scan=1 (e.g. "Scan again" from Status page). */
 	$effect(() => {
@@ -125,9 +134,6 @@
 	let displaySettingsProgramHid = $state(true);
 	let displaySettingsMuted = $state(false);
 	let displaySettingsVolume = $state(1);
-	let displaySettingsTtsSource = $state('browser');
-	let displaySettingsTtsVoice = $state('');
-	let displaySettingsServerVoices = $state([]);
 	let displaySettingsLocalAllowHid = $state(false);
 	let availableTtsVoices = $state([]);
 	$effect(() => {
@@ -184,8 +190,6 @@
 				'program_is_paused',
 				'display_audio_muted',
 				'display_audio_volume',
-				'tts_source',
-				'display_tts_voice',
 			],
 		});
 	}
@@ -207,10 +211,8 @@
 	}
 
 	/** Play TTS audio from server; returns Promise that resolves when playback ends or rejects on error/503. */
-	async function playServerTts(text, voiceId) {
+	async function playServerTts(text) {
 		const params = new URLSearchParams({ text });
-		if (voiceId) params.set('voice', voiceId);
-		params.set('rate', String(TTS_DEFAULT_RATE));
 		const url = `/api/public/tts?${params.toString()}`;
 		const cacheName = 'flexiqueue-tts';
 		if (typeof caches !== 'undefined') {
@@ -254,7 +256,7 @@
 		});
 	}
 
-	/** Per plan: TTS — token pre-generated first, then server on-demand, then browser; repeat 2x with 2s gap. */
+	/** Per plan: TTS — token segment first, then connector + station phrase; server on-demand then browser; repeat 2x with 2s gap. */
 	function speakCallAnnouncement(alias, stationName, pronounceAs = 'letters', tokenId = null) {
 		if (typeof window === 'undefined' || displayAudioMuted) return;
 		if (ttsRepeatTimeoutId != null) {
@@ -262,41 +264,53 @@
 			ttsRepeatTimeoutId = null;
 		}
 		const aliasSpoken = aliasForSpeech(alias, pronounceAs);
-		const stationSpoken = (stationName ?? 'your station').toString().trim() || 'your station';
-		const text = `Calling ${aliasSpoken}, please proceed to ${stationSpoken}`;
-		const doBrowserSpeak = () => {
+		const stationKey = (stationName ?? 'your station').toString().trim();
+		const stationFromMap = stationTtsByName[stationKey];
+		const stationPhraseRaw =
+			(stationFromMap && stationFromMap.toString().trim()) ||
+			stationKey ||
+			'your station';
+		const connector = connectorPhrase;
+
+		const firstText = `Calling ${aliasSpoken}`;
+		const secondText = connector ? `${connector} ${stationPhraseRaw}` : stationPhraseRaw;
+
+		const speakBrowser = (text) => {
 			if (displayAudioMuted || !window.speechSynthesis) return;
 			const u = new SpeechSynthesisUtterance(text);
 			u.rate = TTS_DEFAULT_RATE;
 			u.volume = Math.max(0, Math.min(1, displayAudioVolume));
-			const voice = getVoiceForTts(effectiveTtsVoice ?? null);
+			const voice = getVoiceForTts(null);
 			if (voice) u.voice = voice;
 			window.speechSynthesis.speak(u);
 		};
-		const doServerTtsFallback = () => {
-			playServerTts(text, effectiveTtsVoice ?? undefined).catch(() => doBrowserSpeak());
-		};
-		if (effectiveTtsSource === 'server') {
+
+		const playFirstSegment = () => {
 			if (tokenId != null) {
-				playTokenTts(tokenId).catch(doServerTtsFallback);
-			} else {
-				doServerTtsFallback();
+				return playTokenTts(tokenId).catch(() =>
+					playServerTts(firstText).catch(() => speakBrowser(firstText))
+				);
 			}
-			ttsRepeatTimeoutId = setTimeout(() => {
-				if (tokenId != null) {
-					playTokenTts(tokenId).catch(doServerTtsFallback);
-				} else {
-					doServerTtsFallback();
+
+			return playServerTts(firstText).catch(() => speakBrowser(firstText));
+		};
+
+		const playSecondSegment = () =>
+			playServerTts(secondText).catch(() => speakBrowser(secondText));
+
+		const playSequence = () => {
+			playFirstSegment().then(() => {
+				if (!displayAudioMuted) {
+					void playSecondSegment();
 				}
-				ttsRepeatTimeoutId = null;
-			}, 2000);
-		} else {
-			doBrowserSpeak();
-			ttsRepeatTimeoutId = setTimeout(() => {
-				doBrowserSpeak();
-				ttsRepeatTimeoutId = null;
-			}, 2000);
-		}
+			});
+		};
+
+		playSequence();
+		ttsRepeatTimeoutId = setTimeout(() => {
+			playSequence();
+			ttsRepeatTimeoutId = null;
+		}, 2000);
 	}
 
 	async function saveDisplaySettings() {
@@ -312,8 +326,6 @@
 				enable_display_hid_barcode: displaySettingsProgramHid,
 				display_audio_muted: displaySettingsMuted,
 				display_audio_volume: displaySettingsVolume,
-				tts_source: displaySettingsTtsSource,
-				display_tts_voice: displaySettingsTtsVoice || null,
 			};
 			const res = await fetch('/api/public/display-settings', {
 				method: 'POST',
@@ -337,8 +349,6 @@
 			}
 			displayAudioMuted = !!data.display_audio_muted;
 			displayAudioVolume = Math.max(0, Math.min(1, Number(data.display_audio_volume ?? 1)));
-			ttsSource = data.tts_source === 'server' ? 'server' : 'browser';
-			displayTtsVoice = data.display_tts_voice ?? null;
 			enableDisplayHidBarcode = !!data.enable_display_hid_barcode;
 			displaySettingsPin = '';
 			showDisplaySettingsModal = false;
@@ -351,8 +361,6 @@
 		displaySettingsProgramHid = enableDisplayHidBarcode;
 		displaySettingsMuted = displayAudioMuted;
 		displaySettingsVolume = displayAudioVolume;
-		displaySettingsTtsSource = ttsSource;
-		displaySettingsTtsVoice = displayTtsVoice ?? '';
 		displaySettingsLocalAllowHid = getLocalAllowHidOnThisDevice('display') === true;
 		displaySettingsPin = '';
 		displaySettingsError = '';
@@ -360,9 +368,9 @@
 		try {
 			const res = await fetch('/api/public/tts/voices', { credentials: 'same-origin' });
 			const data = await res.json().catch(() => ({}));
-			displaySettingsServerVoices = Array.isArray(data.voices) ? data.voices : [];
+			availableTtsVoices = Array.isArray(data.voices) ? data.voices : [];
 		} catch {
-			displaySettingsServerVoices = [];
+			availableTtsVoices = [];
 		}
 	}
 
@@ -401,9 +409,6 @@
 		activityChannel.listen('.display_settings', (e) => {
 			displayAudioMuted = !!e.display_audio_muted;
 			displayAudioVolume = Math.max(0, Math.min(1, Number(e.display_audio_volume ?? 1)));
-			if (e.tts_source === 'server') ttsSource = 'server';
-			else ttsSource = 'browser';
-			displayTtsVoice = e.display_tts_voice ?? null;
 			if (typeof e.enable_display_hid_barcode === 'boolean') enableDisplayHidBarcode = e.enable_display_hid_barcode;
 		});
 		// Real-time: refresh Now Serving and waiting list when serve/transfer/complete (not only on activity)
@@ -524,6 +529,9 @@
 			default: return 'Offline';
 		}
 	}
+
+	/** Max tokens to show per station in \"Currently waiting\" before collapsing into \"+N more\". */
+	const MAX_VISIBLE_WAITING = 7;
 
 	/** Flatten staff from all stations for profile bar (no duplicates by name). */
 	const staffForBar = $derived.by(() => {
@@ -693,47 +701,7 @@
 								disabled={displaySettingsSaving || displaySettingsMuted}
 							/>
 						</label>
-						<label class="flex flex-col gap-2">
-							<span class="text-sm font-medium text-surface-950">TTS source</span>
-							<select
-								class="select select-sm bg-surface-50 border border-surface-300 rounded-lg w-full max-w-xs"
-								bind:value={displaySettingsTtsSource}
-								disabled={displaySettingsSaving}
-								aria-label="TTS source"
-							>
-								<option value="browser">Browser (device voices)</option>
-								<option value="server">Server (pre-generated)</option>
-							</select>
-							<p class="text-xs text-surface-500">Server TTS needs internet to generate; playback uses cache when offline.</p>
-						</label>
-						<label class="flex flex-col gap-2">
-							<span class="text-sm font-medium text-surface-950">TTS voice</span>
-							{#if displaySettingsTtsSource === 'server'}
-								<select
-									class="select select-sm bg-surface-50 border border-surface-300 rounded-lg w-full max-w-xs"
-									bind:value={displaySettingsTtsVoice}
-									disabled={displaySettingsSaving}
-									aria-label="TTS voice (server)"
-								>
-									<option value="">Use program default</option>
-									{#each displaySettingsServerVoices as voice}
-										<option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ''}</option>
-									{/each}
-								</select>
-							{:else}
-								<select
-									class="select select-sm bg-surface-50 border border-surface-300 rounded-lg w-full max-w-xs"
-									bind:value={displaySettingsTtsVoice}
-									disabled={displaySettingsSaving}
-									aria-label="TTS voice (browser)"
-								>
-									<option value="">Use program default</option>
-									{#each availableTtsVoices as voice}
-										<option value={voice.name}>{voice.name}{voice.lang ? ` (${voice.lang})` : ''}</option>
-									{/each}
-								</select>
-							{/if}
-						</label>
+						<!-- TTS source/voice are now global; display uses pre-generated/server/browser automatically. -->
 					</div>
 					<div class="border-t border-surface-200 pt-4 flex flex-col gap-2">
 						<h3 class="text-sm font-semibold text-surface-950">This device</h3>
@@ -811,37 +779,85 @@
 		<section>
 			<h2 class="text-xl font-bold text-surface-950 mb-3">CURRENTLY WAITING</h2>
 			{#if waiting_by_station.length > 0}
-				<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-					{#each waiting_by_station as row (row.station_name)}
-						<div class="card bg-surface-50 border border-surface-200 rounded-container shadow-sm flex flex-col">
-							<div class="p-4 py-3 shrink-0">
-								<h3 class="font-semibold text-surface-950">{row.station_name}</h3>
-								<div class="flex flex-wrap items-center gap-2 mt-1">
-									{#if row.serving_count != null && row.client_capacity != null}
-										<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500"
-											>{row.serving_count}/{row.client_capacity} serving</span
-										>
-									{/if}
-									<span class="text-surface-950/80 text-sm">
-										{row.count}
-										{row.count === 1 ? 'client' : 'clients'} waiting
-									</span>
+				<!-- Mobile: single-row horizontal scroll; Desktop: multi-column grid -->
+				<div class="flex gap-4 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:block">
+					<!-- Desktop/grid wrapper -->
+					<div class="hidden sm:grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 w-full">
+						{#each waiting_by_station as row (row.station_name)}
+							<div class="card bg-surface-50 border border-surface-200 rounded-container shadow-sm flex flex-col">
+								<div class="p-4 py-3 shrink-0">
+									<h3 class="font-semibold text-surface-950">{row.station_name}</h3>
+									<div class="flex flex-wrap items-center gap-2 mt-1">
+										{#if row.serving_count != null && row.client_capacity != null}
+											<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500"
+												>{row.serving_count}/{row.client_capacity} serving</span
+											>
+										{/if}
+										<span class="text-surface-950/80 text-sm">
+											{row.count}
+											{row.count === 1 ? 'client' : 'clients'} waiting
+										</span>
+									</div>
 								</div>
+								{#if row.waiting_clients?.length > 0}
+									<ul class="px-4 pb-4 space-y-1 text-sm text-surface-950/90" aria-label="Queue order for {row.station_name}">
+										{#each row.waiting_clients.slice(0, MAX_VISIBLE_WAITING) as client (client.alias)}
+											<li>
+												<span class="font-mono font-medium">{client.alias}</span>
+												{#if client.process_name}
+													<span class="text-surface-950/70 ml-1">— {client.process_name}</span>
+												{/if}
+											</li>
+										{/each}
+										{#if row.waiting_clients.length > MAX_VISIBLE_WAITING}
+											<li class="text-xs text-surface-950/60">
+												+{row.waiting_clients.length - MAX_VISIBLE_WAITING} more
+											</li>
+										{/if}
+									</ul>
+								{/if}
 							</div>
-							{#if row.waiting_clients?.length > 0}
-								<ul class="px-4 pb-4 space-y-1 text-sm text-surface-950/90" aria-label="Queue order for {row.station_name}">
-									{#each row.waiting_clients as client (client.alias)}
-										<li>
-											<span class="font-mono font-medium">{client.alias}</span>
-											{#if client.process_name}
-												<span class="text-surface-950/70 ml-1">— {client.process_name}</span>
-											{/if}
-										</li>
-									{/each}
-								</ul>
-							{/if}
-						</div>
-					{/each}
+						{/each}
+					</div>
+
+					<!-- Mobile: horizontally scrollable cards, no wrapping -->
+					<div class="flex sm:hidden gap-4">
+						{#each waiting_by_station as row (row.station_name)}
+							<div class="card bg-surface-50 border border-surface-200 rounded-container shadow-sm flex flex-col flex-shrink-0 min-w-[260px] max-w-[280px]">
+								<div class="p-4 py-3 shrink-0">
+									<h3 class="font-semibold text-surface-950 truncate">{row.station_name}</h3>
+									<div class="flex flex-wrap items-center gap-2 mt-1">
+										{#if row.serving_count != null && row.client_capacity != null}
+											<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500 whitespace-nowrap"
+												>{row.serving_count}/{row.client_capacity} serving</span
+											>
+										{/if}
+										<span class="text-surface-950/80 text-sm whitespace-nowrap">
+											{row.count}
+											{row.count === 1 ? 'client' : 'clients'} waiting
+										</span>
+									</div>
+								</div>
+								{#if row.waiting_clients?.length > 0}
+									<ul class="px-4 pb-4 space-y-1 text-sm text-surface-950/90" aria-label="Queue order for {row.station_name}">
+										{#each row.waiting_clients.slice(0, MAX_VISIBLE_WAITING) as client (client.alias)}
+											<li>
+												<span class="font-mono font-medium">{client.alias}</span>
+												{#if client.process_name}
+													<span class="text-surface-950/70 ml-1">— {client.process_name}</span>
+												{/if}
+											</li>
+										{/each}
+										{#if row.waiting_clients.length > MAX_VISIBLE_WAITING}
+											<li class="text-xs text-surface-950/60">
+												+{row.waiting_clients.length - MAX_VISIBLE_WAITING} more
+											</li>
+										{/if}
+									</ul>
+								{/if}
+							</div>
+						{/each}
+					</div>
 				</div>
 				<p class="mt-2 text-sm text-surface-950/70">
 					Total in queue: <strong>{total_in_queue}</strong>

@@ -53,6 +53,10 @@ return [
         ['id' => 'VR6AewLTigWG4xSOukaG', 'name' => 'Arnold', 'lang' => 'en-US'],
         ['id' => 'pNInz6obpgDQGcFmaJgB', 'name' => 'Adam', 'lang' => 'en-US'],
         ['id' => 'yoZ06aMxZJJ28mfd3POQ', 'name' => 'Sam', 'lang' => 'en-US'],
+        // language next are filipino voices
+        ['id' => 'xBXX3d8DJAMukmVFzDUY', 'name' => 'Donnah', 'lang' => 'fil-PH'],
+        ['id' => 'ofwR5KwL2nT4XZAub5qx', 'name' => 'Maria - Made For Flexiqueue', 'lang' => 'fil-PH'],
+        ['id' => '1ZA0KgPdD0Tns6SR4FVQ', 'name' => 'Juan', 'lang' => 'fil-PH'],
     ],
 
     /*

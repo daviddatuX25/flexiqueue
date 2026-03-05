@@ -105,23 +105,52 @@ class ProgramPageController extends Controller
                 'created_at' => $p->created_at?->toIso8601String(),
             ]);
 
-        $stations = $program->stations()
+        $stationsQuery = $program->stations()
             ->with('processes')
-            ->orderBy('name')
+            ->orderBy('name');
+
+        $stations = $stationsQuery
             ->get()
-            ->map(fn (Station $s) => [
-                'id' => $s->id,
-                'program_id' => $s->program_id,
-                'name' => $s->name,
-                'capacity' => $s->capacity,
-                'client_capacity' => $s->client_capacity ?? 1,
-                'priority_first_override' => $s->priority_first_override,
-                'is_active' => $s->is_active,
-                'created_at' => $s->created_at?->toIso8601String(),
-                'process_ids' => $s->processes->pluck('id')->values()->all(),
-            ]);
+            ->map(function (Station $s) {
+                $settings = $s->settings ?? [];
+                $stationTtsLanguages = [];
+                if (
+                    isset($settings['tts']) &&
+                    is_array($settings['tts']) &&
+                    isset($settings['tts']['languages']) &&
+                    is_array($settings['tts']['languages'])
+                ) {
+                    $stationTtsLanguages = $settings['tts']['languages'];
+                }
+
+                return [
+                    'id' => $s->id,
+                    'program_id' => $s->program_id,
+                    'name' => $s->name,
+                    'capacity' => $s->capacity,
+                    'client_capacity' => $s->client_capacity ?? 1,
+                    'priority_first_override' => $s->priority_first_override,
+                    'is_active' => $s->is_active,
+                    'created_at' => $s->created_at?->toIso8601String(),
+                    'process_ids' => $s->processes->pluck('id')->values()->all(),
+                    'tts' => [
+                        'languages' => $stationTtsLanguages,
+                    ],
+                ];
+            });
 
         $settings = $program->settings ?? [];
+        $connectorLanguages = [];
+        if (
+            isset($settings['tts']) &&
+            is_array($settings['tts']) &&
+            isset($settings['tts']['connector']) &&
+            is_array($settings['tts']['connector']) &&
+            isset($settings['tts']['connector']['languages']) &&
+            is_array($settings['tts']['connector']['languages'])
+        ) {
+            $connectorLanguages = $settings['tts']['connector']['languages'];
+        }
 
         $stats = [
             'total_sessions' => Session::where('program_id', $program->id)->count(),
@@ -153,11 +182,15 @@ class ProgramPageController extends Controller
                         : 20,
                     'display_audio_muted' => $program->getDisplayAudioMuted(),
                     'display_audio_volume' => $program->getDisplayAudioVolume(),
-                    'tts_source' => $program->getTtsSource(),
-                    'display_tts_voice' => $program->getDisplayTtsVoice(),
                     'allow_public_triage' => $program->getAllowPublicTriage(),
                     'enable_display_hid_barcode' => $program->getEnableDisplayHidBarcode(),
                     'enable_public_triage_hid_barcode' => $program->getEnablePublicTriageHidBarcode(),
+                    'tts' => [
+                        'active_language' => $program->getTtsActiveLanguage(),
+                        'connector' => [
+                            'languages' => $connectorLanguages,
+                        ],
+                    ],
                 ],
             ],
             'tracks' => $tracks,

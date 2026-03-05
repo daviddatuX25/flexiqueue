@@ -48,17 +48,70 @@ class TokenController extends Controller
      */
     public function batch(BatchCreateTokenRequest $request): JsonResponse
     {
-        $pronounceAs = $request->validated('pronounce_as') ?? 'letters';
+        $validated = $request->validated();
+        $pronounceAs = $validated['pronounce_as'] ?? 'letters';
+
         $result = $this->tokenService->batchCreate(
-            $request->validated('prefix'),
-            $request->validated('count'),
-            $request->validated('start_number'),
+            $validated['prefix'],
+            $validated['count'],
+            $validated['start_number'],
             $pronounceAs
         );
 
-        if ($request->boolean('generate_tts') && $this->ttsService->isEnabled()) {
-            $tokenIds = array_column($result['tokens'], 'id');
-            if ($tokenIds !== []) {
+        $tokenIds = array_column($result['tokens'], 'id');
+
+        // Persist per-batch TTS settings on tokens (three language rows).
+        $ttsInput = $validated['tts'] ?? [];
+        if ($tokenIds !== [] && is_array($ttsInput) && $ttsInput !== []) {
+            $tokens = Token::query()
+                ->whereIn('id', $tokenIds)
+                ->get();
+
+            foreach ($tokens as $token) {
+                foreach (['en', 'fil', 'ilo'] as $lang) {
+                    if (! isset($ttsInput[$lang]) || ! is_array($ttsInput[$lang])) {
+                        continue;
+                    }
+
+                    $langInput = $ttsInput[$lang];
+                    $config = $token->getTtsConfigFor($lang);
+
+                    if (array_key_exists('voice_id', $langInput)) {
+                        $config['voice_id'] = $langInput['voice_id'] !== '' ? $langInput['voice_id'] : null;
+                    }
+
+                    if (array_key_exists('rate', $langInput) && $langInput['rate'] !== null && $langInput['rate'] !== '') {
+                        $config['rate'] = (float) $langInput['rate'];
+                    }
+
+                    if (array_key_exists('pre_phrase', $langInput)) {
+                        $value = $langInput['pre_phrase'];
+                        $config['pre_phrase'] = is_string($value) && trim($value) !== '' ? trim($value) : null;
+                    }
+
+                    $token->setTtsConfigFor($lang, $config);
+                }
+
+                $token->save();
+            }
+        }
+
+        if ($tokenIds !== []) {
+            // Always mark tokens as opted-in for pre-generation so future regeneration
+            // can include them even if server TTS is currently disabled.
+            Token::query()
+                ->whereIn('id', $tokenIds)
+                ->update([
+                    'tts_pre_generate_enabled' => true,
+                ]);
+
+            if ($this->ttsService->isEnabled()) {
+                Token::query()
+                    ->whereIn('id', $tokenIds)
+                    ->update([
+                        'tts_status' => 'generating',
+                    ]);
+
                 GenerateTokenTtsJob::dispatch($tokenIds);
             }
         }
@@ -72,10 +125,11 @@ class TokenController extends Controller
      */
     public function update(UpdateTokenRequest $request, Token $token): JsonResponse
     {
+        $validated = $request->validated();
         $updates = [];
 
-        if ($request->has('status')) {
-            $status = $request->validated('status');
+        if (array_key_exists('status', $validated)) {
+            $status = $validated['status'];
             if ($status === 'deactivated' && $token->status === 'in_use') {
                 return response()->json([
                     'message' => 'Cannot deactivate token in use. Mark it available first.',
@@ -85,12 +139,44 @@ class TokenController extends Controller
             $updates['current_session_id'] = $status !== 'in_use' ? null : $token->current_session_id;
         }
 
-        if ($request->has('pronounce_as')) {
-            $updates['pronounce_as'] = $request->validated('pronounce_as');
+        if (array_key_exists('pronounce_as', $validated)) {
+            $updates['pronounce_as'] = $validated['pronounce_as'];
         }
 
         if (! empty($updates)) {
             $token->update($updates);
+            $token->refresh();
+        }
+
+        // Optional: update per-language TTS settings when provided.
+        if (isset($validated['tts']) && is_array($validated['tts'])) {
+            $ttsInput = $validated['tts'];
+
+            foreach (['en', 'fil', 'ilo'] as $lang) {
+                if (! isset($ttsInput[$lang]) || ! is_array($ttsInput[$lang])) {
+                    continue;
+                }
+
+                $langInput = $ttsInput[$lang];
+                $config = $token->getTtsConfigFor($lang);
+
+                if (array_key_exists('voice_id', $langInput)) {
+                    $config['voice_id'] = $langInput['voice_id'] !== '' ? $langInput['voice_id'] : null;
+                }
+
+                if (array_key_exists('rate', $langInput) && $langInput['rate'] !== null && $langInput['rate'] !== '') {
+                    $config['rate'] = (float) $langInput['rate'];
+                }
+
+                if (array_key_exists('pre_phrase', $langInput)) {
+                    $value = $langInput['pre_phrase'];
+                    $config['pre_phrase'] = is_string($value) && trim($value) !== '' ? trim($value) : null;
+                }
+
+                $token->setTtsConfigFor($lang, $config);
+            }
+
+            $token->save();
             $token->refresh();
         }
 
@@ -134,6 +220,43 @@ class TokenController extends Controller
         return response()->json(['deleted' => $deleted]);
     }
 
+    /**
+     * Regenerate TTS audio for all tokens opted-in to pre-generation.
+     * Marks their tts_status as "generating" and dispatches the queue job.
+     */
+    public function regenerateTts(): JsonResponse
+    {
+        if (! $this->ttsService->isEnabled()) {
+            return response()->json([
+                'message' => 'Server TTS is not enabled.',
+                'queued' => 0,
+            ], 503);
+        }
+
+        $tokenIds = Token::query()
+            ->where('tts_pre_generate_enabled', true)
+            ->pluck('id')
+            ->all();
+
+        if ($tokenIds === []) {
+            return response()->json([
+                'queued' => 0,
+            ]);
+        }
+
+        Token::query()
+            ->whereIn('id', $tokenIds)
+            ->update([
+                'tts_status' => 'generating',
+            ]);
+
+        GenerateTokenTtsJob::dispatch($tokenIds);
+
+        return response()->json([
+            'queued' => count($tokenIds),
+        ]);
+    }
+
     private function tokenResource(Token $token): array
     {
         return [
@@ -142,6 +265,9 @@ class TokenController extends Controller
             'pronounce_as' => $token->pronounce_as ?? 'letters',
             'qr_code_hash' => $token->qr_code_hash,
             'status' => $token->status,
+            'tts_status' => $token->tts_status,
+            'has_tts_audio' => $token->tts_audio_path !== null,
+            'tts_settings' => $token->tts_settings,
         ];
     }
 }

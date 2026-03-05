@@ -152,32 +152,64 @@ class TtsService
     }
 
     /**
-     * Generate TTS for a token and store under tts/tokens/{id}.mp3. Updates token.tts_audio_path.
-     * Returns stored relative path or null on failure.
+     * Generate TTS for an arbitrary phrase and store it under the given relative storage path.
+     * Returns the stored relative path or null on failure.
+     *
+     * @param  string|null  $voiceId  Engine voice ID; null = use default
+     * @param  float|null  $rate  Playback rate; null = use default
      */
-    public function storeTokenTts(Token $token): ?string
+    public function storeSegment(string $text, ?string $voiceId, ?float $rate, string $relativePath): ?string
     {
         if (! $this->isEnabled()) {
             return null;
         }
 
-        $phrase = TtsPhrase::buildCallPhraseForToken($token);
-        $path = $this->getPath($phrase, $this->defaultVoiceId, $this->defaultRate);
-        if ($path === null || ! is_file($path)) {
+        $text = trim($text);
+        if ($text === '') {
             return null;
         }
 
-        $content = file_get_contents($path);
+        $voiceId = $voiceId ?? $this->defaultVoiceId;
+        $rate = $rate ?? $this->defaultRate;
+
+        $cachePath = $this->getPath($text, $voiceId, $rate);
+        if ($cachePath === null || ! is_file($cachePath)) {
+            return null;
+        }
+
+        $content = file_get_contents($cachePath);
         if ($content === false) {
             return null;
         }
 
+        $directory = trim(dirname($relativePath), '/');
+        if ($directory !== '' && $directory !== '.') {
+            Storage::makeDirectory($directory);
+        }
+
+        Storage::put($relativePath, $content);
+
+        return $relativePath;
+    }
+
+    /**
+     * Generate TTS for a token and store under tts/tokens/{id}.mp3. Updates token.tts_audio_path.
+     * Returns stored relative path or null on failure.
+     *
+     * @param  string|null  $voiceId  Engine voice ID; null = use default
+     * @param  float|null  $rate  Playback rate; null = use default
+     */
+    public function storeTokenTts(Token $token, ?string $voiceId = null, ?float $rate = null): ?string
+    {
+        $phrase = TtsPhrase::buildCallPhraseForToken($token);
         $tokenPath = 'tts/tokens/'.$token->id.'.mp3';
-        Storage::makeDirectory('tts/tokens');
-        Storage::put($tokenPath, $content);
+        $stored = $this->storeSegment($phrase, $voiceId, $rate, $tokenPath);
+        if ($stored === null) {
+            return null;
+        }
 
-        $token->update(['tts_audio_path' => $tokenPath]);
+        $token->update(['tts_audio_path' => $stored]);
 
-        return $tokenPath;
+        return $stored;
     }
 }

@@ -498,6 +498,40 @@ class ProgramControllerTest extends TestCase
         $this->assertDatabaseMissing('programs', ['id' => $program->id]);
     }
 
+    public function test_station_delete_cleans_up_tts_files(): void
+    {
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+
+        \Illuminate\Support\Facades\Storage::fake('local');
+
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Desk 1',
+            'capacity' => 1,
+            'is_active' => true,
+            'settings' => [
+                'tts' => [
+                    'languages' => [
+                        'en' => ['audio_path' => 'tts/stations/1/en.mp3', 'status' => 'ready'],
+                    ],
+                ],
+            ],
+        ]);
+
+        \Illuminate\Support\Facades\Storage::put('tts/stations/'.$station->id.'/en.mp3', 'audio');
+
+        $response = $this->actingAs($this->admin)->deleteJson("/api/admin/stations/{$station->id}");
+
+        $response->assertStatus(204);
+        $this->assertSoftDeleted('stations', ['id' => $station->id]);
+        \Illuminate\Support\Facades\Storage::assertMissing('tts/stations/'.$station->id.'/en.mp3');
+    }
+
     public function test_pause_sets_program_paused(): void
     {
         $program = Program::create([
