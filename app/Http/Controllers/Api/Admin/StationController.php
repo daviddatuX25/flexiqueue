@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\SetStationProcessesRequest;
 use App\Http\Requests\StoreStationRequest;
 use App\Http\Requests\UpdateStationRequest;
+use App\Jobs\GenerateStationTtsJob;
 use App\Models\Program;
 use App\Models\Station;
 use App\Models\TrackStep;
@@ -60,6 +61,8 @@ class StationController extends Controller
             $station->processes()->sync($processIds);
         }
 
+        GenerateStationTtsJob::dispatch($station->fresh());
+
         return response()->json(['station' => $this->stationResource($station->fresh())], 201);
     }
 
@@ -78,10 +81,18 @@ class StationController extends Controller
 
         $station->update($data);
 
+        $requiresRegeneration = false;
         if ($tts !== null) {
             $settings = $station->settings ?? [];
             $languagesInput = $tts['languages'] ?? [];
             $existingLanguages = $settings['tts']['languages'] ?? [];
+
+            foreach ($existingLanguages as $config) {
+                if (is_array($config) && (! empty($config['audio_path']) || ($config['status'] ?? '') === 'ready')) {
+                    $requiresRegeneration = true;
+                    break;
+                }
+            }
 
             foreach (['en', 'fil', 'ilo'] as $lang) {
                 if (! isset($languagesInput[$lang]) || ! is_array($languagesInput[$lang])) {
@@ -116,6 +127,9 @@ class StationController extends Controller
 
         $station = $station->fresh();
         $payload = ['station' => $this->stationResource($station)];
+        if ($requiresRegeneration) {
+            $payload['requires_regeneration'] = true;
+        }
 
         if (($data['is_active'] ?? true) === false) {
             $stationProcessIds = $station->processes()->pluck('processes.id')->all();
@@ -181,6 +195,16 @@ class StationController extends Controller
         $station->delete();
 
         return response()->json(null, 204);
+    }
+
+    /**
+     * Regenerate TTS for this station (connector + station phrase). Called after user confirms regeneration prompt.
+     */
+    public function regenerateTts(Station $station): JsonResponse
+    {
+        GenerateStationTtsJob::dispatch($station->fresh());
+
+        return response()->json(['message' => 'Station TTS regeneration started.']);
     }
 
     private function stationResource(Station $station): array

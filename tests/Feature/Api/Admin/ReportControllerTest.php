@@ -91,7 +91,7 @@ class ReportControllerTest extends TestCase
 
     public function test_audit_returns_paginated_logs_for_admin(): void
     {
-        $response = $this->actingAs($this->admin)->getJson('/api/admin/reports/audit');
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/logs/audit');
 
         $response->assertStatus(200);
         $response->assertJsonStructure([
@@ -117,7 +117,7 @@ class ReportControllerTest extends TestCase
             'action' => 'session_start',
         ]);
 
-        $response = $this->actingAs($this->admin)->getJson('/api/admin/reports/program-sessions');
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/logs/program-sessions');
 
         $response->assertStatus(200);
         $response->assertJsonStructure(['program_sessions']);
@@ -140,7 +140,7 @@ class ReportControllerTest extends TestCase
             'action_type' => 'complete',
         ]);
 
-        $response = $this->actingAs($this->admin)->getJson("/api/admin/reports/audit?staff_user_id={$this->staff->id}");
+        $response = $this->actingAs($this->admin)->getJson("/api/admin/logs/audit?staff_user_id={$this->staff->id}");
 
         $response->assertStatus(200);
         $response->assertJsonPath('meta.total', 1);
@@ -155,7 +155,7 @@ class ReportControllerTest extends TestCase
             'action' => 'session_start',
         ]);
 
-        $response = $this->actingAs($this->admin)->getJson("/api/admin/reports/audit?program_id={$this->program->id}");
+        $response = $this->actingAs($this->admin)->getJson("/api/admin/logs/audit?program_id={$this->program->id}");
 
         $response->assertStatus(200);
         $data = $response->json('data');
@@ -213,7 +213,7 @@ class ReportControllerTest extends TestCase
             'action_type' => 'check_in',
         ]);
 
-        $response = $this->actingAs($this->admin)->getJson("/api/admin/reports/audit?program_id={$this->program->id}");
+        $response = $this->actingAs($this->admin)->getJson("/api/admin/logs/audit?program_id={$this->program->id}");
 
         $response->assertStatus(200);
         $response->assertJsonPath('meta.total', 1);
@@ -229,7 +229,7 @@ class ReportControllerTest extends TestCase
             'action_type' => 'complete',
         ]);
 
-        $response = $this->actingAs($this->admin)->getJson('/api/admin/reports/audit?action_type=complete');
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/logs/audit?action_type=complete');
 
         $response->assertStatus(200);
         $response->assertJsonPath('meta.total', 1);
@@ -238,14 +238,14 @@ class ReportControllerTest extends TestCase
 
     public function test_audit_staff_returns_403(): void
     {
-        $response = $this->actingAs($this->staff)->getJson('/api/admin/reports/audit');
+        $response = $this->actingAs($this->staff)->getJson('/api/admin/logs/audit');
 
         $response->assertStatus(403);
     }
 
     public function test_audit_export_returns_csv_for_admin(): void
     {
-        $response = $this->actingAs($this->admin)->get('/api/admin/reports/audit/export');
+        $response = $this->actingAs($this->admin)->get('/api/admin/logs/audit/export');
 
         $response->assertStatus(200);
         $this->assertStringContainsString('text/csv', $response->headers->get('Content-Type'));
@@ -268,7 +268,7 @@ class ReportControllerTest extends TestCase
             'created_at' => now(),
         ]);
 
-        $response = $this->actingAs($this->admin)->getJson('/api/admin/reports/audit');
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/logs/audit');
 
         $response->assertStatus(200);
         $data = $response->json('data');
@@ -285,7 +285,7 @@ class ReportControllerTest extends TestCase
 
     public function test_audit_export_staff_returns_403(): void
     {
-        $response = $this->actingAs($this->staff)->get('/api/admin/reports/audit/export');
+        $response = $this->actingAs($this->staff)->get('/api/admin/logs/audit/export');
 
         $response->assertStatus(403);
     }

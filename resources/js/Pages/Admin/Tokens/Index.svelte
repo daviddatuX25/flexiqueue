@@ -2,7 +2,7 @@
     import AdminLayout from "../../../Layouts/AdminLayout.svelte";
     import Modal from "../../../Components/Modal.svelte";
     import { get } from "svelte/store";
-    import { usePage } from "@inertiajs/svelte";
+    import { Link, usePage } from "@inertiajs/svelte";
     import {
         Ticket,
         Plus,
@@ -16,6 +16,7 @@
         XCircle,
         ChevronDown,
         Pencil,
+        Volume2,
     } from "lucide-svelte";
 
     interface TokenItem {
@@ -25,6 +26,7 @@
         status: string;
         pronounce_as?: string;
         tts_status?: string | null;
+        tts_failure_reason?: string | null;
         has_tts_audio?: boolean;
         tts_settings?: {
             languages?: Record<
@@ -109,11 +111,30 @@
     let tokenTtsSaving = $state(false);
     let tokenTtsLoading = $state(false);
     let tokenTtsVoices = $state<{ id: string; name: string; lang?: string }[]>([]);
-    let tokenTtsSamplePlaying = $state(false);
+    /** Which language is currently playing a sample (Token TTS settings or per-token phrases modal). */
+    let samplePlayingLang = $state<TtsLangKey | null>(null);
     let tokenTtsRegenerating = $state(false);
     let showTtsRegenerateConfirm = $state(false);
+    let ttsRegenerateError = $state("");
+    let showTtsSettingsModal = $state(false);
+    // Global default per-language (EN, FIL, ILO) for Token TTS settings modal
+    let tokenTtsLanguages = $state<Record<TtsLangKey, BatchTtsConfig>>({
+        en: { voice_id: "", rate: 0.84, pre_phrase: "" },
+        fil: { voice_id: "", rate: 0.84, pre_phrase: "" },
+        ilo: { voice_id: "", rate: 0.84, pre_phrase: "" },
+    });
+
+    // Per-token TTS phrases modal (separate from Edit modal)
+    let ttsPhrasesToken = $state<TokenItem | null>(null);
+    let ttsPhrasesForm = $state<Record<TtsLangKey, BatchTtsConfig>>({
+        en: { voice_id: "", rate: 0.84, pre_phrase: "" },
+        fil: { voice_id: "", rate: 0.84, pre_phrase: "" },
+        ilo: { voice_id: "", rate: 0.84, pre_phrase: "" },
+    });
 
     const page = usePage();
+    const serverTtsConfigured = $derived((get(page)?.props as { server_tts_configured?: boolean } | undefined)?.server_tts_configured ?? true);
+
     function getCsrfToken(): string {
         const p = get(page);
         const fromProps = (p?.props as { csrf_token?: string } | undefined)
@@ -207,9 +228,28 @@
                 const s = settingsData.token_tts_settings as {
                     voice_id?: string | null;
                     rate?: number;
+                    languages?: Record<TtsLangKey, { voice_id?: string | null; rate?: number; pre_phrase?: string | null }>;
                 };
                 tokenTtsVoiceId = (s.voice_id ?? null) as string | null;
                 tokenTtsRate = typeof s.rate === "number" ? s.rate : 0.84;
+                const langs = (s.languages ?? {}) as Record<TtsLangKey, { voice_id?: string | null; rate?: number; pre_phrase?: string | null }>;
+                tokenTtsLanguages = {
+                    en: {
+                        voice_id: (langs.en?.voice_id as string | undefined) ?? "",
+                        rate: typeof langs.en?.rate === "number" ? langs.en.rate : 0.84,
+                        pre_phrase: (langs.en?.pre_phrase as string | undefined) ?? "",
+                    },
+                    fil: {
+                        voice_id: (langs.fil?.voice_id as string | undefined) ?? "",
+                        rate: typeof langs.fil?.rate === "number" ? langs.fil.rate : 0.84,
+                        pre_phrase: (langs.fil?.pre_phrase as string | undefined) ?? "",
+                    },
+                    ilo: {
+                        voice_id: (langs.ilo?.voice_id as string | undefined) ?? "",
+                        rate: typeof langs.ilo?.rate === "number" ? langs.ilo.rate : 0.84,
+                        pre_phrase: (langs.ilo?.pre_phrase as string | undefined) ?? "",
+                    },
+                };
             }
 
             if (voicesRes.ok && voicesData && "voices" in voicesData && Array.isArray(voicesData.voices)) {
@@ -226,39 +266,52 @@
         }
     }
 
-    async function playTtsSample() {
-        if (tokenTtsSamplePlaying) return;
-        tokenTtsSamplePlaying = true;
+    /** Play TTS sample for a given language using config (voice, rate, pre_phrase) and optional alias/pronounce_as. */
+    async function playTtsSampleForLang(
+        lang: TtsLangKey,
+        config: { pre_phrase: string; voice_id: string; rate: number },
+        options: { alias: string; pronounce_as: "letters" | "word" },
+    ) {
+        if (samplePlayingLang) return;
+        samplePlayingLang = lang;
         error = "";
         try {
-            const params = new URLSearchParams({
-                text: "Calling A one, please proceed to Window one",
+            const phraseParams = new URLSearchParams({
+                lang,
+                pre_phrase: config.pre_phrase ?? "",
+                alias: options.alias || "A1",
+                pronounce_as: options.pronounce_as || "letters",
             });
-            if (tokenTtsVoiceId) params.set("voice", tokenTtsVoiceId);
-            params.set("rate", String(tokenTtsRate));
-            const url = `/api/public/tts?${params.toString()}`;
-            const res = await fetch(url, {
+            const phraseRes = await fetch(`/api/admin/tts/sample-phrase?${phraseParams.toString()}`, {
                 method: "GET",
-                headers: {
-                    Accept: "audio/mpeg",
-                    "X-Requested-With": "XMLHttpRequest",
-                },
+                headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
                 credentials: "same-origin",
             });
-            if (!res.ok) {
-                let message = "Sample TTS is unavailable (server returned an error).";
-                try {
-                    const data = await res.json();
-                    if (data && typeof data === "object" && "message" in data) {
-                        message = (data as { message?: string }).message ?? message;
-                    }
-                } catch {
-                    // ignore JSON parse errors
-                }
-                error = message;
+            const phraseData = await phraseRes.json().catch(() => ({}));
+            if (!phraseRes.ok || typeof phraseData?.text !== "string") {
+                error = "Could not get sample phrase.";
                 return;
             }
-            const blob = await res.blob();
+            const voiceId = (config.voice_id && config.voice_id.trim()) || tokenTtsVoiceId;
+            const ttsParams = new URLSearchParams({ text: phraseData.text, rate: String(config.rate) });
+            if (voiceId) ttsParams.set("voice", voiceId);
+            const ttsRes = await fetch(`/api/public/tts?${ttsParams.toString()}`, {
+                method: "GET",
+                headers: { Accept: "audio/mpeg", "X-Requested-With": "XMLHttpRequest" },
+                credentials: "same-origin",
+            });
+            if (!ttsRes.ok) {
+                let msg = "Sample TTS unavailable.";
+                try {
+                    const d = await ttsRes.json();
+                    if (d && typeof d === "object" && "message" in d) msg = (d as { message?: string }).message ?? msg;
+                } catch {
+                    /* ignore */
+                }
+                error = msg;
+                return;
+            }
+            const blob = await ttsRes.blob();
             const objectUrl = URL.createObjectURL(blob);
             await new Promise<void>((resolve, reject) => {
                 const audio = new Audio(objectUrl);
@@ -273,10 +326,10 @@
                 audio.volume = 1;
                 audio.play().catch(reject);
             });
-        } catch (e) {
+        } catch {
             error = "Failed to play TTS sample.";
         } finally {
-            tokenTtsSamplePlaying = false;
+            samplePlayingLang = null;
         }
     }
 
@@ -308,6 +361,7 @@
         };
         error = "";
         showBatchModal = true;
+        fetchTokenTtsSettings();
     }
 
     function closeBatchModal() {
@@ -327,23 +381,6 @@
                 count: batchCount,
                 start_number: batchStart,
                 pronounce_as: batchPronounceAs,
-                tts: {
-                    en: {
-                        voice_id: batchTts.en.voice_id || null,
-                        rate: batchTts.en.rate,
-                        pre_phrase: batchTts.en.pre_phrase.trim() || null,
-                    },
-                    fil: {
-                        voice_id: batchTts.fil.voice_id || null,
-                        rate: batchTts.fil.rate,
-                        pre_phrase: batchTts.fil.pre_phrase.trim() || null,
-                    },
-                    ilo: {
-                        voice_id: batchTts.ilo.voice_id || null,
-                        rate: batchTts.ilo.rate,
-                        pre_phrase: batchTts.ilo.pre_phrase.trim() || null,
-                    },
-                },
             },
         );
         submitting = false;
@@ -423,23 +460,6 @@
         error = "";
         const { ok, data, message } = await api("PUT", `/api/admin/tokens/${editToken.id}`, {
             pronounce_as: editPronounceAs,
-            tts: {
-                en: {
-                    voice_id: editTokenTts.en.voice_id || null,
-                    rate: editTokenTts.en.rate,
-                    pre_phrase: editTokenTts.en.pre_phrase.trim() || null,
-                },
-                fil: {
-                    voice_id: editTokenTts.fil.voice_id || null,
-                    rate: editTokenTts.fil.rate,
-                    pre_phrase: editTokenTts.fil.pre_phrase.trim() || null,
-                },
-                ilo: {
-                    voice_id: editTokenTts.ilo.voice_id || null,
-                    rate: editTokenTts.ilo.rate,
-                    pre_phrase: editTokenTts.ilo.pre_phrase.trim() || null,
-                },
-            },
         });
         submitting = false;
         if (ok && data?.token) {
@@ -449,6 +469,80 @@
             closeEditModal();
         } else {
             error = message ?? "Failed to update token.";
+        }
+    }
+
+    function openTtsPhrasesModal(token: TokenItem) {
+        ttsPhrasesToken = token;
+        const langs =
+            (token.tts_settings?.languages as
+                | Record<string, { voice_id?: string | null; rate?: number | null; pre_phrase?: string | null }>
+                | undefined) ?? {};
+        ttsPhrasesForm = {
+            en: {
+                voice_id: (langs.en?.voice_id as string | null | undefined) ?? "",
+                rate:
+                    typeof langs.en?.rate === "number"
+                        ? (langs.en?.rate as number)
+                        : tokenTtsRate ?? 0.84,
+                pre_phrase: (langs.en?.pre_phrase as string | null | undefined) ?? "",
+            },
+            fil: {
+                voice_id: (langs.fil?.voice_id as string | null | undefined) ?? "",
+                rate:
+                    typeof langs.fil?.rate === "number"
+                        ? (langs.fil?.rate as number)
+                        : tokenTtsRate ?? 0.84,
+                pre_phrase: (langs.fil?.pre_phrase as string | null | undefined) ?? "",
+            },
+            ilo: {
+                voice_id: (langs.ilo?.voice_id as string | null | undefined) ?? "",
+                rate:
+                    typeof langs.ilo?.rate === "number"
+                        ? (langs.ilo?.rate as number)
+                        : tokenTtsRate ?? 0.84,
+                pre_phrase: (langs.ilo?.pre_phrase as string | null | undefined) ?? "",
+            },
+        };
+        error = "";
+    }
+
+    function closeTtsPhrasesModal() {
+        ttsPhrasesToken = null;
+    }
+
+    async function saveTtsPhrases() {
+        if (!ttsPhrasesToken) return;
+        submitting = true;
+        error = "";
+        const { ok, data, message } = await api("PUT", `/api/admin/tokens/${ttsPhrasesToken.id}`, {
+            pronounce_as: ttsPhrasesToken.pronounce_as ?? "letters",
+            tts: {
+                en: {
+                    voice_id: ttsPhrasesForm.en.voice_id || null,
+                    rate: ttsPhrasesForm.en.rate,
+                    pre_phrase: ttsPhrasesForm.en.pre_phrase.trim() || null,
+                },
+                fil: {
+                    voice_id: ttsPhrasesForm.fil.voice_id || null,
+                    rate: ttsPhrasesForm.fil.rate,
+                    pre_phrase: ttsPhrasesForm.fil.pre_phrase.trim() || null,
+                },
+                ilo: {
+                    voice_id: ttsPhrasesForm.ilo.voice_id || null,
+                    rate: ttsPhrasesForm.ilo.rate,
+                    pre_phrase: ttsPhrasesForm.ilo.pre_phrase.trim() || null,
+                },
+            },
+        });
+        submitting = false;
+        if (ok && data?.token) {
+            tokens = tokens.map((t) =>
+                t.id === ttsPhrasesToken!.id ? { ...t, tts_settings: data.token.tts_settings } : t,
+            );
+            closeTtsPhrasesModal();
+        } else {
+            error = message ?? "Failed to update TTS phrases.";
         }
     }
 
@@ -712,6 +806,79 @@
         }
     }
 
+    async function generateTtsForTokens(ids: number[]) {
+        if (ids.length === 0) return;
+        submitting = true;
+        error = "";
+        try {
+            const res = await fetch("/api/admin/tokens/regenerate-tts", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                    "X-CSRF-TOKEN": getCsrfToken(),
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+                credentials: "same-origin",
+                body: JSON.stringify({ token_ids: ids }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                error =
+                    (data && "message" in data && typeof data.message === "string"
+                        ? data.message
+                        : "Failed to start TTS generation.") ?? "Failed to start TTS generation.";
+                return;
+            }
+            await fetchTokens();
+        } catch (e) {
+            error = "Failed to start TTS generation.";
+        } finally {
+            submitting = false;
+        }
+    }
+
+    /** Tokens with failed TTS or not generated (cleared) can be generated. */
+    const selectedIdsNeedingTts = $derived(
+        [...selectedIds].filter((id) => {
+            const t = tokens.find((tok) => tok.id === id);
+            return t && (t.tts_status === "failed" || !t.tts_status);
+        }),
+    );
+    const bulkGenerateTtsDisabled = $derived(
+        !someSelected ||
+        selectedIdsNeedingTts.length === 0 ||
+        submitting,
+    );
+
+    const hasAnyGenerating = $derived(
+        tokens.some((t) => t.tts_status === "generating"),
+    );
+
+    // Real-time TTS status: subscribe only while at least one token is generating; leave when done to save memory.
+    $effect(() => {
+        const win = window as unknown as { Echo?: { private: (ch: string) => { listen: (ev: string, cb: (e: { token_id: number; tts_status: string; tts_settings?: TokenItem["tts_settings"] }) => void) => void }; leave: (ch: string) => void } };
+        if (typeof window === "undefined" || !win.Echo) return;
+        if (!hasAnyGenerating) return;
+        const Echo = win.Echo;
+        const ch = "admin.token-tts";
+        Echo.private(ch).listen(".token_tts_status_updated", (e: { token_id: number; tts_status: string; tts_settings?: TokenItem["tts_settings"] & { failure_reason?: string | null } }) => {
+            tokens = tokens.map((t) => {
+                if (t.id !== e.token_id) return t;
+                const settings = e.tts_settings ?? t.tts_settings;
+                return {
+                    ...t,
+                    tts_status: e.tts_status,
+                    tts_settings: settings,
+                    tts_failure_reason: (settings && typeof settings === "object" && "failure_reason" in settings ? (settings.failure_reason as string | null) : t.tts_failure_reason) ?? null,
+                };
+            });
+        });
+        return () => {
+            Echo.leave("private-" + ch);
+        };
+    });
+
     // Load tokens on mount
     $effect(() => {
         fetchTokens();
@@ -768,117 +935,36 @@
             </div>
         </div>
 
+        {#if serverTtsConfigured === false}
+            <div
+                class="rounded-container border border-warning-200 bg-warning-50 p-4 flex flex-wrap items-center gap-3"
+                role="alert"
+            >
+                <p class="text-sm text-warning-900 flex-1 min-w-0">
+                    Server TTS is not set up. Add an ElevenLabs API account in
+                    <Link
+                        href="/admin/settings?tab=integrations"
+                        class="font-semibold text-warning-800 underline hover:text-warning-950"
+                    >
+                        Settings → Integrations
+                    </Link>
+                    to generate token audio. Displays can still use browser voices.
+                </p>
+            </div>
+        {/if}
+
         <!-- Bulk actions: always visible; buttons disabled when no selection -->
-        <!-- Global TTS audio settings -->
-        <div
-            class="rounded-container border border-primary-100 bg-primary-50/40 p-4 sm:p-5 shadow-sm flex flex-col gap-3"
-        >
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div>
-                    <h2 class="text-sm font-semibold text-surface-900">
-                        Token TTS audio
-                    </h2>
-                    <p class="text-xs text-surface-600 mt-1 max-w-2xl">
-                        Choose the server voice and speed used when pre-generating token audio and when server TTS is available.
-                        Displays will still fall back to browser voices if server TTS is unavailable.
-                    </p>
-                </div>
-                <div class="flex flex-wrap items-center gap-2">
-                    <button
-                        type="button"
-                        class="btn btn-sm preset-filled-primary-500 shadow-sm disabled:opacity-50"
-                        onclick={async () => {
-                            tokenTtsSaving = true;
-                            error = "";
-                            try {
-                                const res = await fetch("/api/admin/token-tts-settings", {
-                                    method: "PUT",
-                                    headers: {
-                                        "Content-Type": "application/json",
-                                        Accept: "application/json",
-                                        "X-CSRF-TOKEN": getCsrfToken(),
-                                        "X-Requested-With": "XMLHttpRequest",
-                                    },
-                                    credentials: "same-origin",
-                                    body: JSON.stringify({
-                                        voice_id: tokenTtsVoiceId || null,
-                                        rate: tokenTtsRate,
-                                    }),
-                                });
-                                const data = await res.json().catch(() => ({}));
-                                if (!res.ok) {
-                                    error =
-                                        (data && "message" in data && data.message) ||
-                                        "Failed to save TTS settings.";
-                                    return;
-                                }
-                                if (data && "requires_regeneration" in data && data.requires_regeneration) {
-                                    showTtsRegenerateConfirm = true;
-                                }
-                            } catch (e) {
-                                error = "Failed to save TTS settings.";
-                            } finally {
-                                tokenTtsSaving = false;
-                            }
-                        }}
-                        disabled={tokenTtsSaving || tokenTtsLoading}
-                    >
-                        {tokenTtsSaving ? "Saving…" : "Save TTS settings"}
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
-                        onclick={playTtsSample}
-                        disabled={tokenTtsSamplePlaying || tokenTtsLoading}
-                    >
-                        {tokenTtsSamplePlaying ? "Playing sample…" : "Play sample"}
-                    </button>
-                </div>
-            </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
-                <div class="form-control">
-                    <label class="label" for="token-tts-voice">
-                        <span class="label-text text-sm font-medium">Server voice</span>
-                    </label>
-                    <select
-                        id="token-tts-voice"
-                        class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm max-w-xs"
-                        bind:value={tokenTtsVoiceId}
-                    >
-                        <option value={""}>Default (from TTS config)</option>
-                        {#each tokenTtsVoices as voice}
-                            <option value={voice.id}>
-                                {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
-                            </option>
-                        {/each}
-                    </select>
-                    <p class="text-xs text-surface-500 mt-1">
-                        Uses configured ElevenLabs voice IDs when server TTS is enabled.
-                    </p>
-                </div>
-                <div class="form-control">
-                    <label class="label" for="token-tts-rate">
-                        <span class="label-text text-sm font-medium">TTS speed</span>
-                    </label>
-                    <div class="flex items-center gap-3">
-                        <input
-                            id="token-tts-rate"
-                            type="range"
-                            min="0.5"
-                            max="2"
-                            step="0.05"
-                            class="range range-sm max-w-xs"
-                            bind:value={tokenTtsRate}
-                        />
-                        <span class="text-xs text-surface-600 w-14">
-                            {tokenTtsRate.toFixed(2)}x
-                        </span>
-                    </div>
-                    <p class="text-xs text-surface-500 mt-1">
-                        1.00x is normal speed. Slower for clearer announcements.
-                    </p>
-                </div>
-            </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <button
+                type="button"
+                class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-100 flex items-center gap-2 shadow-sm"
+                onclick={() => (showTtsSettingsModal = true)}
+            >
+                Token TTS settings
+            </button>
+            <p class="text-xs text-surface-500">
+                Server voice and speed for pre-generated token audio. Configure in TTS settings.
+            </p>
         </div>
 
         <div
@@ -914,6 +1000,16 @@
                         title={!someSelected ? "Select tokens to print" : "Print selected"}
                     >
                         <Printer class="w-3.5 h-3.5" /> Print
+                    </button>
+                    <button
+                        type="button"
+                        class="btn btn-sm preset-tonal text-surface-700 hover:text-surface-950 flex items-center gap-1.5 shadow-sm transition-colors min-h-[2.25rem] disabled:opacity-50 disabled:cursor-not-allowed"
+                        onclick={() => generateTtsForTokens(selectedIdsNeedingTts)}
+                        disabled={bulkGenerateTtsDisabled}
+                        title={bulkGenerateTtsDisabled ? "Select tokens with failed or not-generated TTS" : `Generate TTS for ${selectedIdsNeedingTts.length} token(s)`}
+                    >
+                        <Volume2 class="w-3.5 h-3.5" />
+                        {submitting ? "Starting…" : "Generate TTS"}
                     </button>
                     <button
                         type="button"
@@ -1049,7 +1145,20 @@
                 <table class="table table-zebra relative w-max text-sm">
                     <thead>
                         <tr class="border-b border-surface-200">
-                            <th class="w-10 py-2 px-2 text-center text-surface-600 font-medium">Select</th>
+                            <th class="w-10 py-2 px-2 text-center text-surface-600 font-medium">
+                                <label class="flex items-center justify-center gap-1.5 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        class="checkbox checkbox-sm"
+                                        bind:this={selectAllCheckbox}
+                                        checked={allSelected}
+                                        onchange={toggleSelectAll}
+                                        disabled={selectableForDelete.length === 0}
+                                        aria-label="Select all"
+                                    />
+                                    <span class="text-xs font-medium">All</span>
+                                </label>
+                            </th>
                             <th class="w-36 py-2 px-3 text-left text-surface-600 font-medium">Physical ID</th>
                             <th class="w-32 py-2 px-3 text-surface-600 font-medium">Status</th>
                             <th class="w-40 py-2 px-3 text-surface-600 font-medium">TTS status</th>
@@ -1134,7 +1243,7 @@
                                     {:else if token.tts_status === "failed"}
                                         <span
                                             class="inline-flex items-center gap-1.5 rounded-full bg-error-50 border border-error-200 text-error-700 text-[10px] px-2 py-0.5 font-medium"
-                                            title="Generation failed. Display will fall back to live TTS."
+                                            title={token.tts_failure_reason || "Generation failed. Display will fall back to live TTS."}
                                         >
                                             <XCircle class="w-3 h-3" />
                                             Failed
@@ -1157,6 +1266,24 @@
                                             title="Edit token"
                                         >
                                             <Pencil class="w-3.5 h-3.5" /> Edit
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onclick={() => openTtsPhrasesModal(token)}
+                                            disabled={someSelected || submitting}
+                                            title="TTS phrases"
+                                        >
+                                            TTS
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onclick={() => generateTtsForTokens([token.id])}
+                                            disabled={someSelected || submitting || token.tts_status === "pre_generated" || token.tts_status === "generating"}
+                                            title={token.tts_status === "failed" ? "Regenerate TTS (generation failed)" : !token.tts_status ? "Generate TTS (not generated)" : token.tts_status === "pre_generated" ? "TTS already generated" : "Generating…"}
+                                        >
+                                            <Volume2 class="w-3.5 h-3.5" /> Generate TTS
                                         </button>
                                         <button
                                             type="button"
@@ -1297,7 +1424,10 @@
                                             Pre-generated
                                         </span>
                                     {:else if token.tts_status === "failed"}
-                                        <span class="inline-flex items-center gap-1 text-error-700">
+                                        <span
+                                            class="inline-flex items-center gap-1 text-error-700"
+                                            title={token.tts_failure_reason || "Generation failed"}
+                                        >
                                             <XCircle class="w-3 h-3" />
                                             Failed
                                         </span>
@@ -1311,7 +1441,7 @@
                         <div class="pt-2 border-t border-surface-200 flex flex-wrap items-center gap-2 min-h-[2.75rem] {someSelected ? 'opacity-60 pointer-events-none' : ''}">
                             <button
                                 type="button"
-                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[48px] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                 onclick={() => openEditModal(token)}
                                 disabled={someSelected || submitting}
                                 aria-label="Edit token"
@@ -1320,7 +1450,25 @@
                             </button>
                             <button
                                 type="button"
-                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[48px] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                onclick={() => openTtsPhrasesModal(token)}
+                                disabled={someSelected || submitting}
+                                aria-label="TTS phrases"
+                            >
+                                TTS
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[48px] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                onclick={() => generateTtsForTokens([token.id])}
+                                disabled={someSelected || submitting || token.tts_status === "pre_generated" || token.tts_status === "generating"}
+                                aria-label={token.tts_status === "failed" ? "Regenerate TTS" : !token.tts_status ? "Generate TTS" : token.tts_status === "pre_generated" ? "TTS already generated" : "Generating"}
+                            >
+                                <Volume2 class="w-3.5 h-3.5" /> Generate TTS
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[48px] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                 onclick={() => openPrintModal([token.id])}
                                 disabled={someSelected || submitting}
                                 aria-label="Print token"
@@ -1330,7 +1478,7 @@
                             {#if token.status === "in_use"}
                                 <button
                                     type="button"
-                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[48px] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                     onclick={() => setTokenStatus(token, "available")}
                                     disabled={someSelected || submitting}
                                     aria-label="Mark available"
@@ -1340,7 +1488,7 @@
                             {:else if token.status === "available"}
                                 <button
                                     type="button"
-                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[48px] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                     onclick={() => setTokenStatus(token, "deactivated")}
                                     disabled={someSelected || submitting}
                                     aria-label="Deactivate"
@@ -1350,7 +1498,7 @@
                             {:else if token.status === "deactivated"}
                                 <button
                                     type="button"
-                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[2.5rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[48px] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                     onclick={() => setTokenStatus(token, "available")}
                                     disabled={someSelected || submitting}
                                     aria-label="Activate"
@@ -1360,7 +1508,7 @@
                             {/if}
                             <button
                                 type="button"
-                                class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center justify-center min-h-[2.5rem] w-10 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center justify-center min-h-[48px] w-10 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                                 onclick={() => handleDeleteToken(token)}
                                 disabled={someSelected || submitting || token.status === "in_use"}
                                 aria-label="Delete token"
@@ -1476,159 +1624,48 @@
                     </label>
                 </div>
             </div>
-            <div class="form-control w-full">
-                <span class="label-text font-medium mb-1 block">Token TTS phrases</span>
-                <p class="text-sm text-surface-600 mb-2">
-                    Configure how the token will be spoken in each language. Audio is generated in the background after tokens are created.
+            <div class="rounded-container border border-surface-200 bg-surface-50 p-3 mt-2">
+                <p class="text-sm font-medium text-surface-800 mb-1">Preview TTS (default settings)</p>
+                <p class="text-xs text-surface-600 mb-3">
+                    Uses global Token TTS defaults and the first token alias so you can hear how it will sound in each language.
                 </p>
-                <div class="space-y-3">
-                    <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                        <div class="flex items-center justify-between gap-2 mb-2">
-                            <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">English</span>
-                        </div>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div class="form-control">
-                                <label class="label" for="batch-tts-en-voice"><span class="label-text text-xs font-medium">Voice</span></label>
-                                <select
-                                    id="batch-tts-en-voice"
-                                    class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                    bind:value={batchTts.en.voice_id}
-                                >
-                                    <option value={""}>Use global token voice</option>
-                                    {#each tokenTtsVoices as voice}
-                                        <option value={voice.id}>
-                                            {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
-                                        </option>
-                                    {/each}
-                                </select>
-                            </div>
-                            <div class="form-control">
-                                <label class="label" for="batch-tts-en-rate"><span class="label-text text-xs font-medium">Speed</span></label>
-                                <div class="flex items-center gap-3">
-                                    <input
-                                        id="batch-tts-en-rate"
-                                        type="range"
-                                        min="0.5"
-                                        max="2"
-                                        step="0.05"
-                                        class="range range-xs max-w-xs"
-                                        bind:value={batchTts.en.rate}
-                                    />
-                                    <span class="text-xs text-surface-600 w-14">
-                                        {Number(batchTts.en.rate).toFixed(2)}x
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="form-control mt-2">
-                            <label class="label" for="batch-tts-en-pre"><span class="label-text text-xs font-medium">Pre-phrase (optional)</span></label>
-                            <input
-                                id="batch-tts-en-pre"
-                                type="text"
-                                class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                placeholder='e.g. "Calling" or "Token"'
-                                bind:value={batchTts.en.pre_phrase}
-                            />
-                        </div>
-                    </div>
-                    <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                        <div class="flex items-center justify-between gap-2 mb-2">
-                            <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Filipino</span>
-                        </div>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div class="form-control">
-                                <label class="label" for="batch-tts-fil-voice"><span class="label-text text-xs font-medium">Voice</span></label>
-                                <select
-                                    id="batch-tts-fil-voice"
-                                    class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                    bind:value={batchTts.fil.voice_id}
-                                >
-                                    <option value={""}>Use global token voice</option>
-                                    {#each tokenTtsVoices as voice}
-                                        <option value={voice.id}>
-                                            {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
-                                        </option>
-                                    {/each}
-                                </select>
-                            </div>
-                            <div class="form-control">
-                                <label class="label" for="batch-tts-fil-rate"><span class="label-text text-xs font-medium">Speed</span></label>
-                                <div class="flex items-center gap-3">
-                                    <input
-                                        id="batch-tts-fil-rate"
-                                        type="range"
-                                        min="0.5"
-                                        max="2"
-                                        step="0.05"
-                                        class="range range-xs max-w-xs"
-                                        bind:value={batchTts.fil.rate}
-                                    />
-                                    <span class="text-xs text-surface-600 w-14">
-                                        {Number(batchTts.fil.rate).toFixed(2)}x
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="form-control mt-2">
-                            <label class="label" for="batch-tts-fil-pre"><span class="label-text text-xs font-medium">Pre-phrase (optional)</span></label>
-                            <input
-                                id="batch-tts-fil-pre"
-                                type="text"
-                                class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                placeholder='e.g. "Pakitawag" or "Token"'
-                                bind:value={batchTts.fil.pre_phrase}
-                            />
-                        </div>
-                    </div>
-                    <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                        <div class="flex items-center justify-between gap-2 mb-2">
-                            <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Ilocano</span>
-                        </div>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div class="form-control">
-                                <label class="label" for="batch-tts-ilo-voice"><span class="label-text text-xs font-medium">Voice</span></label>
-                                <select
-                                    id="batch-tts-ilo-voice"
-                                    class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                    bind:value={batchTts.ilo.voice_id}
-                                >
-                                    <option value={""}>Use global token voice</option>
-                                    {#each tokenTtsVoices as voice}
-                                        <option value={voice.id}>
-                                            {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
-                                        </option>
-                                    {/each}
-                                </select>
-                            </div>
-                            <div class="form-control">
-                                <label class="label" for="batch-tts-ilo-rate"><span class="label-text text-xs font-medium">Speed</span></label>
-                                <div class="flex items-center gap-3">
-                                    <input
-                                        id="batch-tts-ilo-rate"
-                                        type="range"
-                                        min="0.5"
-                                        max="2"
-                                        step="0.05"
-                                        class="range range-xs max-w-xs"
-                                        bind:value={batchTts.ilo.rate}
-                                    />
-                                    <span class="text-xs text-surface-600 w-14">
-                                        {Number(batchTts.ilo.rate).toFixed(2)}x
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="form-control mt-2">
-                            <label class="label" for="batch-tts-ilo-pre"><span class="label-text text-xs font-medium">Pre-phrase (optional)</span></label>
-                            <input
-                                id="batch-tts-ilo-pre"
-                                type="text"
-                                class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                placeholder='e.g. "Mapan" or "Token"'
-                                bind:value={batchTts.ilo.pre_phrase}
-                            />
-                        </div>
-                    </div>
+                <div class="flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
+                        onclick={() =>
+                            playTtsSampleForLang("en", tokenTtsLanguages.en, {
+                                alias: String(batchPrefix) + String(batchStart),
+                                pronounce_as: batchPronounceAs,
+                            })}
+                        disabled={samplePlayingLang !== null || tokenTtsLoading}
+                    >
+                        {samplePlayingLang === "en" ? "Playing…" : "Play sample (EN)"}
+                    </button>
+                    <button
+                        type="button"
+                        class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
+                        onclick={() =>
+                            playTtsSampleForLang("fil", tokenTtsLanguages.fil, {
+                                alias: String(batchPrefix) + String(batchStart),
+                                pronounce_as: batchPronounceAs,
+                            })}
+                        disabled={samplePlayingLang !== null || tokenTtsLoading}
+                    >
+                        {samplePlayingLang === "fil" ? "Playing…" : "Play sample (FIL)"}
+                    </button>
+                    <button
+                        type="button"
+                        class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
+                        onclick={() =>
+                            playTtsSampleForLang("ilo", tokenTtsLanguages.ilo, {
+                                alias: String(batchPrefix) + String(batchStart),
+                                pronounce_as: batchPronounceAs,
+                            })}
+                        disabled={samplePlayingLang !== null || tokenTtsLoading}
+                    >
+                        {samplePlayingLang === "ilo" ? "Playing…" : "Play sample (ILO)"}
+                    </button>
                 </div>
             </div>
             <div
@@ -1655,10 +1692,335 @@
 </Modal>
 
 <Modal
+    open={showTtsSettingsModal}
+    title="Token TTS settings"
+    onClose={() => (showTtsSettingsModal = false)}
+>
+    {#snippet children()}
+        <div class="flex flex-col gap-4">
+            <p class="text-sm text-surface-600">
+                Choose the server voice and speed used when pre-generating token audio and when server TTS is available.
+                Displays will still fall back to browser voices if server TTS is unavailable.
+            </p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="form-control">
+                    <label class="label" for="token-tts-voice">
+                        <span class="label-text text-sm font-medium">Server voice</span>
+                    </label>
+                    <select
+                        id="token-tts-voice"
+                        class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm max-w-xs"
+                        bind:value={tokenTtsVoiceId}
+                    >
+                        <option value={""}>Default (from TTS config)</option>
+                        {#each tokenTtsVoices as voice}
+                            <option value={voice.id}>
+                                {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
+                            </option>
+                        {/each}
+                    </select>
+                    <p class="text-xs text-surface-500 mt-1">
+                        Uses configured ElevenLabs voice IDs when server TTS is enabled.
+                    </p>
+                </div>
+                <div class="form-control">
+                    <label class="label" for="token-tts-rate">
+                        <span class="label-text text-sm font-medium">TTS speed</span>
+                    </label>
+                    <div class="flex items-center gap-3">
+                        <input
+                            id="token-tts-rate"
+                            type="range"
+                            min="0.5"
+                            max="2"
+                            step="0.05"
+                            class="range range-sm max-w-xs"
+                            bind:value={tokenTtsRate}
+                        />
+                        <span class="text-xs text-surface-600 w-14">
+                            {tokenTtsRate.toFixed(2)}x
+                        </span>
+                    </div>
+                    <p class="text-xs text-surface-500 mt-1">
+                        1.00x is normal speed. Slower for clearer announcements.
+                    </p>
+                </div>
+            </div>
+            <p class="text-sm font-medium text-surface-800 mt-2">Default per language (English, Filipino, Ilocano)</p>
+            <p class="text-xs text-surface-600 mb-2">
+                These apply when a token has no override. Voice, speed, and pre-phrase (pronunciation) per language.
+            </p>
+            <div class="space-y-3">
+                <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">English</span>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="form-control">
+                            <label class="label" for="global-tts-en-voice"><span class="label-text text-xs font-medium">Voice</span></label>
+                            <select
+                                id="global-tts-en-voice"
+                                class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                                bind:value={tokenTtsLanguages.en.voice_id}
+                            >
+                                <option value={""}>Use server voice above</option>
+                                {#each tokenTtsVoices as voice}
+                                    <option value={voice.id}>
+                                        {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
+                                    </option>
+                                {/each}
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label class="label" for="global-tts-en-rate"><span class="label-text text-xs font-medium">Speed</span></label>
+                            <div class="flex items-center gap-3">
+                                <input
+                                    id="global-tts-en-rate"
+                                    type="range"
+                                    min="0.5"
+                                    max="2"
+                                    step="0.05"
+                                    class="range range-xs max-w-xs"
+                                    bind:value={tokenTtsLanguages.en.rate}
+                                />
+                                <span class="text-xs text-surface-600 w-14">
+                                    {Number(tokenTtsLanguages.en.rate).toFixed(2)}x
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-control mt-2">
+                        <label class="label" for="global-tts-en-pre"><span class="label-text text-xs font-medium">Pre-phrase (pronunciation)</span></label>
+                        <input
+                            id="global-tts-en-pre"
+                            type="text"
+                            class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                            placeholder='e.g. "Calling" or "Token"'
+                            bind:value={tokenTtsLanguages.en.pre_phrase}
+                        />
+                    </div>
+                    <div class="mt-2">
+                        <button
+                            type="button"
+                            class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
+                            onclick={() => playTtsSampleForLang("en", tokenTtsLanguages.en, { alias: "A1", pronounce_as: "letters" })}
+                            disabled={samplePlayingLang !== null || tokenTtsLoading}
+                        >
+                            {samplePlayingLang === "en" ? "Playing…" : "Play sample"}
+                        </button>
+                    </div>
+                </div>
+                <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Filipino</span>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="form-control">
+                            <label class="label" for="global-tts-fil-voice"><span class="label-text text-xs font-medium">Voice</span></label>
+                            <select
+                                id="global-tts-fil-voice"
+                                class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                                bind:value={tokenTtsLanguages.fil.voice_id}
+                            >
+                                <option value={""}>Use server voice above</option>
+                                {#each tokenTtsVoices as voice}
+                                    <option value={voice.id}>
+                                        {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
+                                    </option>
+                                {/each}
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label class="label" for="global-tts-fil-rate"><span class="label-text text-xs font-medium">Speed</span></label>
+                            <div class="flex items-center gap-3">
+                                <input
+                                    id="global-tts-fil-rate"
+                                    type="range"
+                                    min="0.5"
+                                    max="2"
+                                    step="0.05"
+                                    class="range range-xs max-w-xs"
+                                    bind:value={tokenTtsLanguages.fil.rate}
+                                />
+                                <span class="text-xs text-surface-600 w-14">
+                                    {Number(tokenTtsLanguages.fil.rate).toFixed(2)}x
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-control mt-2">
+                        <label class="label" for="global-tts-fil-pre"><span class="label-text text-xs font-medium">Pre-phrase (pronunciation)</span></label>
+                        <input
+                            id="global-tts-fil-pre"
+                            type="text"
+                            class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                            placeholder='e.g. "Pakitawag" or "Token"'
+                            bind:value={tokenTtsLanguages.fil.pre_phrase}
+                        />
+                    </div>
+                    <div class="mt-2">
+                        <button
+                            type="button"
+                            class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
+                            onclick={() => playTtsSampleForLang("fil", tokenTtsLanguages.fil, { alias: "A1", pronounce_as: "letters" })}
+                            disabled={samplePlayingLang !== null || tokenTtsLoading}
+                        >
+                            {samplePlayingLang === "fil" ? "Playing…" : "Play sample"}
+                        </button>
+                    </div>
+                </div>
+                <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Ilocano</span>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="form-control">
+                            <label class="label" for="global-tts-ilo-voice"><span class="label-text text-xs font-medium">Voice</span></label>
+                            <select
+                                id="global-tts-ilo-voice"
+                                class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                                bind:value={tokenTtsLanguages.ilo.voice_id}
+                            >
+                                <option value={""}>Use server voice above</option>
+                                {#each tokenTtsVoices as voice}
+                                    <option value={voice.id}>
+                                        {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
+                                    </option>
+                                {/each}
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label class="label" for="global-tts-ilo-rate"><span class="label-text text-xs font-medium">Speed</span></label>
+                            <div class="flex items-center gap-3">
+                                <input
+                                    id="global-tts-ilo-rate"
+                                    type="range"
+                                    min="0.5"
+                                    max="2"
+                                    step="0.05"
+                                    class="range range-xs max-w-xs"
+                                    bind:value={tokenTtsLanguages.ilo.rate}
+                                />
+                                <span class="text-xs text-surface-600 w-14">
+                                    {Number(tokenTtsLanguages.ilo.rate).toFixed(2)}x
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-control mt-2">
+                        <label class="label" for="global-tts-ilo-pre"><span class="label-text text-xs font-medium">Pre-phrase (pronunciation)</span></label>
+                        <input
+                            id="global-tts-ilo-pre"
+                            type="text"
+                            class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                            placeholder='e.g. "Mapan" or "Token"'
+                            bind:value={tokenTtsLanguages.ilo.pre_phrase}
+                        />
+                    </div>
+                    <div class="mt-2">
+                        <button
+                            type="button"
+                            class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
+                            onclick={() => playTtsSampleForLang("ilo", tokenTtsLanguages.ilo, { alias: "A1", pronounce_as: "letters" })}
+                            disabled={samplePlayingLang !== null || tokenTtsLoading}
+                        >
+                            {samplePlayingLang === "ilo" ? "Playing…" : "Play sample"}
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 pt-2">
+                <button
+                    type="button"
+                    class="btn btn-sm preset-filled-primary-500 shadow-sm disabled:opacity-50"
+                    onclick={async () => {
+                        tokenTtsSaving = true;
+                        error = "";
+                        try {
+                            const res = await fetch("/api/admin/token-tts-settings", {
+                                method: "PUT",
+                                headers: {
+                                    "Content-Type": "application/json",
+                                    Accept: "application/json",
+                                    "X-CSRF-TOKEN": getCsrfToken(),
+                                    "X-Requested-With": "XMLHttpRequest",
+                                },
+                                credentials: "same-origin",
+                                body: JSON.stringify({
+                                    voice_id: tokenTtsVoiceId || null,
+                                    rate: tokenTtsRate,
+                                    languages: {
+                                        en: {
+                                            voice_id: tokenTtsLanguages.en.voice_id || null,
+                                            rate: tokenTtsLanguages.en.rate,
+                                            pre_phrase: tokenTtsLanguages.en.pre_phrase.trim() || null,
+                                        },
+                                        fil: {
+                                            voice_id: tokenTtsLanguages.fil.voice_id || null,
+                                            rate: tokenTtsLanguages.fil.rate,
+                                            pre_phrase: tokenTtsLanguages.fil.pre_phrase.trim() || null,
+                                        },
+                                        ilo: {
+                                            voice_id: tokenTtsLanguages.ilo.voice_id || null,
+                                            rate: tokenTtsLanguages.ilo.rate,
+                                            pre_phrase: tokenTtsLanguages.ilo.pre_phrase.trim() || null,
+                                        },
+                                    },
+                                }),
+                            });
+                            const data = await res.json().catch(() => ({}));
+                            if (!res.ok) {
+                                error =
+                                    (data && "message" in data && data.message) ||
+                                    "Failed to save TTS settings.";
+                                return;
+                            }
+                            if (data?.token_tts_settings?.languages) {
+                                const langs = data.token_tts_settings.languages as Record<TtsLangKey, { voice_id?: string | null; rate?: number; pre_phrase?: string | null }>;
+                                tokenTtsLanguages = {
+                                    en: {
+                                        voice_id: (langs.en?.voice_id as string) ?? "",
+                                        rate: typeof langs.en?.rate === "number" ? langs.en.rate : 0.84,
+                                        pre_phrase: (langs.en?.pre_phrase as string) ?? "",
+                                    },
+                                    fil: {
+                                        voice_id: (langs.fil?.voice_id as string) ?? "",
+                                        rate: typeof langs.fil?.rate === "number" ? langs.fil.rate : 0.84,
+                                        pre_phrase: (langs.fil?.pre_phrase as string) ?? "",
+                                    },
+                                    ilo: {
+                                        voice_id: (langs.ilo?.voice_id as string) ?? "",
+                                        rate: typeof langs.ilo?.rate === "number" ? langs.ilo.rate : 0.84,
+                                        pre_phrase: (langs.ilo?.pre_phrase as string) ?? "",
+                                    },
+                                };
+                            }
+                            if (data && "requires_regeneration" in data && data.requires_regeneration) {
+                                showTtsRegenerateConfirm = true;
+                            }
+                        } catch (e) {
+                            error = "Failed to save TTS settings.";
+                        } finally {
+                            tokenTtsSaving = false;
+                        }
+                    }}
+                    disabled={tokenTtsSaving || tokenTtsLoading}
+                >
+                    {tokenTtsSaving ? "Saving…" : "Save TTS settings"}
+                </button>
+            </div>
+        </div>
+    {/snippet}
+</Modal>
+
+<Modal
     open={showTtsRegenerateConfirm}
     title="Regenerate token TTS audio"
     onClose={() => {
-        if (!tokenTtsRegenerating) showTtsRegenerateConfirm = false;
+        if (!tokenTtsRegenerating) {
+            showTtsRegenerateConfirm = false;
+            ttsRegenerateError = "";
+        }
     }}
 >
     {#snippet children()}
@@ -1672,12 +2034,20 @@
                 Regeneration happens in the background via the queue worker. You can continue using the system;
                 TTS status badges will update as tokens finish.
             </p>
+            {#if ttsRegenerateError}
+                <div class="rounded-container bg-error-50 border border-error-200 text-error-800 p-3 text-sm" role="alert">
+                    {ttsRegenerateError}
+                </div>
+            {/if}
             <div class="flex justify-end gap-3 mt-2 pt-3 border-t border-surface-200">
                 <button
                     type="button"
                     class="btn preset-tonal"
                     onclick={() => {
-                        if (!tokenTtsRegenerating) showTtsRegenerateConfirm = false;
+                        if (!tokenTtsRegenerating) {
+                            showTtsRegenerateConfirm = false;
+                            ttsRegenerateError = "";
+                        }
                     }}
                     disabled={tokenTtsRegenerating}
                 >
@@ -1690,6 +2060,7 @@
                     onclick={async () => {
                         if (tokenTtsRegenerating) return;
                         tokenTtsRegenerating = true;
+                        ttsRegenerateError = "";
                         error = "";
                         try {
                             const res = await fetch("/api/admin/tokens/regenerate-tts", {
@@ -1705,15 +2076,19 @@
                             });
                             const data = await res.json().catch(() => ({}));
                             if (!res.ok) {
-                                error =
-                                    (data && "message" in data && data.message) ||
+                                const msg =
+                                    (data && "message" in data && typeof data.message === "string" && data.message) ||
                                     "Failed to start TTS regeneration.";
+                                ttsRegenerateError = msg;
+                                error = msg;
                                 return;
                             }
                             showTtsRegenerateConfirm = false;
+                            ttsRegenerateError = "";
                             await fetchTokens();
                         } catch (e) {
-                            error = "Failed to start TTS regeneration.";
+                            ttsRegenerateError = "Failed to start TTS regeneration.";
+                            error = ttsRegenerateError;
                         } finally {
                             tokenTtsRegenerating = false;
                         }
@@ -1775,179 +2150,6 @@
                         </label>
                     </div>
                 </div>
-                <div class="form-control w-full">
-                    <span class="label-text font-medium mb-1 block">Token TTS phrases</span>
-                    <p class="text-sm text-surface-600 mb-2">
-                        Adjust how this token will be spoken in each language. Leave blank to use defaults.
-                    </p>
-                    <div class="space-y-3">
-                        <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                            <div class="flex items-center justify-between gap-2 mb-2">
-                                <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">English</span>
-                            </div>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div class="form-control">
-                                    <label class="label" for="edit-token-en-voice">
-                                        <span class="label-text text-xs font-medium">Voice</span>
-                                    </label>
-                                    <select
-                                        id="edit-token-en-voice"
-                                        class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                        bind:value={editTokenTts.en.voice_id}
-                                    >
-                                        <option value={""}>Use global token voice</option>
-                                        {#each tokenTtsVoices as voice}
-                                            <option value={voice.id}>
-                                                {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
-                                            </option>
-                                        {/each}
-                                    </select>
-                                </div>
-                                <div class="form-control">
-                                    <label class="label" for="edit-token-en-rate">
-                                        <span class="label-text text-xs font-medium">Speed</span>
-                                    </label>
-                                    <div class="flex items-center gap-3">
-                                        <input
-                                            id="edit-token-en-rate"
-                                            type="range"
-                                            min="0.5"
-                                            max="2"
-                                            step="0.05"
-                                            class="range range-xs max-w-xs"
-                                            bind:value={editTokenTts.en.rate}
-                                        />
-                                        <span class="text-xs text-surface-600 w-14">
-                                            {Number(editTokenTts.en.rate).toFixed(2)}x
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="form-control mt-2">
-                                <label class="label" for="edit-token-en-pre">
-                                    <span class="label-text text-xs font-medium">Pre-phrase (optional)</span>
-                                </label>
-                                <input
-                                    id="edit-token-en-pre"
-                                    type="text"
-                                    class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                    placeholder='e.g. "Calling" or "Token"'
-                                    bind:value={editTokenTts.en.pre_phrase}
-                                />
-                            </div>
-                        </div>
-                        <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                            <div class="flex items-center justify-between gap-2 mb-2">
-                                <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Filipino</span>
-                            </div>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div class="form-control">
-                                    <label class="label" for="edit-token-fil-voice">
-                                        <span class="label-text text-xs font-medium">Voice</span>
-                                    </label>
-                                    <select
-                                        id="edit-token-fil-voice"
-                                        class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                        bind:value={editTokenTts.fil.voice_id}
-                                    >
-                                        <option value={""}>Use global token voice</option>
-                                        {#each tokenTtsVoices as voice}
-                                            <option value={voice.id}>
-                                                {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
-                                            </option>
-                                        {/each}
-                                    </select>
-                                </div>
-                                <div class="form-control">
-                                    <label class="label" for="edit-token-fil-rate">
-                                        <span class="label-text text-xs font-medium">Speed</span>
-                                    </label>
-                                    <div class="flex items-center gap-3">
-                                        <input
-                                            id="edit-token-fil-rate"
-                                            type="range"
-                                            min="0.5"
-                                            max="2"
-                                            step="0.05"
-                                            class="range range-xs max-w-xs"
-                                            bind:value={editTokenTts.fil.rate}
-                                        />
-                                        <span class="text-xs text-surface-600 w-14">
-                                            {Number(editTokenTts.fil.rate).toFixed(2)}x
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="form-control mt-2">
-                                <label class="label" for="edit-token-fil-pre">
-                                    <span class="label-text text-xs font-medium">Pre-phrase (optional)</span>
-                                </label>
-                                <input
-                                    id="edit-token-fil-pre"
-                                    type="text"
-                                    class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                    placeholder='e.g. "Pakitawag" or "Token"'
-                                    bind:value={editTokenTts.fil.pre_phrase}
-                                />
-                            </div>
-                        </div>
-                        <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                            <div class="flex items-center justify-between gap-2 mb-2">
-                                <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Ilocano</span>
-                            </div>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div class="form-control">
-                                    <label class="label" for="edit-token-ilo-voice">
-                                        <span class="label-text text-xs font-medium">Voice</span>
-                                    </label>
-                                    <select
-                                        id="edit-token-ilo-voice"
-                                        class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                        bind:value={editTokenTts.ilo.voice_id}
-                                    >
-                                        <option value={""}>Use global token voice</option>
-                                        {#each tokenTtsVoices as voice}
-                                            <option value={voice.id}>
-                                                {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
-                                            </option>
-                                        {/each}
-                                    </select>
-                                </div>
-                                <div class="form-control">
-                                    <label class="label" for="edit-token-ilo-rate">
-                                        <span class="label-text text-xs font-medium">Speed</span>
-                                    </label>
-                                    <div class="flex items-center gap-3">
-                                        <input
-                                            id="edit-token-ilo-rate"
-                                            type="range"
-                                            min="0.5"
-                                            max="2"
-                                            step="0.05"
-                                            class="range range-xs max-w-xs"
-                                            bind:value={editTokenTts.ilo.rate}
-                                        />
-                                        <span class="text-xs text-surface-600 w-14">
-                                            {Number(editTokenTts.ilo.rate).toFixed(2)}x
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="form-control mt-2">
-                                <label class="label" for="edit-token-ilo-pre">
-                                    <span class="label-text text-xs font-medium">Pre-phrase (optional)</span>
-                                </label>
-                                <input
-                                    id="edit-token-ilo-pre"
-                                    type="text"
-                                    class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                    placeholder='e.g. "Mapan" or "Token"'
-                                    bind:value={editTokenTts.ilo.pre_phrase}
-                                />
-                            </div>
-                        </div>
-                    </div>
-                </div>
                 <div class="flex justify-end gap-3 mt-4 pt-4 border-t border-surface-200">
                     <button
                         type="button"
@@ -1961,6 +2163,230 @@
                         class="btn preset-filled-primary-500 shadow-sm"
                         disabled={submitting}
                     >
+                        {submitting ? "Saving…" : "Save"}
+                    </button>
+                </div>
+            </form>
+        {/if}
+    {/snippet}
+</Modal>
+
+<Modal
+    open={ttsPhrasesToken !== null}
+    title={ttsPhrasesToken ? `Token TTS phrases – ${ttsPhrasesToken.physical_id}` : "Token TTS phrases"}
+    onClose={closeTtsPhrasesModal}
+>
+    {#snippet children()}
+        {#if ttsPhrasesToken}
+            <form
+                onsubmit={(e) => {
+                    e.preventDefault();
+                    saveTtsPhrases();
+                }}
+                class="flex flex-col gap-4"
+            >
+                <p class="text-sm text-surface-600">
+                    Adjust how this token will be spoken in each language. Leave blank to use defaults.
+                </p>
+                <div class="space-y-3">
+                    <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">English</span>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div class="form-control">
+                                <label class="label" for="tts-phrases-en-voice"><span class="label-text text-xs font-medium">Voice</span></label>
+                                <select
+                                    id="tts-phrases-en-voice"
+                                    class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                                    bind:value={ttsPhrasesForm.en.voice_id}
+                                >
+                                    <option value={""}>Use global token voice</option>
+                                    {#each tokenTtsVoices as voice}
+                                        <option value={voice.id}>
+                                            {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
+                                        </option>
+                                    {/each}
+                                </select>
+                            </div>
+                            <div class="form-control">
+                                <label class="label" for="tts-phrases-en-rate"><span class="label-text text-xs font-medium">Speed</span></label>
+                                <div class="flex items-center gap-3">
+                                    <input
+                                        id="tts-phrases-en-rate"
+                                        type="range"
+                                        min="0.5"
+                                        max="2"
+                                        step="0.05"
+                                        class="range range-xs max-w-xs"
+                                        bind:value={ttsPhrasesForm.en.rate}
+                                    />
+                                    <span class="text-xs text-surface-600 w-14">
+                                        {Number(ttsPhrasesForm.en.rate).toFixed(2)}x
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-control mt-2">
+                            <label class="label" for="tts-phrases-en-pre"><span class="label-text text-xs font-medium">Pre-phrase (optional)</span></label>
+                            <input
+                                id="tts-phrases-en-pre"
+                                type="text"
+                                class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                                placeholder='e.g. "Calling" or "Token"'
+                                bind:value={ttsPhrasesForm.en.pre_phrase}
+                            />
+                        </div>
+                        <div class="mt-2">
+                            <button
+                                type="button"
+                                class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
+                                onclick={() =>
+                                    ttsPhrasesToken &&
+                                    playTtsSampleForLang("en", ttsPhrasesForm.en, {
+                                        alias: ttsPhrasesToken.physical_id,
+                                        pronounce_as: (ttsPhrasesToken.pronounce_as as "letters" | "word") ?? "letters",
+                                    })}
+                                disabled={samplePlayingLang !== null || !ttsPhrasesToken}
+                            >
+                                {samplePlayingLang === "en" ? "Playing…" : "Play sample"}
+                            </button>
+                        </div>
+                    </div>
+                    <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Filipino</span>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div class="form-control">
+                                <label class="label" for="tts-phrases-fil-voice"><span class="label-text text-xs font-medium">Voice</span></label>
+                                <select
+                                    id="tts-phrases-fil-voice"
+                                    class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                                    bind:value={ttsPhrasesForm.fil.voice_id}
+                                >
+                                    <option value={""}>Use global token voice</option>
+                                    {#each tokenTtsVoices as voice}
+                                        <option value={voice.id}>
+                                            {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
+                                        </option>
+                                    {/each}
+                                </select>
+                            </div>
+                            <div class="form-control">
+                                <label class="label" for="tts-phrases-fil-rate"><span class="label-text text-xs font-medium">Speed</span></label>
+                                <div class="flex items-center gap-3">
+                                    <input
+                                        id="tts-phrases-fil-rate"
+                                        type="range"
+                                        min="0.5"
+                                        max="2"
+                                        step="0.05"
+                                        class="range range-xs max-w-xs"
+                                        bind:value={ttsPhrasesForm.fil.rate}
+                                    />
+                                    <span class="text-xs text-surface-600 w-14">
+                                        {Number(ttsPhrasesForm.fil.rate).toFixed(2)}x
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-control mt-2">
+                            <label class="label" for="tts-phrases-fil-pre"><span class="label-text text-xs font-medium">Pre-phrase (optional)</span></label>
+                            <input
+                                id="tts-phrases-fil-pre"
+                                type="text"
+                                class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                                placeholder='e.g. "Pakitawag" or "Token"'
+                                bind:value={ttsPhrasesForm.fil.pre_phrase}
+                            />
+                        </div>
+                        <div class="mt-2">
+                            <button
+                                type="button"
+                                class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
+                                onclick={() =>
+                                    ttsPhrasesToken &&
+                                    playTtsSampleForLang("fil", ttsPhrasesForm.fil, {
+                                        alias: ttsPhrasesToken.physical_id,
+                                        pronounce_as: (ttsPhrasesToken.pronounce_as as "letters" | "word") ?? "letters",
+                                    })}
+                                disabled={samplePlayingLang !== null || !ttsPhrasesToken}
+                            >
+                                {samplePlayingLang === "fil" ? "Playing…" : "Play sample"}
+                            </button>
+                        </div>
+                    </div>
+                    <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Ilocano</span>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div class="form-control">
+                                <label class="label" for="tts-phrases-ilo-voice"><span class="label-text text-xs font-medium">Voice</span></label>
+                                <select
+                                    id="tts-phrases-ilo-voice"
+                                    class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                                    bind:value={ttsPhrasesForm.ilo.voice_id}
+                                >
+                                    <option value={""}>Use global token voice</option>
+                                    {#each tokenTtsVoices as voice}
+                                        <option value={voice.id}>
+                                            {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
+                                        </option>
+                                    {/each}
+                                </select>
+                            </div>
+                            <div class="form-control">
+                                <label class="label" for="tts-phrases-ilo-rate"><span class="label-text text-xs font-medium">Speed</span></label>
+                                <div class="flex items-center gap-3">
+                                    <input
+                                        id="tts-phrases-ilo-rate"
+                                        type="range"
+                                        min="0.5"
+                                        max="2"
+                                        step="0.05"
+                                        class="range range-xs max-w-xs"
+                                        bind:value={ttsPhrasesForm.ilo.rate}
+                                    />
+                                    <span class="text-xs text-surface-600 w-14">
+                                        {Number(ttsPhrasesForm.ilo.rate).toFixed(2)}x
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-control mt-2">
+                            <label class="label" for="tts-phrases-ilo-pre"><span class="label-text text-xs font-medium">Pre-phrase (optional)</span></label>
+                            <input
+                                id="tts-phrases-ilo-pre"
+                                type="text"
+                                class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                                placeholder='e.g. "Mapan" or "Token"'
+                                bind:value={ttsPhrasesForm.ilo.pre_phrase}
+                            />
+                        </div>
+                        <div class="mt-2">
+                            <button
+                                type="button"
+                                class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
+                                onclick={() =>
+                                    ttsPhrasesToken &&
+                                    playTtsSampleForLang("ilo", ttsPhrasesForm.ilo, {
+                                        alias: ttsPhrasesToken.physical_id,
+                                        pronounce_as: (ttsPhrasesToken.pronounce_as as "letters" | "word") ?? "letters",
+                                    })}
+                                disabled={samplePlayingLang !== null || !ttsPhrasesToken}
+                            >
+                                {samplePlayingLang === "ilo" ? "Playing…" : "Play sample"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-3 mt-4 pt-4 border-t border-surface-200">
+                    <button type="button" class="btn preset-tonal" onclick={closeTtsPhrasesModal}>
+                        Cancel
+                    </button>
+                    <button type="submit" class="btn preset-filled-primary-500 shadow-sm" disabled={submitting}>
                         {submitting ? "Saving…" : "Save"}
                     </button>
                 </div>

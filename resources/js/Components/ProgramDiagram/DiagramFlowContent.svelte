@@ -999,7 +999,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		</div>
 		<button
 			type="button"
-			class="btn preset-filled-primary-500 min-h-[40px]"
+			class="btn preset-filled-primary-500 min-h-[48px]"
 			disabled={saving || publishing}
 			onclick={handlePublish}
 		>
@@ -1071,7 +1071,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		<div class="flex items-center justify-end shrink-0 px-2 py-2 border-b border-surface-200 bg-surface-100">
 			<button
 				type="button"
-				class="btn preset-tonal min-h-[40px] min-w-[40px] rounded-full"
+				class="btn preset-tonal min-h-[48px] min-w-[48px] rounded-full"
 				title="Exit fullscreen"
 				aria-label="Exit fullscreen"
 				onclick={() => (fullscreen = false)}
@@ -1212,7 +1212,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 							</div>
 							<button
 								type="button"
-								class="btn preset-filled-primary-500 min-h-[40px]"
+								class="btn preset-filled-primary-500 min-h-[48px]"
 								disabled={saving || publishing}
 								onclick={handlePublish}
 							>

@@ -33,14 +33,14 @@
 			</p>
 
 			{#if status === 'error'}
-				<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 mt-4">
+				<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 mt-4" role="alert">
 					<span>{errorMessage}</span>
 				</div>
 			{:else}
 				<div class="mt-4 flex flex-col gap-3">
 					<button
 						type="button"
-						class="btn preset-filled-primary-500"
+						class="btn preset-filled-primary-500 min-h-[48px]"
 						onclick={async () => {
 							status = 'listening';
 							lastEvent = null;

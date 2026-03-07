@@ -2,14 +2,18 @@
 
 namespace App\Services;
 
+use App\Exceptions\TtsQuotaExceededException;
 use App\Models\Token;
+use App\Models\TtsAccount;
 use App\Support\TtsPhrase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 /**
  * Server-side TTS: generate or serve cached audio. Keyed by hash(text + voice_id + rate).
  * Per plan: one driver (ElevenLabs); file cache under storage.
+ * Credentials resolved from TtsAccount (active) first, then config.
  */
 class TtsService
 {
@@ -40,10 +44,35 @@ class TtsService
             return false;
         }
         if ($this->driver === 'elevenlabs') {
-            return (string) config('tts.elevenlabs.api_key', '') !== '';
+            return $this->getResolvedApiKey() !== '';
         }
 
         return false;
+    }
+
+    /** Resolve API key: active TtsAccount first, then config. */
+    public function getResolvedApiKey(): string
+    {
+        $active = TtsAccount::getActive();
+        if ($active !== null) {
+            $key = $active->getApiKey();
+            if ($key !== '') {
+                return $key;
+            }
+        }
+
+        return (string) config('tts.elevenlabs.api_key', '');
+    }
+
+    /** Resolve model ID: active TtsAccount first, then config. */
+    public function getResolvedModelId(): string
+    {
+        $active = TtsAccount::getActive();
+        if ($active !== null && $active->model_id !== '') {
+            return $active->model_id;
+        }
+
+        return (string) config('tts.elevenlabs.model_id', 'eleven_multilingual_v2');
     }
 
     /**
@@ -101,7 +130,7 @@ class TtsService
 
     private function generateElevenLabs(string $text, string $voiceId, float $rate): ?string
     {
-        $apiKey = config('tts.elevenlabs.api_key', '');
+        $apiKey = $this->getResolvedApiKey();
         if ($apiKey === '') {
             return null;
         }
@@ -110,7 +139,7 @@ class TtsService
 
         $body = [
             'text' => $text,
-            'model_id' => config('tts.elevenlabs.model_id', 'eleven_multilingual_v2'),
+            'model_id' => $this->getResolvedModelId(),
         ];
         if ($rate !== 1.0) {
             $body['voice_settings'] = ['stability' => 0.5, 'similarity_boost' => 0.75];
@@ -124,6 +153,18 @@ class TtsService
         ])->timeout(30)->post($url, $body);
 
         if (! $response->successful()) {
+            $status = $response->status();
+            $body = $response->json() ?? [];
+            $detail = $body['detail'] ?? [];
+            if (is_array($detail) && ($detail['status'] ?? '') === 'quota_exceeded') {
+                throw TtsQuotaExceededException::fromApiResponse($status, $body);
+            }
+            Log::warning('ElevenLabs TTS request failed', [
+                'status' => $status,
+                'body' => $body ?: substr($response->body(), 0, 500),
+                'text_length' => strlen($text),
+            ]);
+
             return null;
         }
 
@@ -135,9 +176,24 @@ class TtsService
         return hash('sha256', $text."\n".$voiceId."\n".((string) $rate));
     }
 
-    /** Config-driven list for admin dropdown. */
+    /** Voices for admin dropdown: from ElevenLabs API when key available, else config fallback. */
     public function getVoicesList(): array
     {
+        $apiKey = $this->getResolvedApiKey();
+        if ($apiKey !== '') {
+            $client = new ElevenLabsClient($apiKey);
+            $apiVoices = $client->getVoices();
+            if ($apiVoices !== []) {
+                return array_map(static function (array $v) {
+                    return [
+                        'id' => $v['voice_id'] ?? '',
+                        'name' => $v['name'] ?? 'Unknown',
+                        'lang' => $v['labels']['accent'] ?? ($v['labels']['language'] ?? null),
+                    ];
+                }, array_filter($apiVoices, fn ($v) => ! empty($v['voice_id'] ?? '')));
+            }
+        }
+
         return config('tts.voices', []);
     }
 

@@ -35,7 +35,7 @@
                 <p
                     class="text-xs font-semibold uppercase tracking-wider text-surface-500 mb-3 ml-1"
                 >
-                    People & Reports
+                    People & Audit log
                 </p>
                 <div class="flex flex-col gap-3">
                     <Link
@@ -46,11 +46,11 @@
                         <span class="font-medium">Manage Staff</span>
                     </Link>
                     <Link
-                        href="/admin/reports"
+                        href="/admin/logs"
                         class="btn preset-tonal-surface w-full justify-start gap-3 hover:preset-tonal-primary transition-colors py-3"
                     >
                         <FileText class="h-4 w-4 shrink-0 text-surface-600" />
-                        <span class="font-medium">View Reports</span>
+                        <span class="font-medium">View audit log</span>
                     </Link>
                 </div>
             </div>

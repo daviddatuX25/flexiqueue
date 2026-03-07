@@ -61,6 +61,10 @@
             display_audio_muted?: boolean;
             /** Per plan: display board TTS volume 0-1 (admin-controlled). */
             display_audio_volume?: number;
+            /** TTS announcement repeat count (1–3: Once, Twice, Three times). Default 1. */
+            display_tts_repeat_count?: number;
+            /** Delay between repeated announcements in ms (500–10000). Default 2000. */
+            display_tts_repeat_delay_ms?: number;
             /** Per plan: allow public self-serve triage at /triage/start. */
             allow_public_triage?: boolean;
             /** Per barcode-hid: enable HID barcode on Display board. Default true. */
@@ -271,6 +275,10 @@
     let displayAudioMuted = $state(false);
     /** Per plan: display board audio volume 0-1 (admin-controlled). */
     let displayAudioVolume = $state(1);
+    /** TTS announcement repeat count (1–3). Default 1. */
+    let settingsDisplayTtsRepeatCount = $state(1);
+    /** Delay between repeats in seconds (0.5–10) for UI; stored as ms in backend. Default 2. */
+    let settingsDisplayTtsRepeatDelaySec = $state(2);
     /** Available browser voices for TTS dropdown (loaded on mount). */
     let availableTtsVoices = $state<{ name: string; lang: string }[]>([]);
     let serverTtsVoices = $state<{ id: string; name: string; lang: string }[]>([]);
@@ -288,6 +296,22 @@
         fil: { voice_id: "", rate: 0.84, connector_phrase: "" },
         ilo: { voice_id: "", rate: 0.84, connector_phrase: "" },
     });
+    /** Modal for editing program-wide connector TTS (shown from Stations tab or Settings shortcut). */
+    let showProgramConnectorTtsModal = $state(false);
+    /** Modal for editing a single station's TTS (voice, rate, station phrase per language). */
+    let showStationTtsModal = $state(false);
+    /** Station whose TTS is being edited in the dedicated TTS modal (null when closed). */
+    let stationTtsModalStation = $state<StationItem | null>(null);
+    /** Which language is currently playing a TTS sample in the station TTS modal. */
+    let stationTtsSamplePlayingLang = $state<StationTtsLangKey | null>(null);
+    /** Show "regenerate station TTS" confirm after saving program connector TTS. */
+    let showProgramTtsRegenerateConfirm = $state(false);
+    /** Show "regenerate station TTS" confirm after saving a station's TTS. */
+    let showStationTtsRegenerateConfirm = $state(false);
+    let programTtsRegenerating = $state(false);
+    let stationTtsRegenerating = $state(false);
+    /** Station ID currently triggering TTS regeneration (for button loading state). */
+    let stationRegeneratingId = $state<number | null>(null);
     /** Per plan: allow public self-serve triage at /triage/start. */
     let allowPublicTriage = $state(false);
     /** Per barcode-hid: enable HID barcode on Display board. Default true. */
@@ -326,6 +350,8 @@
             displayScanTimeoutSeconds = Math.min(300, Math.max(0, Number(s.display_scan_timeout_seconds ?? 20)));
             displayAudioMuted = s.display_audio_muted === true;
             displayAudioVolume = Math.max(0, Math.min(1, Number(s.display_audio_volume ?? 1)));
+            settingsDisplayTtsRepeatCount = Math.max(1, Math.min(3, Math.floor(Number(s.display_tts_repeat_count ?? 1))));
+            settingsDisplayTtsRepeatDelaySec = Math.max(0.5, Math.min(10, (Number(s.display_tts_repeat_delay_ms ?? 2000) / 1000)));
             allowPublicTriage = s.allow_public_triage === true;
             enableDisplayHidBarcode = (s.enable_display_hid_barcode ?? true) === true;
             enablePublicTriageHidBarcode = (s.enable_public_triage_hid_barcode ?? true) === true;
@@ -501,6 +527,8 @@
             .map((x) => x.user_id);
     }
     const page = usePage();
+    const serverTtsConfigured = $derived((get(page)?.props as { server_tts_configured?: boolean } | undefined)?.server_tts_configured ?? true);
+
     // Sync activeTab with URL so direct links with ?tab=stations (or other tab) work when already on this page
     $effect(() => {
         const p = $page;
@@ -519,6 +547,26 @@
         } catch {
             /* ignore */
         }
+    });
+    // Real-time station TTS status: when a station finishes generating, update local list
+    $effect(() => {
+        const win = window as unknown as { Echo?: { private: (ch: string) => { listen: (ev: string, cb: (e: { station_id: number; settings?: { tts?: StationItem["tts"] } }) => void) => void; leave: () => void } } };
+        if (typeof window === "undefined" || !win.Echo || localStations.length === 0) return;
+        const Echo = win.Echo;
+        const ch = "admin.station-tts";
+        const channel = Echo.private(ch);
+        channel.listen(".station_tts_status_updated", (e: { station_id: number; settings?: { tts?: StationItem["tts"] } }) => {
+            localStations = localStations.map((s) =>
+                s.id === e.station_id ? { ...s, tts: e.settings?.tts ?? s.tts } : s,
+            );
+        });
+        return () => {
+            try {
+                channel.leave();
+            } catch {
+                /* ignore */
+            }
+        };
     });
     const diagramViewMode = $derived(
         (() => {
@@ -876,6 +924,145 @@
         error = "";
     }
 
+    /** Open the dedicated Station TTS modal for a station; syncs edit form so Save can call handleUpdateStation. */
+    function openEditStationTtsModal(s: StationItem) {
+        editStation = s;
+        editStationName = s.name;
+        editStationCapacity = s.capacity;
+        editStationClientCapacity = s.client_capacity ?? 1;
+        editStationPriorityFirstOverride = s.priority_first_override ?? null;
+        editStationIsActive = s.is_active;
+        editStationProcessIds = [...(s.process_ids ?? [])];
+        const langs =
+            (s.tts?.languages as
+                | Record<string, { voice_id?: string; rate?: number; station_phrase?: string }>
+                | undefined) ?? {};
+        editStationTts = {
+            en: {
+                voice_id: (langs.en?.voice_id as string | undefined) ?? "",
+                rate: typeof langs.en?.rate === "number" ? (langs.en?.rate as number) : 0.84,
+                station_phrase: (langs.en?.station_phrase as string | undefined) ?? "",
+            },
+            fil: {
+                voice_id: (langs.fil?.voice_id as string | undefined) ?? "",
+                rate: typeof langs.fil?.rate === "number" ? (langs.fil?.rate as number) : 0.84,
+                station_phrase: (langs.fil?.station_phrase as string | undefined) ?? "",
+            },
+            ilo: {
+                voice_id: (langs.ilo?.voice_id as string | undefined) ?? "",
+                rate: typeof langs.ilo?.rate === "number" ? (langs.ilo?.rate as number) : 0.84,
+                station_phrase: (langs.ilo?.station_phrase as string | undefined) ?? "",
+            },
+        };
+        stationTtsModalStation = s;
+        showStationTtsModal = true;
+        error = "";
+    }
+
+    function closeStationTtsModal() {
+        showStationTtsModal = false;
+        stationTtsModalStation = null;
+        stationTtsSamplePlayingLang = null;
+    }
+
+    /** Aggregate TTS status from station.settings.tts.languages (ready, failed, or not generated). */
+    function getStationTtsStatus(station: StationItem): "ready" | "failed" | null {
+        const langs = station.tts?.languages as Record<string, { status?: string }> | undefined;
+        if (!langs || typeof langs !== "object") return null;
+        let hasReady = false;
+        let hasFailed = false;
+        for (const lang of Object.keys(langs)) {
+            const s = langs[lang]?.status;
+            if (s === "ready") hasReady = true;
+            if (s === "failed") hasFailed = true;
+        }
+        if (hasFailed) return "failed";
+        if (hasReady) return "ready";
+        return null;
+    }
+
+    async function regenerateStationTts(station: StationItem) {
+        if (stationRegeneratingId !== null || submitting) return;
+        stationRegeneratingId = station.id;
+        error = "";
+        try {
+            const res = await fetch(`/api/admin/stations/${station.id}/regenerate-tts`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Accept: "application/json", "X-Requested-With": "XMLHttpRequest", "X-CSRF-TOKEN": getCsrfToken() },
+                credentials: "same-origin",
+            });
+            if (!res.ok) error = "Failed to start regeneration.";
+            else router.reload();
+        } catch {
+            error = "Failed to start regeneration.";
+        } finally {
+            stationRegeneratingId = null;
+        }
+    }
+
+    /** Play TTS sample for station phrase in the given language (connector + station name). */
+    async function playStationTtsSample(lang: StationTtsLangKey) {
+        if (stationTtsSamplePlayingLang || !stationTtsModalStation || !program) return;
+        stationTtsSamplePlayingLang = lang;
+        error = "";
+        try {
+            const connectorPhrase =
+                (lang === "en"
+                    ? connectorTts.en.connector_phrase
+                    : lang === "fil"
+                      ? connectorTts.fil.connector_phrase
+                      : connectorTts.ilo.connector_phrase) ?? "";
+            const phraseParams = new URLSearchParams({
+                lang,
+                pre_phrase: connectorPhrase.trim(),
+                alias: stationTtsModalStation.name || "Station",
+                pronounce_as: "word",
+            });
+            const phraseRes = await fetch(`/api/admin/tts/sample-phrase?${phraseParams.toString()}`, {
+                method: "GET",
+                headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+                credentials: "same-origin",
+            });
+            const phraseData = await phraseRes.json().catch(() => ({}));
+            if (!phraseRes.ok || typeof phraseData?.text !== "string") {
+                error = "Could not get sample phrase.";
+                return;
+            }
+            const config = lang === "en" ? editStationTts.en : lang === "fil" ? editStationTts.fil : editStationTts.ilo;
+            const voiceId = (config.voice_id && config.voice_id.trim()) || "";
+            const ttsParams = new URLSearchParams({ text: phraseData.text, rate: String(config.rate) });
+            if (voiceId) ttsParams.set("voice", voiceId);
+            const ttsRes = await fetch(`/api/public/tts?${ttsParams.toString()}`, {
+                method: "GET",
+                headers: { Accept: "audio/mpeg", "X-Requested-With": "XMLHttpRequest" },
+                credentials: "same-origin",
+            });
+            if (!ttsRes.ok) {
+                error = "TTS sample unavailable.";
+                return;
+            }
+            const blob = await ttsRes.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            await new Promise<void>((resolve, reject) => {
+                const audio = new Audio(objectUrl);
+                audio.onended = () => {
+                    URL.revokeObjectURL(objectUrl);
+                    resolve();
+                };
+                audio.onerror = () => {
+                    URL.revokeObjectURL(objectUrl);
+                    reject(new Error("Playback failed"));
+                };
+                audio.volume = 1;
+                audio.play().catch(reject);
+            });
+        } catch {
+            error = "Failed to play TTS sample.";
+        } finally {
+            stationTtsSamplePlayingLang = null;
+        }
+    }
+
     function toggleCreateProcess(id: number) {
         if (createStationProcessIds.includes(id)) {
             createStationProcessIds = createStationProcessIds.filter(
@@ -1076,8 +1263,14 @@
         );
         submitting = false;
         if (ok) {
-            closeModals();
-            router.reload();
+            const d = data as { requires_regeneration?: boolean; errors?: Record<string, string[]> };
+            if (d?.requires_regeneration) {
+                showStationTtsRegenerateConfirm = true;
+            } else {
+                closeModals();
+                closeStationTtsModal();
+                router.reload();
+            }
         } else {
             const d = data as {
                 message?: string;
@@ -1318,7 +1511,7 @@
     async function handleSaveSettings() {
         submitting = true;
         error = "";
-        const { ok, message } = await api(
+        const { ok, data, message } = await api(
             "PUT",
             `/api/admin/programs/${program.id}`,
             {
@@ -1341,6 +1534,8 @@
                     display_scan_timeout_seconds: displayScanTimeoutSeconds,
                     display_audio_muted: displayAudioMuted,
                     display_audio_volume: displayAudioVolume,
+                    display_tts_repeat_count: Math.max(1, Math.min(3, Math.floor(Number(settingsDisplayTtsRepeatCount) || 1))),
+                    display_tts_repeat_delay_ms: Math.round(settingsDisplayTtsRepeatDelaySec * 1000),
                     allow_public_triage: allowPublicTriage,
                     enable_display_hid_barcode: enableDisplayHidBarcode,
                     enable_public_triage_hid_barcode: enablePublicTriageHidBarcode,
@@ -1370,8 +1565,11 @@
             },
         );
         submitting = false;
-        if (ok) router.reload();
-        else error = message ?? "Failed to save settings.";
+        if (ok) {
+            const d = data as { requires_regeneration?: boolean } | undefined;
+            if (d?.requires_regeneration) showProgramTtsRegenerateConfirm = true;
+            else router.reload();
+        } else error = message ?? "Failed to save settings.";
     }
 
     /** Per ISSUES-ELABORATION §2: load saved default settings into form (does not save to program until user clicks Save). */
@@ -1727,13 +1925,13 @@
                     bind:this={tabListEl}
                     class="flex gap-1 overflow-x-auto overflow-y-hidden flex-nowrap w-full max-w-full py-1 sm:py-2 sm:px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 >
-                    <button type="button" role="tab" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'overview' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "overview")}>Overview</button>
-                    <button type="button" role="tab" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'processes' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "processes")}>Processes</button>
-                    <button type="button" role="tab" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'stations' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "stations")}>Stations</button>
-                    <button type="button" role="tab" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'staff' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "staff")}>Staff</button>
-                    <button type="button" role="tab" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'tracks' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "tracks")}>Track</button>
-                    <button type="button" role="tab" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'diagram' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "diagram")}>Diagram</button>
-                    <button type="button" role="tab" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'settings' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "settings")}>Settings</button>
+                    <button type="button" role="tab" id="tab-overview" aria-selected={activeTab === 'overview'} aria-controls="tabpanel-overview" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'overview' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "overview")}>Overview</button>
+                    <button type="button" role="tab" id="tab-processes" aria-selected={activeTab === 'processes'} aria-controls="tabpanel-processes" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'processes' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "processes")}>Processes</button>
+                    <button type="button" role="tab" id="tab-stations" aria-selected={activeTab === 'stations'} aria-controls="tabpanel-stations" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'stations' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "stations")}>Stations</button>
+                    <button type="button" role="tab" id="tab-staff" aria-selected={activeTab === 'staff'} aria-controls="tabpanel-staff" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'staff' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "staff")}>Staff</button>
+                    <button type="button" role="tab" id="tab-tracks" aria-selected={activeTab === 'tracks'} aria-controls="tabpanel-tracks" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'tracks' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "tracks")}>Track</button>
+                    <button type="button" role="tab" id="tab-diagram" aria-selected={activeTab === 'diagram'} aria-controls="tabpanel-diagram" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'diagram' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "diagram")}>Diagram</button>
+                    <button type="button" role="tab" id="tab-settings" aria-selected={activeTab === 'settings'} aria-controls="tabpanel-settings" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'settings' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "settings")}>Settings</button>
                 </div>
                 {#if canScrollRight}
                     <button
@@ -1770,7 +1968,7 @@
         {/if}
 
         {#if activeTab === "overview"}
-            <div class="space-y-8">
+            <div id="tabpanel-overview" role="tabpanel" aria-labelledby="tab-overview" class="space-y-8">
                 <section>
                     <h2 class="text-lg font-semibold text-surface-950 mb-4">
                         Program stats
@@ -1837,7 +2035,7 @@
                 </section>
             </div>
         {:else if activeTab === "diagram"}
-            <div class="space-y-4">
+            <div id="tabpanel-diagram" role="tabpanel" aria-labelledby="tab-diagram" class="space-y-4">
                 <section>
                     <h2 class="text-lg font-semibold text-surface-950 mb-2">
                         Program diagram
@@ -1853,7 +2051,7 @@
                 </section>
             </div>
         {:else if activeTab === "processes"}
-            <div class="space-y-6">
+            <div id="tabpanel-processes" role="tabpanel" aria-labelledby="tab-processes" class="space-y-6">
                 <section>
                     <h2 class="text-lg font-semibold text-surface-950 mb-2">
                         Processes
@@ -1972,6 +2170,7 @@
             </div>
         {:else if activeTab === "stations"}
             <!-- Stations tab (BD-010) -->
+            <div id="tabpanel-stations" role="tabpanel" aria-labelledby="tab-stations">
             <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
                 <div>
                     <h2 class="text-lg font-semibold text-surface-950">
@@ -1981,14 +2180,29 @@
                         Manage service points where clients receive attention.
                     </p>
                 </div>
-                <button
-                    type="button"
-                    class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm"
-                    onclick={openCreateStation}
-                >
-                    <Plus class="w-4 h-4" /> Add Station
-                </button>
+                <div class="flex flex-wrap items-center gap-2">
+                    <button
+                        type="button"
+                        class="btn preset-tonal flex items-center gap-2 shadow-sm"
+                        onclick={() => (showProgramConnectorTtsModal = true)}
+                    >
+                        <Volume2 class="w-4 h-4" />
+                        Connecting phrase TTS
+                    </button>
+                    <button
+                        type="button"
+                        class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm"
+                        onclick={openCreateStation}
+                    >
+                        <Plus class="w-4 h-4" /> Add Station
+                    </button>
+                </div>
             </div>
+            {#if serverTtsConfigured === false}
+                <div class="rounded-container border border-warning-200 bg-warning-50 p-3 mb-4 text-sm text-warning-900" role="alert">
+                    Add an ElevenLabs account in <Link href="/admin/settings?tab=integrations" class="font-semibold text-warning-800 underline hover:text-warning-950">Settings → Integrations</Link> before generating station TTS.
+                </div>
+            {/if}
             {#if localStations.length === 0}
                 <div
                     class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
@@ -2084,24 +2298,53 @@
                                 </div>
                             </div>
                             <div
-                                class="px-5 py-3 border-t border-surface-100 flex items-center justify-between bg-surface-50/50 rounded-b-container"
+                                class="px-5 py-3 border-t border-surface-100 flex items-center justify-between gap-2 flex-wrap bg-surface-50/50 rounded-b-container"
                             >
-                                <button
-                                    type="button"
-                                    class="text-xs font-medium transition-colors hover:text-surface-900 flex items-center gap-1.5 {station.is_active
-                                        ? 'text-error-600 hover:text-error-700'
-                                        : 'text-success-600 hover:text-success-700'}"
-                                    onclick={() =>
-                                        handleToggleStationActive(station)}
-                                    disabled={submitting}
-                                >
-                                    {#if station.is_active}
-                                        <Power class="w-3.5 h-3.5" /> Deactivate
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <button
+                                        type="button"
+                                        class="text-xs font-medium transition-colors hover:text-surface-900 flex items-center gap-1.5 {station.is_active
+                                            ? 'text-error-600 hover:text-error-700'
+                                            : 'text-success-600 hover:text-success-700'}"
+                                        onclick={() =>
+                                            handleToggleStationActive(station)}
+                                        disabled={submitting}
+                                    >
+                                        {#if station.is_active}
+                                            <Power class="w-3.5 h-3.5" /> Deactivate
+                                        {:else}
+                                            <Power class="w-3.5 h-3.5" /> Activate
+                                        {/if}
+                                    </button>
+                                    {#if getStationTtsStatus(station) === "ready"}
+                                        <span class="text-[10px] uppercase tracking-wider font-medium px-2 py-0.5 rounded preset-filled-success-500/20 text-success-700">TTS ready</span>
+                                    {:else if getStationTtsStatus(station) === "failed"}
+                                        <span class="text-[10px] uppercase tracking-wider font-medium px-2 py-0.5 rounded preset-filled-error-500/20 text-error-700">TTS failed</span>
                                     {:else}
-                                        <Power class="w-3.5 h-3.5" /> Activate
+                                        <span class="text-[10px] uppercase tracking-wider font-medium px-2 py-0.5 rounded preset-tonal text-surface-500">TTS —</span>
                                     {/if}
-                                </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-xs preset-tonal"
+                                        onclick={() => regenerateStationTts(station)}
+                                        disabled={submitting || getStationTtsStatus(station) !== "failed" || stationRegeneratingId !== null}
+                                        title={getStationTtsStatus(station) === "failed" ? "Regenerate TTS" : "Only available when TTS has failed"}
+                                    >
+                                        {stationRegeneratingId === station.id ? "Starting…" : "Generate TTS"}
+                                    </button>
+                                </div>
                                 <div class="flex items-center gap-1">
+                                    <button
+                                        type="button"
+                                        class="btn preset-tonal btn-sm p-2"
+                                        onclick={() => openEditStationTtsModal(station)}
+                                        disabled={submitting}
+                                        title="Station TTS"
+                                    >
+                                        <Volume2
+                                            class="w-4 h-4 text-surface-600"
+                                        />
+                                    </button>
                                     <button
                                         type="button"
                                         class="btn preset-tonal btn-sm p-2"
@@ -2131,9 +2374,10 @@
                     {/each}
                 </div>
             {/if}
+            </div>
         {:else if activeTab === "staff"}
             <!-- Staff tab: station assignments + supervisors -->
-            <div class="space-y-8">
+            <div id="tabpanel-staff" role="tabpanel" aria-labelledby="tab-staff" class="space-y-8">
                 <section>
                     <h2 class="text-lg font-semibold text-surface-950 mb-4">
                         Station assignments
@@ -2348,6 +2592,7 @@
                 </section>
             </div>
         {:else if activeTab === "tracks"}
+            <div id="tabpanel-tracks" role="tabpanel" aria-labelledby="tab-tracks">
             <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
                 <div>
                     <h2 class="text-lg font-semibold text-surface-950">
@@ -2502,8 +2747,9 @@
                     {/each}
                 </div>
             {/if}
+            </div>
         {:else if activeTab === "settings"}
-            <div class="max-w-3xl">
+            <div id="tabpanel-settings" role="tabpanel" aria-labelledby="tab-settings" class="max-w-3xl">
                 <div
                     class="flex flex-wrap items-center justify-between gap-4 mb-4"
                 >
@@ -2644,11 +2890,35 @@
                                     />
                                     <span class="text-xs text-surface-500">{Math.round(displayAudioVolume * 100)}%</span>
                                 </label>
-                                <!-- TTS source/voice are now global; program controls only mute/volume. -->
+                                <label class="flex flex-col gap-1">
+                                    <span class="text-sm text-surface-600">TTS announcement repeat</span>
+                                    <select
+                                        class="select select-bordered w-fit"
+                                        bind:value={settingsDisplayTtsRepeatCount}
+                                        aria-label="How many times to repeat each call announcement"
+                                    >
+                                        <option value={1}>Once</option>
+                                        <option value={2}>Twice</option>
+                                        <option value={3}>Three times</option>
+                                    </select>
+                                </label>
+                                <label class="flex flex-col gap-1">
+                                    <span class="text-sm text-surface-600">Delay between repeats (seconds)</span>
+                                    <input
+                                        type="number"
+                                        min="0.5"
+                                        max="10"
+                                        step="0.5"
+                                        class="input input-bordered w-24"
+                                        bind:value={settingsDisplayTtsRepeatDelaySec}
+                                        aria-label="Delay between repeated announcements in seconds"
+                                    />
+                                </label>
+                                <!-- TTS source/voice are now global; program controls only mute/volume/repeat. -->
                             </div>
                         </div>
 
-                        <!-- Program TTS connector phrases -->
+                        <!-- Program TTS connector phrases (configured via modal on Stations tab) -->
                         <div
                             class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
                         >
@@ -2662,191 +2932,21 @@
                                     Phrases between token and station (e.g. "Please proceed to"). One set per language.
                                 </p>
                             </div>
-                            <div class="sm:w-2/3 form-control space-y-4">
-                                <div class="form-control">
-                                    <label class="label" for="tts-active-language">
-                                        <span class="label-text text-sm font-medium">Active language</span>
-                                    </label>
-                                    <select
-                                        id="tts-active-language"
-                                        class="select rounded-container border border-surface-200 px-3 py-2 w-full text-surface-950 bg-surface-50 shadow-sm max-w-xs"
-                                        bind:value={ttsActiveLanguage}
-                                    >
-                                        <option value="en">English</option>
-                                        <option value="fil">Filipino</option>
-                                        <option value="ilo">Ilocano</option>
-                                    </select>
-                                    <p class="text-xs text-surface-500 mt-1">
-                                        Displays use this language first for announcements.
-                                    </p>
-                                </div>
-                                <div class="space-y-3">
-                                    <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                                        <div class="flex items-center justify-between gap-2 mb-2">
-                                            <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">English</span>
-                                        </div>
-                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                            <div class="form-control">
-                                                <label class="label" for="connector-en-voice">
-                                                    <span class="label-text text-xs font-medium">Voice</span>
-                                                </label>
-                                                <select
-                                                    id="connector-en-voice"
-                                                    class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                                    bind:value={connectorTts.en.voice_id}
-                                                >
-                                                    <option value={""}>Use global token voice</option>
-                                                    {#each serverTtsVoices as voice}
-                                                        <option value={voice.id}>
-                                                            {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
-                                                        </option>
-                                                    {/each}
-                                                </select>
-                                            </div>
-                                            <div class="form-control">
-                                                <label class="label" for="connector-en-rate">
-                                                    <span class="label-text text-xs font-medium">Speed</span>
-                                                </label>
-                                                <div class="flex items-center gap-3">
-                                                    <input
-                                                        id="connector-en-rate"
-                                                        type="range"
-                                                        min="0.5"
-                                                        max="2"
-                                                        step="0.05"
-                                                        class="range range-xs max-w-xs"
-                                                        bind:value={connectorTts.en.rate}
-                                                    />
-                                                    <span class="text-xs text-surface-600 w-14">
-                                                        {Number(connectorTts.en.rate).toFixed(2)}x
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="form-control mt-2">
-                                            <label class="label" for="connector-en-phrase">
-                                                <span class="label-text text-xs font-medium">Connector phrase (optional)</span>
-                                            </label>
-                                            <input
-                                                id="connector-en-phrase"
-                                                type="text"
-                                                class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                                placeholder='e.g. "Please proceed to"'
-                                                bind:value={connectorTts.en.connector_phrase}
-                                            />
-                                        </div>
-                                    </div>
-                                    <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                                        <div class="flex items-center justify-between gap-2 mb-2">
-                                            <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Filipino</span>
-                                        </div>
-                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                            <div class="form-control">
-                                                <label class="label" for="connector-fil-voice">
-                                                    <span class="label-text text-xs font-medium">Voice</span>
-                                                </label>
-                                                <select
-                                                    id="connector-fil-voice"
-                                                    class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                                    bind:value={connectorTts.fil.voice_id}
-                                                >
-                                                    <option value={""}>Use global token voice</option>
-                                                    {#each serverTtsVoices as voice}
-                                                        <option value={voice.id}>
-                                                            {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
-                                                        </option>
-                                                    {/each}
-                                                </select>
-                                            </div>
-                                            <div class="form-control">
-                                                <label class="label" for="connector-fil-rate">
-                                                    <span class="label-text text-xs font-medium">Speed</span>
-                                                </label>
-                                                <div class="flex items-center gap-3">
-                                                    <input
-                                                        id="connector-fil-rate"
-                                                        type="range"
-                                                        min="0.5"
-                                                        max="2"
-                                                        step="0.05"
-                                                        class="range range-xs max-w-xs"
-                                                        bind:value={connectorTts.fil.rate}
-                                                    />
-                                                    <span class="text-xs text-surface-600 w-14">
-                                                        {Number(connectorTts.fil.rate).toFixed(2)}x
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="form-control mt-2">
-                                            <label class="label" for="connector-fil-phrase">
-                                                <span class="label-text text-xs font-medium">Connector phrase (optional)</span>
-                                            </label>
-                                            <input
-                                                id="connector-fil-phrase"
-                                                type="text"
-                                                class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                                placeholder='e.g. "Pumunta sa"'
-                                                bind:value={connectorTts.fil.connector_phrase}
-                                            />
-                                        </div>
-                                    </div>
-                                    <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                                        <div class="flex items-center justify-between gap-2 mb-2">
-                                            <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Ilocano</span>
-                                        </div>
-                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                            <div class="form-control">
-                                                <label class="label" for="connector-ilo-voice">
-                                                    <span class="label-text text-xs font-medium">Voice</span>
-                                                </label>
-                                                <select
-                                                    id="connector-ilo-voice"
-                                                    class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                                    bind:value={connectorTts.ilo.voice_id}
-                                                >
-                                                    <option value={""}>Use global token voice</option>
-                                                    {#each serverTtsVoices as voice}
-                                                        <option value={voice.id}>
-                                                            {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
-                                                        </option>
-                                                    {/each}
-                                                </select>
-                                            </div>
-                                            <div class="form-control">
-                                                <label class="label" for="connector-ilo-rate">
-                                                    <span class="label-text text-xs font-medium">Speed</span>
-                                                </label>
-                                                <div class="flex items-center gap-3">
-                                                    <input
-                                                        id="connector-ilo-rate"
-                                                        type="range"
-                                                        min="0.5"
-                                                        max="2"
-                                                        step="0.05"
-                                                        class="range range-xs max-w-xs"
-                                                        bind:value={connectorTts.ilo.rate}
-                                                    />
-                                                    <span class="text-xs text-surface-600 w-14">
-                                                        {Number(connectorTts.ilo.rate).toFixed(2)}x
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="form-control mt-2">
-                                            <label class="label" for="connector-ilo-phrase">
-                                                <span class="label-text text-xs font-medium">Connector phrase (optional)</span>
-                                            </label>
-                                            <input
-                                                id="connector-ilo-phrase"
-                                                type="text"
-                                                class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                                placeholder='e.g. "Mapanen ijay"'
-                                                bind:value={connectorTts.ilo.connector_phrase}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
+                            <div class="sm:w-2/3 form-control space-y-3">
+                                <p class="text-xs text-surface-600">
+                                    Configure connector phrases and voices from the Stations tab. This applies to all stations in the program.
+                                </p>
+                                <button
+                                    type="button"
+                                    class="btn preset-tonal w-full sm:w-auto flex items-center gap-2"
+                                    onclick={() => {
+                                        activeTab = "stations";
+                                        showProgramConnectorTtsModal = true;
+                                    }}
+                                >
+                                    <Volume2 class="w-4 h-4" />
+                                    Open connector TTS settings
+                                </button>
                             </div>
                         </div>
 
@@ -3433,21 +3533,10 @@
                 {/if}
             </div>
             <div class="form-control w-full">
-                <span class="label-text font-medium mb-1 block">Station TTS phrases</span>
+                <span class="label-text font-medium mb-1 block">Station TTS (per language)</span>
                 <p class="text-sm text-surface-600 mb-2">
-                    Configure how this station name will be spoken in each language.
-                    You can adjust connector phrases under the Program Settings tab.
+                    Voice, speed, and pronunciation for this station in each language. Connector phrase is set via &quot;Connecting phrase TTS&quot; on the Stations tab.
                 </p>
-                <button
-                    type="button"
-                    class="btn btn-xs preset-tonal mb-2"
-                    onclick={() => {
-                        closeModals();
-                        activeTab = "settings";
-                    }}
-                >
-                    Edit connector phrases in Settings
-                </button>
                 <div class="space-y-3">
                     <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
                         <div class="flex items-center justify-between gap-2 mb-2">
@@ -3455,17 +3544,25 @@
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div class="form-control">
-                                <label class="label" for="station-en-phrase">
-                                    <span class="label-text text-xs font-medium">Station phrase (optional)</span>
-                                </label>
-                                <input
-                                    id="station-en-phrase"
-                                    type="text"
-                                    class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                    placeholder='e.g. "Window one"'
-                                    bind:value={createStationTts.en.station_phrase}
-                                />
+                                <label class="label" for="create-station-en-voice"><span class="label-text text-xs font-medium">Voice</span></label>
+                                <select id="create-station-en-voice" class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={createStationTts.en.voice_id}>
+                                    <option value="">Use default</option>
+                                    {#each serverTtsVoices as voice}
+                                        <option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
+                                    {/each}
+                                </select>
                             </div>
+                            <div class="form-control">
+                                <label class="label" for="create-station-en-rate"><span class="label-text text-xs font-medium">Speed</span></label>
+                                <div class="flex items-center gap-2">
+                                    <input id="create-station-en-rate" type="range" min="0.5" max="2" step="0.05" class="range range-xs flex-1" bind:value={createStationTts.en.rate} />
+                                    <span class="text-xs text-surface-600 w-12">{Number(createStationTts.en.rate).toFixed(2)}x</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-control mt-2">
+                            <label class="label" for="station-en-phrase"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
+                            <input id="station-en-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Window one"' bind:value={createStationTts.en.station_phrase} />
                         </div>
                     </div>
                     <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
@@ -3474,17 +3571,25 @@
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div class="form-control">
-                                <label class="label" for="station-fil-phrase">
-                                    <span class="label-text text-xs font-medium">Station phrase (optional)</span>
-                                </label>
-                                <input
-                                    id="station-fil-phrase"
-                                    type="text"
-                                    class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                    placeholder='e.g. "Estasyon ng window one"'
-                                    bind:value={createStationTts.fil.station_phrase}
-                                />
+                                <label class="label" for="create-station-fil-voice"><span class="label-text text-xs font-medium">Voice</span></label>
+                                <select id="create-station-fil-voice" class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={createStationTts.fil.voice_id}>
+                                    <option value="">Use default</option>
+                                    {#each serverTtsVoices as voice}
+                                        <option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
+                                    {/each}
+                                </select>
                             </div>
+                            <div class="form-control">
+                                <label class="label" for="create-station-fil-rate"><span class="label-text text-xs font-medium">Speed</span></label>
+                                <div class="flex items-center gap-2">
+                                    <input id="create-station-fil-rate" type="range" min="0.5" max="2" step="0.05" class="range range-xs flex-1" bind:value={createStationTts.fil.rate} />
+                                    <span class="text-xs text-surface-600 w-12">{Number(createStationTts.fil.rate).toFixed(2)}x</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-control mt-2">
+                            <label class="label" for="station-fil-phrase"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
+                            <input id="station-fil-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Estasyon ng window one"' bind:value={createStationTts.fil.station_phrase} />
                         </div>
                     </div>
                     <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
@@ -3493,17 +3598,25 @@
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div class="form-control">
-                                <label class="label" for="station-ilo-phrase">
-                                    <span class="label-text text-xs font-medium">Station phrase (optional)</span>
-                                </label>
-                                <input
-                                    id="station-ilo-phrase"
-                                    type="text"
-                                    class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                    placeholder='e.g. "Estasyon ti window one"'
-                                    bind:value={createStationTts.ilo.station_phrase}
-                                />
+                                <label class="label" for="create-station-ilo-voice"><span class="label-text text-xs font-medium">Voice</span></label>
+                                <select id="create-station-ilo-voice" class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={createStationTts.ilo.voice_id}>
+                                    <option value="">Use default</option>
+                                    {#each serverTtsVoices as voice}
+                                        <option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
+                                    {/each}
+                                </select>
                             </div>
+                            <div class="form-control">
+                                <label class="label" for="create-station-ilo-rate"><span class="label-text text-xs font-medium">Speed</span></label>
+                                <div class="flex items-center gap-2">
+                                    <input id="create-station-ilo-rate" type="range" min="0.5" max="2" step="0.05" class="range range-xs flex-1" bind:value={createStationTts.ilo.rate} />
+                                    <span class="text-xs text-surface-600 w-12">{Number(createStationTts.ilo.rate).toFixed(2)}x</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-control mt-2">
+                            <label class="label" for="station-ilo-phrase"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
+                            <input id="station-ilo-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Estasyon ti window one"' bind:value={createStationTts.ilo.station_phrase} />
                         </div>
                     </div>
                 </div>
@@ -3719,77 +3832,84 @@
                     </label>
                 </div>
                 <div class="form-control w-full">
-                    <span class="label-text font-medium mb-1 block">Station TTS phrases</span>
+                    <span class="label-text font-medium mb-1 block">Station TTS (per language)</span>
                     <p class="text-sm text-surface-600 mb-2">
-                        Adjust how this station name will be spoken in each language.
-                        You can adjust connector phrases under the Program Settings tab.
+                        Voice, speed, and pronunciation. For full TTS editing use the <strong>Station TTS</strong> button on the station card.
                     </p>
-                    <button
-                        type="button"
-                        class="btn btn-xs preset-tonal mb-2"
-                        onclick={() => {
-                            closeModals();
-                            activeTab = "settings";
-                        }}
-                    >
-                        Edit connector phrases in Settings
-                    </button>
                     <div class="space-y-3">
                         <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                            <div class="flex items-center justify-between gap-2 mb-2">
-                                <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">English</span>
-                            </div>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">English</span>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
                                 <div class="form-control">
-                                    <label class="label" for="edit-station-en-phrase">
-                                        <span class="label-text text-xs font-medium">Station phrase (optional)</span>
-                                    </label>
-                                    <input
-                                        id="edit-station-en-phrase"
-                                        type="text"
-                                        class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                        placeholder='e.g. "Window one"'
-                                        bind:value={editStationTts.en.station_phrase}
-                                    />
+                                    <label class="label py-0"><span class="label-text text-xs font-medium">Voice</span></label>
+                                    <select class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={editStationTts.en.voice_id}>
+                                        <option value="">Use default</option>
+                                        {#each serverTtsVoices as voice}
+                                            <option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
+                                        {/each}
+                                    </select>
                                 </div>
+                                <div class="form-control">
+                                    <label class="label py-0"><span class="label-text text-xs font-medium">Speed</span></label>
+                                    <div class="flex items-center gap-2">
+                                        <input type="range" min="0.5" max="2" step="0.05" class="range range-xs flex-1" bind:value={editStationTts.en.rate} />
+                                        <span class="text-xs text-surface-600 w-12">{Number(editStationTts.en.rate).toFixed(2)}x</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-control mt-2">
+                                <label class="label py-0" for="edit-station-en-phrase"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
+                                <input id="edit-station-en-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Window one"' bind:value={editStationTts.en.station_phrase} />
                             </div>
                         </div>
                         <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                            <div class="flex items-center justify-between gap-2 mb-2">
-                                <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Filipino</span>
-                            </div>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Filipino</span>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
                                 <div class="form-control">
-                                    <label class="label" for="edit-station-fil-phrase">
-                                        <span class="label-text text-xs font-medium">Station phrase (optional)</span>
-                                    </label>
-                                    <input
-                                        id="edit-station-fil-phrase"
-                                        type="text"
-                                        class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                        placeholder='e.g. "Estasyon ng window one"'
-                                        bind:value={editStationTts.fil.station_phrase}
-                                    />
+                                    <label class="label py-0"><span class="label-text text-xs font-medium">Voice</span></label>
+                                    <select class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={editStationTts.fil.voice_id}>
+                                        <option value="">Use default</option>
+                                        {#each serverTtsVoices as voice}
+                                            <option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
+                                        {/each}
+                                    </select>
                                 </div>
+                                <div class="form-control">
+                                    <label class="label py-0"><span class="label-text text-xs font-medium">Speed</span></label>
+                                    <div class="flex items-center gap-2">
+                                        <input type="range" min="0.5" max="2" step="0.05" class="range range-xs flex-1" bind:value={editStationTts.fil.rate} />
+                                        <span class="text-xs text-surface-600 w-12">{Number(editStationTts.fil.rate).toFixed(2)}x</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-control mt-2">
+                                <label class="label py-0" for="edit-station-fil-phrase"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
+                                <input id="edit-station-fil-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Estasyon ng window one"' bind:value={editStationTts.fil.station_phrase} />
                             </div>
                         </div>
                         <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                            <div class="flex items-center justify-between gap-2 mb-2">
-                                <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Ilocano</span>
-                            </div>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Ilocano</span>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
                                 <div class="form-control">
-                                    <label class="label" for="edit-station-ilo-phrase">
-                                        <span class="label-text text-xs font-medium">Station phrase (optional)</span>
-                                    </label>
-                                    <input
-                                        id="edit-station-ilo-phrase"
-                                        type="text"
-                                        class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                        placeholder='e.g. "Estasyon ti window one"'
-                                        bind:value={editStationTts.ilo.station_phrase}
-                                    />
+                                    <label class="label py-0"><span class="label-text text-xs font-medium">Voice</span></label>
+                                    <select class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={editStationTts.ilo.voice_id}>
+                                        <option value="">Use default</option>
+                                        {#each serverTtsVoices as voice}
+                                            <option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
+                                        {/each}
+                                    </select>
                                 </div>
+                                <div class="form-control">
+                                    <label class="label py-0"><span class="label-text text-xs font-medium">Speed</span></label>
+                                    <div class="flex items-center gap-2">
+                                        <input type="range" min="0.5" max="2" step="0.05" class="range range-xs flex-1" bind:value={editStationTts.ilo.rate} />
+                                        <span class="text-xs text-surface-600 w-12">{Number(editStationTts.ilo.rate).toFixed(2)}x</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-control mt-2">
+                                <label class="label py-0" for="edit-station-ilo-phrase"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
+                                <input id="edit-station-ilo-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Estasyon ti window one"' bind:value={editStationTts.ilo.station_phrase} />
                             </div>
                         </div>
                     </div>
@@ -3815,6 +3935,207 @@
         {/snippet}
     </Modal>
 {/if}
+
+<Modal
+    open={showStationTtsModal && !!stationTtsModalStation}
+    title={stationTtsModalStation ? `Station TTS – ${stationTtsModalStation.name}` : "Station TTS"}
+    onClose={closeStationTtsModal}
+>
+    {#snippet children()}
+        <form
+            onsubmit={(e) => {
+                e.preventDefault();
+                if (editStation) handleUpdateStation();
+            }}
+            class="flex flex-col gap-4"
+        >
+            {#if error}
+                <div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-3 text-sm flex items-center justify-between gap-2">
+                    <span>{error}</span>
+                    <button type="button" class="btn preset-tonal btn-xs" onclick={() => (error = "")}>Dismiss</button>
+                </div>
+            {/if}
+            <p class="text-sm text-surface-600">
+                Configure how this station name is spoken in each language (voice, speed, and pronunciation). Used for the second part of the call announcement.
+            </p>
+            <div class="space-y-3 max-h-[24rem] overflow-y-auto pr-1">
+                <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">English</span>
+                        <button type="button" class="btn btn-xs preset-tonal" disabled={!!stationTtsSamplePlayingLang || submitting} onclick={() => playStationTtsSample("en")}>
+                            {stationTtsSamplePlayingLang === "en" ? "Playing…" : "Sample"}
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="form-control">
+                            <label class="label py-0"><span class="label-text text-xs font-medium">Voice</span></label>
+                            <select class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={editStationTts.en.voice_id}>
+                                <option value="">Use default</option>
+                                {#each serverTtsVoices as voice}
+                                    <option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
+                                {/each}
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label class="label py-0"><span class="label-text text-xs font-medium">Speed</span></label>
+                            <div class="flex items-center gap-2">
+                                <input type="range" min="0.5" max="2" step="0.05" class="range range-xs flex-1" bind:value={editStationTts.en.rate} />
+                                <span class="text-xs text-surface-600 w-12">{Number(editStationTts.en.rate).toFixed(2)}x</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-control mt-2">
+                        <label class="label py-0"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
+                        <input type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Window one"' bind:value={editStationTts.en.station_phrase} />
+                    </div>
+                </div>
+                <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Filipino</span>
+                        <button type="button" class="btn btn-xs preset-tonal" disabled={!!stationTtsSamplePlayingLang || submitting} onclick={() => playStationTtsSample("fil")}>
+                            {stationTtsSamplePlayingLang === "fil" ? "Playing…" : "Sample"}
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="form-control">
+                            <label class="label py-0"><span class="label-text text-xs font-medium">Voice</span></label>
+                            <select class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={editStationTts.fil.voice_id}>
+                                <option value="">Use default</option>
+                                {#each serverTtsVoices as voice}
+                                    <option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
+                                {/each}
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label class="label py-0"><span class="label-text text-xs font-medium">Speed</span></label>
+                            <div class="flex items-center gap-2">
+                                <input type="range" min="0.5" max="2" step="0.05" class="range range-xs flex-1" bind:value={editStationTts.fil.rate} />
+                                <span class="text-xs text-surface-600 w-12">{Number(editStationTts.fil.rate).toFixed(2)}x</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-control mt-2">
+                        <label class="label py-0"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
+                        <input type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Estasyon ng window one"' bind:value={editStationTts.fil.station_phrase} />
+                    </div>
+                </div>
+                <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Ilocano</span>
+                        <button type="button" class="btn btn-xs preset-tonal" disabled={!!stationTtsSamplePlayingLang || submitting} onclick={() => playStationTtsSample("ilo")}>
+                            {stationTtsSamplePlayingLang === "ilo" ? "Playing…" : "Sample"}
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="form-control">
+                            <label class="label py-0"><span class="label-text text-xs font-medium">Voice</span></label>
+                            <select class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={editStationTts.ilo.voice_id}>
+                                <option value="">Use default</option>
+                                {#each serverTtsVoices as voice}
+                                    <option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
+                                {/each}
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label class="label py-0"><span class="label-text text-xs font-medium">Speed</span></label>
+                            <div class="flex items-center gap-2">
+                                <input type="range" min="0.5" max="2" step="0.05" class="range range-xs flex-1" bind:value={editStationTts.ilo.rate} />
+                                <span class="text-xs text-surface-600 w-12">{Number(editStationTts.ilo.rate).toFixed(2)}x</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-control mt-2">
+                        <label class="label py-0"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
+                        <input type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Estasyon ti window one"' bind:value={editStationTts.ilo.station_phrase} />
+                    </div>
+                </div>
+            </div>
+            <div class="flex justify-end gap-2 pt-2">
+                <button type="button" class="btn preset-tonal" onclick={closeStationTtsModal} disabled={submitting}>
+                    Cancel
+                </button>
+                <button type="submit" class="btn preset-filled-primary-500" disabled={submitting || !editStation}>
+                    {submitting ? "Saving…" : "Save"}
+                </button>
+            </div>
+        </form>
+    {/snippet}
+</Modal>
+
+<Modal
+    open={showProgramTtsRegenerateConfirm}
+    title="Regenerate station TTS"
+    onClose={() => { if (!programTtsRegenerating) showProgramTtsRegenerateConfirm = false; }}
+>
+    {#snippet children()}
+        <div class="flex flex-col gap-4">
+            <p class="text-sm text-surface-700">
+                Connecting phrase TTS was updated. This will regenerate TTS for all stations in this program.
+                Regeneration runs in the background; status will update as each station finishes.
+            </p>
+            <div class="flex justify-end gap-3 pt-2 border-t border-surface-200">
+                <button type="button" class="btn preset-tonal" disabled={programTtsRegenerating} onclick={() => { if (!programTtsRegenerating) showProgramTtsRegenerateConfirm = false; }}>
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    class="btn preset-filled-primary-500"
+                    disabled={programTtsRegenerating}
+                    onclick={async () => {
+                        if (programTtsRegenerating || !program?.id) return;
+                        programTtsRegenerating = true;
+                        error = "";
+                        try {
+                            const res = await fetch(`/api/admin/programs/${program.id}/regenerate-station-tts`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "X-Requested-With": "XMLHttpRequest", "X-CSRF-TOKEN": getCsrfToken() }, credentials: "same-origin" });
+                            if (!res.ok) error = "Failed to start regeneration.";
+                            else { showProgramTtsRegenerateConfirm = false; router.reload(); }
+                        } catch { error = "Failed to start regeneration."; }
+                        finally { programTtsRegenerating = false; }
+                    }}
+                >
+                    {programTtsRegenerating ? "Starting…" : "Regenerate all"}
+                </button>
+            </div>
+        </div>
+    {/snippet}
+</Modal>
+
+<Modal
+    open={showStationTtsRegenerateConfirm}
+    title="Regenerate station TTS"
+    onClose={() => { if (!stationTtsRegenerating) { showStationTtsRegenerateConfirm = false; closeModals(); closeStationTtsModal(); } }}
+>
+    {#snippet children()}
+        <div class="flex flex-col gap-4">
+            <p class="text-sm text-surface-700">
+                Station TTS was updated and this station had generated audio. Regenerate TTS for this station?
+            </p>
+            <div class="flex justify-end gap-3 pt-2 border-t border-surface-200">
+                <button type="button" class="btn preset-tonal" disabled={stationTtsRegenerating} onclick={() => { if (!stationTtsRegenerating) { showStationTtsRegenerateConfirm = false; closeModals(); closeStationTtsModal(); router.reload(); } }}>
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    class="btn preset-filled-primary-500"
+                    disabled={stationTtsRegenerating || !editStation}
+                    onclick={async () => {
+                        if (stationTtsRegenerating || !editStation?.id) return;
+                        stationTtsRegenerating = true;
+                        error = "";
+                        try {
+                            const res = await fetch(`/api/admin/stations/${editStation.id}/regenerate-tts`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "X-Requested-With": "XMLHttpRequest", "X-CSRF-TOKEN": getCsrfToken() }, credentials: "same-origin" });
+                            if (!res.ok) error = "Failed to start regeneration.";
+                            else { showStationTtsRegenerateConfirm = false; closeModals(); closeStationTtsModal(); router.reload(); }
+                        } catch { error = "Failed to start regeneration."; }
+                        finally { stationTtsRegenerating = false; }
+                    }}
+                >
+                    {stationTtsRegenerating ? "Starting…" : "Regenerate"}
+                </button>
+            </div>
+        </div>
+    {/snippet}
+</Modal>
 
 {#if stepModalTrack}
     <Modal
@@ -4071,6 +4392,229 @@
         {/snippet}
     </Modal>
 {/if}
+
+<Modal
+    open={showProgramConnectorTtsModal}
+    title="Program connecting-phrase TTS"
+    onClose={() => (showProgramConnectorTtsModal = false)}
+>
+    {#snippet children()}
+        <form
+            onsubmit={(e) => {
+                e.preventDefault();
+                handleSaveSettings();
+                showProgramConnectorTtsModal = false;
+            }}
+            class="flex flex-col gap-4"
+        >
+            <p class="text-sm text-surface-600">
+                Configure how the connecting phrase between the token and station will sound for each language.
+                These settings apply to all stations in this program.
+            </p>
+            <div class="form-control">
+                <label class="label" for="tts-active-language-modal">
+                    <span class="label-text text-sm font-medium">Active language</span>
+                </label>
+                <select
+                    id="tts-active-language-modal"
+                    class="select rounded-container border border-surface-200 px-3 py-2 w-full text-surface-950 bg-surface-50 shadow-sm max-w-xs"
+                    bind:value={ttsActiveLanguage}
+                >
+                    <option value="en">English</option>
+                    <option value="fil">Filipino</option>
+                    <option value="ilo">Ilocano</option>
+                </select>
+                <p class="text-xs text-surface-500 mt-1">
+                    Displays use this language first for announcements.
+                </p>
+            </div>
+            <div class="space-y-3 max-h-[26rem] overflow-y-auto pr-1">
+                <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">English</span>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="form-control">
+                            <label class="label" for="connector-en-voice-modal">
+                                <span class="label-text text-xs font-medium">Voice</span>
+                            </label>
+                            <select
+                                id="connector-en-voice-modal"
+                                class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                                bind:value={connectorTts.en.voice_id}
+                            >
+                                <option value={""}>Use global token voice</option>
+                                {#each serverTtsVoices as voice}
+                                    <option value={voice.id}>
+                                        {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
+                                    </option>
+                                {/each}
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label class="label" for="connector-en-rate-modal">
+                                <span class="label-text text-xs font-medium">Speed</span>
+                            </label>
+                            <div class="flex items-center gap-3">
+                                <input
+                                    id="connector-en-rate-modal"
+                                    type="range"
+                                    min="0.5"
+                                    max="2"
+                                    step="0.05"
+                                    class="range range-xs max-w-xs"
+                                    bind:value={connectorTts.en.rate}
+                                />
+                                <span class="text-xs text-surface-600 w-14">
+                                    {Number(connectorTts.en.rate).toFixed(2)}x
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-control mt-2">
+                        <label class="label" for="connector-en-phrase-modal">
+                            <span class="label-text text-xs font-medium">Connector phrase (optional)</span>
+                        </label>
+                        <input
+                            id="connector-en-phrase-modal"
+                            type="text"
+                            class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                            placeholder='e.g. "Please proceed to"'
+                            bind:value={connectorTts.en.connector_phrase}
+                        />
+                    </div>
+                </div>
+                <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Filipino</span>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="form-control">
+                            <label class="label" for="connector-fil-voice-modal">
+                                <span class="label-text text-xs font-medium">Voice</span>
+                            </label>
+                            <select
+                                id="connector-fil-voice-modal"
+                                class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                                bind:value={connectorTts.fil.voice_id}
+                            >
+                                <option value={""}>Use global token voice</option>
+                                {#each serverTtsVoices as voice}
+                                    <option value={voice.id}>
+                                        {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
+                                    </option>
+                                {/each}
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label class="label" for="connector-fil-rate-modal">
+                                <span class="label-text text-xs font-medium">Speed</span>
+                            </label>
+                            <div class="flex items-center gap-3">
+                                <input
+                                    id="connector-fil-rate-modal"
+                                    type="range"
+                                    min="0.5"
+                                    max="2"
+                                    step="0.05"
+                                    class="range range-xs max-w-xs"
+                                    bind:value={connectorTts.fil.rate}
+                                />
+                                <span class="text-xs text-surface-600 w-14">
+                                    {Number(connectorTts.fil.rate).toFixed(2)}x
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-control mt-2">
+                        <label class="label" for="connector-fil-phrase-modal">
+                            <span class="label-text text-xs font-medium">Connector phrase (optional)</span>
+                        </label>
+                        <input
+                            id="connector-fil-phrase-modal"
+                            type="text"
+                            class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                            placeholder='e.g. "Pumunta sa"'
+                            bind:value={connectorTts.fil.connector_phrase}
+                        />
+                    </div>
+                </div>
+                <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Ilocano</span>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="form-control">
+                            <label class="label" for="connector-ilo-voice-modal">
+                                <span class="label-text text-xs font-medium">Voice</span>
+                            </label>
+                            <select
+                                id="connector-ilo-voice-modal"
+                                class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                                bind:value={connectorTts.ilo.voice_id}
+                            >
+                                <option value={""}>Use global token voice</option>
+                                {#each serverTtsVoices as voice}
+                                    <option value={voice.id}>
+                                        {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
+                                    </option>
+                                {/each}
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label class="label" for="connector-ilo-rate-modal">
+                                <span class="label-text text-xs font-medium">Speed</span>
+                            </label>
+                            <div class="flex items-center gap-3">
+                                <input
+                                    id="connector-ilo-rate-modal"
+                                    type="range"
+                                    min="0.5"
+                                    max="2"
+                                    step="0.05"
+                                    class="range range-xs max-w-xs"
+                                    bind:value={connectorTts.ilo.rate}
+                                />
+                                <span class="text-xs text-surface-600 w-14">
+                                    {Number(connectorTts.ilo.rate).toFixed(2)}x
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-control mt-2">
+                        <label class="label" for="connector-ilo-phrase-modal">
+                            <span class="label-text text-xs font-medium">Connector phrase (optional)</span>
+                        </label>
+                        <input
+                            id="connector-ilo-phrase-modal"
+                            type="text"
+                            class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
+                            placeholder='e.g. "Mapanen ijay"'
+                            bind:value={connectorTts.ilo.connector_phrase}
+                        />
+                    </div>
+                </div>
+            </div>
+            <div class="flex justify-end gap-2 pt-2">
+                <button
+                    type="button"
+                    class="btn preset-tonal"
+                    onclick={() => (showProgramConnectorTtsModal = false)}
+                    disabled={submitting}
+                >
+                    Cancel
+                </button>
+                <button
+                    type="submit"
+                    class="btn preset-filled-primary-500"
+                    disabled={submitting}
+                >
+                    {submitting ? "Saving…" : "Save"}
+                </button>
+            </div>
+        </form>
+    {/snippet}
+</Modal>
 
 {#if showReorderConfirm && stepModalTrack}
     <Modal

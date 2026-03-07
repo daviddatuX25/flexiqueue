@@ -17,6 +17,19 @@ class UpdateTokenTtsSettingsRequest extends FormRequest
         return [
             'voice_id' => ['nullable', 'string', 'max:200'],
             'rate' => ['nullable', 'numeric', 'min:0.5', 'max:2.0'],
+            'languages' => ['sometimes', 'array'],
+            'languages.en' => ['sometimes', 'array'],
+            'languages.en.voice_id' => ['nullable', 'string', 'max:200'],
+            'languages.en.rate' => ['nullable', 'numeric', 'min:0.5', 'max:2.0'],
+            'languages.en.pre_phrase' => ['nullable', 'string', 'max:255'],
+            'languages.fil' => ['sometimes', 'array'],
+            'languages.fil.voice_id' => ['nullable', 'string', 'max:200'],
+            'languages.fil.rate' => ['nullable', 'numeric', 'min:0.5', 'max:2.0'],
+            'languages.fil.pre_phrase' => ['nullable', 'string', 'max:255'],
+            'languages.ilo' => ['sometimes', 'array'],
+            'languages.ilo.voice_id' => ['nullable', 'string', 'max:200'],
+            'languages.ilo.rate' => ['nullable', 'numeric', 'min:0.5', 'max:2.0'],
+            'languages.ilo.pre_phrase' => ['nullable', 'string', 'max:255'],
         ];
     }
 }

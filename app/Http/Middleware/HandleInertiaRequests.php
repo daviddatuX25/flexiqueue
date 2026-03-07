@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\Program;
+use App\Services\TtsService;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -30,11 +31,13 @@ class HandleInertiaRequests extends Middleware
      */
     public function share(Request $request): array
     {
+        $user = $request->user();
+
         return [
             ...parent::share($request),
             'csrf_token' => csrf_token(),
             'auth' => [
-                'user' => $request->user(),
+                'user' => $user,
             ],
             'activeProgram' => (function () {
                 try {
@@ -43,6 +46,9 @@ class HandleInertiaRequests extends Middleware
                     return null;
                 }
             })(),
+            'server_tts_configured' => $user?->role === 'admin'
+                ? app(TtsService::class)->isEnabled()
+                : null,
         ];
     }
 }

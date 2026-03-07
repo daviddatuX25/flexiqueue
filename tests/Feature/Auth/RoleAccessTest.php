@@ -72,7 +72,7 @@ class RoleAccessTest extends TestCase
             'admin.tokens',
             'admin.tokens.print',
             'admin.users',
-            'admin.reports',
+            'admin.logs',
         ];
 
         foreach ($routes as $routeName) {

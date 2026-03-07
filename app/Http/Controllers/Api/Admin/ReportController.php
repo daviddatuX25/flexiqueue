@@ -9,7 +9,7 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * Per 08-API-SPEC-PHASE1 §5.8: Reports API. Auth: role:admin.
+ * Per 08-API-SPEC-PHASE1 §5.8: Audit log API (program sessions + audit log). Auth: role:admin.
  */
 class ReportController extends Controller
 {

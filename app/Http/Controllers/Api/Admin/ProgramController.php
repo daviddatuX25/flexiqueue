@@ -6,6 +6,7 @@ use App\Events\DisplaySettingsUpdated;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreProgramRequest;
 use App\Http\Requests\UpdateProgramRequest;
+use App\Jobs\GenerateStationTtsJob;
 use App\Models\Program;
 use App\Services\ProgramService;
 use Illuminate\Http\JsonResponse;
@@ -83,16 +84,48 @@ class ProgramController extends Controller
         $program->update($validated);
 
         $program = $program->fresh();
-        if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('enable_display_hid_barcode', $settings) || array_key_exists('enable_public_triage_hid_barcode', $settings))) {
+        if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('enable_display_hid_barcode', $settings) || array_key_exists('enable_public_triage_hid_barcode', $settings) || array_key_exists('display_tts_repeat_count', $settings) || array_key_exists('display_tts_repeat_delay_ms', $settings))) {
             event(new DisplaySettingsUpdated(
                 $program->getDisplayAudioMuted(),
                 $program->getDisplayAudioVolume(),
                 $program->getEnableDisplayHidBarcode(),
                 $program->getEnablePublicTriageHidBarcode(),
+                $program->getDisplayTtsRepeatCount(),
+                $program->getDisplayTtsRepeatDelayMs(),
             ));
         }
+        $requiresRegeneration = false;
+        if ($settings !== null && array_key_exists('tts', $settings)) {
+            $stations = $program->stations()->get();
+            foreach ($stations as $station) {
+                $langs = $station->settings['tts']['languages'] ?? [];
+                foreach ($langs as $config) {
+                    if (is_array($config) && (! empty($config['audio_path']) || ($config['status'] ?? '') === 'ready')) {
+                        $requiresRegeneration = true;
+                        break 2;
+                    }
+                }
+            }
+        }
 
-        return response()->json(['program' => $this->programResource($program)]);
+        $payload = ['program' => $this->programResource($program)];
+        if ($requiresRegeneration) {
+            $payload['requires_regeneration'] = true;
+        }
+
+        return response()->json($payload);
+    }
+
+    /**
+     * Regenerate TTS for all stations of the program (connector + station phrase). Called after user confirms regeneration prompt.
+     */
+    public function regenerateStationTts(Program $program): JsonResponse
+    {
+        foreach ($program->stations()->get() as $station) {
+            GenerateStationTtsJob::dispatch($station);
+        }
+
+        return response()->json(['message' => 'Station TTS regeneration started.']);
     }
 
     /**
@@ -218,6 +251,8 @@ class ProgramController extends Controller
                 'display_scan_timeout_seconds' => $program->getDisplayScanTimeoutSeconds(),
                 'display_audio_muted' => $program->getDisplayAudioMuted(),
                 'display_audio_volume' => $program->getDisplayAudioVolume(),
+                'display_tts_repeat_count' => $program->getDisplayTtsRepeatCount(),
+                'display_tts_repeat_delay_ms' => $program->getDisplayTtsRepeatDelayMs(),
                 'allow_public_triage' => $program->getAllowPublicTriage(),
                 'tts' => [
                     'active_language' => $program->getTtsActiveLanguage(),

@@ -6,7 +6,7 @@
 	import { onMount } from 'svelte';
 	import { router } from '@inertiajs/svelte';
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
-	import { getVoiceForTts, ensureVoicesLoaded, TTS_DEFAULT_RATE } from '../../lib/speechUtils.js';
+	import { prepareDisplayTts, cancelCurrentAnnouncement, playSegmentAQueued } from '../../lib/displayTts.js';
 
 let {
 	program_name = null,
@@ -27,9 +27,7 @@ let muted = $state(false);
 let volume = $state(1);
 let ttsLanguage = $state('en');
 let connectorPhrase = $state(null);
-let stationPhrase = $state(null);
-	/** Pending second-speak timeout; cleared when new call or unmount. */
-	let repeatTimeoutId = $state(null);
+	let stationPhrase = $state(null);
 	/** Recent activity: from props + real-time .station_activity; max 20, newest first. */
 	let activityFeed = $state([]);
 
@@ -54,163 +52,6 @@ let stationPhrase = $state(null);
 		activityFeed = [...(station_activity ?? [])];
 	});
 
-	/** Phonetic words for letters so TTS says "ay" not "uh". */
-	const LETTER_PHONETIC = {
-		a: 'ay', b: 'bee', c: 'see', d: 'dee', e: 'ee', f: 'eff', g: 'jee', h: 'aych',
-		i: 'eye', j: 'jay', k: 'kay', l: 'ell', m: 'em', n: 'en', o: 'oh', p: 'pee',
-		q: 'cue', r: 'ar', s: 'ess', t: 'tee', u: 'you', v: 'vee', w: 'double you',
-		x: 'ex', y: 'why', z: 'zee',
-	};
-
-	/** Build alias text for TTS: letters = phonetic + digit runs; word = as-is. */
-	function aliasForSpeech(alias, pronounceAs) {
-		const raw = (alias || 'client').toString().trim() || 'client';
-		if (pronounceAs === 'word') return raw;
-		const segments = [];
-		let i = 0;
-		while (i < raw.length) {
-			if (/[a-zA-Z]/.test(raw[i])) {
-				let run = '';
-				while (i < raw.length && /[a-zA-Z]/.test(raw[i])) {
-					run += raw[i++];
-				}
-				for (const c of run) {
-					const ph = LETTER_PHONETIC[c.toLowerCase()];
-					if (ph) segments.push(ph);
-				}
-			} else if (/\d/.test(raw[i])) {
-				let run = '';
-				while (i < raw.length && /\d/.test(raw[i])) {
-					run += raw[i++];
-				}
-				segments.push(run);
-			} else {
-				i++;
-			}
-		}
-		return segments.length ? segments.join(' ') : raw;
-	}
-
-	/** Play pre-generated token TTS; returns Promise that resolves when playback ends or rejects on 404/error. */
-	async function playTokenTts(tokenId) {
-		const url = `/api/public/tts/token/${tokenId}`;
-		const res = await fetch(url, { credentials: 'same-origin' });
-		if (!res.ok) throw new Error(res.status === 404 ? 'No token TTS' : `TTS ${res.status}`);
-		const blob = await res.blob();
-		const objectUrl = URL.createObjectURL(blob);
-		await new Promise((resolve, reject) => {
-			const a = new Audio(objectUrl);
-			a.volume = Math.max(0, Math.min(1, volume));
-			a.onended = () => { URL.revokeObjectURL(objectUrl); resolve(); };
-			a.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Playback failed')); };
-			a.play().catch(reject);
-		});
-	}
-
-	/** Play TTS audio from server; returns Promise that resolves when playback ends or rejects on error/503. */
-	async function playServerTts(text) {
-		const params = new URLSearchParams({ text });
-		const url = `/api/public/tts?${params.toString()}`;
-		const cacheName = 'flexiqueue-tts';
-		if (typeof caches !== 'undefined') {
-			try {
-				const cache = await caches.open(cacheName);
-				const cached = await cache.match(url);
-				if (cached && cached.ok) {
-					const blob = await cached.blob();
-					const objectUrl = URL.createObjectURL(blob);
-					await new Promise((resolve, reject) => {
-						const a = new Audio(objectUrl);
-						a.volume = Math.max(0, Math.min(1, volume));
-						a.onended = () => { URL.revokeObjectURL(objectUrl); resolve(); };
-						a.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Playback failed')); };
-						a.play().catch(reject);
-					});
-					return;
-				}
-			} catch {
-				// Fall through to fetch
-			}
-		}
-		const res = await fetch(url, { credentials: 'same-origin' });
-		if (!res.ok) throw new Error(res.status === 503 ? 'TTS unavailable' : `TTS ${res.status}`);
-		const blob = await res.blob();
-		if (typeof caches !== 'undefined') {
-			try {
-				const cache = await caches.open(cacheName);
-				await cache.put(url, new Response(blob, { headers: { 'Content-Type': 'audio/mpeg' } }));
-			} catch {
-				// Ignore cache write errors
-			}
-		}
-		const objectUrl = URL.createObjectURL(blob);
-		await new Promise((resolve, reject) => {
-			const a = new Audio(objectUrl);
-			a.volume = Math.max(0, Math.min(1, volume));
-			a.onended = () => { URL.revokeObjectURL(objectUrl); resolve(); };
-			a.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Playback failed')); };
-			a.play().catch(reject);
-		});
-	}
-
-	function speakCall(alias, pronounceAs = 'letters', tokenId = null) {
-		if (typeof window === 'undefined' || muted) return;
-		if (repeatTimeoutId != null) {
-			clearTimeout(repeatTimeoutId);
-			repeatTimeoutId = null;
-		}
-		const aliasSpoken = aliasForSpeech(alias, pronounceAs);
-		const firstText = 'Calling ' + aliasSpoken;
-		const baseStation = stationPhrase || station_name || 'your station';
-		const secondText = connectorPhrase
-			? `${connectorPhrase} ${baseStation}`
-			: baseStation;
-		const doBrowserSpeak = () => {
-			if (muted || !window.speechSynthesis) return;
-			const u = new SpeechSynthesisUtterance(firstText);
-			u.rate = TTS_DEFAULT_RATE;
-			u.volume = Math.max(0, Math.min(1, volume));
-			const voice = getVoiceForTts(null);
-			if (voice) u.voice = voice;
-			window.speechSynthesis.speak(u);
-		};
-		const playFirstSegment = () => {
-			if (tokenId != null) {
-				return playTokenTts(tokenId).catch(() =>
-					playServerTts(firstText).catch(() => doBrowserSpeak())
-				);
-			}
-
-			return playServerTts(firstText).catch(() => doBrowserSpeak());
-		};
-
-		const playSecondSegment = () =>
-			playServerTts(secondText).catch(() => {
-				if (!muted && window.speechSynthesis) {
-					const u = new SpeechSynthesisUtterance(secondText);
-					u.rate = TTS_DEFAULT_RATE;
-					u.volume = Math.max(0, Math.min(1, volume));
-					const voice = getVoiceForTts(null);
-					if (voice) u.voice = voice;
-					window.speechSynthesis.speak(u);
-				}
-			});
-
-		const playSequence = () => {
-			playFirstSegment().then(() => {
-				if (!muted) {
-					void playSecondSegment();
-				}
-			});
-		};
-
-		playSequence();
-		repeatTimeoutId = setTimeout(() => {
-			playSequence();
-			repeatTimeoutId = null;
-		}, 2000);
-	}
-
 	function refreshStationData() {
 		router.reload({
 			only: ['now_serving', 'waiting', 'station_activity', 'display_audio_muted', 'display_audio_volume'],
@@ -231,15 +72,21 @@ let stationPhrase = $state(null);
 		};
 		activityFeed = [item, ...activityFeed].slice(0, 20);
 		if (e?.action_type === 'call') {
-			const pronounceAs = e.pronounce_as === 'word' ? 'word' : 'letters';
-			speakCall(e.alias, pronounceAs, e.token_id ?? null);
+			const pronounceAs = (e.pronounce_as === 'word' ? 'word' : 'letters');
+			playSegmentAQueued(e.alias, pronounceAs, e.token_id ?? null, {
+				muted,
+				volume,
+				onFallback: (reason, text) => { console.warn?.('TTS fallback', reason, text); },
+			});
 		}
 		refreshStationData();
 	}
 
 	onMount(() => {
-		ensureVoicesLoaded();
-		if (typeof window === 'undefined' || !window.Echo || !station_id) return;
+		prepareDisplayTts();
+		if (typeof window === 'undefined' || !window.Echo || !station_id) {
+			return () => cancelCurrentAnnouncement();
+		}
 		const echo = window.Echo;
 		const channelName = 'display.station.' + station_id;
 		const ch = echo.channel(channelName);
@@ -251,7 +98,7 @@ let stationPhrase = $state(null);
 			volume = Math.max(0, Math.min(1, Number(e.display_audio_volume ?? 1)));
 		});
 		return () => {
-			if (repeatTimeoutId != null) clearTimeout(repeatTimeoutId);
+			cancelCurrentAnnouncement();
 			echo.leave(channelName);
 		};
 	});

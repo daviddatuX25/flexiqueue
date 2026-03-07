@@ -10,7 +10,7 @@ use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Admin Reports page (audit log viewer + export). Per 09-UI-ROUTES-PHASE1 §3.11.
+ * Admin Audit log page (audit log viewer + export). Per 09-UI-ROUTES-PHASE1 §3.11.
  */
 class ReportPageController extends Controller
 {
@@ -39,7 +39,7 @@ class ReportPageController extends Controller
             ->values()
             ->all();
 
-        return Inertia::render('Admin/Reports/Index', [
+        return Inertia::render('Admin/Logs/Index', [
             'programs' => $programs,
             'stations' => $stations,
             'staffUsers' => $staffUsers,

@@ -366,6 +366,8 @@
                     </div>
                     {#if passwordMessage}
                         <p
+                            id="password-form-message"
+                            role="alert"
                             class="text-sm {passwordMessage.type === 'error'
                                 ? 'text-error-500'
                                 : 'text-success-500'}"
@@ -375,8 +377,9 @@
                     {/if}
                     <button
                         type="submit"
-                        class="btn preset-filled-primary-500 btn-sm"
+                        class="btn preset-filled-primary-500 btn-sm min-h-[48px]"
                         disabled={passwordSubmitting}
+                        aria-describedby={passwordMessage ? 'password-form-message' : undefined}
                     >
                         {passwordSubmitting ? "Updating…" : "Update password"}
                     </button>
@@ -429,6 +432,8 @@
                     </div>
                     {#if pinMessage}
                         <p
+                            id="pin-form-message"
+                            role="alert"
                             class="text-sm {pinMessage.type === 'error'
                                 ? 'text-error-500'
                                 : 'text-success-500'}"
@@ -438,8 +443,9 @@
                     {/if}
                     <button
                         type="submit"
-                        class="btn preset-filled-primary-500 btn-sm"
+                        class="btn preset-filled-primary-500 btn-sm min-h-[48px]"
                         disabled={pinSubmitting}
+                        aria-describedby={pinMessage ? 'pin-form-message' : undefined}
                     >
                         {pinSubmitting ? "Saving…" : "Update PIN"}
                     </button>
@@ -488,6 +494,8 @@
                     {/if}
                     {#if qrMessage}
                         <p
+                            id="qr-form-message"
+                            role="alert"
                             class="text-sm {qrMessage.type === 'error'
                                 ? 'text-error-500'
                                 : 'text-success-500'}"
@@ -580,6 +588,8 @@
 				</form>
                 {#if avatarMessage}
                     <p
+                        id="avatar-form-message"
+                        role="alert"
                         class="text-sm {avatarMessage.type === 'error'
                             ? 'text-error-500'
                             : 'text-success-500'}"

@@ -20,7 +20,12 @@
 	import QrScanner from '../../Components/QrScanner.svelte';
 	import UserAvatar from '../../Components/UserAvatar.svelte';
 	import { Camera, Settings } from 'lucide-svelte';
-	import { getVoiceForTts, ensureVoicesLoaded, TTS_DEFAULT_RATE } from '../../lib/speechUtils.js';
+	import {
+		prepareDisplayTts,
+		cancelCurrentAnnouncement,
+		playFullAnnouncement,
+		createFullAnnouncementParams,
+	} from '../../lib/displayTts.js';
 	import {
 		shouldFocusHidInput,
 		shouldUseInputModeNone,
@@ -59,6 +64,8 @@ let {
 	tts_active_language = 'en',
 	tts_connector_phrase = null,
 	station_tts_by_name = {},
+	display_tts_repeat_count = 1,
+	display_tts_repeat_delay_ms = 2000,
 } = $props();
 
 /** Synced from prop + .program_status; when true, show "Program is paused" overlay (real-time). */
@@ -66,6 +73,9 @@ let programIsPaused = $state(false);
 /** Per plan: display board TTS mute/volume — from props and .display_settings broadcast. */
 let displayAudioMuted = $state(false);
 let displayAudioVolume = $state(1);
+/** TTS announcement repeat (1–3) and delay between repeats (ms); from props and .display_settings broadcast. */
+let displayTtsRepeatCount = $state(1);
+let displayTtsRepeatDelayMs = $state(2000);
 /** Active TTS language and phrases from program/station. */
 let ttsLanguage = $state('en');
 let connectorPhrase = $state(null);
@@ -79,6 +89,8 @@ let stationTtsByName = $state({});
 	$effect(() => {
 		displayAudioMuted = !!display_audio_muted;
 		displayAudioVolume = Math.max(0, Math.min(1, Number(display_audio_volume ?? 1)));
+		displayTtsRepeatCount = Math.max(1, Math.min(3, Math.floor(Number(display_tts_repeat_count) || 1)));
+		displayTtsRepeatDelayMs = Math.max(500, Math.min(10000, Math.floor(Number(display_tts_repeat_delay_ms) || 2000)));
 		enableDisplayHidBarcode = enable_display_hid_barcode !== false;
 		const lang =
 			typeof tts_active_language === 'string' && tts_active_language
@@ -124,8 +136,6 @@ let stationTtsByName = $state({});
 	let displayBarcodeInputEl = $state(null);
 	/** Activity feed: synced from props (and after reload), prepended by real-time events */
 	let activityFeed = $state([]);
-	/** Pending second-speak timeout for TTS repeat; cleared when new call or unmount. */
-	let ttsRepeatTimeoutId = $state(null);
 	/** Display settings modal (PIN + program HID/volume + device-local). */
 	let showDisplaySettingsModal = $state(false);
 	let displaySettingsPin = $state('');
@@ -143,43 +153,6 @@ let stationTtsByName = $state({});
 	/** Recent activity: max 20 items, fixed-height scroll (shows ~5 items). No View more/less. */
 	const visibleActivity = $derived(activityFeed.slice(0, 20));
 
-	/** Phonetic words for letters so TTS says "ay" not "uh". */
-	const LETTER_PHONETIC = {
-		a: 'ay', b: 'bee', c: 'see', d: 'dee', e: 'ee', f: 'eff', g: 'jee', h: 'aych',
-		i: 'eye', j: 'jay', k: 'kay', l: 'ell', m: 'em', n: 'en', o: 'oh', p: 'pee',
-		q: 'cue', r: 'ar', s: 'ess', t: 'tee', u: 'you', v: 'vee', w: 'double you',
-		x: 'ex', y: 'why', z: 'zee',
-	};
-
-	/** Build alias text for TTS: letters = phonetic + digit runs; word = as-is. */
-	function aliasForSpeech(alias, pronounceAs) {
-		const raw = (alias ?? 'client').toString().trim() || 'client';
-		if (pronounceAs === 'word') return raw;
-		const segments = [];
-		let i = 0;
-		while (i < raw.length) {
-			if (/[a-zA-Z]/.test(raw[i])) {
-				let run = '';
-				while (i < raw.length && /[a-zA-Z]/.test(raw[i])) {
-					run += raw[i++];
-				}
-				for (const c of run) {
-					const ph = LETTER_PHONETIC[c.toLowerCase()];
-					if (ph) segments.push(ph);
-				}
-			} else if (/\d/.test(raw[i])) {
-				let run = '';
-				while (i < raw.length && /\d/.test(raw[i])) {
-					run += raw[i++];
-				}
-				segments.push(run);
-			} else {
-				i++;
-			}
-		}
-		return segments.length ? segments.join(' ') : raw;
-	}
-
 	function refreshBoardData() {
 		router.reload({
 			only: [
@@ -192,125 +165,6 @@ let stationTtsByName = $state({});
 				'display_audio_volume',
 			],
 		});
-	}
-
-	/** Play pre-generated token TTS; returns Promise that resolves when playback ends or rejects on 404/error. */
-	async function playTokenTts(tokenId) {
-		const url = `/api/public/tts/token/${tokenId}`;
-		const res = await fetch(url, { credentials: 'same-origin' });
-		if (!res.ok) throw new Error(res.status === 404 ? 'No token TTS' : `TTS ${res.status}`);
-		const blob = await res.blob();
-		const objectUrl = URL.createObjectURL(blob);
-		await new Promise((resolve, reject) => {
-			const a = new Audio(objectUrl);
-			a.volume = Math.max(0, Math.min(1, displayAudioVolume));
-			a.onended = () => { URL.revokeObjectURL(objectUrl); resolve(); };
-			a.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Playback failed')); };
-			a.play().catch(reject);
-		});
-	}
-
-	/** Play TTS audio from server; returns Promise that resolves when playback ends or rejects on error/503. */
-	async function playServerTts(text) {
-		const params = new URLSearchParams({ text });
-		const url = `/api/public/tts?${params.toString()}`;
-		const cacheName = 'flexiqueue-tts';
-		if (typeof caches !== 'undefined') {
-			try {
-				const cache = await caches.open(cacheName);
-				const cached = await cache.match(url);
-				if (cached && cached.ok) {
-					const blob = await cached.blob();
-					const objectUrl = URL.createObjectURL(blob);
-					await new Promise((resolve, reject) => {
-						const a = new Audio(objectUrl);
-						a.volume = Math.max(0, Math.min(1, displayAudioVolume));
-						a.onended = () => { URL.revokeObjectURL(objectUrl); resolve(); };
-						a.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Playback failed')); };
-						a.play().catch(reject);
-					});
-					return;
-				}
-			} catch {
-				// Fall through to fetch
-			}
-		}
-		const res = await fetch(url, { credentials: 'same-origin' });
-		if (!res.ok) throw new Error(res.status === 503 ? 'TTS unavailable' : `TTS ${res.status}`);
-		const blob = await res.blob();
-		if (typeof caches !== 'undefined') {
-			try {
-				const cache = await caches.open(cacheName);
-				await cache.put(url, new Response(blob, { headers: { 'Content-Type': 'audio/mpeg' } }));
-			} catch {
-				// Ignore cache write errors
-			}
-		}
-		const objectUrl = URL.createObjectURL(blob);
-		await new Promise((resolve, reject) => {
-			const a = new Audio(objectUrl);
-			a.volume = Math.max(0, Math.min(1, displayAudioVolume));
-			a.onended = () => { URL.revokeObjectURL(objectUrl); resolve(); };
-			a.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Playback failed')); };
-			a.play().catch(reject);
-		});
-	}
-
-	/** Per plan: TTS — token segment first, then connector + station phrase; server on-demand then browser; repeat 2x with 2s gap. */
-	function speakCallAnnouncement(alias, stationName, pronounceAs = 'letters', tokenId = null) {
-		if (typeof window === 'undefined' || displayAudioMuted) return;
-		if (ttsRepeatTimeoutId != null) {
-			clearTimeout(ttsRepeatTimeoutId);
-			ttsRepeatTimeoutId = null;
-		}
-		const aliasSpoken = aliasForSpeech(alias, pronounceAs);
-		const stationKey = (stationName ?? 'your station').toString().trim();
-		const stationFromMap = stationTtsByName[stationKey];
-		const stationPhraseRaw =
-			(stationFromMap && stationFromMap.toString().trim()) ||
-			stationKey ||
-			'your station';
-		const connector = connectorPhrase;
-
-		const firstText = `Calling ${aliasSpoken}`;
-		const secondText = connector ? `${connector} ${stationPhraseRaw}` : stationPhraseRaw;
-
-		const speakBrowser = (text) => {
-			if (displayAudioMuted || !window.speechSynthesis) return;
-			const u = new SpeechSynthesisUtterance(text);
-			u.rate = TTS_DEFAULT_RATE;
-			u.volume = Math.max(0, Math.min(1, displayAudioVolume));
-			const voice = getVoiceForTts(null);
-			if (voice) u.voice = voice;
-			window.speechSynthesis.speak(u);
-		};
-
-		const playFirstSegment = () => {
-			if (tokenId != null) {
-				return playTokenTts(tokenId).catch(() =>
-					playServerTts(firstText).catch(() => speakBrowser(firstText))
-				);
-			}
-
-			return playServerTts(firstText).catch(() => speakBrowser(firstText));
-		};
-
-		const playSecondSegment = () =>
-			playServerTts(secondText).catch(() => speakBrowser(secondText));
-
-		const playSequence = () => {
-			playFirstSegment().then(() => {
-				if (!displayAudioMuted) {
-					void playSecondSegment();
-				}
-			});
-		};
-
-		playSequence();
-		ttsRepeatTimeoutId = setTimeout(() => {
-			playSequence();
-			ttsRepeatTimeoutId = null;
-		}, 2000);
 	}
 
 	async function saveDisplaySettings() {
@@ -375,7 +229,7 @@ let stationTtsByName = $state({});
 	}
 
 	onMount(() => {
-		ensureVoicesLoaded((voices) => {
+		prepareDisplayTts((voices) => {
 			availableTtsVoices = (voices || []).map((v) => ({ name: v.name, lang: v.lang || '' }));
 		});
 		if (typeof window === 'undefined' || !window.Echo) return;
@@ -391,8 +245,17 @@ let stationTtsByName = $state({});
 			};
 			activityFeed = [item, ...activityFeed].slice(0, 20);
 			if (e.action_type === 'call') {
-				const pronounceAs = e.pronounce_as === 'word' ? 'word' : 'letters';
-				speakCallAnnouncement(e.alias, e.station_name, pronounceAs, e.token_id ?? null);
+				playFullAnnouncement(
+					createFullAnnouncementParams(e, {
+						connectorPhrase,
+						stationTtsByName,
+						muted: displayAudioMuted,
+						volume: displayAudioVolume,
+						onFallback: (reason, text) => { console.warn?.('TTS fallback', reason, text); },
+						repeatCount: displayTtsRepeatCount,
+						repeatDelayMs: displayTtsRepeatDelayMs,
+					})
+				);
 			}
 			// Per ISSUES-ELABORATION §10: refresh waiting/now serving so "Currently waiting" updates in realtime
 			refreshBoardData();
@@ -410,13 +273,15 @@ let stationTtsByName = $state({});
 			displayAudioMuted = !!e.display_audio_muted;
 			displayAudioVolume = Math.max(0, Math.min(1, Number(e.display_audio_volume ?? 1)));
 			if (typeof e.enable_display_hid_barcode === 'boolean') enableDisplayHidBarcode = e.enable_display_hid_barcode;
+			if (typeof e.display_tts_repeat_count === 'number') displayTtsRepeatCount = Math.max(1, Math.min(3, e.display_tts_repeat_count));
+			if (typeof e.display_tts_repeat_delay_ms === 'number') displayTtsRepeatDelayMs = Math.max(500, Math.min(10000, e.display_tts_repeat_delay_ms));
 		});
 		// Real-time: refresh Now Serving and waiting list when serve/transfer/complete (not only on activity)
 		const queueChannel = echo.channel('global.queue');
 		queueChannel.listen('.now_serving', refreshBoardData);
 		queueChannel.listen('.queue_length', refreshBoardData);
 		return () => {
-			if (ttsRepeatTimeoutId != null) clearTimeout(ttsRepeatTimeoutId);
+			cancelCurrentAnnouncement();
 			echo.leave('display.activity');
 			echo.leave('global.queue');
 		};

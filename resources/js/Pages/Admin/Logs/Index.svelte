@@ -146,7 +146,7 @@
         if (filterProgramSessionId)
             params.set("program_session_id", String(filterProgramSessionId));
         params.set("page", String(pageNum));
-        return `/api/admin/reports/audit?${params.toString()}`;
+        return `/api/admin/logs/audit?${params.toString()}`;
     }
 
     function buildExportUrl(): string {
@@ -162,8 +162,8 @@
             params.set("program_session_id", String(filterProgramSessionId));
         const q = params.toString();
         return q
-            ? `/api/admin/reports/audit/export?${q}`
-            : "/api/admin/reports/audit/export";
+            ? `/api/admin/logs/audit/export?${q}`
+            : "/api/admin/logs/audit/export";
     }
 
     async function fetchProgramSessions() {
@@ -172,16 +172,16 @@
         if (filterProgramId) params.set("program_id", String(filterProgramId));
         if (filterFrom) params.set("from", filterFrom);
         if (filterTo) params.set("to", filterTo);
-        const url = `/api/admin/reports/program-sessions?${params.toString()}`;
+        const url = `/api/admin/logs/program-sessions?${params.toString()}`;
         const res = await api("GET", url);
         programSessionsLoading = false;
         if (
             res.ok &&
-            (res.data as { program_sessions?: ProgramSessionItem[] })
+            (res.data as unknown as { program_sessions?: ProgramSessionItem[] })
                 ?.program_sessions !== undefined
         ) {
             programSessions = (
-                res.data as { program_sessions: ProgramSessionItem[] }
+                res.data as unknown as { program_sessions: ProgramSessionItem[] }
             ).program_sessions;
         } else {
             programSessions = [];
@@ -291,7 +291,7 @@
 </script>
 
 <svelte:head>
-    <title>Reports — FlexiQueue</title>
+    <title>Audit log — FlexiQueue</title>
 </svelte:head>
 
 <AdminLayout>
@@ -304,7 +304,7 @@
                     class="text-2xl font-bold text-surface-950 flex items-center gap-2"
                 >
                     <FileText class="w-6 h-6 text-primary-500" />
-                    Reports & Audit
+                    Audit log
                 </h1>
                 <p class="mt-2 text-surface-600 max-w-3xl leading-relaxed">
                     View transaction logs and export to CSV for COA compliance.

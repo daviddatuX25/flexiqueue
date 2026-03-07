@@ -12,6 +12,11 @@ use Illuminate\Support\Collection;
 /**
  * Per 09-UI-ROUTES §3.4: Data for client-facing informant display (no auth).
  * No internal IDs exposed (per 05-SECURITY-CONTROLS).
+ *
+ * TTS on the display is always played as two logical segments:
+ * 1) token call segment (pre-generated token audio when available, or live TTS),
+ * 2) connector + station/window phrase segment, derived from Program/Station
+ *    settings here and typically spoken via on-demand server TTS.
  */
 class DisplayBoardService
 {
@@ -36,6 +41,8 @@ class DisplayBoardService
                 'program_is_paused' => false,
                 'display_audio_muted' => false,
                 'display_audio_volume' => 1.0,
+                'display_tts_repeat_count' => 1,
+                'display_tts_repeat_delay_ms' => 2000,
                 'enable_display_hid_barcode' => true,
                 'tts_active_language' => 'en',
                 'tts_connector_phrase' => null,
@@ -167,6 +174,8 @@ class DisplayBoardService
             'program_is_paused' => (bool) $program->is_paused,
             'display_audio_muted' => $program->getDisplayAudioMuted(),
             'display_audio_volume' => $program->getDisplayAudioVolume(),
+            'display_tts_repeat_count' => $program->getDisplayTtsRepeatCount(),
+            'display_tts_repeat_delay_ms' => $program->getDisplayTtsRepeatDelayMs(),
             'enable_display_hid_barcode' => $program->getEnableDisplayHidBarcode(),
             'tts_active_language' => $activeLanguage,
             'tts_connector_phrase' => $connectorPhrase,
@@ -275,6 +284,42 @@ class DisplayBoardService
         $phrase = $config['station_phrase'] ?? null;
 
         return is_string($phrase) && trim($phrase) !== '' ? trim($phrase) : null;
+    }
+
+    /**
+     * Get connector phrase for a language from program settings (for second-segment TTS generation).
+     */
+    public function getConnectorPhraseForLang(Program $program, string $lang): ?string
+    {
+        $settings = $program->settings ?? [];
+        if (
+            ! isset($settings['tts']['connector']['languages'][$lang])
+            || ! is_array($settings['tts']['connector']['languages'][$lang])
+        ) {
+            return null;
+        }
+        $raw = $settings['tts']['connector']['languages'][$lang]['connector_phrase'] ?? null;
+
+        return is_string($raw) && trim($raw) !== '' ? trim($raw) : null;
+    }
+
+    /**
+     * Build the second-segment TTS text for a station in a given language (connector + station phrase).
+     * Matches how the display builds the phrase for playback.
+     */
+    public function getSecondSegmentText(Program $program, Station $station, string $lang): string
+    {
+        $connectorPhrase = $this->getConnectorPhraseForLang($program, $lang);
+        $stationPhrase = $this->getStationTtsPhrase($station, $lang);
+        $stationPhrase = $stationPhrase !== null && $stationPhrase !== ''
+            ? $stationPhrase
+            : $station->name;
+
+        if ($connectorPhrase !== null && $connectorPhrase !== '') {
+            return trim($connectorPhrase.' '.$stationPhrase);
+        }
+
+        return trim($stationPhrase);
     }
 
     /**

@@ -11,6 +11,8 @@
         KeyRound,
         Users,
         BarChart3,
+        PieChart,
+        Settings,
         User,
         LogOut,
         Menu,
@@ -41,7 +43,9 @@
         { href: "/admin/programs", label: "Programs", icon: FolderKanban },
         { href: "/admin/tokens", label: "Tokens", icon: KeyRound },
         { href: "/admin/users", label: "Staff", icon: Users },
-        { href: "/admin/reports", label: "Reports", icon: BarChart3 },
+        { href: "/admin/logs", label: "Audit log", icon: BarChart3 },
+        { href: "/admin/analytics", label: "Analytics", icon: PieChart },
+        { href: "/admin/settings", label: "System", icon: Settings },
     ];
 </script>
 

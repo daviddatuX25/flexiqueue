@@ -90,6 +90,14 @@ Concise checklist so we don’t repeat the same failures. Add new items here whe
 
 ---
 
+## Svelte 5 / $effect
+
+- **"effect_update_depth_exceeded" or "Maximum update depth exceeded"**  
+  An effect read and wrote the same reactive state (e.g. in a chart component, the effect that creates the instance both read and wrote `chartInstance`).  
+  → Use a non-reactive ref (plain `let created = false` or similar) to guard one-shot creation so the effect does not depend on the state it writes; read that ref inside the effect and set it when done, but do not read the reactive state you are assigning in that effect.
+
+---
+
 ## Backend / middleware
 
 - **HandleInertiaRequests causes 500 when sharing Program::where()**  

@@ -46,7 +46,7 @@
 			{#if sortedSteps(track).length === 0}
 				<p class="text-sm text-surface-950/60">No steps defined.</p>
 			{:else}
-				<div class="flex flex-wrap items-center gap-1 min-h-[2.5rem]">
+				<div class="flex flex-wrap items-center gap-1 min-h-[48px]">
 					{#each sortedSteps(track) as step, i (step.id)}
 						<span
 							class="inline-flex items-center px-3 py-1.5 rounded-lg bg-surface-100 text-sm font-medium text-surface-950"

@@ -89,6 +89,68 @@ class ProgramControllerTest extends TestCase
         $this->assertSame('New Name', $program->name);
     }
 
+    public function test_update_tts_returns_requires_regeneration_when_stations_have_generated_tts(): void
+    {
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'S1',
+            'capacity' => 1,
+            'is_active' => true,
+            'settings' => [
+                'tts' => [
+                    'languages' => [
+                        'en' => ['status' => 'ready', 'audio_path' => 'tts/stations/1/en.mp3'],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/programs/{$program->id}", [
+            'name' => 'P',
+            'description' => null,
+            'settings' => [
+                'tts' => [
+                    'active_language' => 'en',
+                    'connector' => [
+                        'languages' => [
+                            'en' => ['voice_id' => null, 'rate' => 0.84, 'connector_phrase' => 'Please proceed to'],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('requires_regeneration', true);
+    }
+
+    public function test_regenerate_station_tts_returns_200(): void
+    {
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+        Station::create([
+            'program_id' => $program->id,
+            'name' => 'S1',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$program->id}/regenerate-station-tts");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('message', 'Station TTS regeneration started.');
+    }
+
     public function test_update_merges_program_settings(): void
     {
         $program = Program::create([
@@ -159,6 +221,73 @@ class ProgramControllerTest extends TestCase
         $program->refresh();
         $this->assertTrue($program->getDisplayAudioMuted());
         $this->assertSame(0.5, $program->getDisplayAudioVolume());
+    }
+
+    /** Per plan: display_tts_repeat_count and display_tts_repeat_delay_ms are persisted (1–3, 500–10000 ms). */
+    public function test_update_persists_display_tts_repeat_settings(): void
+    {
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/programs/{$program->id}", [
+            'name' => 'P',
+            'description' => null,
+            'settings' => [
+                'display_tts_repeat_count' => 2,
+                'display_tts_repeat_delay_ms' => 3000,
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('program.settings.display_tts_repeat_count', 2);
+        $response->assertJsonPath('program.settings.display_tts_repeat_delay_ms', 3000);
+        $program->refresh();
+        $this->assertSame(2, $program->getDisplayTtsRepeatCount());
+        $this->assertSame(3000, $program->getDisplayTtsRepeatDelayMs());
+    }
+
+    /** Per plan: display_tts_repeat_count rejects values outside 1–3. */
+    public function test_update_rejects_display_tts_repeat_count_out_of_range(): void
+    {
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/programs/{$program->id}", [
+            'name' => 'P',
+            'description' => null,
+            'settings' => ['display_tts_repeat_count' => 5],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['settings.display_tts_repeat_count']);
+    }
+
+    /** Per plan: display_tts_repeat_delay_ms rejects values outside 500–10000. */
+    public function test_update_rejects_display_tts_repeat_delay_ms_out_of_range(): void
+    {
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/programs/{$program->id}", [
+            'name' => 'P',
+            'description' => null,
+            'settings' => ['display_tts_repeat_delay_ms' => 100],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['settings.display_tts_repeat_delay_ms']);
     }
 
     public function test_update_persists_station_selection_mode(): void

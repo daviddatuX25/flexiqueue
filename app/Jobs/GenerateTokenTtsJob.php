@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Events\TokenTtsStatusUpdated;
 use App\Models\Token;
 use App\Models\TokenTtsSetting;
 use App\Services\TtsService;
@@ -14,7 +15,15 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Generate and store TTS audio for tokens. Dispatched after batch create when generate_tts is true.
+ * Generate and store TTS audio for tokens.
+ *
+ * Per display-board contract, this job only pre-generates the **first**
+ * segment of the call (token alias + optional pre-phrase). The second
+ * segment ("connector phrase" + station/window name) is built at runtime
+ * from Program/Station TTS settings and spoken separately on the display.
+ *
+ * Dispatched after batch create (and on explicit regenerate) when
+ * tts_pre_generate_enabled is true.
  */
 class GenerateTokenTtsJob implements ShouldQueue
 {
@@ -29,6 +38,17 @@ class GenerateTokenTtsJob implements ShouldQueue
 
     public function handle(TtsService $ttsService): void
     {
+        try {
+            $this->runHandle($ttsService);
+        } catch (\Throwable $e) {
+            $this->markGeneratingTokensAsFailed();
+            Log::warning('GenerateTokenTtsJob failed: {message}', ['message' => $e->getMessage()]);
+            throw $e;
+        }
+    }
+
+    private function runHandle(TtsService $ttsService): void
+    {
         if (! $ttsService->isEnabled()) {
             return;
         }
@@ -36,6 +56,7 @@ class GenerateTokenTtsJob implements ShouldQueue
         $settings = TokenTtsSetting::instance();
         $defaultVoiceId = $settings->getEffectiveVoiceId();
         $defaultRate = $settings->getEffectiveRate();
+        $defaultLanguages = $settings->getDefaultLanguages();
 
         $languages = ['en', 'fil', 'ilo'];
 
@@ -57,7 +78,11 @@ class GenerateTokenTtsJob implements ShouldQueue
                 $hadSuccess = false;
 
                 foreach ($languages as $lang) {
-                    $config = $languagesConfig[$lang] ?? [];
+                    // Merge global default with token override (token wins).
+                    $config = array_merge(
+                        $defaultLanguages[$lang] ?? [],
+                        $languagesConfig[$lang] ?? []
+                    );
 
                     // Determine if this language is configured enough to attempt generation.
                     $hasConfig = array_key_exists('pre_phrase', $config)
@@ -86,8 +111,8 @@ class GenerateTokenTtsJob implements ShouldQueue
 
                     $prePhrase = isset($config['pre_phrase']) ? (string) $config['pre_phrase'] : '';
                     $text = $prePhrase !== ''
-                        ? TtsPhrase::aliasForSpeech($token->physical_id ?? 'client', $token->pronounce_as ?? 'letters')
-                        : TtsPhrase::buildCallPhraseForToken($token);
+                        ? TtsPhrase::aliasForSpeech($token->physical_id ?? 'client', $token->pronounce_as ?? 'letters', $lang)
+                        : TtsPhrase::buildCallPhraseForToken($token, $lang);
 
                     if ($prePhrase !== '') {
                         $text = trim($prePhrase.' '.$text);
@@ -130,6 +155,7 @@ class GenerateTokenTtsJob implements ShouldQueue
                 }
 
                 $settingsArray['languages'] = $languagesConfig;
+                $settingsArray['failure_reason'] = null;
                 $token->tts_settings = $settingsArray;
 
                 if ($token->tts_pre_generate_enabled) {
@@ -137,10 +163,27 @@ class GenerateTokenTtsJob implements ShouldQueue
                 }
 
                 $token->save();
+                try {
+                    TokenTtsStatusUpdated::dispatch($token);
+                } catch (\Throwable $e) {
+                    // Reverb/websocket may be down; token is already saved with correct status — UI can rely on refresh.
+                    Log::warning('TTS status broadcast failed for token {id} (Reverb may be down): {message}', [
+                        'id' => $token->id,
+                        'message' => $e->getMessage(),
+                    ]);
+                }
             } catch (\Throwable $e) {
                 if ($token->tts_pre_generate_enabled) {
                     $token->tts_status = 'failed';
+                    $settings = $token->getTtsSettings();
+                    $settings['failure_reason'] = $e->getMessage();
+                    $token->tts_settings = $settings;
                     $token->save();
+                    try {
+                        TokenTtsStatusUpdated::dispatch($token);
+                    } catch (\Throwable $broadcastEx) {
+                        Log::debug('TTS status broadcast failed after generation failure', ['token_id' => $token->id]);
+                    }
                 }
                 Log::warning('TTS generation failed for token {id}: {message}', [
                     'id' => $token->id,
@@ -148,5 +191,38 @@ class GenerateTokenTtsJob implements ShouldQueue
                 ]);
             }
         }
+    }
+
+    /**
+     * Mark any tokens left in "generating" as "failed". Called when job fails (sync: outer catch;
+     * queue: failed()) so UI shows correct status on refresh.
+     */
+    private function markGeneratingTokensAsFailed(): void
+    {
+        foreach ($this->tokenIds as $tokenId) {
+            $token = Token::find($tokenId);
+            if (! $token || $token->tts_status !== 'generating') {
+                continue;
+            }
+
+            $token->tts_status = 'failed';
+            $token->save();
+
+            try {
+                TokenTtsStatusUpdated::dispatch($token);
+            } catch (\Throwable $e) {
+                Log::debug('TTS status broadcast failed after mark failed', ['token_id' => $token->id]);
+            }
+        }
+    }
+
+    /**
+     * Called when the job fails (timeout, uncaught exception, max attempts). With sync driver
+     * this is NOT called; outer catch in handle() does cleanup. With queue, this runs.
+     */
+    public function failed(\Throwable $exception): void
+    {
+        Log::warning('GenerateTokenTtsJob failed: {message}', ['message' => $exception->getMessage()]);
+        $this->markGeneratingTokensAsFailed();
     }
 }

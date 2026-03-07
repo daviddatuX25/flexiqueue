@@ -18,10 +18,35 @@
 		if (!dialogEl) return;
 		if (open) {
 			dialogEl.showModal();
+			// Focus trap: focus first focusable inside the dialog (per UI-UX-QA)
+			requestAnimationFrame(() => {
+				const focusable = dialogEl && dialogEl.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+				const first = focusable && focusable[0];
+				if (first && typeof first.focus === 'function') first.focus();
+			});
 		} else {
 			dialogEl.close();
 		}
 	});
+
+	function handleKeydown(e) {
+		if (e.key !== 'Tab' || !dialogEl) return;
+		const focusable = Array.from(dialogEl.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')).filter((el) => !el.hasAttribute('disabled'));
+		if (focusable.length === 0) return;
+		const first = focusable[0];
+		const last = focusable[focusable.length - 1];
+		if (e.shiftKey) {
+			if (document.activeElement === first) {
+				e.preventDefault();
+				last.focus();
+			}
+		} else {
+			if (document.activeElement === last) {
+				e.preventDefault();
+				first.focus();
+			}
+		}
+	}
 
 	function handleClose() {
 		if (dialogEl) dialogEl.close();
@@ -29,10 +54,11 @@
 	}
 </script>
 
-<!-- Per ISSUES-ELABORATION: only explicit Close/Cancel (and optionally Escape) close; no click-outside -->
+<!-- Per ISSUES-ELABORATION: only explicit Close/Cancel (and optionally Escape) close; no click-outside. Per UI-UX-QA: aria-modal and focus trap. -->
 <dialog
 	bind:this={dialogEl}
 	class="modal-dialog-center p-0 m-0 rounded-none border-0 shadow-none bg-transparent backdrop:bg-black/50"
+	aria-modal="true"
 	onclose={handleClose}
 	oncancel={(e) => e.preventDefault()}
 	onkeydown={(e) => e.key === 'Escape' && handleClose()}
@@ -42,7 +68,7 @@
 		role="document"
 		aria-label={title || 'Dialog'}
 		onclick={(e) => e.stopPropagation()}
-		onkeydown={(e) => e.key === 'Escape' && handleClose()}
+		onkeydown={handleKeydown}
 	>
 		{#if title}
 			<h3 class="font-bold text-lg text-surface-950">{title}</h3>

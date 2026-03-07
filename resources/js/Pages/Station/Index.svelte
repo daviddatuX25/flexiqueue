@@ -42,6 +42,20 @@
 		process_name?: string | null;
 	}
 
+	/** Resolved session from station token scan (session-by-token API). */
+	interface ScannedSession {
+		session_id: number;
+		alias: string;
+		track: string;
+		status: string;
+		current_station_id: number;
+		current_station: string;
+		client_category: string;
+		current_step_order: number;
+		total_steps: number;
+		at_this_station: boolean;
+	}
+
 	interface QueueData {
 		station: { id: number; name: string; client_capacity?: number; serving_count?: number };
 		serving: ServingSession[];
@@ -97,6 +111,14 @@
 	let noShowModalSession = $state<ServingSession | null>(null);
 	let showCallNextOverrideModal = $state(false);
 	let callNextSession = $state<{ session_id: number; alias: string } | null>(null);
+
+	/** Station token scan: identify client by QR, then show actions. Separate from override-auth scanner. */
+	let showStationTokenScanner = $state(false);
+	let stationScanHandled = $state(false);
+	let scannedSession = $state<ScannedSession | null>(null);
+	let scannedSessionError = $state('');
+	/** When set (e.g. 'not_registered'), frontend can show triage redirect. */
+	let scannedSessionErrorCode = $state<string | null>(null);
 
 	/** Scanner modal countdown (when showQrScanner): decrement scanCountdown so Extend works. */
 	let scanCountdown = $state(0);
@@ -412,12 +434,117 @@
 	async function serve(s: ServingSession) {
 		if (!s || s.status !== 'called' || actionLoading) return;
 		actionLoading = `serve-${s.session_id}`;
-		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/serve`, {});
+		const body = station ? { station_id: station.id } : {};
+		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/serve`, body);
 		if (ok) {
 			await fetchQueue(true, () => { actionLoading = null; });
 		} else {
 			actionLoading = null;
 			error = (data as { message?: string })?.message ?? 'Serve failed';
+		}
+	}
+
+	async function serveFromWaiting(w: WaitingSession) {
+		if (!w || !station || actionLoading) return;
+		actionLoading = `serve-${w.session_id}`;
+		const { ok, data } = await api('POST', `/api/sessions/${w.session_id}/serve`, {
+			station_id: station.id,
+		});
+		if (ok) {
+			await fetchQueue(true, () => { actionLoading = null; });
+		} else {
+			actionLoading = null;
+			error = (data as { message?: string })?.message ?? 'Serve failed';
+		}
+	}
+
+	async function handleStationTokenScan(decodedText: string) {
+		if (stationScanHandled || !station) return;
+		stationScanHandled = true;
+		scannedSessionError = '';
+		scannedSessionErrorCode = null;
+		const raw = decodedText.trim();
+		const qrHash = raw.includes('/') ? (raw.split('/').pop() ?? raw).split('?')[0].trim() : raw;
+		if (!qrHash) {
+			scannedSessionError = 'Invalid scan.';
+			showStationTokenScanner = false;
+			return;
+		}
+		showStationTokenScanner = false;
+		try {
+			const { ok, data } = await api('GET', `/api/stations/${station.id}/session-by-token?qr_hash=${encodeURIComponent(qrHash)}`);
+			if (ok && data && typeof data === 'object' && 'session_id' in data) {
+				scannedSession = data as ScannedSession;
+				scannedSessionError = '';
+				scannedSessionErrorCode = null;
+			} else {
+				scannedSession = null;
+				const payload = (data && typeof data === 'object' ? data : {}) as { message?: string; error_code?: string };
+				scannedSessionError = payload?.message ?? 'Token not found or not in use.';
+				scannedSessionErrorCode = payload?.error_code ?? null;
+			}
+		} catch {
+			scannedSession = null;
+			scannedSessionError = 'Request failed. Check your connection and try again.';
+			scannedSessionErrorCode = null;
+		}
+	}
+
+	function closeScannedSessionPanel() {
+		scannedSession = null;
+		scannedSessionError = '';
+		scannedSessionErrorCode = null;
+		stationScanHandled = false;
+	}
+
+	function openStationTokenScanner() {
+		scannedSession = null;
+		scannedSessionError = '';
+		scannedSessionErrorCode = null;
+		stationScanHandled = false;
+		showStationTokenScanner = true;
+	}
+
+	async function serveScannedSession() {
+		const s = scannedSession;
+		if (!s || !station || actionLoading || !s.at_this_station) return;
+		if (s.status !== 'waiting' && s.status !== 'called') return;
+		actionLoading = `serve-${s.session_id}`;
+		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/serve`, { station_id: station.id });
+		actionLoading = null;
+		if (ok) {
+			closeScannedSessionPanel();
+			await fetchQueue(true);
+		} else {
+			error = (data as { message?: string })?.message ?? 'Serve failed';
+		}
+	}
+
+	async function transferScannedSession() {
+		const s = scannedSession;
+		if (!s || actionLoading || s.status !== 'serving') return;
+		actionLoading = `transfer-${s.session_id}`;
+		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/transfer`, { mode: 'standard' });
+		actionLoading = null;
+		if (ok) {
+			closeScannedSessionPanel();
+			await fetchQueue(true);
+		} else {
+			error = (data as { message?: string })?.message ?? 'Transfer failed';
+		}
+	}
+
+	async function completeScannedSession() {
+		const s = scannedSession;
+		if (!s || actionLoading || s.status !== 'serving') return;
+		actionLoading = `complete-${s.session_id}`;
+		const { ok } = await api('POST', `/api/sessions/${s.session_id}/complete`, {});
+		actionLoading = null;
+		if (ok) {
+			closeScannedSessionPanel();
+			await fetchQueue(true);
+		} else {
+			error = 'Complete failed';
 		}
 	}
 
@@ -753,7 +880,7 @@
 							type="button"
 							role="tab"
 							aria-selected={s.id === station.id}
-							class="btn btn-sm shrink-0 min-h-[44px] px-4 {s.id === station.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
+							class="btn btn-sm shrink-0 min-h-[48px] px-4 {s.id === station.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
 							onclick={() => switchStation(s)}
 						>
 							{s.name}
@@ -764,12 +891,12 @@
 
 			<!-- Toolbar: capacity, priority, display audio (single row, wraps on small) -->
 			<div class="flex flex-wrap items-center justify-between gap-3 py-2 px-3 rounded-container bg-surface-50/80 border border-surface-200 elevation-card">
-				<div class="flex items-center gap-3 min-h-[44px]">
+				<div class="flex items-center gap-3 min-h-[48px]">
 					<span class="text-sm font-medium text-surface-950/80 tabular-nums" aria-label="Serving count">
 						Serving {servingCount}/{clientCapacity}
 					</span>
 					{#if canSwitchStation}
-						<label for="priority-first-switch" class="label cursor-pointer gap-2 items-center min-h-[44px]">
+						<label for="priority-first-switch" class="label cursor-pointer gap-2 items-center min-h-[48px]">
 							<span class="label-text text-sm">Priority first</span>
 							<div class="relative inline-block w-11 h-5">
 								<input
@@ -787,7 +914,19 @@
 				</div>
 				<button
 					type="button"
-					class="btn preset-tonal btn-sm gap-2 min-h-[44px] min-w-[44px] md:min-w-[auto] px-3"
+					class="btn preset-tonal btn-sm gap-2 min-h-[48px] min-w-[48px] md:min-w-[auto] px-3"
+					title="Scan client token to identify and act"
+					onclick={openStationTokenScanner}
+					aria-label="Scan token"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-surface-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+					</svg>
+					<span class="hidden md:inline text-sm">Scan token</span>
+				</button>
+				<button
+					type="button"
+					class="btn preset-tonal btn-sm gap-2 min-h-[48px] min-w-[48px] md:min-w-[auto] px-3"
 					title="Display board audio"
 					onclick={() => (showDisplayAudioModal = true)}
 					aria-label="Display board audio settings"
@@ -796,6 +935,80 @@
 					<span class="hidden md:inline text-sm">Display audio</span>
 				</button>
 			</div>
+
+			<!-- Scanned token panel (after resolve from Scan token) -->
+			{#if scannedSession || scannedSessionError}
+				<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5 space-y-3">
+					{#if scannedSession}
+						{@const s = scannedSession}
+						<p class="text-xs font-semibold text-surface-950/80 uppercase tracking-wide">Scanned: {s.alias}</p>
+						<p class="text-sm text-surface-950/90">
+							{s.track} · {s.client_category ?? 'Regular'} · Step {s.current_step_order} of {s.total_steps} · {s.current_station}
+						</p>
+						<p class="text-sm text-surface-950/70">
+							Status: <span class="font-medium">{s.status}</span>
+							{#if s.at_this_station}
+								<span class="text-success-600 font-medium"> · At this station</span>
+							{:else}
+								<span class="text-warning-600"> · At another station</span>
+							{/if}
+						</p>
+						{#if s.at_this_station}
+							<div class="flex flex-wrap gap-2 pt-2">
+								{#if s.status === 'waiting' || s.status === 'called'}
+									<button
+										type="button"
+										class="btn preset-filled-primary-500 btn-lg min-h-[48px]"
+										disabled={!!actionLoading}
+										onclick={serveScannedSession}
+									>
+										{actionLoading === `serve-${s.session_id}` ? 'Processing…' : 'Mark as serving'}
+									</button>
+								{:else if s.status === 'serving'}
+									<button
+										type="button"
+										class="btn preset-filled-primary-500 min-h-[48px]"
+										disabled={!!actionLoading}
+										onclick={transferScannedSession}
+									>
+										{actionLoading === `transfer-${s.session_id}` ? 'Transferring…' : 'Send to next process'}
+									</button>
+									<button
+										type="button"
+										class="btn preset-filled-primary-500 min-h-[48px]"
+										disabled={!!actionLoading}
+										onclick={completeScannedSession}
+									>
+										{actionLoading === `complete-${s.session_id}` ? 'Completing…' : 'Complete session'}
+									</button>
+								{/if}
+							</div>
+						{:else}
+							<p class="text-sm text-surface-950/70 pt-1">This client is at {s.current_station}, not here.</p>
+						{/if}
+					{:else}
+						<p class="text-sm text-surface-950/90">{scannedSessionError}</p>
+						{#if scannedSessionErrorCode === 'not_registered'}
+							<p class="text-sm text-surface-950/70">Send the client to triage to register and get in the queue.</p>
+							<button
+								type="button"
+								class="btn preset-filled-primary-500 btn-sm min-h-[40px]"
+								onclick={() => router.visit('/triage')}
+							>
+								Go to triage
+							</button>
+						{/if}
+					{/if}
+					<div class="flex flex-wrap gap-2">
+						<button type="button" class="btn preset-tonal btn-sm min-h-[40px]" onclick={closeScannedSessionPanel}>
+							Close
+						</button>
+						<button type="button" class="btn preset-outlined btn-sm min-h-[40px]" onclick={() => { closeScannedSessionPanel(); openStationTokenScanner(); }}>
+							Scan another
+						</button>
+					</div>
+				</div>
+			{/if}
 
 			<!-- Main content: grid on desktop, stack on mobile -->
 			<div class="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">
@@ -835,7 +1048,7 @@
 									</button>
 									<button
 										type="button"
-										class="btn btn-sm min-h-[44px] {s.no_show_attempts >= 2 ? 'preset-filled-warning-500' : 'preset-tonal'}"
+										class="btn btn-sm min-h-[48px] {s.no_show_attempts >= 2 ? 'preset-filled-warning-500' : 'preset-tonal'}"
 										disabled={!!actionLoading || !canNoShow(s)}
 										onclick={() => openNoShowModal(s)}
 									>
@@ -862,9 +1075,9 @@
 										</button>
 									{/if}
 									<div class="flex flex-wrap gap-2">
-										<button type="button" class="btn preset-outlined btn-sm min-h-[44px]" disabled={!!actionLoading} onclick={() => openOverrideModal(s)}>Override</button>
-										<button type="button" class="btn preset-filled-warning-500 btn-sm min-h-[44px]" disabled={!!actionLoading} onclick={() => openForceCompleteModal(s)}>Force Complete</button>
-										<button type="button" class="btn preset-tonal btn-sm min-h-[44px]" disabled={!!actionLoading} onclick={() => cancel(s)}>Cancel</button>
+										<button type="button" class="btn preset-outlined btn-sm min-h-[48px]" disabled={!!actionLoading} onclick={() => openOverrideModal(s)}>Override</button>
+										<button type="button" class="btn preset-filled-warning-500 btn-sm min-h-[48px]" disabled={!!actionLoading} onclick={() => openForceCompleteModal(s)}>Force Complete</button>
+										<button type="button" class="btn preset-tonal btn-sm min-h-[48px]" disabled={!!actionLoading} onclick={() => cancel(s)}>Cancel</button>
 									</div>
 								{/if}
 							</div>
@@ -919,7 +1132,18 @@
 												<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80 truncate max-w-[8rem]">{w.process_name}</span>
 											{/if}
 										</div>
-										<span class="text-surface-950/60 shrink-0 text-xs">{w.track} · {formatDuration(w.queued_at)}</span>
+										<div class="flex items-center gap-2 shrink-0">
+											<span class="text-surface-950/60 text-xs">{w.track} · {formatDuration(w.queued_at)}</span>
+											<button
+												type="button"
+												class="btn preset-filled-primary-500 btn-sm min-h-[40px]"
+												disabled={!!actionLoading || atCapacity}
+												title={atCapacity ? 'At capacity' : 'Start serving (no call)'}
+												onclick={() => serveFromWaiting(w)}
+											>
+												{actionLoading === `serve-${w.session_id}` ? '…' : 'Start serving'}
+											</button>
+										</div>
 									</li>
 								{/each}
 							</ul>
@@ -971,7 +1195,7 @@
 						></textarea>
 						<div class="flex items-center justify-between gap-2">
 							<span class="text-xs text-surface-950/50">{noteMessage.length}/500</span>
-							<button type="submit" class="btn preset-filled-primary-500 btn-sm min-h-[44px] px-4" disabled={noteSubmitting}>
+							<button type="submit" class="btn preset-filled-primary-500 btn-sm min-h-[48px] px-4" disabled={noteSubmitting}>
 								{noteSubmitting ? 'Saving…' : 'Save note'}
 							</button>
 						</div>
@@ -1001,6 +1225,29 @@
 				</div>
 			</div>
 			<!-- Per flexiqueue-ldd: backdrop does not close modal; only Cancel/buttons do -->
+			<div class="modal-backdrop" aria-hidden="true"></div>
+		</dialog>
+	{/if}
+
+	{#if showStationTokenScanner}
+		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
+			<div class="card bg-surface-50 rounded-container shadow-xl p-6 text-surface-950 max-w-md">
+				<h3 class="font-bold text-lg mb-3">Scan client token</h3>
+				<p class="text-sm text-surface-950/70 mb-4">Scan the client's QR to identify their session and show actions.</p>
+				<QrScanner
+					active={showStationTokenScanner}
+					onScan={handleStationTokenScan}
+					soundOnScan={true}
+					cameraOnly={true}
+				/>
+				<button
+					type="button"
+					class="btn preset-tonal btn-sm mt-4 min-h-[48px] w-full"
+					onclick={() => { showStationTokenScanner = false; stationScanHandled = true; }}
+				>
+					Cancel
+				</button>
+			</div>
 			<div class="modal-backdrop" aria-hidden="true"></div>
 		</dialog>
 	{/if}

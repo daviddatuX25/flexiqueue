@@ -2,6 +2,7 @@
 
 use App\Models\Program;
 use App\Models\Session;
+use App\Models\Token;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 
@@ -25,3 +26,17 @@ Artisan::command('flexiqueue:session-active', function () {
     $this->comment('No session active.');
     return 1;
 })->purpose('Report if app has active program or queue sessions (exit 0=active, 1=idle).');
+
+/**
+ * Mark tokens stuck in "generating" as "failed" (no worker, job died, or orphaned).
+ * Uses updated_at: if generating for > N minutes with no progress, assume orphaned.
+ */
+Artisan::command('tokens:fix-stuck-generating {--minutes=5 : Only mark tokens generating longer than this} {--all : Mark all generating, ignore timeout}', function () {
+    $query = Token::where('tts_status', 'generating');
+    if (! $this->option('all')) {
+        $minutes = (int) $this->option('minutes');
+        $query->where('updated_at', '<', now()->subMinutes($minutes));
+    }
+    $count = $query->update(['tts_status' => 'failed']);
+    $this->comment("Marked {$count} token(s) as failed.");
+})->purpose('Fix tokens stuck in generating (no worker, job died, or orphaned).');

@@ -39,7 +39,7 @@
 		<div class="flex justify-end gap-2 mt-4">
 			<button
 				type="button"
-				class="btn preset-tonal"
+				class="btn preset-tonal min-h-[48px]"
 				disabled={loading}
 				onclick={handleCancel}
 			>
@@ -47,7 +47,7 @@
 			</button>
 			<button
 				type="button"
-				class="btn {confirmButtonPreset}"
+				class="btn {confirmButtonPreset} min-h-[48px]"
 				disabled={loading}
 				onclick={handleConfirm}
 			>

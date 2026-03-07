@@ -20,7 +20,9 @@ Overview of all scripts (dev + Pi): [scripts/README.md](../README.md).
 | `update-from-url.sh` | On Pi: download tarball from URL and apply. |
 | `flexiqueue-reverb.service` | systemd unit for Laravel Reverb (WebSocket). |
 | `zerotier-when-idle.sh` | Cron helper to start/stop ZeroTier when idle. |
-| `nginx-flexiqueue.conf` | Nginx site config for FlexiQueue. |
+| `nginx-flexiqueue.conf` | Nginx site config for FlexiQueue (HTTP). |
+| `nginx-flexiqueue-ssl.conf` | Nginx site config with HTTPS (for camera on mobile). |
+| `setup-ssl.sh` | Enable HTTPS on an **existing** Pi (self-signed cert, Nginx, APP_URL). Run on the Pi. |
 
 ---
 
@@ -206,7 +208,74 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ### Camera (QR scanner) on mobile
 
-The device camera requires a **secure context** (HTTPS or localhost). If you access the app over HTTP (e.g. `http://192.168.1.x` or `http://armbian.local`), the browser will deny camera access on mobile. For mobile QR scanning, either:
+The device camera requires a **secure context** (HTTPS or localhost). If you access the app over HTTP (e.g. `http://192.168.1.x` or `http://armbian.local`), the browser will deny camera access on mobile. The app will show a message: "Camera requires a secure connection (HTTPS). Open this page via https://… or use 'Scan from file'."
 
-- Use **HTTPS** (e.g. Let's Encrypt) when accessing from phones
-- Or use a hostname that resolves to localhost (e.g. `localhost` on the same device)
+To make the camera work on phones:
+
+- Use **HTTPS** when accessing from phones (see [HTTPS on the Pi](#https-on-the-pi-self-signed) below), or
+- Use a hostname that resolves to localhost (e.g. `localhost` on the same device).
+
+---
+
+### HTTPS on the Pi (self-signed)
+
+To enable camera access on mobile, serve the app over HTTPS. A **self-signed certificate** is enough for LAN use; each device will show a one-time "unsafe" warning that the user can accept.
+
+**Option A: Run the script (existing Pi)**
+
+On a Pi that already has FlexiQueue and Nginx installed, run from the app root:
+
+```bash
+cd /var/www/flexiqueue
+sudo ./scripts/pi/setup-ssl.sh --hostname=orangepione.local
+```
+
+Replace `orangepione.local` with the hostname your phones use to reach the Pi (e.g. `orangepione.local` for mDNS, or your Pi's IP if you use that). The script will:
+
+- Create `/etc/nginx/ssl/` and generate a self-signed cert (CN + SAN for the hostname)
+- Install `nginx-flexiqueue-ssl.conf` as the Nginx site (HTTP redirects to HTTPS)
+- Set `APP_URL=https://<hostname>` in `.env` and run `config:cache`
+- Reload Nginx and restart Reverb if present
+
+Then open the app on your phone at `https://orangepione.local` (or your hostname), accept the certificate warning once, and the camera should work.
+
+**Option B: Manual steps**
+
+**1. Generate a self-signed certificate on the Pi**
+
+```bash
+sudo mkdir -p /etc/nginx/ssl
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/nginx/ssl/flexiqueue.key \
+  -out /etc/nginx/ssl/flexiqueue.crt \
+  -subj "/CN=orangepione.local" -addext "subjectAltName=DNS:orangepione.local,IP:127.0.0.1"
+```
+
+Replace `orangepione.local` with your Pi hostname or add more `DNS:`/`IP:` entries if you use other hostnames or IPs.
+
+**2. Use the HTTPS Nginx config**
+
+Copy `nginx-flexiqueue-ssl.conf` to the Pi and enable it the same way as the HTTP config (Option A or B under "Nginx site config" above), but use `nginx-flexiqueue-ssl.conf` instead of `nginx-flexiqueue.conf`. Ensure the SSL cert paths in the config match where you created the certs in step 1. Then:
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+**3. Set Laravel to use HTTPS**
+
+On the Pi, set `APP_URL` to `https://` so links and redirects use HTTPS:
+
+```bash
+cd /var/www/flexiqueue
+sudo sed -i 's|^APP_URL=.*|APP_URL=https://orangepione.local|' .env
+sudo -u www-data php artisan config:cache
+```
+
+Replace `orangepione.local` with your hostname. Restart Reverb if you use it: `sudo systemctl restart flexiqueue-reverb`.
+
+**4. Open the app on your phone via HTTPS**
+
+Use `https://orangepione.local` (or your hostname). Accept the browser’s certificate warning once; then the camera should work.
+
+**Let’s Encrypt (optional)**  
+For a trusted cert with no warning, use Let’s Encrypt. You need a public hostname and port 80 (and optionally 443) reachable from the internet for validation. See your distro’s certbot docs; then use the same Nginx SSL pattern with the cert paths certbot provides.

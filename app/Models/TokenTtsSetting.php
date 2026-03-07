@@ -9,10 +9,12 @@ class TokenTtsSetting extends Model
     protected $fillable = [
         'voice_id',
         'rate',
+        'default_languages',
     ];
 
     protected $casts = [
         'rate' => 'float',
+        'default_languages' => 'array',
     ];
 
     /**
@@ -52,6 +54,28 @@ class TokenTtsSetting extends Model
         $rate = (float) ($this->rate ?? config('tts.default_rate', 0.84));
 
         return max(0.5, min(2.0, $rate));
+    }
+
+    /**
+     * Get default per-language TTS config (en, fil, ilo). Used when a token has no override.
+     * Returns ['en' => [...], 'fil' => [...], 'ilo' => [...]] with voice_id, rate, pre_phrase per lang.
+     */
+    public function getDefaultLanguages(): array
+    {
+        $raw = $this->default_languages;
+        if (! is_array($raw)) {
+            return [
+                'en' => [],
+                'fil' => [],
+                'ilo' => [],
+            ];
+        }
+
+        return [
+            'en' => $raw['en'] ?? [],
+            'fil' => $raw['fil'] ?? [],
+            'ilo' => $raw['ilo'] ?? [],
+        ];
     }
 }
 

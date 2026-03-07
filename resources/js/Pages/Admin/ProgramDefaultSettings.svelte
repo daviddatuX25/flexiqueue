@@ -36,6 +36,7 @@
 	}
 
 	let loading = $state(true);
+	let loadError = $state("");
 	let submitting = $state(false);
 	let error = $state("");
 	let noShowTimer = $state(10);
@@ -46,10 +47,15 @@
 	let alternateRatioP = $state(2);
 	let alternateRatioR = $state(1);
 
-	onMount(async () => {
+	async function loadSettings() {
+		loading = true;
+		loadError = "";
 		const { ok, data } = await api("GET", "/api/admin/program-default-settings");
 		loading = false;
-		if (!ok || !data) return;
+		if (!ok || !data) {
+			loadError = "Unable to load settings. Try again or refresh the page.";
+			return;
+		}
 		const s = (data as { settings?: Record<string, unknown> }).settings ?? {};
 		noShowTimer = Number(s.no_show_timer_seconds ?? 10);
 		requireOverride = Boolean(s.require_permission_before_override ?? true);
@@ -59,6 +65,10 @@
 		const ar = (s.alternate_ratio as number[] | undefined) ?? [2, 1];
 		alternateRatioP = Number(ar[0] ?? 2);
 		alternateRatioR = Number(ar[1] ?? 1);
+	}
+
+	onMount(() => {
+		loadSettings();
 	});
 
 	async function handleSave() {
@@ -96,9 +106,14 @@
 
 		{#if loading}
 			<p class="text-surface-500">Loading…</p>
+		{:else if loadError}
+			<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 mb-4" role="alert">
+				<p>{loadError}</p>
+				<button type="button" class="btn preset-tonal btn-sm mt-3 min-h-[48px]" onclick={() => loadSettings()}>Try again</button>
+			</div>
 		{:else}
 			{#if error}
-				<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-3 text-sm mb-4">{error}</div>
+				<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-3 text-sm mb-4" role="alert">{error}</div>
 			{/if}
 			<div class="rounded-container bg-surface-50 border border-surface-200 shadow-sm p-6 space-y-6">
 				<div class="flex flex-col sm:flex-row gap-4">

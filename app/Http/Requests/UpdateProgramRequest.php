@@ -36,6 +36,8 @@ class UpdateProgramRequest extends FormRequest
             'settings.display_scan_timeout_seconds' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:300'],
             'settings.display_audio_muted' => ['sometimes', 'boolean'],
             'settings.display_audio_volume' => ['sometimes', 'numeric', 'min:0', 'max:1'],
+            'settings.display_tts_repeat_count' => ['sometimes', 'integer', 'min:1', 'max:3'],
+            'settings.display_tts_repeat_delay_ms' => ['sometimes', 'integer', 'min:500', 'max:10000'],
             'settings.allow_public_triage' => ['sometimes', 'boolean'],
             'settings.enable_display_hid_barcode' => ['sometimes', 'boolean'],
             'settings.enable_public_triage_hid_barcode' => ['sometimes', 'boolean'],

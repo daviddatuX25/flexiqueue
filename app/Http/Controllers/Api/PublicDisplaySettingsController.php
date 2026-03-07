@@ -54,6 +54,8 @@ class PublicDisplaySettingsController extends Controller
             $program->getDisplayAudioVolume(),
             $program->getEnableDisplayHidBarcode(),
             $program->getEnablePublicTriageHidBarcode(),
+            $program->getDisplayTtsRepeatCount(),
+            $program->getDisplayTtsRepeatDelayMs(),
         ));
 
         return response()->json([

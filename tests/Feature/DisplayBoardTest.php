@@ -770,6 +770,31 @@ class DisplayBoardTest extends TestCase
         $this->assertSame(0.5, $props['display_audio_volume']);
     }
 
+    /** Per plan: display board returns display_tts_repeat_count and display_tts_repeat_delay_ms from program. */
+    public function test_display_board_includes_tts_repeat_settings_when_program_has_them(): void
+    {
+        $user = User::factory()->create();
+        Program::create([
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+            'settings' => [
+                'display_tts_repeat_count' => 2,
+                'display_tts_repeat_delay_ms' => 2500,
+            ],
+        ]);
+
+        $response = $this->get('/display');
+
+        $response->assertStatus(200);
+        $props = $response->viewData('page')['props'];
+        $this->assertArrayHasKey('display_tts_repeat_count', $props);
+        $this->assertArrayHasKey('display_tts_repeat_delay_ms', $props);
+        $this->assertSame(2, $props['display_tts_repeat_count']);
+        $this->assertSame(2500, $props['display_tts_repeat_delay_ms']);
+    }
+
     /** Per plan: general display returns default display_audio when no program. */
     public function test_display_board_returns_default_display_audio_when_no_program(): void
     {
@@ -781,5 +806,9 @@ class DisplayBoardTest extends TestCase
         $this->assertArrayHasKey('display_audio_volume', $props);
         $this->assertFalse($props['display_audio_muted']);
         $this->assertSame(1.0, $props['display_audio_volume']);
+        $this->assertArrayHasKey('display_tts_repeat_count', $props);
+        $this->assertArrayHasKey('display_tts_repeat_delay_ms', $props);
+        $this->assertSame(1, $props['display_tts_repeat_count']);
+        $this->assertSame(2000, $props['display_tts_repeat_delay_ms']);
     }
 }

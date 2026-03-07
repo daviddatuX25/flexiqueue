@@ -122,6 +122,24 @@ class Program extends Model
         return (float) max(0, min(1, $v));
     }
 
+    /** Display TTS announcement repeat count (1–3: Once, Twice, Three times). Default 1. */
+    public function getDisplayTtsRepeatCount(): int
+    {
+        $settings = $this->settings ?? [];
+        $v = $settings['display_tts_repeat_count'] ?? 1;
+
+        return (int) max(1, min(3, $v));
+    }
+
+    /** Delay between repeated announcements in milliseconds (500–10000). Default 2000. */
+    public function getDisplayTtsRepeatDelayMs(): int
+    {
+        $settings = $this->settings ?? [];
+        $v = $settings['display_tts_repeat_delay_ms'] ?? 2000;
+
+        return (int) max(500, min(10000, $v));
+    }
+
     /** Per plan: allow public self-serve triage at GET /triage/start. Default false. */
     public function getAllowPublicTriage(): bool
     {

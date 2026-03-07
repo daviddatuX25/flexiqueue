@@ -195,6 +195,74 @@ class SessionActionsTest extends TestCase
         $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'check_in']);
     }
 
+    public function test_serve_waiting_session_with_correct_station_id_returns_200_and_sets_serving(): void
+    {
+        $this->session->update(['status' => 'waiting']);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/serve", [
+            'station_id' => $this->station1->id,
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session.status', 'serving');
+        $this->assertDatabaseHas('queue_sessions', ['id' => $this->session->id, 'status' => 'serving']);
+        $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'check_in']);
+    }
+
+    public function test_serve_waiting_session_without_station_id_returns_422(): void
+    {
+        $this->session->update(['status' => 'waiting']);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/serve", []);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.station_id.0', 'Station context is required when serving from waiting.');
+        $this->assertDatabaseHas('queue_sessions', ['id' => $this->session->id, 'status' => 'waiting']);
+    }
+
+    public function test_serve_waiting_session_at_another_station_returns_409(): void
+    {
+        $this->session->update(['status' => 'waiting', 'current_station_id' => $this->station1->id]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/serve", [
+            'station_id' => $this->station2->id,
+        ]);
+
+        $response->assertStatus(409);
+        $response->assertJsonPath('message', 'Session is not at this station.');
+        $this->assertDatabaseHas('queue_sessions', ['id' => $this->session->id, 'status' => 'waiting']);
+    }
+
+    public function test_serve_waiting_session_when_station_at_capacity_returns_409(): void
+    {
+        $this->station1->update(['client_capacity' => 1]);
+        $this->session->update(['status' => 'called', 'current_station_id' => $this->station1->id]);
+        $token2 = new Token;
+        $token2->qr_code_hash = hash('sha256', Str::random(32).'A2');
+        $token2->physical_id = 'A2';
+        $token2->status = 'in_use';
+        $token2->save();
+        $session2 = Session::create([
+            'token_id' => $token2->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'A2',
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'status' => 'waiting',
+        ]);
+        $token2->update(['current_session_id' => $session2->id]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$session2->id}/serve", [
+            'station_id' => $this->station1->id,
+        ]);
+
+        $response->assertStatus(409);
+        $response->assertJsonPath('message', 'Station at capacity (1). Cannot start serving more clients.');
+        $this->assertDatabaseHas('queue_sessions', ['id' => $session2->id, 'status' => 'waiting']);
+    }
+
     public function test_call_non_waiting_session_returns_409(): void
     {
         $this->session->update(['status' => 'serving']);

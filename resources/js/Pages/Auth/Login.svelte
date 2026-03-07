@@ -72,7 +72,7 @@
 
 				<button
 					type="submit"
-					class="btn preset-filled-primary-500 w-full mt-2"
+					class="btn preset-filled-primary-500 w-full mt-2 min-h-[48px]"
 					disabled={$form.processing}
 				>
 					{$form.processing ? 'Signing in…' : 'Sign in'}

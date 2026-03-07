@@ -114,7 +114,7 @@
 		<h1 class="text-2xl font-bold text-surface-950">YOUR STATUS</h1>
 
 		{#if error}
-			<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4">
+			<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4" role="alert">
 				<span>{error}</span>
 			</div>
 		{:else if status === 'available' && message}

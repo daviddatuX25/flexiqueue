@@ -632,6 +632,75 @@ class StationQueueApiTest extends TestCase
         $response->assertJsonFragment(['message' => 'Station at capacity (1). Cannot call more clients.']);
     }
 
+    public function test_session_by_token_returns_session_and_at_this_station(): void
+    {
+        $token = new Token;
+        $token->qr_code_hash = hash('sha256', Str::random(32).'A1');
+        $token->physical_id = 'A1';
+        $token->status = 'in_use';
+        $token->save();
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'A1',
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'status' => 'waiting',
+        ]);
+        $token->update(['current_session_id' => $session->id]);
+
+        $response = $this->actingAs($this->staff)->getJson(
+            "/api/stations/{$this->station1->id}/session-by-token?qr_hash=".urlencode($token->qr_code_hash)
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session_id', $session->id);
+        $response->assertJsonPath('alias', 'A1');
+        $response->assertJsonPath('status', 'waiting');
+        $response->assertJsonPath('current_station_id', $this->station1->id);
+        $response->assertJsonPath('at_this_station', true);
+    }
+
+    public function test_session_by_token_when_session_at_other_station_returns_at_this_station_false(): void
+    {
+        $token = new Token;
+        $token->qr_code_hash = hash('sha256', Str::random(32).'B1');
+        $token->physical_id = 'B1';
+        $token->status = 'in_use';
+        $token->save();
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'B1',
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station2->id,
+            'current_step_order' => 1,
+            'status' => 'waiting',
+        ]);
+        $token->update(['current_session_id' => $session->id]);
+
+        $response = $this->actingAs($this->staff)->getJson(
+            "/api/stations/{$this->station1->id}/session-by-token?qr_hash=".urlencode($token->qr_code_hash)
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('at_this_station', false);
+        $response->assertJsonPath('current_station_id', $this->station2->id);
+    }
+
+    public function test_session_by_token_not_found_returns_404(): void
+    {
+        $response = $this->actingAs($this->staff)->getJson(
+            "/api/stations/{$this->station1->id}/session-by-token?qr_hash=".urlencode('nonexistent')
+        );
+
+        $response->assertStatus(404);
+        $response->assertJsonPath('message', 'Token not found.');
+    }
+
     private function createToken(string $physicalId): Token
     {
         $token = new Token;

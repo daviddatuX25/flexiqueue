@@ -11,6 +11,7 @@ use App\Http\Requests\CallSessionRequest;
 use App\Http\Requests\CancelSessionRequest;
 use App\Http\Requests\ForceCompleteSessionRequest;
 use App\Http\Requests\OverrideSessionRequest;
+use App\Http\Requests\ServeSessionRequest;
 use App\Http\Requests\TransferSessionRequest;
 use App\Models\Session;
 use App\Models\Station;
@@ -253,14 +254,29 @@ class SessionController extends Controller
     }
 
     /**
-     * Per plan: Serve session — client showed, staff clicks Serve. From 'called' only.
+     * Per plan: Serve session — client showed, staff clicks Serve. From 'called' or 'waiting'.
+     * When session is 'waiting', station_id is required in request body.
      */
-    public function serve(Session $session): JsonResponse
+    public function serve(ServeSessionRequest $request, Session $session): JsonResponse
     {
+        if ($session->status === 'waiting' && $request->validated('station_id') === null) {
+            return response()->json([
+                'message' => 'Validation failed.',
+                'errors' => ['station_id' => ['Station context is required when serving from waiting.']],
+            ], 422);
+        }
+
         try {
-            $result = $this->sessionService->serve($session, $this->user()->id);
+            $result = $this->sessionService->serve(
+                $session,
+                $this->user()->id,
+                $request->validated('station_id')
+            );
         } catch (\InvalidArgumentException $e) {
-            return response()->json(['message' => $e->getMessage()], 409);
+            $code = (int) $e->getCode();
+            $status = $code === 422 ? 422 : 409;
+
+            return response()->json(['message' => $e->getMessage()], $status);
         }
 
         return response()->json([

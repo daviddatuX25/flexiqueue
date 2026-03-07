@@ -199,14 +199,37 @@ class SessionService
 
     /**
      * Per plan: Serve session — client physically showed, staff clicks Serve.
-     * From 'called' only. Logs check_in, sets serving.
+     * From 'called' or 'waiting'. When 'waiting', staff's station_id required and session must be at that station; capacity enforced.
+     * Logs check_in for both.
      *
+     * @param  int|null  $stationId  Required when status is 'waiting' (staff's station); optional when 'called'.
      * @return array{session: Session}
      */
-    public function serve(Session $session, int $staffUserId): array
+    public function serve(Session $session, int $staffUserId, ?int $stationId = null): array
     {
-        if ($session->status !== 'called') {
-            throw new \InvalidArgumentException('Session is not in called state. Call the client first.', 409);
+        if (! in_array($session->status, ['called', 'waiting'], true)) {
+            throw new \InvalidArgumentException('Session is not in called or waiting state. Call the client first or start serving from waiting.', 409);
+        }
+
+        if ($session->status === 'waiting') {
+            if ($stationId === null) {
+                throw new \InvalidArgumentException('Station context is required when serving from waiting.', 422);
+            }
+            if ($session->current_station_id !== $stationId) {
+                throw new \InvalidArgumentException('Session is not at this station.', 409);
+            }
+            $station = $session->currentStation;
+            if (! $station) {
+                throw new \InvalidArgumentException('Session has no current station.', 409);
+            }
+            $clientCapacity = (int) ($station->client_capacity ?? 1);
+            $currentCount = Session::query()
+                ->where('current_station_id', $station->id)
+                ->whereIn('status', ['called', 'serving'])
+                ->count();
+            if ($currentCount >= $clientCapacity) {
+                throw new \InvalidArgumentException("Station at capacity ({$clientCapacity}). Cannot start serving more clients.", 409);
+            }
         }
 
         $session->update(['status' => 'serving']);

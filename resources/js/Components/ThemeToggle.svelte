@@ -35,7 +35,7 @@
 <button
 	type="button"
 	onclick={doToggle}
-	class="p-2 rounded-lg text-surface-600 hover:text-surface-950 hover:bg-surface-200 dark:text-surface-400 dark:hover:text-surface-100 dark:hover:bg-surface-800 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 dark:focus:ring-offset-surface-900 min-h-[2.5rem] min-w-[2.5rem] flex items-center justify-center"
+	class="p-2 rounded-lg text-surface-600 hover:text-surface-950 hover:bg-surface-200 dark:text-surface-400 dark:hover:text-surface-100 dark:hover:bg-surface-800 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 dark:focus:ring-offset-surface-900 min-h-[48px] min-w-[48px] flex items-center justify-center"
 	aria-label={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
 	title={mode === "dark" ? "Light mode" : "Dark mode"}
 >

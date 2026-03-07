@@ -5,13 +5,16 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\BatchCreateTokenRequest;
 use App\Http\Requests\BatchDeleteTokenRequest;
+use App\Http\Requests\RegenerateTokenTtsRequest;
 use App\Http\Requests\UpdateTokenRequest;
 use App\Jobs\GenerateTokenTtsJob;
 use App\Models\Token;
+use App\Models\TokenTtsSetting;
 use App\Services\TokenService;
 use App\Services\TtsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Per 08-API-SPEC-PHASE1 §5.5: Token list, batch create, update status. Auth: role:admin.
@@ -105,7 +108,22 @@ class TokenController extends Controller
                     'tts_pre_generate_enabled' => true,
                 ]);
 
-            if ($this->ttsService->isEnabled()) {
+            if ($this->ttsService->isEnabled() && TokenTtsSetting::instance()->getEffectiveVoiceId() !== null) {
+                if ($this->queueWorkerAppearsIdle()) {
+                    Token::query()
+                        ->whereIn('id', $tokenIds)
+                        ->update(['tts_status' => 'failed']);
+                    return response()->json([
+                        'message' => 'Queue worker is not running. Start it with: php artisan queue:work',
+                    ], 503);
+                }
+                // Clear tokens stuck in "generating" (no worker, job died), but never touch tokens we're about to generate.
+                Token::query()
+                    ->where('tts_status', 'generating')
+                    ->where('updated_at', '<', now()->subMinutes(5))
+                    ->whereNotIn('id', $tokenIds)
+                    ->update(['tts_status' => 'failed']);
+
                 Token::query()
                     ->whereIn('id', $tokenIds)
                     ->update([
@@ -221,10 +239,10 @@ class TokenController extends Controller
     }
 
     /**
-     * Regenerate TTS audio for all tokens opted-in to pre-generation.
-     * Marks their tts_status as "generating" and dispatches the queue job.
+     * Regenerate TTS audio. If token_ids provided, only those tokens; else all opted-in.
+     * Marks tts_status as "generating" and dispatches the queue job.
      */
-    public function regenerateTts(): JsonResponse
+    public function regenerateTts(RegenerateTokenTtsRequest $request): JsonResponse
     {
         if (! $this->ttsService->isEnabled()) {
             return response()->json([
@@ -233,22 +251,56 @@ class TokenController extends Controller
             ], 503);
         }
 
-        $tokenIds = Token::query()
-            ->where('tts_pre_generate_enabled', true)
-            ->pluck('id')
-            ->all();
-
-        if ($tokenIds === []) {
+        if (TokenTtsSetting::instance()->getEffectiveVoiceId() === null) {
             return response()->json([
+                'message' => 'Default TTS voice must be configured in Settings before generating token TTS.',
                 'queued' => 0,
-            ]);
+            ], 422);
         }
 
-        Token::query()
-            ->whereIn('id', $tokenIds)
-            ->update([
-                'tts_status' => 'generating',
-            ]);
+        $requestIds = $request->validated('token_ids');
+
+        if (is_array($requestIds) && $requestIds !== []) {
+            $tokenIds = array_values(array_map('intval', $requestIds));
+            Token::query()
+                ->whereIn('id', $tokenIds)
+                ->update([
+                    'tts_pre_generate_enabled' => true,
+                    'tts_status' => 'generating',
+                ]);
+        } else {
+            $tokenIds = Token::query()
+                ->where('tts_pre_generate_enabled', true)
+                ->pluck('id')
+                ->all();
+
+            if ($tokenIds === []) {
+                return response()->json([
+                    'queued' => 0,
+                ]);
+            }
+
+            if ($this->queueWorkerAppearsIdle()) {
+                Token::query()
+                    ->whereIn('id', $tokenIds)
+                    ->update(['tts_status' => 'failed']);
+                return response()->json([
+                    'message' => 'Queue worker is not running. Start it with: php artisan queue:work',
+                ], 503);
+            }
+            // Clear tokens stuck in "generating" (no worker, job died), but never touch tokens we're about to generate.
+            Token::query()
+                ->where('tts_status', 'generating')
+                ->where('updated_at', '<', now()->subMinutes(5))
+                ->whereNotIn('id', $tokenIds)
+                ->update(['tts_status' => 'failed']);
+
+            Token::query()
+                ->whereIn('id', $tokenIds)
+                ->update([
+                    'tts_status' => 'generating',
+                ]);
+        }
 
         GenerateTokenTtsJob::dispatch($tokenIds);
 
@@ -257,8 +309,33 @@ class TokenController extends Controller
         ]);
     }
 
+    /**
+     * Heuristic: queue is database and has pending jobs older than 2 min → likely no worker.
+     * With sync driver, job runs inline so we never fail.
+     */
+    private function queueWorkerAppearsIdle(): bool
+    {
+        if (config('queue.default') !== 'database') {
+            return false;
+        }
+
+        $connection = config('queue.connections.database.connection') ?? config('database.default');
+        $table = config('queue.connections.database.table', 'jobs');
+        $queue = config('queue.connections.database.queue', 'default');
+        $cutoff = now()->subMinutes(2)->timestamp;
+
+        return DB::connection($connection)->table($table)
+            ->where('queue', $queue)
+            ->whereNull('reserved_at')
+            ->where('available_at', '<=', time())
+            ->where('created_at', '<', $cutoff)
+            ->exists();
+    }
+
     private function tokenResource(Token $token): array
     {
+        $ttsSettings = $token->tts_settings ?? [];
+
         return [
             'id' => $token->id,
             'physical_id' => $token->physical_id,
@@ -266,8 +343,9 @@ class TokenController extends Controller
             'qr_code_hash' => $token->qr_code_hash,
             'status' => $token->status,
             'tts_status' => $token->tts_status,
+            'tts_failure_reason' => is_array($ttsSettings) ? ($ttsSettings['failure_reason'] ?? null) : null,
             'has_tts_audio' => $token->tts_audio_path !== null,
-            'tts_settings' => $token->tts_settings,
+            'tts_settings' => $ttsSettings,
         ];
     }
 }

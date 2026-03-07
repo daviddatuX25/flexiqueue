@@ -188,11 +188,33 @@
 		}
 	}
 
+	/** Message when camera is blocked due to non-secure context (HTTP on mobile). */
+	function getInsecureContextMessage(): string {
+		const base = 'Camera requires a secure connection (HTTPS).';
+		try {
+			const host = typeof window !== 'undefined' ? window.location.host : '';
+			if (host) {
+				return `${base} Open this page via https://${host} or use "Scan from file".`;
+			}
+		} catch {
+			// ignore
+		}
+		return `${base} Use "Scan from file" or open the page via HTTPS.`;
+	}
+
 	async function initScanner() {
 		if (!active) return;
 		errorMessage = '';
 		isLoading = true;
 		mode = 'camera';
+
+		// Per plan: detect non-secure context (e.g. HTTP on mobile) so we show a clear message instead of generic "No camera available".
+		if (typeof window !== 'undefined' && (window.isSecureContext === false || typeof navigator?.mediaDevices === 'undefined')) {
+			isLoading = false;
+			errorMessage = getInsecureContextMessage();
+			mode = showFileFallback ? 'file' : 'error';
+			return;
+		}
 
 		try {
 			let list = await loadCameras();

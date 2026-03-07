@@ -62,7 +62,7 @@
                 <div
                     tabindex="0"
                     role="button"
-                    class="btn preset-tonal btn-icon min-h-[44px] min-w-[44px] rounded-full p-0"
+                    class="btn preset-tonal btn-icon min-h-[48px] min-w-[48px] rounded-full p-0"
                 >
                     <UserAvatar {user} size="sm" />
                 </div>
@@ -121,7 +121,7 @@
         <div class="flex justify-around py-2">
             <Link
                 href="/station"
-                class="flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center {isStation
+                class="flex flex-col items-center gap-0.5 min-w-[48px] min-h-[48px] justify-center {isStation
                     ? 'text-primary-500 font-semibold'
                     : 'text-surface-950/70'}"
             >
@@ -143,7 +143,7 @@
             </Link>
             <Link
                 href="/triage"
-                class="flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center {isTriage
+                class="flex flex-col items-center gap-0.5 min-w-[48px] min-h-[48px] justify-center {isTriage
                     ? 'text-primary-500 font-semibold'
                     : 'text-surface-950/70'}"
             >
@@ -164,7 +164,7 @@
             </Link>
             <Link
                 href="/track-overrides"
-                class="flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center {isTrackOverrides
+                class="flex flex-col items-center gap-0.5 min-w-[48px] min-h-[48px] justify-center {isTrackOverrides
                     ? 'text-primary-500 font-semibold'
                     : 'text-surface-950/70'}"
             >

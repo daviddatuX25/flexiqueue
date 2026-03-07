@@ -21,6 +21,8 @@ class DisplaySettingsUpdated implements ShouldBroadcastNow
         public float $displayAudioVolume,
         public bool $enableDisplayHidBarcode = true,
         public bool $enablePublicTriageHidBarcode = true,
+        public int $displayTtsRepeatCount = 1,
+        public int $displayTtsRepeatDelayMs = 2000,
     ) {}
 
     /**
@@ -48,6 +50,8 @@ class DisplaySettingsUpdated implements ShouldBroadcastNow
             'display_audio_volume' => $this->displayAudioVolume,
             'enable_display_hid_barcode' => $this->enableDisplayHidBarcode,
             'enable_public_triage_hid_barcode' => $this->enablePublicTriageHidBarcode,
+            'display_tts_repeat_count' => $this->displayTtsRepeatCount,
+            'display_tts_repeat_delay_ms' => $this->displayTtsRepeatDelayMs,
         ];
     }
 }

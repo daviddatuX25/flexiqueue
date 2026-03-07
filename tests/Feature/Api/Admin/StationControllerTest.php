@@ -216,6 +216,55 @@ class StationControllerTest extends TestCase
         $response->assertJsonValidationErrors('process_ids');
     }
 
+    public function test_update_with_tts_returns_requires_regeneration_when_station_had_generated_tts(): void
+    {
+        $station = Station::create([
+            'program_id' => $this->program->id,
+            'name' => 'Desk',
+            'capacity' => 1,
+            'is_active' => true,
+            'settings' => [
+                'tts' => [
+                    'languages' => [
+                        'en' => ['voice_id' => 'v1', 'rate' => 0.84, 'station_phrase' => 'Window one', 'status' => 'ready', 'audio_path' => 'tts/stations/1/en.mp3'],
+                    ],
+                ],
+            ],
+        ]);
+        $station->processes()->attach($this->process->id);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/stations/{$station->id}", [
+            'name' => 'Desk',
+            'capacity' => 1,
+            'is_active' => true,
+            'process_ids' => [$this->process->id],
+            'tts' => [
+                'languages' => [
+                    'en' => ['voice_id' => 'v1', 'rate' => 0.9, 'station_phrase' => 'Window one'],
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('requires_regeneration', true);
+    }
+
+    public function test_regenerate_tts_returns_200(): void
+    {
+        $station = Station::create([
+            'program_id' => $this->program->id,
+            'name' => 'Desk',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $station->processes()->attach($this->process->id);
+
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/stations/{$station->id}/regenerate-tts");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('message', 'Station TTS regeneration started.');
+    }
+
     public function test_list_processes_returns_assigned_process_ids(): void
     {
         $station = Station::create([
