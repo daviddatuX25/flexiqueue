@@ -212,13 +212,23 @@
 	</div>
 
 	{#if cards.length === 0}
-		<div class="rounded-lg bg-surface-50 p-8 text-center text-surface-950/70">
+		<div
+			role="status"
+			aria-label="No tokens to print"
+			class="rounded-lg bg-surface-50 p-8 text-center text-surface-950/70 flex flex-col items-center gap-4"
+		>
 			<p class="font-medium">No tokens to print.</p>
 			{#if skipped > 0}
-				<p class="mt-2 text-sm">
+				<p class="text-sm">
 					{skipped} token(s) skipped (invalid or QR generation failed).
 				</p>
 			{/if}
+			<Link
+				href="/admin/tokens"
+				class="btn preset-filled-primary-500 flex items-center gap-2 touch-target-h"
+			>
+				Go to Tokens
+			</Link>
 		</div>
 	{:else}
 		{#each pages as pageCards}

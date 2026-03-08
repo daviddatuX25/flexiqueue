@@ -30,7 +30,7 @@
                     </span>
                     <Link
                         href="/station"
-                        class="btn preset-filled-primary-500 btn-sm gap-1.5"
+                        class="btn preset-filled-primary-500 btn-sm gap-1.5 touch-target-h"
                     >
                         <Eye class="h-4 w-4" />
                         View Program
@@ -78,7 +78,7 @@
                 <p class="text-sm text-surface-950/60 mb-3">
                     Activate a program to start operations.
                 </p>
-                <Link href="/admin/programs" class="btn preset-tonal btn-sm"
+                <Link href="/admin/programs" class="btn preset-tonal btn-sm touch-target-h"
                     >Go to Programs</Link
                 >
             </div>

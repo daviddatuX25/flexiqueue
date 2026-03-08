@@ -7,7 +7,8 @@
     import { usePage } from "@inertiajs/svelte";
     import { router } from "@inertiajs/svelte";
     import StatusFooter from "./StatusFooter.svelte";
-    import Toast from "../Components/Toast.svelte";
+    import FlexiQueueToaster from "../Components/FlexiQueueToaster.svelte";
+    import FlashToToast from "../Components/FlashToToast.svelte";
     import ThemeToggle from "../Components/ThemeToggle.svelte";
     import OfflineBanner from "../Components/OfflineBanner.svelte";
     import UserAvatar from "../Components/UserAvatar.svelte";
@@ -62,7 +63,7 @@
                 <div
                     tabindex="0"
                     role="button"
-                    class="btn preset-tonal btn-icon min-h-[48px] min-w-[48px] rounded-full p-0"
+                    class="btn preset-tonal btn-icon touch-target rounded-full p-0"
                 >
                     <UserAvatar {user} size="sm" />
                 </div>
@@ -121,7 +122,7 @@
         <div class="flex justify-around py-2">
             <Link
                 href="/station"
-                class="flex flex-col items-center gap-0.5 min-w-[48px] min-h-[48px] justify-center {isStation
+                class="flex flex-col items-center gap-0.5 touch-target justify-center {isStation
                     ? 'text-primary-500 font-semibold'
                     : 'text-surface-950/70'}"
             >
@@ -143,7 +144,7 @@
             </Link>
             <Link
                 href="/triage"
-                class="flex flex-col items-center gap-0.5 min-w-[48px] min-h-[48px] justify-center {isTriage
+                class="flex flex-col items-center gap-0.5 touch-target justify-center {isTriage
                     ? 'text-primary-500 font-semibold'
                     : 'text-surface-950/70'}"
             >
@@ -164,7 +165,7 @@
             </Link>
             <Link
                 href="/track-overrides"
-                class="flex flex-col items-center gap-0.5 min-w-[48px] min-h-[48px] justify-center {isTrackOverrides
+                class="flex flex-col items-center gap-0.5 touch-target justify-center {isTrackOverrides
                     ? 'text-primary-500 font-semibold'
                     : 'text-surface-950/70'}"
             >
@@ -188,7 +189,8 @@
 
     <StatusFooter {queueCount} {processedToday} fixed={false} />
 
-    <Toast />
+    <FlexiQueueToaster />
+    <FlashToToast />
 </div>
 
 <style>

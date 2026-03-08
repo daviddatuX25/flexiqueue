@@ -3,6 +3,7 @@
     import { get } from "svelte/store";
     import { onMount } from "svelte";
     import { usePage } from "@inertiajs/svelte";
+    import { toaster } from "../../../lib/toaster.js";
     import {
         FileText,
         Download,
@@ -70,7 +71,6 @@
         current_page: number;
     } | null>(null);
     let loading = $state(true);
-    let error = $state("");
 
     // Filters
     let showFilters = $state(false);
@@ -114,6 +114,9 @@
         return metaEl ?? "";
     }
 
+    const MSG_SESSION_EXPIRED = "Session expired. Please refresh and try again.";
+    const MSG_NETWORK_ERROR = "Network error. Please try again.";
+
     async function api(
         method: string,
         url: string,
@@ -121,17 +124,26 @@
         ok: boolean;
         data?: { data: AuditLogEntry[]; meta: typeof meta };
     }> {
-        const res = await fetch(url, {
-            method,
-            headers: {
-                Accept: "application/json",
-                "X-CSRF-TOKEN": getCsrfToken(),
-                "X-Requested-With": "XMLHttpRequest",
-            },
-            credentials: "same-origin",
-        });
-        const json = await res.json().catch(() => ({}));
-        return { ok: res.ok, data: json };
+        try {
+            const res = await fetch(url, {
+                method,
+                headers: {
+                    Accept: "application/json",
+                    "X-CSRF-TOKEN": getCsrfToken(),
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+                credentials: "same-origin",
+            });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return { ok: false, data: undefined };
+            }
+            const json = await res.json().catch(() => ({}));
+            return { ok: res.ok, data: json };
+        } catch (e) {
+            toaster.error({ title: MSG_NETWORK_ERROR });
+            return { ok: false, data: undefined };
+        }
     }
 
     function buildAuditUrl(pageNum = 1): string {
@@ -166,6 +178,49 @@
             : "/api/admin/logs/audit/export";
     }
 
+    let exportLoading = $state(false);
+
+    async function downloadCsv() {
+        exportLoading = true;
+        try {
+            const res = await fetch(buildExportUrl(), {
+                method: "GET",
+                headers: {
+                    Accept: "text/csv, application/csv",
+                    "X-CSRF-TOKEN": getCsrfToken(),
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+                credentials: "same-origin",
+            });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
+            if (res.ok) {
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                toaster.success({ title: "Export downloaded" });
+            } else {
+                const msg =
+                    (await res.json().catch(() => ({})))?.message ??
+                    "Export failed";
+                toaster.error({ title: msg });
+            }
+        } catch (e) {
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Export failed" });
+        } finally {
+            exportLoading = false;
+        }
+    }
+
     async function fetchProgramSessions() {
         programSessionsLoading = true;
         const params = new URLSearchParams();
@@ -190,7 +245,6 @@
 
     async function fetchAudit(pageNum = 1) {
         loading = true;
-        error = "";
         const res = await api("GET", buildAuditUrl(pageNum));
         loading = false;
         if (res.ok && res.data?.data !== undefined) {
@@ -199,11 +253,23 @@
         } else {
             data = [];
             meta = null;
-            error = "Failed to load audit log.";
+            toaster.error({ title: "Failed to load audit log." });
         }
     }
 
     function applyFilters() {
+        fetchProgramSessions();
+        fetchAudit(1);
+    }
+
+    function clearFilters() {
+        filterProgramId = "";
+        filterFrom = "";
+        filterTo = "";
+        filterActionType = "";
+        filterStationId = "";
+        filterStaffUserId = "";
+        filterProgramSessionId = "";
         fetchProgramSessions();
         fetchAudit(1);
     }
@@ -312,21 +378,13 @@
             </div>
         </div>
 
-        {#if error}
-            <div
-                class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 mt-4"
-            >
-                {error}
-            </div>
-        {/if}
-
         <!-- Filter panel -->
         <div
             class="rounded-container bg-surface-50 border border-surface-200 shadow-sm mt-2 overflow-hidden"
         >
             <button
                 type="button"
-                class="w-full text-left p-4 sm:p-5 flex items-center justify-between gap-2 bg-surface-100/30 hover:bg-surface-200/50 transition-colors cursor-pointer"
+                class="w-full text-left p-4 sm:p-5 flex items-center justify-between gap-2 bg-surface-100/30 hover:bg-surface-200/50 transition-colors cursor-pointer touch-target-h"
                 onclick={() => (showFilters = !showFilters)}
                 aria-expanded={showFilters}
                 aria-controls="filter-panel-content"
@@ -369,7 +427,7 @@
                             </label>
                             <select
                                 id="filter-program"
-                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full"
+                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full touch-target-h"
                                 bind:value={filterProgramId}
                                 onchange={() => {
                                     filterStationId = "";
@@ -392,7 +450,7 @@
                             <input
                                 id="filter-from"
                                 type="date"
-                                class="input rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full"
+                                class="input rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full touch-target-h"
                                 bind:value={filterFrom}
                             />
                         </div>
@@ -406,7 +464,7 @@
                             <input
                                 id="filter-to"
                                 type="date"
-                                class="input rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full"
+                                class="input rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full touch-target-h"
                                 bind:value={filterTo}
                             />
                         </div>
@@ -422,7 +480,7 @@
                             </label>
                             <select
                                 id="filter-program-session"
-                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full"
+                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full touch-target-h"
                                 bind:value={filterProgramSessionId}
                                 disabled={programSessionsLoading}
                             >
@@ -443,7 +501,7 @@
                             </label>
                             <select
                                 id="filter-action"
-                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full"
+                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full touch-target-h"
                                 bind:value={filterActionType}
                             >
                                 <option value="">All actions</option>
@@ -463,7 +521,7 @@
                             </label>
                             <select
                                 id="filter-station"
-                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full"
+                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full touch-target-h"
                                 bind:value={filterStationId}
                             >
                                 <option value="">All stations</option>
@@ -481,7 +539,7 @@
                             </label>
                             <select
                                 id="filter-staff"
-                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full"
+                                class="select rounded-container border border-surface-200 px-3 py-2 text-sm bg-surface-50 shadow-sm w-full touch-target-h"
                                 bind:value={filterStaffUserId}
                             >
                                 <option value="">All staff</option>
@@ -496,7 +554,7 @@
                     >
                         <button
                             type="button"
-                            class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm"
+                            class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm touch-target-h"
                             onclick={applyFilters}
                             disabled={loading}
                         >
@@ -527,15 +585,20 @@
                     0 records
                 {/if}
             </div>
-            <a
-                href={buildExportUrl()}
-                class="btn preset-outlined flex items-center gap-2 shadow-sm hover:bg-surface-50"
-                download
+            <button
+                type="button"
+                class="btn preset-outlined flex items-center gap-2 shadow-sm hover:bg-surface-50 touch-target-h"
+                onclick={downloadCsv}
+                disabled={loading || exportLoading}
                 aria-label="Download CSV export"
             >
-                <Download class="w-4 h-4" />
+                {#if exportLoading}
+                    <span class="loading-spinner loading-sm"></span>
+                {:else}
+                    <Download class="w-4 h-4" />
+                {/if}
                 Download CSV
-            </a>
+            </button>
         </div>
 
         <!-- Audit log table -->
@@ -551,6 +614,8 @@
             </div>
         {:else if data.length === 0}
             <div
+                role="status"
+                aria-label="No audit log entries"
                 class="rounded-container border border-surface-200 bg-surface-50 p-12 flex flex-col items-center justify-center text-center shadow-sm mt-4"
             >
                 <div
@@ -561,10 +626,17 @@
                 <h3 class="text-lg font-semibold text-surface-950">
                     No records found
                 </h3>
-                <p class="text-surface-600 max-w-sm mt-2">
+                <p class="text-surface-600 max-w-sm mt-2 mb-6">
                     No audit log entries match the current filters. Try changing
-                    your search criteria.
+                    your search criteria or clear filters.
                 </p>
+                <button
+                    type="button"
+                    class="btn preset-filled-primary-500 flex items-center gap-2 touch-target-h"
+                    onclick={clearFilters}
+                >
+                    <Filter class="w-4 h-4" /> Clear filters
+                </button>
             </div>
         {:else}
             <div
@@ -726,7 +798,7 @@
                 <div class="flex gap-2">
                     <button
                         type="button"
-                        class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-4 py-1.5 transition-colors disabled:opacity-50"
+                        class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-4 py-1.5 transition-colors disabled:opacity-50 touch-target-h"
                         disabled={meta.current_page <= 1}
                         onclick={() => goToPage(meta!.current_page - 1)}
                     >
@@ -734,7 +806,7 @@
                     </button>
                     <button
                         type="button"
-                        class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-4 py-1.5 transition-colors disabled:opacity-50"
+                        class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-4 py-1.5 transition-colors disabled:opacity-50 touch-target-h"
                         disabled={meta.current_page >= totalPages}
                         onclick={() => goToPage(meta!.current_page + 1)}
                     >

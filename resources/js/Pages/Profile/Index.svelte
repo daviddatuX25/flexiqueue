@@ -8,6 +8,7 @@
     import UserAvatar from "../../Components/UserAvatar.svelte";
     import { usePage } from "@inertiajs/svelte";
     import { router } from "@inertiajs/svelte";
+    import { toaster } from "../../lib/toaster.js";
 
     const page = usePage();
     const user = $derived($page.props?.auth?.user ?? null);
@@ -17,10 +18,7 @@
     let passwordNew = $state("");
     let passwordConfirm = $state("");
     let passwordSubmitting = $state(false);
-    let passwordMessage = $state<{
-        type: "success" | "error";
-        text: string;
-    } | null>(null);
+    let passwordErrors = $state<Record<string, string>>({});
 
     /** Digits only, max 6 — avoids browser "Please match the requested format" on pattern. */
     function sanitizePin(value: string): string {
@@ -31,29 +29,24 @@
     let currentPassword = $state("");
     let newPin = $state("");
     let pinSubmitting = $state(false);
-    let pinMessage = $state<{ type: "success" | "error"; text: string } | null>(
-        null,
-    );
+    let pinErrors = $state<Record<string, string>>({});
 
     // Profile photo — use response URL so new avatar shows immediately (per ISSUES-ELABORATION §9)
     let avatarSubmitting = $state(false);
-    let avatarMessage = $state<{
-        type: "success" | "error";
-        text: string;
-    } | null>(null);
     let displayAvatarUrl = $state<string | null>(null);
 
 	// Avatar upload interactive state
 	let selectedAvatarFile = $state<File | null>(null);
 	let avatarPreviewUrl = $state<string | null>(null);
 	let avatarDragging = $state(false);
+	let avatarError = $state<string | null>(null);
 
 	function handleAvatarSelect(files: FileList | null) {
+		avatarError = null;
 		if (files && files.length > 0) {
 			selectedAvatarFile = files[0];
 			if (avatarPreviewUrl) URL.revokeObjectURL(avatarPreviewUrl);
 			avatarPreviewUrl = URL.createObjectURL(selectedAvatarFile);
-			avatarMessage = null;
 		} else {
 			selectedAvatarFile = null;
 			if (avatarPreviewUrl) URL.revokeObjectURL(avatarPreviewUrl);
@@ -70,9 +63,6 @@
     let qrLoading = $state(false);
     let qrRegenerating = $state(false);
     let qrDataUri = $state<string | null>(null);
-    let qrMessage = $state<{ type: "success" | "error"; text: string } | null>(
-        null,
-    );
 
     async function fetchHasPresetQr() {
         qrLoading = true;
@@ -93,8 +83,8 @@
 
     async function submitPassword(e: Event) {
         e.preventDefault();
-        passwordMessage = null;
         passwordSubmitting = true;
+        passwordErrors = {};
         try {
             const r = await fetch("/api/profile/password", {
                 method: "PUT",
@@ -112,23 +102,32 @@
             });
             const data = await r.json().catch(() => ({}));
             if (r.ok) {
-                passwordMessage = {
-                    type: "success",
-                    text: data.message ?? "Password updated.",
-                };
+                passwordErrors = {};
+                toaster.success({ title: data.message ?? "Password updated." });
                 passwordCurrent = "";
                 passwordNew = "";
                 passwordConfirm = "";
+            } else if (r.status === 419) {
+                toaster.error({ title: "Session expired. Refresh and try again." });
             } else {
-                passwordMessage = {
-                    type: "error",
-                    text:
+                const errs = normalizeErrors(data.errors);
+                passwordErrors = errs;
+                toaster.error({
+                    title:
                         data.message ??
-                        (data.errors
-                            ? Object.values(data.errors).flat().join(" ")
-                            : "Failed to update password."),
+                        (data.errors ? Object.values(data.errors).flat().join(" ") : "Failed to update password."),
+                });
+                const idByKey: Record<string, string> = {
+                    current_password: "current_password",
+                    password: "password_new",
+                    password_confirmation: "password_confirm",
                 };
+                const firstKey = PASSWORD_FIELD_ORDER.find((k) => errs[k]);
+                const focusId = firstKey ? idByKey[firstKey] : null;
+                if (focusId) document.getElementById(focusId)?.focus();
             }
+        } catch {
+            toaster.error({ title: "Network error. Please try again." });
         } finally {
             passwordSubmitting = false;
         }
@@ -136,13 +135,14 @@
 
     async function submitPin(e: Event) {
         e.preventDefault();
-        pinMessage = null;
         const pin = sanitizePin(newPin);
         if (pin.length !== 6) {
-            pinMessage = { type: "error", text: "Enter a 6-digit PIN." };
+            toaster.error({ title: "Enter a 6-digit PIN." });
+            pinErrors = { new_pin: "Enter a 6-digit PIN." };
             return;
         }
         pinSubmitting = true;
+        pinErrors = {};
         try {
             const r = await fetch("/api/profile/override-pin", {
                 method: "PUT",
@@ -159,29 +159,31 @@
             });
             const data = await r.json().catch(() => ({}));
             if (r.ok) {
-                pinMessage = {
-                    type: "success",
-                    text: data.message ?? "Override PIN updated.",
-                };
+                pinErrors = {};
+                toaster.success({ title: data.message ?? "Override PIN updated." });
                 currentPassword = "";
                 newPin = "";
+            } else if (r.status === 419) {
+                toaster.error({ title: "Session expired. Refresh and try again." });
             } else {
-                pinMessage = {
-                    type: "error",
-                    text:
+                const errs = normalizeErrors(data.errors);
+                pinErrors = errs;
+                toaster.error({
+                    title:
                         data.message ??
-                        (data.errors
-                            ? Object.values(data.errors).flat().join(" ")
-                            : "Failed to update PIN."),
-                };
+                        (data.errors ? Object.values(data.errors).flat().join(" ") : "Failed to update PIN."),
+                });
+                const focusId = errs.current_password ? "pin_current_password" : errs.new_pin ? "new_pin" : null;
+                if (focusId) document.getElementById(focusId)?.focus();
             }
+        } catch {
+            toaster.error({ title: "Network error. Please try again." });
         } finally {
             pinSubmitting = false;
         }
     }
 
     async function regenerateQr() {
-        qrMessage = null;
         qrDataUri = null;
         qrRegenerating = true;
         try {
@@ -197,17 +199,11 @@
             if (r.ok) {
                 qrDataUri = data.qr_data_uri ?? null;
                 hasPresetQr = true;
-                qrMessage = {
-                    type: "success",
-                    text:
-                        data.message ??
-                        "Preset QR regenerated. Save or print it; it will not be shown again.",
-                };
+                toaster.success({
+                    title: data.message ?? "Preset QR regenerated. Save or print it; it will not be shown again.",
+                });
             } else {
-                qrMessage = {
-                    type: "error",
-                    text: data.message ?? "Failed to regenerate QR.",
-                };
+                toaster.error({ title: data.message ?? "Failed to regenerate QR." });
             }
         } finally {
             qrRegenerating = false;
@@ -220,11 +216,12 @@
 		const fileInput = form.querySelector<HTMLInputElement>('input[type="file"][name="avatar"]');
 		const file = fileInput?.files?.[0] ?? selectedAvatarFile;
 		if (!file) {
-			avatarMessage = { type: "error", text: "Please select an image." };
+			toaster.error({ title: "Please select an image." });
+			avatarError = "Please select an image.";
 			return;
 		}
-		avatarMessage = null;
         avatarSubmitting = true;
+        avatarError = null;
         try {
             const fd = new FormData();
             fd.append("avatar", file);
@@ -239,25 +236,27 @@
             });
             const data = await r.json().catch(() => ({}));
             if (r.ok) {
-                avatarMessage = {
-                    type: "success",
-                    text: data.message ?? "Avatar updated.",
-                };
+                avatarError = null;
+                toaster.success({ title: data.message ?? "Avatar updated." });
                 if (data.avatar_url) displayAvatarUrl = data.avatar_url;
 				selectedAvatarFile = null;
 				if (avatarPreviewUrl) { URL.revokeObjectURL(avatarPreviewUrl); avatarPreviewUrl = null; }
 				if (fileInput) fileInput.value = "";
 				router.reload();
+            } else if (r.status === 419) {
+                toaster.error({ title: "Session expired. Refresh and try again." });
             } else {
-                avatarMessage = {
-                    type: "error",
-                    text:
-                        data.message ??
-                        (data.errors
-                            ? Object.values(data.errors).flat().join(" ")
-                            : "Failed to update avatar."),
-                };
+                const errs = normalizeErrors(data.errors);
+                const msg =
+                    errs.avatar ??
+                    data.message ??
+                    (data.errors ? Object.values(data.errors).flat().join(" ") : "Failed to update avatar.");
+                avatarError = typeof msg === "string" ? msg : String(msg);
+                toaster.error({ title: typeof data.message === "string" ? data.message : avatarError });
+                document.getElementById("avatar-dropzone")?.focus();
             }
+        } catch {
+            toaster.error({ title: "Network error. Please try again." });
         } finally {
             avatarSubmitting = false;
         }
@@ -267,6 +266,20 @@
         const match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
         return match ? decodeURIComponent(match[1]) : "";
     }
+
+    /** Normalize Laravel validation errors (array or string per key) to Record<string, string>. */
+    function normalizeErrors(errors: unknown): Record<string, string> {
+        if (!errors || typeof errors !== "object" || Array.isArray(errors)) return {};
+        const out: Record<string, string> = {};
+        for (const [key, val] of Object.entries(errors)) {
+            const msg = Array.isArray(val) ? val[0] : val;
+            out[key] = typeof msg === "string" ? msg : String(msg);
+        }
+        return out;
+    }
+
+    const PASSWORD_FIELD_ORDER = ["current_password", "password", "password_confirmation"] as const;
+    const PIN_FIELD_ORDER = ["current_password", "new_pin"] as const;
 
     function printPresetQr() {
         if (!qrDataUri || !user) return;
@@ -332,11 +345,16 @@
                         <input
                             id="current_password"
                             type="password"
-                            class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                            class="input rounded-container border px-3 py-2 w-full {passwordErrors.current_password ? 'border-error-500 bg-error-50' : 'border-surface-200'}"
                             bind:value={passwordCurrent}
                             required
                             autocomplete="current-password"
+                            aria-invalid={!!passwordErrors.current_password}
+                            aria-describedby={passwordErrors.current_password ? 'current_password-error' : undefined}
                         />
+                        {#if passwordErrors.current_password}
+                            <span id="current_password-error" class="text-error-600 text-sm" role="alert">{passwordErrors.current_password}</span>
+                        {/if}
                     </div>
                     <div>
                         <label for="password_new" class="label label-text"
@@ -345,11 +363,16 @@
                         <input
                             id="password_new"
                             type="password"
-                            class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                            class="input rounded-container border px-3 py-2 w-full {passwordErrors.password ? 'border-error-500 bg-error-50' : 'border-surface-200'}"
                             bind:value={passwordNew}
                             required
                             autocomplete="new-password"
+                            aria-invalid={!!passwordErrors.password}
+                            aria-describedby={passwordErrors.password ? 'password_new-error' : undefined}
                         />
+                        {#if passwordErrors.password}
+                            <span id="password_new-error" class="text-error-600 text-sm" role="alert">{passwordErrors.password}</span>
+                        {/if}
                     </div>
                     <div>
                         <label for="password_confirm" class="label label-text"
@@ -358,28 +381,21 @@
                         <input
                             id="password_confirm"
                             type="password"
-                            class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                            class="input rounded-container border px-3 py-2 w-full {passwordErrors.password_confirmation ? 'border-error-500 bg-error-50' : 'border-surface-200'}"
                             bind:value={passwordConfirm}
                             required
                             autocomplete="new-password"
+                            aria-invalid={!!passwordErrors.password_confirmation}
+                            aria-describedby={passwordErrors.password_confirmation ? 'password_confirm-error' : undefined}
                         />
+                        {#if passwordErrors.password_confirmation}
+                            <span id="password_confirm-error" class="text-error-600 text-sm" role="alert">{passwordErrors.password_confirmation}</span>
+                        {/if}
                     </div>
-                    {#if passwordMessage}
-                        <p
-                            id="password-form-message"
-                            role="alert"
-                            class="text-sm {passwordMessage.type === 'error'
-                                ? 'text-error-500'
-                                : 'text-success-500'}"
-                        >
-                            {passwordMessage.text}
-                        </p>
-                    {/if}
                     <button
                         type="submit"
-                        class="btn preset-filled-primary-500 btn-sm min-h-[48px]"
+                        class="btn preset-filled-primary-500 btn-sm touch-target-h"
                         disabled={passwordSubmitting}
-                        aria-describedby={passwordMessage ? 'password-form-message' : undefined}
                     >
                         {passwordSubmitting ? "Updating…" : "Update password"}
                     </button>
@@ -407,11 +423,16 @@
                         <input
                             id="pin_current_password"
                             type="password"
-                            class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                            class="input rounded-container border px-3 py-2 w-full {pinErrors.current_password ? 'border-error-500 bg-error-50' : 'border-surface-200'}"
                             bind:value={currentPassword}
                             required
                             autocomplete="current-password"
+                            aria-invalid={!!pinErrors.current_password}
+                            aria-describedby={pinErrors.current_password ? 'pin_current_password-error' : undefined}
                         />
+                        {#if pinErrors.current_password}
+                            <span id="pin_current_password-error" class="text-error-600 text-sm" role="alert">{pinErrors.current_password}</span>
+                        {/if}
                     </div>
                     <div>
                         <label for="new_pin" class="label label-text"
@@ -422,30 +443,23 @@
                             type="password"
                             inputmode="numeric"
                             maxlength="6"
-                            class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                            class="input rounded-container border px-3 py-2 w-full {pinErrors.new_pin ? 'border-error-500 bg-error-50' : 'border-surface-200'}"
                             bind:value={newPin}
                             oninput={(e) => { newPin = sanitizePin(e.currentTarget.value); }}
                             required
                             placeholder="000000"
                             autocomplete="off"
+                            aria-invalid={!!pinErrors.new_pin}
+                            aria-describedby={pinErrors.new_pin ? 'new_pin-error' : undefined}
                         />
+                        {#if pinErrors.new_pin}
+                            <span id="new_pin-error" class="text-error-600 text-sm" role="alert">{pinErrors.new_pin}</span>
+                        {/if}
                     </div>
-                    {#if pinMessage}
-                        <p
-                            id="pin-form-message"
-                            role="alert"
-                            class="text-sm {pinMessage.type === 'error'
-                                ? 'text-error-500'
-                                : 'text-success-500'}"
-                        >
-                            {pinMessage.text}
-                        </p>
-                    {/if}
                     <button
                         type="submit"
-                        class="btn preset-filled-primary-500 btn-sm min-h-[48px]"
+                        class="btn preset-filled-primary-500 btn-sm touch-target-h"
                         disabled={pinSubmitting}
-                        aria-describedby={pinMessage ? 'pin-form-message' : undefined}
                     >
                         {pinSubmitting ? "Saving…" : "Update PIN"}
                     </button>
@@ -491,17 +505,6 @@
                                 Print
                             </button>
                         </div>
-                    {/if}
-                    {#if qrMessage}
-                        <p
-                            id="qr-form-message"
-                            role="alert"
-                            class="text-sm {qrMessage.type === 'error'
-                                ? 'text-error-500'
-                                : 'text-success-500'}"
-                        >
-                            {qrMessage.text}
-                        </p>
                     {/if}
                     <button
                         type="button"
@@ -549,7 +552,8 @@
 						<!-- Dropzone -->
 						<div class="flex-1 w-full">
 							<div 
-								class="border-2 border-dashed rounded-container p-6 text-center transition-colors {avatarDragging ? 'border-primary-500 bg-primary-50' : 'border-surface-300 hover:border-primary-400 bg-surface-50/50 hover:bg-surface-100/50'} cursor-pointer"
+								id="avatar-dropzone"
+								class="border-2 border-dashed rounded-container p-6 text-center transition-colors {avatarDragging ? 'border-primary-500 bg-primary-50' : avatarError ? 'border-error-500 bg-error-50' : 'border-surface-300 hover:border-primary-400 bg-surface-50/50 hover:bg-surface-100/50'} cursor-pointer"
 								ondragover={(e) => { e.preventDefault(); avatarDragging = true; }}
 								ondragleave={() => avatarDragging = false}
 								ondrop={(e) => { e.preventDefault(); avatarDragging = false; handleAvatarSelect(e.dataTransfer?.files || null); }}
@@ -558,6 +562,7 @@
 								role="button"
 								tabindex="0"
 								aria-label="Upload profile photo"
+								aria-describedby={avatarError ? 'avatar-error' : undefined}
 							>
 								<input 
 									id="hidden-avatar-input"
@@ -565,6 +570,8 @@
 									type="file" 
 									accept="image/jpeg,image/png,image/jpg"
 									class="hidden"
+									aria-invalid={!!avatarError}
+									aria-describedby={avatarError ? 'avatar-error' : undefined}
 									onchange={(e) => handleAvatarSelect(e.currentTarget.files)}
 								/>
 								<div class="flex flex-col items-center justify-center gap-2 pointer-events-none">
@@ -575,6 +582,9 @@
 									<p class="text-xs text-surface-500">PNG or JPG up to 2MB</p>
 								</div>
 							</div>
+							{#if avatarError}
+								<p id="avatar-error" class="text-error-600 text-sm mt-2" role="alert">{avatarError}</p>
+							{/if}
 						</div>
 					</div>
 					
@@ -586,17 +596,6 @@
 						</div>
 					{/if}
 				</form>
-                {#if avatarMessage}
-                    <p
-                        id="avatar-form-message"
-                        role="alert"
-                        class="text-sm {avatarMessage.type === 'error'
-                            ? 'text-error-500'
-                            : 'text-success-500'}"
-                    >
-                        {avatarMessage.text}
-                    </p>
-                {/if}
             </div>
         </section>
     </div>

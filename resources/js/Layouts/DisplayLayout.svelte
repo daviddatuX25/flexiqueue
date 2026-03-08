@@ -3,6 +3,9 @@
 	 * DisplayLayout — client-facing informant (no auth). Per 09-UI-ROUTES-PHASE1 §2.4.
 	 * Header: FlexiQueue, program name, date, and live time. Main: full-screen content.
 	 */
+	import FlexiQueueToaster from '../Components/FlexiQueueToaster.svelte';
+	import FlashToToast from '../Components/FlashToToast.svelte';
+
 	let { children, programName = null, date = '' } = $props();
 	let time = $state('');
 
@@ -22,6 +25,8 @@
 </script>
 
 <div class="flex flex-col min-h-screen bg-surface-100">
+	<FlexiQueueToaster />
+	<FlashToToast />
 	<header class="flex items-center justify-between gap-4 bg-primary-500 text-primary-contrast-500 px-4 py-2.5 shrink-0">
 		<div class="shrink-0">
 			<span class="text-lg font-bold">FlexiQueue</span>

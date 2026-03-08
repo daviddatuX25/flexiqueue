@@ -10,6 +10,7 @@
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
 	import DiagramCanvas from '../../Components/ProgramDiagram/DiagramCanvas.svelte';
 	import { shouldFocusHidInput, shouldUseInputModeNone } from '../../lib/displayHid.js';
+	import { toaster } from '../../lib/toaster.js';
 
 	let {
 		error = null,
@@ -87,6 +88,10 @@
 			if (shouldFocusHidInput(enable_display_hid_barcode, 'display')) barcodeInputEl?.focus();
 		}, 2000);
 		return () => clearInterval(id);
+	});
+
+	$effect(() => {
+		if (error) toaster.error({ title: error });
 	});
 
 	onDestroy(() => {

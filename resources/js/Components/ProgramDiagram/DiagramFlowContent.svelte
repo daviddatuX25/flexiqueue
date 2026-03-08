@@ -8,7 +8,7 @@ import { setContext } from 'svelte';
 	import { SvelteFlow, Background, Controls, Panel } from '@xyflow/svelte';
 	import type { Node, Edge } from '@xyflow/svelte';
 	import { useViewport, useSvelteFlow } from '@xyflow/svelte';
-	import { toast } from '../../stores/toastStore.js';
+	import { toast } from '../../lib/toaster.js';
 	import StationNode from './nodes/StationNode.svelte';
 	import TrackNode from './nodes/TrackNode.svelte';
 	import ProcessNode from './nodes/ProcessNode.svelte';
@@ -658,6 +658,11 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 				credentials: 'same-origin',
 				body: JSON.stringify({ layout }),
 			});
+			if (res.status === 419) {
+				setSaveStatus('error');
+				toast('Session expired. Please refresh and try again.', 'error');
+				return;
+			}
 			const data = await res.json().catch(() => ({}));
 			if (res.ok) {
 				setSaveStatus('saved');
@@ -691,7 +696,8 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 			}
 	} catch (err) {
 		setSaveStatus('error');
-		toast('Failed to save diagram. Check your connection and try again.', 'error');
+		const isNetwork = err instanceof TypeError && (err as Error).message === 'Failed to fetch';
+		toast(isNetwork ? 'Network error. Please try again.' : 'Failed to save diagram. Check your connection and try again.', 'error');
 		} finally {
 			saving = false;
 		}
@@ -719,6 +725,10 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 				credentials: 'same-origin',
 				body: form,
 			});
+			if (res.status === 419) {
+				toast('Session expired. Please refresh and try again.', 'error');
+				return;
+			}
 			const data = await res.json().catch(() => ({}));
 			if (res.ok && data?.url) {
 				ownNodes = [
@@ -735,8 +745,9 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 			} else {
 				toast((data?.message as string) || 'Failed to upload image.', 'error');
 			}
-		} catch {
-			toast('Failed to upload image.', 'error');
+		} catch (err) {
+			const isNetwork = err instanceof TypeError && (err as Error).message === 'Failed to fetch';
+			toast(isNetwork ? 'Network error. Please try again.' : 'Failed to upload image.', 'error');
 		} finally {
 			imageUploading = false;
 			input.value = '';
@@ -982,7 +993,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		<div class="flex flex-wrap gap-1">
 			<button
 				type="button"
-				class="btn preset-tonal text-xs min-h-[32px] px-2 {selectedTrackId === null ? 'ring-2 ring-primary-500' : ''}"
+				class="btn preset-tonal text-xs touch-target-h px-2 {selectedTrackId === null ? 'ring-2 ring-primary-500' : ''}"
 				onclick={() => onTrackSelect(null)}
 			>
 				None
@@ -990,7 +1001,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 			{#each tracks as track (track.id)}
 				<button
 					type="button"
-					class="btn preset-tonal text-xs min-h-[32px] px-2 {selectedTrackId === track.id ? 'ring-2 ring-primary-500' : ''}"
+					class="btn preset-tonal text-xs touch-target-h px-2 {selectedTrackId === track.id ? 'ring-2 ring-primary-500' : ''}"
 					onclick={() => onTrackSelect(track.id)}
 				>
 					{track.name}
@@ -999,7 +1010,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		</div>
 		<button
 			type="button"
-			class="btn preset-filled-primary-500 min-h-[48px]"
+			class="btn preset-filled-primary-500 touch-target-h"
 			disabled={saving || publishing}
 			onclick={handlePublish}
 		>
@@ -1011,7 +1022,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		</button>
 		<button
 			type="button"
-			class="btn preset-tonal min-h-[36px]"
+			class="btn preset-tonal touch-target-h"
 			disabled={saving}
 			onclick={handleClearDiagram}
 		>
@@ -1026,7 +1037,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		/>
 		<button
 			type="button"
-			class="btn preset-tonal min-h-[36px]"
+			class="btn preset-tonal touch-target-h"
 			disabled={imageUploading}
 			onclick={() => imageInputEl?.click()}
 		>
@@ -1038,7 +1049,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		</button>
 		<button
 			type="button"
-			class="btn preset-tonal min-h-[36px]"
+			class="btn preset-tonal touch-target-h"
 			title="Fullscreen canvas"
 			onclick={() => (fullscreen = true)}
 		>
@@ -1071,7 +1082,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		<div class="flex items-center justify-end shrink-0 px-2 py-2 border-b border-surface-200 bg-surface-100">
 			<button
 				type="button"
-				class="btn preset-tonal min-h-[48px] min-w-[48px] rounded-full"
+				class="btn preset-tonal touch-target rounded-full"
 				title="Exit fullscreen"
 				aria-label="Exit fullscreen"
 				onclick={() => (fullscreen = false)}
@@ -1195,7 +1206,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 							<div class="flex flex-wrap gap-1">
 								<button
 									type="button"
-									class="btn preset-tonal text-xs min-h-[32px] px-2 {selectedTrackId === null ? 'ring-2 ring-primary-500' : ''}"
+									class="btn preset-tonal text-xs touch-target-h px-2 {selectedTrackId === null ? 'ring-2 ring-primary-500' : ''}"
 									onclick={() => onTrackSelect(null)}
 								>
 									None
@@ -1203,7 +1214,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 								{#each tracks as track (track.id)}
 									<button
 										type="button"
-										class="btn preset-tonal text-xs min-h-[32px] px-2 {selectedTrackId === track.id ? 'ring-2 ring-primary-500' : ''}"
+										class="btn preset-tonal text-xs touch-target-h px-2 {selectedTrackId === track.id ? 'ring-2 ring-primary-500' : ''}"
 										onclick={() => onTrackSelect(track.id)}
 									>
 										{track.name}
@@ -1212,7 +1223,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 							</div>
 							<button
 								type="button"
-								class="btn preset-filled-primary-500 min-h-[48px]"
+								class="btn preset-filled-primary-500 touch-target-h"
 								disabled={saving || publishing}
 								onclick={handlePublish}
 							>
@@ -1224,7 +1235,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 							</button>
 							<button
 								type="button"
-								class="btn preset-tonal min-h-[36px]"
+								class="btn preset-tonal touch-target-h"
 								disabled={saving}
 								onclick={handleClearDiagram}
 							>
@@ -1232,7 +1243,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 							</button>
 							<button
 								type="button"
-								class="btn preset-tonal min-h-[36px]"
+								class="btn preset-tonal touch-target-h"
 								disabled={imageUploading}
 								onclick={() => imageInputEl?.click()}
 							>
@@ -1244,7 +1255,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 							</button>
 							<button
 								type="button"
-								class="btn preset-tonal min-h-[36px]"
+								class="btn preset-tonal touch-target-h"
 								title="Exit fullscreen"
 								onclick={() => (fullscreen = false)}
 							>

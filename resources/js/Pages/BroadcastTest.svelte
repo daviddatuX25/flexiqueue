@@ -1,14 +1,15 @@
 <script>
 	import { onMount } from 'svelte';
+	import AuthLayout from '../Layouts/AuthLayout.svelte';
+	import { toaster } from '../lib/toaster.js';
 
 	let lastEvent = $state(null);
 	let status = $state('idle'); // idle | listening | received | error
-	let errorMessage = $state('');
 
 	onMount(() => {
 		if (typeof window === 'undefined' || !window.Echo) {
 			status = 'error';
-			errorMessage = 'Echo not available (check VITE_REVERB_APP_KEY and Reverb server).';
+			toaster.error({ title: 'Echo not available (check VITE_REVERB_APP_KEY and Reverb server).' });
 			return;
 		}
 
@@ -24,6 +25,7 @@
 	<title>Broadcast test — FlexiQueue</title>
 </svelte:head>
 
+<AuthLayout>
 <main class="min-h-screen bg-surface-100 flex flex-col items-center justify-center p-6">
 	<div class="card bg-surface-50 shadow-xl max-w-md w-full">
 		<div class="p-6">
@@ -33,23 +35,24 @@
 			</p>
 
 			{#if status === 'error'}
-				<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 mt-4" role="alert">
-					<span>{errorMessage}</span>
-				</div>
+				<p role="alert" class="text-sm text-error-600 mt-4">Echo not available. See toast for details.</p>
 			{:else}
 				<div class="mt-4 flex flex-col gap-3">
 					<button
 						type="button"
-						class="btn preset-filled-primary-500 min-h-[48px]"
+						class="btn preset-filled-primary-500 touch-target-h"
 						onclick={async () => {
 							status = 'listening';
 							lastEvent = null;
 							try {
 								const r = await window.axios.post('/broadcast-test');
-								if (!r.data?.ok) status = 'error';
+								if (!r.data?.ok) {
+									status = 'error';
+									toaster.error({ title: 'Broadcast test failed.' });
+								}
 							} catch (e) {
 								status = 'error';
-								errorMessage = e?.message ?? 'Request failed';
+								toaster.error({ title: e?.message ?? 'Request failed' });
 							}
 						}}
 					>
@@ -69,8 +72,9 @@
 			{/if}
 
 			<div class="mt-4 pt-4 border-t border-surface-200">
-				<a href="/" class="link link-primary text-sm">← Back to welcome</a>
+				<a href="/" class="link link-primary text-sm touch-target-h inline-flex items-center">← Back to welcome</a>
 			</div>
 		</div>
 	</div>
 </main>
+</AuthLayout>

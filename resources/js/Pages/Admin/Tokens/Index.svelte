@@ -3,6 +3,7 @@
     import Modal from "../../../Components/Modal.svelte";
     import { get } from "svelte/store";
     import { Link, usePage } from "@inertiajs/svelte";
+    import { toaster } from "../../../lib/toaster.js";
     import {
         Ticket,
         Plus,
@@ -54,7 +55,6 @@
     let tokens = $state<TokenItem[]>([]);
     let loading = $state(true);
     let submitting = $state(false);
-    let error = $state("");
     let showBatchModal = $state(false);
     let filterStatus = $state("");
     let searchQuery = $state("");
@@ -151,6 +151,9 @@
         return meta ?? "";
     }
 
+    const MSG_SESSION_EXPIRED = "Session expired. Please refresh and try again.";
+    const MSG_NETWORK_ERROR = "Network error. Please try again.";
+
     async function api(
         method: string,
         url: string,
@@ -165,19 +168,28 @@
         };
         message?: string;
     }> {
-        const res = await fetch(url, {
-            method,
-            headers: {
-                "Content-Type": "application/json",
-                Accept: "application/json",
-                "X-CSRF-TOKEN": getCsrfToken(),
-                "X-Requested-With": "XMLHttpRequest",
-            },
-            credentials: "same-origin",
-            ...(body ? { body: JSON.stringify(body) } : {}),
-        });
-        const data = await res.json().catch(() => ({}));
-        return { ok: res.ok, data, message: data?.message };
+        try {
+            const res = await fetch(url, {
+                method,
+                headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                    "X-CSRF-TOKEN": getCsrfToken(),
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+                credentials: "same-origin",
+                ...(body ? { body: JSON.stringify(body) } : {}),
+            });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return { ok: false, message: MSG_SESSION_EXPIRED };
+            }
+            const data = await res.json().catch(() => ({}));
+            return { ok: res.ok, data, message: data?.message };
+        } catch (e) {
+            toaster.error({ title: MSG_NETWORK_ERROR });
+            return { ok: false, message: MSG_NETWORK_ERROR };
+        }
     }
 
     function buildTokensUrl(): string {
@@ -207,6 +219,7 @@
                     method: "GET",
                     headers: {
                         Accept: "application/json",
+                        "X-CSRF-TOKEN": getCsrfToken(),
                         "X-Requested-With": "XMLHttpRequest",
                     },
                     credentials: "same-origin",
@@ -220,7 +233,10 @@
                     credentials: "same-origin",
                 }),
             ]);
-
+            if (settingsRes.status === 419 || voicesRes.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
             const settingsData = await settingsRes.json().catch(() => ({}));
             const voicesData = await voicesRes.json().catch(() => ({}));
 
@@ -261,6 +277,9 @@
             } else {
                 tokenTtsVoices = [];
             }
+        } catch (e) {
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
         } finally {
             tokenTtsLoading = false;
         }
@@ -274,7 +293,6 @@
     ) {
         if (samplePlayingLang) return;
         samplePlayingLang = lang;
-        error = "";
         try {
             const phraseParams = new URLSearchParams({
                 lang,
@@ -284,12 +302,16 @@
             });
             const phraseRes = await fetch(`/api/admin/tts/sample-phrase?${phraseParams.toString()}`, {
                 method: "GET",
-                headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+                headers: { Accept: "application/json", "X-CSRF-TOKEN": getCsrfToken(), "X-Requested-With": "XMLHttpRequest" },
                 credentials: "same-origin",
             });
+            if (phraseRes.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
             const phraseData = await phraseRes.json().catch(() => ({}));
             if (!phraseRes.ok || typeof phraseData?.text !== "string") {
-                error = "Could not get sample phrase.";
+                toaster.error({ title: "Could not get sample phrase." });
                 return;
             }
             const voiceId = (config.voice_id && config.voice_id.trim()) || tokenTtsVoiceId;
@@ -300,6 +322,10 @@
                 headers: { Accept: "audio/mpeg", "X-Requested-With": "XMLHttpRequest" },
                 credentials: "same-origin",
             });
+            if (ttsRes.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
             if (!ttsRes.ok) {
                 let msg = "Sample TTS unavailable.";
                 try {
@@ -308,7 +334,7 @@
                 } catch {
                     /* ignore */
                 }
-                error = msg;
+                toaster.error({ title: msg });
                 return;
             }
             const blob = await ttsRes.blob();
@@ -326,8 +352,9 @@
                 audio.volume = 1;
                 audio.play().catch(reject);
             });
-        } catch {
-            error = "Failed to play TTS sample.";
+        } catch (e) {
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to play TTS sample." });
         } finally {
             samplePlayingLang = null;
         }
@@ -359,20 +386,23 @@
                 pre_phrase: "",
             },
         };
-        error = "";
         showBatchModal = true;
         fetchTokenTtsSettings();
     }
 
     function closeBatchModal() {
         showBatchModal = false;
-        error = "";
+    }
+
+    function clearFilters() {
+        searchQuery = "";
+        filterStatus = "";
+        fetchTokens();
     }
 
     async function handleBatchCreate() {
         if (batchCount < 1 || batchCount > 500) return;
         submitting = true;
-        error = "";
         const { ok, data, message } = await api(
             "POST",
             "/api/admin/tokens/batch",
@@ -388,17 +418,18 @@
             closeBatchModal();
             await fetchTokens();
         } else {
-            error =
-                message ??
-                (data && "errors" in data
-                    ? "Validation failed."
-                    : "Failed to create tokens.");
+            toaster.error({
+                title:
+                    message ??
+                    (data && "errors" in data
+                        ? "Validation failed."
+                        : "Failed to create tokens."),
+            });
         }
     }
 
     async function setTokenStatus(token: TokenItem, status: string) {
         submitting = true;
-        error = "";
         const { ok, data, message } = await api(
             "PUT",
             `/api/admin/tokens/${token.id}`,
@@ -410,7 +441,7 @@
                 t.id === token.id ? { ...t, status: data.token.status } : t,
             );
         } else {
-            error = message ?? "Failed to update status.";
+            toaster.error({ title: message ?? "Failed to update status." });
         }
     }
 
@@ -447,7 +478,6 @@
                 pre_phrase: (langs.ilo?.pre_phrase as string | null | undefined) ?? "",
             },
         };
-        error = "";
     }
 
     function closeEditModal() {
@@ -457,7 +487,6 @@
     async function saveEdit() {
         if (!editToken) return;
         submitting = true;
-        error = "";
         const { ok, data, message } = await api("PUT", `/api/admin/tokens/${editToken.id}`, {
             pronounce_as: editPronounceAs,
         });
@@ -468,7 +497,7 @@
             );
             closeEditModal();
         } else {
-            error = message ?? "Failed to update token.";
+            toaster.error({ title: message ?? "Failed to update token." });
         }
     }
 
@@ -504,7 +533,6 @@
                 pre_phrase: (langs.ilo?.pre_phrase as string | null | undefined) ?? "",
             },
         };
-        error = "";
     }
 
     function closeTtsPhrasesModal() {
@@ -514,7 +542,6 @@
     async function saveTtsPhrases() {
         if (!ttsPhrasesToken) return;
         submitting = true;
-        error = "";
         const { ok, data, message } = await api("PUT", `/api/admin/tokens/${ttsPhrasesToken.id}`, {
             pronounce_as: ttsPhrasesToken.pronounce_as ?? "letters",
             tts: {
@@ -542,7 +569,7 @@
             );
             closeTtsPhrasesModal();
         } else {
-            error = message ?? "Failed to update TTS phrases.";
+            toaster.error({ title: message ?? "Failed to update TTS phrases." });
         }
     }
 
@@ -634,7 +661,6 @@
 
     async function savePrintSettings() {
         submitting = true;
-        error = "";
         printSettingsSaved = false;
         const { ok, data, message } = await api(
             "PUT",
@@ -665,7 +691,7 @@
             };
             printSettingsSaved = true;
         } else {
-            error = message ?? "Failed to save settings.";
+            toaster.error({ title: message ?? "Failed to save settings." });
         }
     }
 
@@ -679,7 +705,6 @@
                 ? (value: boolean) => (logoUploading = value)
                 : (value: boolean) => (bgUploading = value);
         setUploading(true);
-        error = "";
         try {
             const res = await fetch("/api/admin/print-settings/image", {
                 method: "POST",
@@ -690,11 +715,15 @@
                 body: fd,
                 credentials: "same-origin",
             });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
-                error =
-                    (data && "message" in data && data.message) ||
-                    "Failed to upload image.";
+                toaster.error({
+                    title: (data && "message" in data && data.message) || "Failed to upload image.",
+                });
                 return;
             }
             const url = (data && data.url) as string | undefined;
@@ -707,7 +736,8 @@
                 printSettingsSaved = false;
             }
         } catch (e) {
-            error = "Failed to upload image.";
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to upload image." });
         } finally {
             setUploading(false);
             if (type === "logo" && logoFileInput) {
@@ -736,7 +766,6 @@
         )
             return;
         submitting = true;
-        error = "";
         let failed = 0;
         for (const token of toDeactivate) {
             const { ok, message: msg } = await api(
@@ -746,7 +775,7 @@
             );
             if (!ok) {
                 failed++;
-                error = msg ?? "Failed to deactivate some tokens.";
+                toaster.error({ title: msg ?? "Failed to deactivate some tokens." });
             }
         }
         submitting = false;
@@ -766,7 +795,6 @@
         )
             return;
         submitting = true;
-        error = "";
         const { ok, data, message } = await api(
             "POST",
             "/api/admin/tokens/batch-delete",
@@ -777,13 +805,13 @@
             selectedIds = new Set();
             await fetchTokens();
         } else {
-            error = message ?? "Failed to delete tokens.";
+            toaster.error({ title: message ?? "Failed to delete tokens." });
         }
     }
 
     async function handleDeleteToken(token: TokenItem) {
         if (token.status === "in_use") {
-            error = "Cannot delete token in use.";
+            toaster.error({ title: "Cannot delete token in use." });
             return;
         }
         if (
@@ -793,7 +821,6 @@
         )
             return;
         submitting = true;
-        error = "";
         const { ok, message } = await api(
             "DELETE",
             `/api/admin/tokens/${token.id}`,
@@ -802,14 +829,13 @@
         if (ok) {
             tokens = tokens.filter((t) => t.id !== token.id);
         } else {
-            error = message ?? "Failed to delete token.";
+            toaster.error({ title: message ?? "Failed to delete token." });
         }
     }
 
     async function generateTtsForTokens(ids: number[]) {
         if (ids.length === 0) return;
         submitting = true;
-        error = "";
         try {
             const res = await fetch("/api/admin/tokens/regenerate-tts", {
                 method: "POST",
@@ -822,17 +848,24 @@
                 credentials: "same-origin",
                 body: JSON.stringify({ token_ids: ids }),
             });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
-                error =
-                    (data && "message" in data && typeof data.message === "string"
-                        ? data.message
-                        : "Failed to start TTS generation.") ?? "Failed to start TTS generation.";
+                toaster.error({
+                    title:
+                        (data && "message" in data && typeof data.message === "string"
+                            ? data.message
+                            : "Failed to start TTS generation.") ?? "Failed to start TTS generation.",
+                });
                 return;
             }
             await fetchTokens();
         } catch (e) {
-            error = "Failed to start TTS generation.";
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to start TTS generation." });
         } finally {
             submitting = false;
         }
@@ -994,7 +1027,7 @@
                     </span>
                     <button
                         type="button"
-                        class="btn btn-sm preset-filled-primary-500 flex items-center gap-1.5 shadow-sm min-h-[2.25rem] disabled:opacity-50 disabled:cursor-not-allowed"
+                        class="btn btn-sm preset-filled-primary-500 flex items-center gap-1.5 shadow-sm touch-target-h disabled:opacity-50 disabled:cursor-not-allowed"
                         onclick={() => openPrintModal([...selectedIds])}
                         disabled={!someSelected || submitting}
                         title={!someSelected ? "Select tokens to print" : "Print selected"}
@@ -1003,7 +1036,7 @@
                     </button>
                     <button
                         type="button"
-                        class="btn btn-sm preset-tonal text-surface-700 hover:text-surface-950 flex items-center gap-1.5 shadow-sm transition-colors min-h-[2.25rem] disabled:opacity-50 disabled:cursor-not-allowed"
+                        class="btn btn-sm preset-tonal text-surface-700 hover:text-surface-950 flex items-center gap-1.5 shadow-sm transition-colors touch-target-h disabled:opacity-50 disabled:cursor-not-allowed"
                         onclick={() => generateTtsForTokens(selectedIdsNeedingTts)}
                         disabled={bulkGenerateTtsDisabled}
                         title={bulkGenerateTtsDisabled ? "Select tokens with failed or not-generated TTS" : `Generate TTS for ${selectedIdsNeedingTts.length} token(s)`}
@@ -1013,7 +1046,7 @@
                     </button>
                     <button
                         type="button"
-                        class="btn btn-sm preset-tonal text-surface-700 hover:text-surface-950 flex items-center gap-1.5 shadow-sm transition-colors min-h-[2.25rem] disabled:opacity-50 disabled:cursor-not-allowed"
+                        class="btn btn-sm preset-tonal text-surface-700 hover:text-surface-950 flex items-center gap-1.5 shadow-sm transition-colors touch-target-h disabled:opacity-50 disabled:cursor-not-allowed"
                         onclick={handleBatchDeactivate}
                         disabled={submitting || selectedAvailableCount === 0}
                         title={selectedAvailableCount === 0
@@ -1025,7 +1058,7 @@
                     </button>
                     <button
                         type="button"
-                        class="btn btn-sm preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1.5 shadow-sm transition-colors min-h-[2.25rem] disabled:opacity-50 disabled:cursor-not-allowed"
+                        class="btn btn-sm preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1.5 shadow-sm transition-colors touch-target-h disabled:opacity-50 disabled:cursor-not-allowed"
                         onclick={handleBatchDelete}
                         disabled={submitting ||
                             selectedForPrint.some((t) => t.status === "in_use") ||
@@ -1040,7 +1073,7 @@
                     {#if someSelected}
                         <button
                             type="button"
-                            class="btn btn-sm preset-tonal text-surface-600 hover:text-surface-900 flex items-center gap-1 min-h-[2.25rem]"
+                            class="btn btn-sm preset-tonal text-surface-600 hover:text-surface-900 flex items-center gap-1 touch-target-h"
                             onclick={() => (selectedIds = new Set())}
                         >
                             <XCircle class="w-3.5 h-3.5" /> Clear
@@ -1097,20 +1130,6 @@
             </button>
         </div>
 
-        {#if error}
-            <div
-                class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4"
-                role="alert"
-            >
-                <span>{error}</span>
-                <button
-                    type="button"
-                    class="btn preset-tonal btn-sm"
-                    onclick={() => (error = "")}>Dismiss</button
-                >
-            </div>
-        {/if}
-
         {#if loading && tokens.length === 0}
             <div
                 class="rounded-container border border-surface-200 bg-surface-50 p-12 flex flex-col items-center justify-center text-center shadow-sm mt-4"
@@ -1123,6 +1142,8 @@
             </div>
         {:else if tokens.length === 0}
             <div
+                role="status"
+                aria-label="No tokens found"
                 class="rounded-container border border-surface-200 bg-surface-50 p-12 flex flex-col items-center justify-center text-center shadow-sm mt-4"
             >
                 <div
@@ -1133,11 +1154,28 @@
                 <h3 class="text-lg font-semibold text-surface-950">
                     No tokens found
                 </h3>
-                <p class="text-surface-600 max-w-sm mt-2">
+                <p class="text-surface-600 max-w-sm mt-2 mb-6">
                     {searchQuery || filterStatus
                         ? "Try adjusting your search criteria or clear the filters."
                         : "Create a batch of tokens to get started."}
                 </p>
+                {#if searchQuery || filterStatus}
+                    <button
+                        type="button"
+                        class="btn preset-filled-primary-500 flex items-center gap-2 touch-target-h"
+                        onclick={clearFilters}
+                    >
+                        <Filter class="w-4 h-4" /> Clear filters
+                    </button>
+                {:else}
+                    <button
+                        type="button"
+                        class="btn preset-filled-primary-500 flex items-center gap-2 touch-target-h"
+                        onclick={openBatchModal}
+                    >
+                        <Plus class="w-4 h-4" /> Create tokens
+                    </button>
+                {/if}
             </div>
         {:else}
             <!-- Desktop Table View: compact, touch-friendly; row actions always visible, disabled when selection active -->
@@ -1441,7 +1479,7 @@
                         <div class="pt-2 border-t border-surface-200 flex flex-wrap items-center gap-2 min-h-[2.75rem] {someSelected ? 'opacity-60 pointer-events-none' : ''}">
                             <button
                                 type="button"
-                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[48px] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 touch-target-h px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                 onclick={() => openEditModal(token)}
                                 disabled={someSelected || submitting}
                                 aria-label="Edit token"
@@ -1450,7 +1488,7 @@
                             </button>
                             <button
                                 type="button"
-                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[48px] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 touch-target-h px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                 onclick={() => openTtsPhrasesModal(token)}
                                 disabled={someSelected || submitting}
                                 aria-label="TTS phrases"
@@ -1459,7 +1497,7 @@
                             </button>
                             <button
                                 type="button"
-                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[48px] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 touch-target-h px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                 onclick={() => generateTtsForTokens([token.id])}
                                 disabled={someSelected || submitting || token.tts_status === "pre_generated" || token.tts_status === "generating"}
                                 aria-label={token.tts_status === "failed" ? "Regenerate TTS" : !token.tts_status ? "Generate TTS" : token.tts_status === "pre_generated" ? "TTS already generated" : "Generating"}
@@ -1468,7 +1506,7 @@
                             </button>
                             <button
                                 type="button"
-                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[48px] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 touch-target-h px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                 onclick={() => openPrintModal([token.id])}
                                 disabled={someSelected || submitting}
                                 aria-label="Print token"
@@ -1478,7 +1516,7 @@
                             {#if token.status === "in_use"}
                                 <button
                                     type="button"
-                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[48px] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 touch-target-h px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                     onclick={() => setTokenStatus(token, "available")}
                                     disabled={someSelected || submitting}
                                     aria-label="Mark available"
@@ -1488,7 +1526,7 @@
                             {:else if token.status === "available"}
                                 <button
                                     type="button"
-                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[48px] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 touch-target-h px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                     onclick={() => setTokenStatus(token, "deactivated")}
                                     disabled={someSelected || submitting}
                                     aria-label="Deactivate"
@@ -1498,7 +1536,7 @@
                             {:else if token.status === "deactivated"}
                                 <button
                                     type="button"
-                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 min-h-[48px] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 touch-target-h px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                     onclick={() => setTokenStatus(token, "available")}
                                     disabled={someSelected || submitting}
                                     aria-label="Activate"
@@ -1508,7 +1546,7 @@
                             {/if}
                             <button
                                 type="button"
-                                class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center justify-center min-h-[48px] w-10 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center justify-center touch-target-h w-10 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                                 onclick={() => handleDeleteToken(token)}
                                 disabled={someSelected || submitting || token.status === "in_use"}
                                 aria-label="Delete token"
@@ -1935,7 +1973,6 @@
                     class="btn btn-sm preset-filled-primary-500 shadow-sm disabled:opacity-50"
                     onclick={async () => {
                         tokenTtsSaving = true;
-                        error = "";
                         try {
                             const res = await fetch("/api/admin/token-tts-settings", {
                                 method: "PUT",
@@ -1968,11 +2005,15 @@
                                     },
                                 }),
                             });
+                            if (res.status === 419) {
+                                toaster.error({ title: MSG_SESSION_EXPIRED });
+                                return;
+                            }
                             const data = await res.json().catch(() => ({}));
                             if (!res.ok) {
-                                error =
-                                    (data && "message" in data && data.message) ||
-                                    "Failed to save TTS settings.";
+                                toaster.error({
+                                    title: (data && "message" in data && data.message) || "Failed to save TTS settings.",
+                                });
                                 return;
                             }
                             if (data?.token_tts_settings?.languages) {
@@ -1999,7 +2040,8 @@
                                 showTtsRegenerateConfirm = true;
                             }
                         } catch (e) {
-                            error = "Failed to save TTS settings.";
+                            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+                            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to save TTS settings." });
                         } finally {
                             tokenTtsSaving = false;
                         }
@@ -2061,7 +2103,6 @@
                         if (tokenTtsRegenerating) return;
                         tokenTtsRegenerating = true;
                         ttsRegenerateError = "";
-                        error = "";
                         try {
                             const res = await fetch("/api/admin/tokens/regenerate-tts", {
                                 method: "POST",
@@ -2074,21 +2115,27 @@
                                 credentials: "same-origin",
                                 body: JSON.stringify({}),
                             });
+                            if (res.status === 419) {
+                                toaster.error({ title: MSG_SESSION_EXPIRED });
+                                ttsRegenerateError = MSG_SESSION_EXPIRED;
+                                return;
+                            }
                             const data = await res.json().catch(() => ({}));
                             if (!res.ok) {
                                 const msg =
                                     (data && "message" in data && typeof data.message === "string" && data.message) ||
                                     "Failed to start TTS regeneration.";
                                 ttsRegenerateError = msg;
-                                error = msg;
+                                toaster.error({ title: msg });
                                 return;
                             }
                             showTtsRegenerateConfirm = false;
                             ttsRegenerateError = "";
                             await fetchTokens();
                         } catch (e) {
-                            ttsRegenerateError = "Failed to start TTS regeneration.";
-                            error = ttsRegenerateError;
+                            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+                            ttsRegenerateError = isNetwork ? MSG_NETWORK_ERROR : "Failed to start TTS regeneration.";
+                            toaster.error({ title: ttsRegenerateError });
                         } finally {
                             tokenTtsRegenerating = false;
                         }

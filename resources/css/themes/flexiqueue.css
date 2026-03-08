@@ -501,6 +501,15 @@
 	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
+/* Touch targets — 48px minimum per stack convention (mobile a11y) */
+@utility touch-target-h {
+	min-height: 48px;
+}
+@utility touch-target {
+	min-height: 48px;
+	min-width: 48px;
+}
+
 /* DaisyUI compatibility utilities — per SKELETON-COMPONENT-MAPPING */
 @utility form-control {
 	display: flex;

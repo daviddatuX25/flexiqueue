@@ -4,6 +4,7 @@
 	import { usePage } from '@inertiajs/svelte';
 	import { router } from '@inertiajs/svelte';
 	import { onMount } from 'svelte';
+	import { toaster } from '../../lib/toaster.js';
 
 	interface PendingRequest {
 		id: number;
@@ -56,7 +57,6 @@
 	let tempQrExpiresAt = $state<string | null>(null);
 	let selectedTtlSeconds = $state(300);
 	let actionLoading = $state<string | null>(null);
-	let error = $state('');
 	let rejectModalRequestId = $state<number | null>(null);
 	let rejectReassignTrackId = $state<number | null>(null);
 	let approveModalRequestId = $state<number | null>(null);
@@ -101,26 +101,37 @@
 		return meta;
 	}
 
+	const MSG_SESSION_EXPIRED = 'Session expired. Please refresh and try again.';
+	const MSG_NETWORK_ERROR = 'Network error. Please try again.';
+
 	async function api(method: string, url: string, body?: object) {
-		const res = await fetch(url, {
-			method,
-			headers: {
-				'Content-Type': 'application/json',
-				Accept: 'application/json',
-				'X-CSRF-TOKEN': getCsrfToken(),
-				'X-Requested-With': 'XMLHttpRequest',
-			},
-			credentials: 'same-origin',
-			...(body ? { body: JSON.stringify(body) } : {}),
-		});
-		const data = await res.json().catch(() => ({}));
-		return { ok: res.ok, data, message: (data as { message?: string })?.message };
+		try {
+			const res = await fetch(url, {
+				method,
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-CSRF-TOKEN': getCsrfToken(),
+					'X-Requested-With': 'XMLHttpRequest',
+				},
+				credentials: 'same-origin',
+				...(body ? { body: JSON.stringify(body) } : {}),
+			});
+			if (res.status === 419) {
+				toaster.error({ title: MSG_SESSION_EXPIRED });
+				return { ok: false, data: undefined, message: MSG_SESSION_EXPIRED };
+			}
+			const data = await res.json().catch(() => ({}));
+			return { ok: res.ok, data, message: (data as { message?: string })?.message };
+		} catch (e) {
+			toaster.error({ title: MSG_NETWORK_ERROR });
+			return { ok: false, data: undefined, message: MSG_NETWORK_ERROR };
+		}
 	}
 
 	async function generateTempPin() {
 		if (actionLoading) return;
 		actionLoading = 'generate-temp-pin';
-		error = '';
 		const { ok, data } = await api('POST', '/api/auth/temporary-pin', { expires_in_seconds: selectedTtlSeconds });
 		actionLoading = null;
 		if (ok) {
@@ -130,14 +141,13 @@
 			tempQrExpiresAt = null;
 			tempCodeExpiresAt = d?.expires_at ?? null;
 		} else {
-			error = (data as { message?: string })?.message ?? 'Failed to generate';
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Failed to generate' });
 		}
 	}
 
 	async function generateTempQr() {
 		if (actionLoading) return;
 		actionLoading = 'generate-temp-qr';
-		error = '';
 		const { ok, data } = await api('POST', '/api/auth/temporary-qr', { expires_in_seconds: selectedTtlSeconds });
 		actionLoading = null;
 		if (ok) {
@@ -147,7 +157,7 @@
 			tempCodeExpiresAt = null;
 			tempQrExpiresAt = d?.expires_at ?? null;
 		} else {
-			error = (data as { message?: string })?.message ?? 'Failed to generate';
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Failed to generate' });
 		}
 	}
 
@@ -182,14 +192,13 @@
 	async function approveRequest(id: number, body?: { target_track_id?: number; custom_steps?: number[] }) {
 		if (actionLoading) return;
 		actionLoading = `approve-${id}`;
-		error = '';
 		const { ok, data } = await api('POST', `/api/permission-requests/${id}/approve`, body ?? {});
 		actionLoading = null;
 		if (ok) {
 			closeApproveModal();
 			router.reload();
 		} else {
-			error = (data as { message?: string })?.message ?? 'Failed to approve';
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Failed to approve' });
 		}
 	}
 
@@ -206,14 +215,13 @@
 	async function rejectRequest(id: number, body?: { reassign_track_id?: number }) {
 		if (actionLoading) return;
 		actionLoading = `reject-${id}`;
-		error = '';
 		const { ok } = await api('POST', `/api/permission-requests/${id}/reject`, body ?? {});
 		actionLoading = null;
 		if (ok) {
 			closeRejectModal();
 			router.reload();
 		} else {
-			error = 'Failed to reject';
+			toaster.error({ title: 'Failed to reject' });
 		}
 	}
 
@@ -246,7 +254,7 @@
 				<div class="form-control w-full max-w-xs mb-4">
 					<label class="label"><span class="label-text">Expiry</span></label>
 					<select
-						class="select rounded-container border border-surface-200 px-3 min-h-[48px]"
+						class="select rounded-container border border-surface-200 px-3 touch-target-h"
 						bind:value={selectedTtlSeconds}
 						onchange={(e) => (selectedTtlSeconds = Number((e.target as HTMLSelectElement).value))}
 					>
@@ -259,7 +267,7 @@
 					<div class="flex flex-col gap-2">
 						<button
 							type="button"
-							class="btn preset-outlined min-h-[48px] px-4"
+							class="btn preset-outlined touch-target-h px-4"
 							disabled={!!actionLoading}
 							onclick={generateTempPin}
 						>
@@ -273,7 +281,7 @@
 					<div class="flex flex-col gap-2">
 						<button
 							type="button"
-							class="btn preset-outlined min-h-[48px] px-4"
+							class="btn preset-outlined touch-target-h px-4"
 							disabled={!!actionLoading}
 							onclick={generateTempQr}
 						>
@@ -315,9 +323,6 @@
 			<p class="text-sm md:text-base font-medium text-surface-950/80 mb-4">
 				{canApprove ? 'Pending requests' : 'Your pending requests'}
 			</p>
-			{#if error}
-				<div class="rounded-container bg-error-100 text-error-900 border border-error-300 p-4 text-sm mb-4">{error}</div>
-			{/if}
 			{#if pendingRequests.length === 0}
 				<p class="text-sm text-surface-950/60 py-4">
 					{canApprove ? 'No pending requests.' : 'No pending requests. Request approval from the Override or Force Complete modal on the Station page.'}
@@ -350,7 +355,7 @@
 								<div class="flex flex-wrap gap-2 pt-2">
 									<button
 										type="button"
-										class="btn preset-filled-primary-500 min-h-[48px] min-w-[48px] px-4"
+										class="btn preset-filled-primary-500 touch-target px-4"
 										disabled={!!actionLoading}
 										onclick={() => openApproveModal(pr)}
 									>
@@ -359,7 +364,7 @@
 									{#if pr.action_type === 'override'}
 										<button
 											type="button"
-											class="btn preset-filled-error-500 min-h-[48px] min-w-[48px] px-4"
+											class="btn preset-filled-error-500 touch-target px-4"
 											disabled={!!actionLoading}
 											onclick={() => openRejectModal(pr.id)}
 										>
@@ -368,7 +373,7 @@
 									{:else}
 										<button
 											type="button"
-											class="btn preset-filled-error-500 min-h-[48px] min-w-[48px] px-4"
+											class="btn preset-filled-error-500 touch-target px-4"
 											disabled={!!actionLoading}
 											onclick={() => rejectRequest(pr.id)}
 										>
@@ -401,7 +406,7 @@
 					<label class="label"><span class="label-text">Add station</span></label>
 					<div class="flex gap-2">
 						<select
-							class="select rounded-container border border-surface-200 px-3 min-h-[48px] flex-1"
+							class="select rounded-container border border-surface-200 px-3 touch-target-h flex-1"
 							bind:value={approveCustomAddStationId}
 							onchange={(e) => { approveCustomAddStationId = (e.target as HTMLSelectElement).value === '' ? '' : Number((e.target as HTMLSelectElement).value); }}
 						>
@@ -410,7 +415,7 @@
 								<option value={st.id}>{st.name}</option>
 							{/each}
 						</select>
-						<button type="button" class="btn preset-outlined min-h-[48px] min-w-[48px] px-4" onclick={addStationToCustomPath} disabled={approveCustomAddStationId === ''}>Add</button>
+						<button type="button" class="btn preset-outlined touch-target px-4" onclick={addStationToCustomPath} disabled={approveCustomAddStationId === ''}>Add</button>
 					</div>
 				</div>
 				{#if approveCustomPath.length > 0}
@@ -421,17 +426,17 @@
 								{@const st = stations.find(s => s.id === stationId)}
 								<li class="flex justify-between items-center text-sm text-surface-950 gap-2">
 									<span>{i + 1}. {st?.name ?? stationId}</span>
-									<button type="button" class="btn preset-tonal min-h-[48px] min-w-[48px] shrink-0" onclick={() => removeStationFromCustomPath(i)} aria-label="Remove station">×</button>
+									<button type="button" class="btn preset-tonal touch-target shrink-0" onclick={() => removeStationFromCustomPath(i)} aria-label="Remove station">×</button>
 								</li>
 							{/each}
 						</ul>
 					</div>
 				{/if}
 				<div class="flex flex-wrap justify-end gap-2 mt-4">
-					<button type="button" class="btn preset-tonal min-h-[48px] px-4" onclick={closeApproveModal}>Cancel</button>
+					<button type="button" class="btn preset-tonal touch-target-h px-4" onclick={closeApproveModal}>Cancel</button>
 					<button
 						type="button"
-						class="btn preset-filled-primary-500 min-h-[48px] px-4"
+						class="btn preset-filled-primary-500 touch-target-h px-4"
 						disabled={approveCustomPath.length === 0 || !!actionLoading}
 						onclick={() => approveRequest(approveModalRequestId!, { custom_steps: approveCustomPath })}
 					>
@@ -458,7 +463,7 @@
 				<div class="form-control w-full mt-2">
 					<label class="label"><span class="label-text">Reassign to track (optional)</span></label>
 					<select
-						class="select rounded-container border border-surface-200 px-3 min-h-[48px] w-full"
+						class="select rounded-container border border-surface-200 px-3 touch-target-h w-full"
 						value={rejectReassignTrackId ?? ''}
 						onchange={(e) => {
 							const v = (e.target as HTMLSelectElement).value;
@@ -472,10 +477,10 @@
 					</select>
 				</div>
 				<div class="flex flex-wrap justify-end gap-2 mt-4">
-					<button type="button" class="btn preset-tonal min-h-[48px] px-4" onclick={closeRejectModal}>Cancel</button>
+					<button type="button" class="btn preset-tonal touch-target-h px-4" onclick={closeRejectModal}>Cancel</button>
 					<button
 						type="button"
-						class="btn preset-filled-error-500 min-h-[48px] px-4"
+						class="btn preset-filled-error-500 touch-target-h px-4"
 						disabled={!!actionLoading}
 						onclick={() => rejectRequest(rejectModalRequestId!, rejectReassignTrackId ? { reassign_track_id: rejectReassignTrackId } : undefined)}
 					>

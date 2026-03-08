@@ -4,6 +4,7 @@
     import ConfirmModal from "../../../Components/ConfirmModal.svelte";
     import { get } from "svelte/store";
     import { router, usePage } from "@inertiajs/svelte";
+    import { toaster } from "../../../lib/toaster.js";
     import {
         Users as UsersIcon,
         UserPlus,
@@ -31,7 +32,6 @@
 
     let { users = [] }: { users: UserItem[] } = $props();
 
-    let error = $state("");
     let submitting = $state(false);
     let showCreateModal = $state(false);
     let showEditModal = $state(false);
@@ -69,6 +69,9 @@
         return meta ?? "";
     }
 
+    const MSG_SESSION_EXPIRED = "Session expired. Please refresh and try again.";
+    const MSG_NETWORK_ERROR = "Network error. Please try again.";
+
     async function api(
         method: string,
         url: string,
@@ -78,23 +81,32 @@
         data?: { user?: UserItem } | object;
         message?: string;
     }> {
-        const res = await fetch(url, {
-            method,
-            headers: {
-                "Content-Type": "application/json",
-                Accept: "application/json",
-                "X-CSRF-TOKEN": getCsrfToken(),
-                "X-Requested-With": "XMLHttpRequest",
-            },
-            credentials: "same-origin",
-            ...(body ? { body: JSON.stringify(body) } : {}),
-        });
-        const data = await res.json().catch(() => ({}));
-        return {
-            ok: res.ok,
-            data,
-            message: (data as { message?: string })?.message,
-        };
+        try {
+            const res = await fetch(url, {
+                method,
+                headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                    "X-CSRF-TOKEN": getCsrfToken(),
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+                credentials: "same-origin",
+                ...(body ? { body: JSON.stringify(body) } : {}),
+            });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return { ok: false, message: MSG_SESSION_EXPIRED };
+            }
+            const data = await res.json().catch(() => ({}));
+            return {
+                ok: res.ok,
+                data,
+                message: (data as { message?: string })?.message,
+            };
+        } catch (e) {
+            toaster.error({ title: MSG_NETWORK_ERROR });
+            return { ok: false, message: MSG_NETWORK_ERROR };
+        }
     }
 
     /** Keep override PIN to digits only, max 6 (avoids browser "Please match the requested format"). */
@@ -108,7 +120,6 @@
         createPassword = "";
         createRole = "staff";
         createOverridePin = "";
-        error = "";
         showCreateModal = true;
     }
 
@@ -118,11 +129,10 @@
             !createEmail.trim() ||
             !createPassword.trim()
         ) {
-            error = "Name, email, and password are required.";
+            toaster.error({ title: "Name, email, and password are required." });
             return;
         }
         submitting = true;
-        error = "";
         const body: {
             name: string;
             email: string;
@@ -146,7 +156,7 @@
         if (ok) {
             showCreateModal = false;
             router.reload();
-        } else error = msg ?? "Failed to create user.";
+        } else toaster.error({ title: msg ?? "Failed to create user." });
     }
 
     function openEdit(u: UserItem) {
@@ -157,14 +167,12 @@
         editIsActive = u.is_active;
         editPassword = "";
         editOverridePin = "";
-        error = "";
         showEditModal = true;
     }
 
     async function handleEdit() {
         if (!editUser || !editName.trim() || !editEmail.trim()) return;
         submitting = true;
-        error = "";
         const body: {
             name: string;
             email: string;
@@ -203,11 +211,10 @@
 
     async function handleReset() {
         if (!resetUser || !resetPassword.trim() || resetPassword.length < 8) {
-            error = "Password must be at least 8 characters.";
+            toaster.error({ title: "Password must be at least 8 characters." });
             return;
         }
         submitting = true;
-        error = "";
         const { ok, message: msg } = await api(
             "POST",
             `/api/admin/users/${resetUser.id}/reset-password`,
@@ -219,20 +226,17 @@
         if (ok) {
             showResetModal = false;
             resetUser = null;
-            error = "";
-        } else error = msg ?? "Failed to reset password.";
+        } else toaster.error({ title: msg ?? "Failed to reset password." });
     }
 
     function openDeactivateConfirm(u: UserItem) {
         deactivateConfirmUser = u;
-        error = "";
     }
 
     async function handleDeactivateConfirm() {
         if (!deactivateConfirmUser) return;
         const u = deactivateConfirmUser;
         submitting = true;
-        error = "";
         const { ok, message: msg } = await api(
             "DELETE",
             `/api/admin/users/${u.id}`,
@@ -241,7 +245,7 @@
         if (ok) {
             deactivateConfirmUser = null;
             router.reload();
-        } else error = msg ?? "Failed to deactivate user.";
+        } else toaster.error({ title: msg ?? "Failed to deactivate user." });
     }
 
     function closeDeactivateConfirm() {
@@ -255,7 +259,6 @@
         deactivateConfirmUser = null;
         editUser = null;
         resetUser = null;
-        error = "";
     }
 </script>
 
@@ -288,14 +291,32 @@
         </button>
     </div>
 
-    {#if error}
+    {#if users.length === 0}
         <div
-            class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 mt-4"
+            role="status"
+            aria-label="No staff yet"
+            class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm mt-6"
         >
-            {error}
+            <div
+                class="bg-surface-100 p-4 rounded-full text-surface-400 mb-4"
+            >
+                <UsersIcon class="w-8 h-8" />
+            </div>
+            <h3 class="text-lg font-semibold text-surface-950">
+                No staff yet
+            </h3>
+            <p class="text-surface-600 max-w-sm mt-2 mb-6">
+                Add staff accounts to manage stations and serve clients.
+            </p>
+            <button
+                type="button"
+                class="btn preset-filled-primary-500 flex items-center gap-2 touch-target-h"
+                onclick={openCreate}
+            >
+                <UserPlus class="w-4 h-4" /> Add Staff
+            </button>
         </div>
-    {/if}
-
+    {:else}
     <!-- Desktop Table View -->
     <div class="table-container mt-6 hidden md:block">
         <table class="table table-zebra relative w-full">
@@ -553,6 +574,7 @@
             </div>
         {/each}
     </div>
+    {/if}
 </AdminLayout>
 
 <Modal open={showCreateModal} title="Add staff" onClose={closeModals}>

@@ -7,6 +7,7 @@
      */
     import { usePage, router } from "@inertiajs/svelte";
     import { Users, CheckCircle2, Clock, ChevronUp, Play } from "lucide-svelte";
+    import { toaster } from "../lib/toaster.js";
 
     /** When true (default), footer is fixed to viewport bottom. When false, it flows in a parent fixed container (e.g. MobileLayout). */
     let { queueCount = 0, processedToday = 0, fixed = true } = $props();
@@ -32,6 +33,9 @@
     /** Per eym: full-screen overlay when on break (only after user selected On break and PATCH succeeded) */
     let showOnBreakOverlay = $state(false);
     let resumeButtonEl = $state(null);
+
+    const MSG_SESSION_EXPIRED = "Session expired. Please refresh and try again.";
+    const MSG_NETWORK_ERROR = "Network error. Please try again.";
 
     const programMode = $derived(
         activeProgram && activeProgram.is_active && !activeProgram.is_paused
@@ -155,6 +159,11 @@
                 },
                 body: JSON.stringify({ status }),
             });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                availabilityStatus = user?.availability_status ?? "offline";
+                return;
+            }
             if (res.ok) {
                 const data = await res.json();
                 if (data.availability_status != null) availabilityStatus = data.availability_status;
@@ -162,8 +171,10 @@
             } else {
                 availabilityStatus = user?.availability_status ?? "offline";
             }
-        } catch {
+        } catch (e) {
             availabilityStatus = user?.availability_status ?? "offline";
+            const isNetwork = e instanceof TypeError && String(e && e.message) === "Failed to fetch";
+            if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
         } finally {
             isUpdating = false;
         }
@@ -193,13 +204,18 @@
                 },
                 body: JSON.stringify({ status: "available" }),
             });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
             if (res.ok) {
                 const data = await res.json();
                 if (data.availability_status != null) availabilityStatus = data.availability_status;
                 showOnBreakOverlay = false;
             }
-        } catch {
-            // Keep overlay open so user can retry
+        } catch (e) {
+            const isNetwork = e instanceof TypeError && String(e && e.message) === "Failed to fetch";
+            if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
         } finally {
             isUpdating = false;
         }

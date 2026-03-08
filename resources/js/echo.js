@@ -1,6 +1,8 @@
 import Echo from 'laravel-echo';
 
 import Pusher from 'pusher-js';
+import { toaster } from './lib/toaster.js';
+
 window.Pusher = Pusher;
 
 // Reverb WebSocket:
@@ -45,6 +47,35 @@ if (appKey && String(appKey).trim() !== '') {
         enabledTransports: ['ws', 'wss'],
         disableStats: true,
     });
+
+    // Surface runtime WebSocket connection failures via toast. Covers BroadcastTest, Display Board,
+    // StationBoard, Station Index, Triage, Dashboard (if using Echo), etc.
+    let lastConnectionToastAt = 0;
+    const CONNECTION_TOAST_THROTTLE_MS = 30000;
+
+    function showConnectionErrorToast() {
+        const now = Date.now();
+        if (now - lastConnectionToastAt < CONNECTION_TOAST_THROTTLE_MS) return;
+        lastConnectionToastAt = now;
+        toaster.error({
+            title: 'Live updates unavailable',
+            description: 'Some changes may be delayed. You can continue using the app.',
+        });
+    }
+
+    try {
+        const conn = window.Echo.connector?.pusher?.connection;
+        if (conn) {
+            conn.bind('state_change', (states) => {
+                if (states?.current === 'failed' || states?.current === 'unavailable') {
+                    showConnectionErrorToast();
+                }
+            });
+            conn.bind('error', () => showConnectionErrorToast());
+        }
+    } catch (_) {
+        // Connector API may change; fail silently
+    }
 } else {
     window.Echo = null;
 }

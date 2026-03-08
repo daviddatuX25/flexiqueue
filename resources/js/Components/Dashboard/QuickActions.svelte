@@ -24,7 +24,7 @@
                 </p>
                 <Link
                     href="/admin/programs"
-                    class="btn preset-tonal-surface w-full justify-start gap-3 hover:preset-tonal-primary transition-colors py-3"
+                    class="btn preset-tonal-surface w-full justify-start gap-3 hover:preset-tonal-primary transition-colors py-3 touch-target-h"
                 >
                     <Settings class="h-4 w-4 shrink-0 text-surface-600" />
                     <span class="font-medium">Manage Program</span>
@@ -40,14 +40,14 @@
                 <div class="flex flex-col gap-3">
                     <Link
                         href="/admin/users"
-                        class="btn preset-tonal-surface w-full justify-start gap-3 hover:preset-tonal-primary transition-colors py-3"
+                        class="btn preset-tonal-surface w-full justify-start gap-3 hover:preset-tonal-primary transition-colors py-3 touch-target-h"
                     >
                         <Users class="h-4 w-4 shrink-0 text-surface-600" />
                         <span class="font-medium">Manage Staff</span>
                     </Link>
                     <Link
                         href="/admin/logs"
-                        class="btn preset-tonal-surface w-full justify-start gap-3 hover:preset-tonal-primary transition-colors py-3"
+                        class="btn preset-tonal-surface w-full justify-start gap-3 hover:preset-tonal-primary transition-colors py-3 touch-target-h"
                     >
                         <FileText class="h-4 w-4 shrink-0 text-surface-600" />
                         <span class="font-medium">View audit log</span>

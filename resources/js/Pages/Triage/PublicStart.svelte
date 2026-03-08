@@ -11,6 +11,7 @@
 	import QrScanner from '../../Components/QrScanner.svelte';
 	import { onMount } from 'svelte';
 	import { Camera, Settings } from 'lucide-svelte';
+	import { toaster } from '../../lib/toaster.js';
 	import {
 		shouldFocusHidInput,
 		shouldUseInputModeNone,
@@ -50,20 +51,32 @@
 		return meta ?? '';
 	}
 
+	const MSG_SESSION_EXPIRED = 'Session expired. Please refresh and try again.';
+	const MSG_NETWORK_ERROR = 'Network error. Please try again.';
+
 	async function api(method: string, url: string, body?: object): Promise<{ ok: boolean; data?: object; message?: string; errors?: Record<string, string[]> }> {
-		const res = await fetch(url, {
-			method,
-			headers: {
-				'Content-Type': 'application/json',
-				Accept: 'application/json',
-				'X-CSRF-TOKEN': getCsrfToken(),
-				'X-Requested-With': 'XMLHttpRequest',
-			},
-			credentials: 'same-origin',
-			...(body ? { body: JSON.stringify(body) } : {}),
-		});
-		const data = await res.json().catch(() => ({}));
-		return { ok: res.ok, data, message: (data as { message?: string }).message, errors: (data as { errors?: Record<string, string[]> }).errors };
+		try {
+			const res = await fetch(url, {
+				method,
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-CSRF-TOKEN': getCsrfToken(),
+					'X-Requested-With': 'XMLHttpRequest',
+				},
+				credentials: 'same-origin',
+				...(body ? { body: JSON.stringify(body) } : {}),
+			});
+			if (res.status === 419) {
+				toaster.error({ title: MSG_SESSION_EXPIRED });
+				return { ok: false, message: MSG_SESSION_EXPIRED };
+			}
+			const data = await res.json().catch(() => ({}));
+			return { ok: res.ok, data, message: (data as { message?: string }).message, errors: (data as { errors?: Record<string, string[]> }).errors };
+		} catch (e) {
+			toaster.error({ title: MSG_NETWORK_ERROR });
+			return { ok: false, message: MSG_NETWORK_ERROR };
+		}
 	}
 
 	let showScanner = $state(false);
@@ -72,7 +85,6 @@
 	let barcodeInputEl = $state<HTMLInputElement | null>(null);
 	let scannedToken = $state<{ physical_id: string; qr_hash: string; status: string } | null>(null);
 	let selectedTrackId = $state<number | null>(null);
-	let error = $state('');
 
 	/** When track count is at or below this, show buttons instead of dropdown. */
 	const MAX_TRACKS_FOR_BUTTONS = 4;
@@ -176,6 +188,11 @@
 				credentials: 'same-origin',
 				body: JSON.stringify(body),
 			});
+			if (res.status === 419) {
+				triageSettingsError = MSG_SESSION_EXPIRED;
+				toaster.error({ title: MSG_SESSION_EXPIRED });
+				return;
+			}
 			const data = await res.json().catch(() => ({}));
 			if (res.status === 401) {
 				triageSettingsError = (data as { message?: string }).message || 'Invalid PIN.';
@@ -189,6 +206,10 @@
 			enablePublicTriageHidBarcode = !!d.enable_public_triage_hid_barcode;
 			triageSettingsPin = '';
 			showTriageSettingsModal = false;
+		} catch (e) {
+			const isNetwork = e instanceof TypeError && (e as Error).message === 'Failed to fetch';
+			triageSettingsError = isNetwork ? MSG_NETWORK_ERROR : 'Failed to save.';
+			if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
 		} finally {
 			triageSettingsSaving = false;
 		}
@@ -213,16 +234,15 @@
 	}
 
 	async function doTokenLookup(qrHash: string, physicalId: string): Promise<boolean> {
-		error = '';
 		if (qrHash && qrHash.length >= 32) {
 			const { ok, data } = await api('GET', `/api/public/token-lookup?qr_hash=${encodeURIComponent(qrHash)}`);
 			if (!ok) {
-				error = (data as { message?: string })?.message ?? 'Token not found.';
+				toaster.error({ title: (data as { message?: string })?.message ?? 'Token not found.' });
 				return false;
 			}
 			const t = data as { physical_id: string; qr_hash: string; status: string };
 			if (t.status !== 'available') {
-				error = t.status === 'in_use' ? 'Token is already in use.' : t.status === 'deactivated' ? 'Token deactivated.' : `Token is ${t.status}.`;
+				toaster.error({ title: t.status === 'in_use' ? 'Token is already in use.' : t.status === 'deactivated' ? 'Token deactivated.' : `Token is ${t.status}.` });
 				return false;
 			}
 			scannedToken = { physical_id: t.physical_id, qr_hash: t.qr_hash, status: t.status };
@@ -231,18 +251,18 @@
 		if (physicalId.trim()) {
 			const { ok, data } = await api('GET', `/api/public/token-lookup?physical_id=${encodeURIComponent(physicalId.trim())}`);
 			if (!ok) {
-				error = (data as { message?: string })?.message ?? 'Token not found.';
+				toaster.error({ title: (data as { message?: string })?.message ?? 'Token not found.' });
 				return false;
 			}
 			const t = data as { physical_id: string; qr_hash: string; status: string };
 			if (t.status !== 'available') {
-				error = t.status === 'in_use' ? 'Token is already in use.' : t.status === 'deactivated' ? 'Token deactivated.' : `Token is ${t.status}.`;
+				toaster.error({ title: t.status === 'in_use' ? 'Token is already in use.' : t.status === 'deactivated' ? 'Token deactivated.' : `Token is ${t.status}.` });
 				return false;
 			}
 			scannedToken = { physical_id: t.physical_id, qr_hash: t.qr_hash, status: t.status };
 			return true;
 		}
-		error = 'Enter or scan a token.';
+		toaster.error({ title: 'Enter or scan a token.' });
 		return false;
 	}
 
@@ -282,7 +302,6 @@
 
 	async function handleBind() {
 		if (!scannedToken || selectedTrackId == null) return;
-		error = '';
 		isSubmitting = true;
 		const { ok, data } = await api('POST', '/api/public/sessions/bind', {
 			qr_hash: scannedToken.qr_hash,
@@ -296,9 +315,9 @@
 		}
 		const d = data as { active_session?: { alias: string }; message?: string } | undefined;
 		if (d?.active_session) {
-			error = `Token already in use (${d.active_session.alias}).`;
+			toaster.error({ title: `Token already in use (${d.active_session.alias}).` });
 		} else {
-			error = d?.message ?? 'Could not start visit.';
+			toaster.error({ title: d?.message ?? 'Could not start visit.' });
 		}
 	}
 
@@ -306,7 +325,6 @@
 		scannedToken = null;
 		selectedTrackId = null;
 		setDefaultTrack();
-		error = '';
 		bindSuccess = false;
 	}
 </script>
@@ -334,7 +352,7 @@
 				<h1 class="text-xl font-bold text-surface-950">Start your visit</h1>
 				<button
 					type="button"
-					class="btn btn-icon preset-tonal shrink-0 min-h-[48px] min-w-[48px]"
+					class="btn btn-icon preset-tonal shrink-0 touch-target"
 					aria-label="Triage settings"
 					title="Settings"
 					onclick={openTriageSettingsModal}
@@ -362,16 +380,13 @@
 						<p class="flex-1 text-base font-medium text-surface-950">Scan your token or enter ID</p>
 						<button
 							type="button"
-							class="btn btn-icon preset-filled-primary-500 shrink-0 min-h-[48px] min-w-[48px]"
+							class="btn btn-icon preset-filled-primary-500 shrink-0 touch-target"
 							aria-label="Open camera to scan QR"
 							onclick={() => { showScanner = true; scanHandled = false; }}
 						>
 							<Camera class="w-6 h-6" />
 						</button>
 					</div>
-					{#if error}
-						<p class="mt-2 text-sm text-error-600">{error}</p>
-					{/if}
 				</section>
 
 				<Modal open={showScanner} title="Scan QR" onClose={closeScanner} wide={true}>
@@ -468,7 +483,7 @@
 								{#each tracks as track (track.id)}
 									<button
 										type="button"
-										class="btn min-h-[48px] px-4 py-2 {selectedTrackId === track.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
+										class="btn touch-target-h px-4 py-2 {selectedTrackId === track.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
 										onclick={() => (selectedTrackId = track.id)}
 									>
 										{track.name}
@@ -478,7 +493,7 @@
 						{:else}
 							<select
 								id="public-track"
-								class="w-full rounded-container border border-surface-200 px-3 py-2 min-h-[48px]"
+								class="w-full rounded-container border border-surface-200 px-3 py-2 touch-target-h"
 								bind:value={selectedTrackId}
 							>
 								{#each tracks as track (track.id)}
@@ -487,16 +502,13 @@
 							</select>
 						{/if}
 					</div>
-					{#if error}
-						<p class="text-sm text-error-600">{error}</p>
-					{/if}
 					<div class="flex gap-2 pt-2">
-						<button type="button" class="btn preset-tonal flex-1 min-h-[48px]" onclick={reset} disabled={isSubmitting}>
+						<button type="button" class="btn preset-tonal flex-1 touch-target-h" onclick={reset} disabled={isSubmitting}>
 							Cancel
 						</button>
 						<button
 							type="button"
-							class="btn preset-filled-primary-500 flex-1 min-h-[48px]"
+							class="btn preset-filled-primary-500 flex-1 touch-target-h"
 							onclick={handleBind}
 							disabled={isSubmitting || selectedTrackId == null}
 						>

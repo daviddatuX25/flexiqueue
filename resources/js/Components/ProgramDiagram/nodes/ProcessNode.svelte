@@ -8,7 +8,7 @@
 </script>
 
 <div
-	class="rounded-lg border-2 px-3 py-2 min-w-[100px] min-h-[48px] flex items-center justify-center text-sm font-medium shadow-sm {orphan
+	class="rounded-lg border-2 px-3 py-2 min-w-[100px] touch-target-h flex items-center justify-center text-sm font-medium shadow-sm {orphan
 		? 'border-error-300 bg-error-50 text-error-700'
 		: 'border-tertiary-300 bg-tertiary-50 text-surface-950'}"
 	data-id={id}

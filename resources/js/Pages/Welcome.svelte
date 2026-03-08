@@ -13,10 +13,10 @@
 			Laravel 12 + Svelte 5 + Inertia.js + TailwindCSS 4 + Skeleton UI
 		</p>
 		<div class="flex flex-wrap gap-2 mt-4">
-			<button type="button" class="btn preset-filled-primary-500 min-h-[48px]">Primary</button>
-			<button type="button" class="btn preset-filled-success-500 min-h-[48px]">Success</button>
-			<button type="button" class="btn preset-outlined min-h-[48px]">Outline</button>
-			<a href="/broadcast-test" class="btn btn-sm preset-outlined min-h-[48px] inline-flex items-center">Reverb test</a>
+			<button type="button" class="btn preset-filled-primary-500 touch-target-h">Primary</button>
+			<button type="button" class="btn preset-filled-success-500 touch-target-h">Success</button>
+			<button type="button" class="btn preset-outlined touch-target-h">Outline</button>
+			<a href="/broadcast-test" class="btn btn-sm preset-outlined touch-target-h inline-flex items-center">Reverb test</a>
 		</div>
 		<p class="text-sm text-surface-600 mt-4">
 			Test page — FlexiQueue theme applied. If you see styled buttons and primary blue, setup is correct.

@@ -33,6 +33,7 @@
 		setLocalAllowHidOnThisDevice,
 		isMobileTouch,
 	} from '../../lib/displayHid.js';
+	import { toaster } from '../../lib/toaster.js';
 
 	const page = usePage();
 
@@ -195,10 +196,12 @@ let stationTtsByName = $state({});
 			const data = await res.json().catch(() => ({}));
 			if (res.status === 401) {
 				displaySettingsError = data.message || 'Invalid PIN.';
+				toaster.error({ title: data.message || 'Invalid PIN.' });
 				return;
 			}
 			if (!res.ok) {
 				displaySettingsError = data.message || 'Failed to save.';
+				toaster.error({ title: data.message || 'Failed to save.' });
 				return;
 			}
 			displayAudioMuted = !!data.display_audio_muted;
@@ -252,6 +255,7 @@ let stationTtsByName = $state({});
 						muted: displayAudioMuted,
 						volume: displayAudioVolume,
 						onFallback: (reason, text) => { console.warn?.('TTS fallback', reason, text); },
+						onCompleteFailure: (reason, text) => { console.warn?.('TTS complete failure', reason, text); },
 						repeatCount: displayTtsRepeatCount,
 						repeatDelayMs: displayTtsRepeatDelayMs,
 					})
@@ -439,7 +443,7 @@ let stationTtsByName = $state({});
 				<h2 class="text-xl font-bold text-surface-950">CHECK YOUR STATUS</h2>
 				<button
 					type="button"
-					class="btn btn-icon preset-tonal shrink-0 min-h-[48px] min-w-[48px]"
+					class="btn btn-icon preset-tonal shrink-0 touch-target"
 					aria-label="Display settings"
 					title="Settings"
 					onclick={openDisplaySettingsModal}
@@ -467,7 +471,7 @@ let stationTtsByName = $state({});
 				</p>
 				<button
 					type="button"
-					class="btn btn-icon preset-filled-primary-500 shrink-0 min-h-[48px] min-w-[48px]"
+					class="btn btn-icon preset-filled-primary-500 shrink-0 touch-target"
 					aria-label="Open camera to scan QR code"
 					title="Tap to scan with device camera"
 					onclick={() => {

@@ -7,7 +7,7 @@
     import { get } from "svelte/store";
     import { onMount } from "svelte";
     import { Link, router, usePage } from "@inertiajs/svelte";
-    import { toast } from "../../../stores/toastStore.js";
+    import { toast, toaster } from "../../../lib/toaster.js";
     import { ensureVoicesLoaded, speakSample } from "../../../lib/speechUtils.js";
 
     import {
@@ -191,6 +191,24 @@
         if (!el) return;
         el.scrollBy({ left: direction === "left" ? -TAB_SCROLL_PX : TAB_SCROLL_PX, behavior: "smooth" });
     }
+
+    const TABS: TabId[] = [...VALID_TABS];
+
+    function handleTabKeydown(e: KeyboardEvent) {
+        const key = e.key;
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(key)) return;
+        e.preventDefault();
+        const idx = TABS.indexOf(activeTab);
+        let nextIdx: number;
+        if (key === "ArrowLeft") nextIdx = idx <= 0 ? TABS.length - 1 : idx - 1;
+        else if (key === "ArrowRight") nextIdx = idx >= TABS.length - 1 ? 0 : idx + 1;
+        else if (key === "Home") nextIdx = 0;
+        else nextIdx = TABS.length - 1;
+        const nextTab = TABS[nextIdx];
+        activeTab = nextTab;
+        const btn = document.getElementById(`tab-${nextTab}`);
+        if (btn) (btn as HTMLButtonElement).focus();
+    }
     $effect(() => {
         const el = tabListEl;
         if (!el) return;
@@ -203,6 +221,14 @@
             el.removeEventListener("scroll", onScroll);
             ro.disconnect();
         };
+    });
+
+    $effect(() => {
+        const tab = activeTab;
+        queueMicrotask(() => {
+            const panel = document.getElementById(`tabpanel-${tab}`);
+            if (panel) (panel as HTMLElement).focus();
+        });
     });
     let showCreateModal = $state(false);
     let editTrack = $state<TrackItem | null>(null);
@@ -256,7 +282,6 @@
     let createProcessDescription = $state("");
     let creatingProcess = $state(false);
     let submitting = $state(false);
-    let error = $state("");
     let settingsNoShowTimer = $state(10);
     /** Per ISSUES-ELABORATION §20: mm:ss display for no-show timer (5–600 seconds). */
     let noShowTimerMinutes = $state(0);
@@ -392,7 +417,13 @@
             headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
             credentials: "same-origin",
         })
-            .then((res) => res.json().catch(() => ({})))
+            .then((res) => {
+                if (res.status === 419) {
+                    toaster.error({ title: MSG_SESSION_EXPIRED });
+                    return {};
+                }
+                return res.json().catch(() => ({}));
+            })
             .then((data) => {
                 if (data && Array.isArray(data.voices)) {
                     serverTtsVoices = data.voices as { id: string; name: string; lang: string }[];
@@ -400,6 +431,7 @@
             })
             .catch(() => {
                 serverTtsVoices = [];
+                toaster.error({ title: MSG_NETWORK_ERROR });
             });
     });
 
@@ -407,31 +439,45 @@
         if (activeTab !== "staff" || !program?.id) return;
         let cancelled = false;
         staffLoading = true;
+        const check419 = (r: Response) => {
+            if (r.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return Promise.resolve({});
+            }
+            return r.json().catch(() => ({}));
+        };
         Promise.all([
             fetch(`/api/admin/programs/${program.id}/staff-assignments`, {
                 headers: {
                     Accept: "application/json",
+                    "X-CSRF-TOKEN": getCsrfToken(),
                     "X-Requested-With": "XMLHttpRequest",
                 },
                 credentials: "same-origin",
-            }).then((r) => r.json()),
+            }).then(check419),
             fetch(`/api/admin/programs/${program.id}/supervisors`, {
                 headers: {
                     Accept: "application/json",
+                    "X-CSRF-TOKEN": getCsrfToken(),
                     "X-Requested-With": "XMLHttpRequest",
                 },
                 credentials: "same-origin",
-            }).then((r) => r.json()),
+            }).then(check419),
         ])
             .then(([assignRes, superRes]) => {
                 if (cancelled) return;
-                staffAssignments = assignRes.assignments ?? [];
-                staffStations = assignRes.stations ?? [];
-                staffSupervisors = superRes.supervisors ?? [];
-                staffWithPin = superRes.staff_with_pin ?? [];
+                const a = assignRes as { assignments?: typeof staffAssignments; stations?: typeof staffStations };
+                const b = superRes as { supervisors?: typeof staffSupervisors; staff_with_pin?: typeof staffWithPin };
+                staffAssignments = a?.assignments ?? [];
+                staffStations = a?.stations ?? [];
+                staffSupervisors = b?.supervisors ?? [];
+                staffWithPin = b?.staff_with_pin ?? [];
             })
             .catch(() => {
-                if (!cancelled) staffAssignments = [];
+                if (!cancelled) {
+                    staffAssignments = [];
+                    toaster.error({ title: MSG_NETWORK_ERROR });
+                }
             })
             .finally(() => {
                 if (!cancelled) staffLoading = false;
@@ -596,48 +642,58 @@
         return meta ?? "";
     }
 
+    const MSG_SESSION_EXPIRED = "Session expired. Please refresh and try again.";
+    const MSG_NETWORK_ERROR = "Network error. Please try again.";
+
     async function api(
         method: string,
         url: string,
         body?: object,
     ): Promise<{ ok: boolean; data?: object; message?: string }> {
-        const res = await fetch(url, {
-            method,
-            headers: {
-                "Content-Type": "application/json",
-                Accept: "application/json",
-                "X-CSRF-TOKEN": getCsrfToken(),
-                "X-Requested-With": "XMLHttpRequest",
-            },
-            credentials: "same-origin",
-            ...(body ? { body: JSON.stringify(body) } : {}),
-        });
-        const data = await res.json().catch(() => ({}));
-        return { ok: res.ok, data, message: data?.message };
+        try {
+            const res = await fetch(url, {
+                method,
+                headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                    "X-CSRF-TOKEN": getCsrfToken(),
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+                credentials: "same-origin",
+                ...(body ? { body: JSON.stringify(body) } : {}),
+            });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return { ok: false, message: MSG_SESSION_EXPIRED };
+            }
+            const data = await res.json().catch(() => ({}));
+            return { ok: res.ok, data, message: data?.message };
+        } catch (e) {
+            toaster.error({ title: MSG_NETWORK_ERROR });
+            return { ok: false, message: MSG_NETWORK_ERROR };
+        }
     }
 
     async function handlePause() {
         submitting = true;
-        error = "";
         const { ok, message } = await api(
             "POST",
             `/api/admin/programs/${program.id}/pause`,
         );
         submitting = false;
         if (ok) router.reload();
-        else error = message ?? "Failed to pause.";
+        else toaster.error({ title: message ?? "Failed to pause." });
     }
 
     async function handleResume() {
         submitting = true;
-        error = "";
         const { ok, message } = await api(
             "POST",
             `/api/admin/programs/${program.id}/resume`,
         );
         submitting = false;
         if (ok) router.reload();
-        else error = message ?? "Failed to resume.";
+        else toaster.error({ title: message ?? "Failed to resume." });
     }
 
     /** Per ISSUES-ELABORATION §16: 422 shows message + optional missing list. */
@@ -651,7 +707,6 @@
 
     async function handleActivate() {
         submitting = true;
-        error = "";
         activateMissing = [];
         const { ok, message, data } = await api(
             "POST",
@@ -660,7 +715,7 @@
         submitting = false;
         if (ok) router.reload();
         else {
-            error = message ?? "Failed to start session.";
+            toaster.error({ title: message ?? "Failed to start session." });
             const missing = (data as { missing?: string[] } | undefined)?.missing;
             if (Array.isArray(missing))
                 activateMissing = missing.map((k) => ACTIVATE_MISSING_LABELS[k] ?? k);
@@ -669,7 +724,6 @@
 
     /** Per bead flexiqueue-nlu: if queue has active sessions, show warning + suggest Pause; else show confirm then deactivate. */
     function openStopConfirm() {
-        error = "";
         const active = stats?.active_sessions ?? 0;
         if (active > 0) {
             showStopQueueWarning = true;
@@ -680,7 +734,6 @@
 
     async function handleStopConfirm() {
         submitting = true;
-        error = "";
         const { ok, message } = await api(
             "POST",
             `/api/admin/programs/${program.id}/deactivate`,
@@ -690,9 +743,9 @@
             confirmStopProgram = false;
             router.reload();
         } else {
-            error =
-                message ??
-                "You can only stop the session when no clients are in the queue.";
+            toaster.error({
+                title: message ?? "You can only stop the session when no clients are in the queue.",
+            });
         }
     }
 
@@ -714,7 +767,6 @@
         createDescription = "";
         createIsDefault = false;
         createColorCode = "";
-        error = "";
         showCreateModal = true;
     }
 
@@ -724,7 +776,6 @@
         editDescription = t.description ?? "";
         editIsDefault = t.is_default;
         editColorCode = t.color_code ?? "";
-        error = "";
     }
 
     function openStepModal(t: TrackItem) {
@@ -733,7 +784,6 @@
         addStepProcessId = "";
         addStepEstimatedMinutes = "";
         editingStepId = null;
-        error = "";
         showStepModal = true;
     }
 
@@ -742,7 +792,6 @@
         editStepProcessId = step.process_id;
         editStepEstimatedMinutes = step.estimated_minutes ?? "";
         editStepIsRequired = step.is_required;
-        error = "";
     }
 
     function cancelEditStep() {
@@ -752,7 +801,6 @@
     async function handleUpdateStep() {
         if (editingStepId == null) return;
         submitting = true;
-        error = "";
         const body: {
             process_id?: number;
             estimated_minutes?: number | null;
@@ -778,7 +826,7 @@
             );
             editingStepId = null;
         } else {
-            error = message ?? "Failed to update step.";
+            toaster.error({ title: message ?? "Failed to update step." });
         }
     }
 
@@ -786,7 +834,6 @@
         showStepModal = false;
         stepModalTrack = null;
         modalSteps = [];
-        error = "";
         router.reload();
     }
 
@@ -795,13 +842,11 @@
         editTrack = null;
         showCreateStationModal = false;
         editStation = null;
-        error = "";
     }
 
     async function handleCreate() {
         if (!createName.trim()) return;
         submitting = true;
-        error = "";
         const { ok, data, message } = await api(
             "POST",
             `/api/admin/programs/${program.id}/tracks`,
@@ -817,21 +862,21 @@
             closeModals();
             router.reload();
         } else {
-            error =
-                message ??
-                (data && "errors" in data
-                    ? JSON.stringify(
-                          (data as { errors?: Record<string, string[]> })
-                              .errors,
-                      )
-                    : "Failed to create track.");
+            toaster.error({
+                title:
+                    message ??
+                    (data && "errors" in data
+                        ? JSON.stringify(
+                              (data as { errors?: Record<string, string[]> }).errors,
+                          )
+                        : "Failed to create track."),
+            });
         }
     }
 
     async function handleUpdate() {
         if (!editTrack || !editName.trim()) return;
         submitting = true;
-        error = "";
         const { ok, message } = await api(
             "PUT",
             `/api/admin/tracks/${editTrack.id}`,
@@ -847,20 +892,18 @@
             closeModals();
             router.reload();
         } else {
-            error = message ?? "Failed to update track.";
+            toaster.error({ title: message ?? "Failed to update track." });
         }
     }
 
     function openDeleteTrackConfirm(t: TrackItem) {
         confirmDeleteTrack = t;
-        error = "";
     }
 
     async function handleDeleteTrackConfirm() {
         if (!confirmDeleteTrack) return;
         const t = confirmDeleteTrack;
         submitting = true;
-        error = "";
         const { ok, message } = await api(
             "DELETE",
             `/api/admin/tracks/${t.id}`,
@@ -870,7 +913,7 @@
             confirmDeleteTrack = null;
             router.reload();
         } else {
-            error = message ?? "Cannot delete: active sessions use this track.";
+            toaster.error({ title: message ?? "Cannot delete: active sessions use this track." });
         }
     }
 
@@ -888,7 +931,6 @@
             fil: { voice_id: "", rate: 0.84, station_phrase: "" },
             ilo: { voice_id: "", rate: 0.84, station_phrase: "" },
         };
-        error = "";
         showCreateStationModal = true;
     }
 
@@ -921,7 +963,6 @@
                 station_phrase: (langs.ilo?.station_phrase as string | undefined) ?? "",
             },
         };
-        error = "";
     }
 
     /** Open the dedicated Station TTS modal for a station; syncs edit form so Save can call handleUpdateStation. */
@@ -956,7 +997,6 @@
         };
         stationTtsModalStation = s;
         showStationTtsModal = true;
-        error = "";
     }
 
     function closeStationTtsModal() {
@@ -984,17 +1024,21 @@
     async function regenerateStationTts(station: StationItem) {
         if (stationRegeneratingId !== null || submitting) return;
         stationRegeneratingId = station.id;
-        error = "";
         try {
             const res = await fetch(`/api/admin/stations/${station.id}/regenerate-tts`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Accept: "application/json", "X-Requested-With": "XMLHttpRequest", "X-CSRF-TOKEN": getCsrfToken() },
                 credentials: "same-origin",
             });
-            if (!res.ok) error = "Failed to start regeneration.";
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
+            if (!res.ok) toaster.error({ title: "Failed to start regeneration." });
             else router.reload();
-        } catch {
-            error = "Failed to start regeneration.";
+        } catch (e) {
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to start regeneration." });
         } finally {
             stationRegeneratingId = null;
         }
@@ -1004,7 +1048,6 @@
     async function playStationTtsSample(lang: StationTtsLangKey) {
         if (stationTtsSamplePlayingLang || !stationTtsModalStation || !program) return;
         stationTtsSamplePlayingLang = lang;
-        error = "";
         try {
             const connectorPhrase =
                 (lang === "en"
@@ -1020,12 +1063,16 @@
             });
             const phraseRes = await fetch(`/api/admin/tts/sample-phrase?${phraseParams.toString()}`, {
                 method: "GET",
-                headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+                headers: { Accept: "application/json", "X-CSRF-TOKEN": getCsrfToken(), "X-Requested-With": "XMLHttpRequest" },
                 credentials: "same-origin",
             });
+            if (phraseRes.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
             const phraseData = await phraseRes.json().catch(() => ({}));
             if (!phraseRes.ok || typeof phraseData?.text !== "string") {
-                error = "Could not get sample phrase.";
+                toaster.error({ title: "Could not get sample phrase." });
                 return;
             }
             const config = lang === "en" ? editStationTts.en : lang === "fil" ? editStationTts.fil : editStationTts.ilo;
@@ -1037,8 +1084,12 @@
                 headers: { Accept: "audio/mpeg", "X-Requested-With": "XMLHttpRequest" },
                 credentials: "same-origin",
             });
+            if (ttsRes.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
             if (!ttsRes.ok) {
-                error = "TTS sample unavailable.";
+                toaster.error({ title: "TTS sample unavailable." });
                 return;
             }
             const blob = await ttsRes.blob();
@@ -1056,8 +1107,9 @@
                 audio.volume = 1;
                 audio.play().catch(reject);
             });
-        } catch {
-            error = "Failed to play TTS sample.";
+        } catch (e) {
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to play TTS sample." });
         } finally {
             stationTtsSamplePlayingLang = null;
         }
@@ -1086,11 +1138,10 @@
     async function handleCreateStation() {
         if (!createStationName.trim()) return;
         if (createStationProcessIds.length === 0) {
-            error = "Select at least one process.";
+            toaster.error({ title: "Select at least one process." });
             return;
         }
         submitting = true;
-        error = "";
         const { ok, data, message } = await api(
             "POST",
             `/api/admin/programs/${program.id}/stations`,
@@ -1132,7 +1183,7 @@
             const firstErr = d?.errors
                 ? Object.values(d.errors).flat()[0]
                 : null;
-            error = firstErr ?? message ?? "Failed to create station.";
+            toaster.error({ title: firstErr ?? message ?? "Failed to create station." });
         }
     }
 
@@ -1140,7 +1191,6 @@
         if (!createProcessName.trim()) return;
         creatingProcess = true;
         submitting = true;
-        error = "";
         const { ok, data, message } = await api(
             "POST",
             `/api/admin/programs/${program.id}/processes`,
@@ -1165,11 +1215,9 @@
             const firstErr = d?.errors
                 ? Object.values(d.errors).flat()[0]
                 : null;
-            error =
-                firstErr ??
-                d?.message ??
-                message ??
-                "Failed to create process.";
+            toaster.error({
+                title: firstErr ?? d?.message ?? message ?? "Failed to create process.",
+            });
         }
     }
 
@@ -1178,7 +1226,6 @@
         editProcessName = proc.name;
         editProcessDescription = proc.description ?? "";
         editProcessExpectedTimeMmSs = secondsToMmSs(proc.expected_time_seconds ?? null) || "";
-        error = "";
     }
 
     function closeEditProcessModal() {
@@ -1191,7 +1238,6 @@
     async function handleUpdateProcess() {
         if (!editProcess || !program || !editProcessName.trim()) return;
         submitting = true;
-        error = "";
         const expectedSeconds = mmSsToSeconds(editProcessExpectedTimeMmSs);
         const { ok, data, message } = await api(
             "PUT",
@@ -1214,22 +1260,19 @@
             const firstErr = d?.errors
                 ? Object.values(d.errors).flat()[0]
                 : null;
-            error =
-                firstErr ??
-                d?.message ??
-                message ??
-                "Failed to update process.";
+            toaster.error({
+                title: firstErr ?? d?.message ?? message ?? "Failed to update process.",
+            });
         }
     }
 
     async function handleUpdateStation() {
         if (!editStation || !editStationName.trim()) return;
         if (editStationProcessIds.length === 0) {
-            error = "Select at least one process.";
+            toaster.error({ title: "Select at least one process." });
             return;
         }
         submitting = true;
-        error = "";
         const { ok, data, message } = await api(
             "PUT",
             `/api/admin/stations/${editStation.id}`,
@@ -1279,20 +1322,18 @@
             const firstErr = d?.errors
                 ? Object.values(d.errors).flat()[0]
                 : null;
-            error = firstErr ?? message ?? "Failed to update station.";
+            toaster.error({ title: firstErr ?? message ?? "Failed to update station." });
         }
     }
 
     function openDeleteStationConfirm(s: StationItem) {
         confirmDeleteStation = s;
-        error = "";
     }
 
     async function handleDeleteStationConfirm() {
         if (!confirmDeleteStation) return;
         const s = confirmDeleteStation;
         submitting = true;
-        error = "";
         const { ok, message } = await api(
             "DELETE",
             `/api/admin/stations/${s.id}`,
@@ -1302,7 +1343,7 @@
             confirmDeleteStation = null;
             router.reload();
         } else {
-            error = message ?? "Cannot delete: station is used in track steps.";
+            toaster.error({ title: message ?? "Cannot delete: station is used in track steps." });
         }
     }
 
@@ -1312,14 +1353,12 @@
 
     function openDeleteProcessConfirm(proc: ProcessItem) {
         confirmDeleteProcess = proc;
-        error = "";
     }
 
     async function handleDeleteProcessConfirm() {
         if (!confirmDeleteProcess || !program) return;
         const proc = confirmDeleteProcess;
         submitting = true;
-        error = "";
         const { ok, message } = await api(
             "DELETE",
             `/api/admin/programs/${program.id}/processes/${proc.id}`,
@@ -1329,7 +1368,7 @@
             confirmDeleteProcess = null;
             router.reload();
         } else {
-            error = message ?? "Cannot delete process.";
+            toaster.error({ title: message ?? "Cannot delete process." });
         }
     }
 
@@ -1339,7 +1378,6 @@
 
     async function handleToggleStationActive(s: StationItem) {
         submitting = true;
-        error = "";
         // Per ISSUES-ELABORATION §17: include current process_ids so validation passes when only toggling is_active
         const processIds =
             s.process_ids && s.process_ids.length > 0 ? s.process_ids : [];
@@ -1369,14 +1407,13 @@
                 toast(payload.warning, "info");
             }
         } else {
-            error = message ?? "Failed to update station.";
+            toaster.error({ title: message ?? "Failed to update station." });
         }
     }
 
     async function handleAddStep() {
         if (!stepModalTrack || addStepProcessId === "") return;
         submitting = true;
-        error = "";
         const body: { process_id: number; estimated_minutes?: number } = {
             process_id: addStepProcessId as number,
         };
@@ -1396,21 +1433,19 @@
             addStepProcessId = "";
             addStepEstimatedMinutes = "";
         } else {
-            error = message ?? "Failed to add step.";
+            toaster.error({ title: message ?? "Failed to add step." });
         }
     }
 
     function openRemoveStepConfirm(step: StepItem) {
         if (!stepModalTrack) return;
         confirmRemoveStep = { step, track: stepModalTrack };
-        error = "";
     }
 
     async function handleRemoveStepConfirm() {
         if (!confirmRemoveStep) return;
         const { step } = confirmRemoveStep;
         submitting = true;
-        error = "";
         const { ok, message } = await api(
             "DELETE",
             `/api/admin/steps/${step.id}`,
@@ -1420,7 +1455,7 @@
             modalSteps = modalSteps.filter((s) => s.id !== step.id);
             confirmRemoveStep = null;
         } else {
-            error = message ?? "Failed to delete step.";
+            toaster.error({ title: message ?? "Failed to delete step." });
         }
     }
 
@@ -1491,7 +1526,6 @@
         migrateSessions: boolean = false,
     ) {
         submitting = true;
-        error = "";
         const { ok, data, message } = await api(
             "POST",
             `/api/admin/tracks/${t.id}/steps/reorder`,
@@ -1504,13 +1538,12 @@
         if (ok && data?.steps) {
             modalSteps = data.steps as StepItem[];
         } else {
-            error = message ?? "Failed to reorder steps.";
+            toaster.error({ title: message ?? "Failed to reorder steps." });
         }
     }
 
     async function handleSaveSettings() {
         submitting = true;
-        error = "";
         const { ok, data, message } = await api(
             "PUT",
             `/api/admin/programs/${program.id}`,
@@ -1569,12 +1602,11 @@
             const d = data as { requires_regeneration?: boolean } | undefined;
             if (d?.requires_regeneration) showProgramTtsRegenerateConfirm = true;
             else router.reload();
-        } else error = message ?? "Failed to save settings.";
+        } else toaster.error({ title: message ?? "Failed to save settings." });
     }
 
     /** Per ISSUES-ELABORATION §2: load saved default settings into form (does not save to program until user clicks Save). */
     async function applyDefaultSettings() {
-        error = "";
         const { ok, data } = await api("GET", "/api/admin/program-default-settings");
         if (!ok || !data) return;
         const s = (data as { settings?: Record<string, unknown> }).settings ?? {};
@@ -1595,7 +1627,6 @@
 
     async function handleAssignStaff(userId: number, stationId: number | null) {
         staffAssigningUserId = userId;
-        error = "";
         if (stationId === null) {
             const { ok, message: msg } = await api(
                 "DELETE",
@@ -1607,7 +1638,7 @@
                         ? { ...a, station_id: null, station: null }
                         : a,
                 );
-            } else error = msg ?? "Failed to unassign.";
+            } else toaster.error({ title: msg ?? "Failed to unassign." });
         } else {
             const { ok, message: msg } = await api(
                 "POST",
@@ -1630,7 +1661,7 @@
                           }
                         : a,
                 );
-            } else error = msg ?? "Failed to assign.";
+            } else toaster.error({ title: msg ?? "Failed to assign." });
         }
         staffAssigningUserId = null;
     }
@@ -1641,7 +1672,6 @@
         userId: number | null,
     ) {
         staffAssigningStationId = stationId;
-        error = "";
         const current = getAssignedUserIdForStation(stationId);
         if (userId === null) {
             if (current != null) {
@@ -1666,14 +1696,12 @@
         const oldUserId = assignedIds[slotIndex] ?? null;
         if (newUserId === oldUserId) return;
         staffAssigningStationId = stationId;
-        error = "";
         if (oldUserId != null) await handleAssignStaff(oldUserId, null);
         if (newUserId != null) await handleAssignStaff(newUserId, stationId);
         staffAssigningStationId = null;
     }
 
     async function handleAddSupervisor(userId: number) {
-        error = "";
         const { ok, message: msg } = await api(
             "POST",
             `/api/admin/programs/${program.id}/supervisors`,
@@ -1690,11 +1718,10 @@
                     x.id === userId ? { ...x, is_supervisor: true } : x,
                 );
             }
-        } else error = msg ?? "Failed to add supervisor.";
+        } else toaster.error({ title: msg ?? "Failed to add supervisor." });
     }
 
     async function handleRemoveSupervisor(userId: number) {
-        error = "";
         const removed = staffSupervisors.find((s) => s.id === userId);
         const { ok, message: msg } = await api(
             "DELETE",
@@ -1719,7 +1746,7 @@
                     },
                 ];
             }
-        } else error = msg ?? "Failed to remove supervisor.";
+        } else toaster.error({ title: msg ?? "Failed to remove supervisor." });
     }
 
     function formatDate(iso: string | null): string {
@@ -1922,16 +1949,18 @@
                 {/if}
                 <div
                     role="tablist"
+                    tabindex="-1"
                     bind:this={tabListEl}
                     class="flex gap-1 overflow-x-auto overflow-y-hidden flex-nowrap w-full max-w-full py-1 sm:py-2 sm:px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    onkeydown={handleTabKeydown}
                 >
-                    <button type="button" role="tab" id="tab-overview" aria-selected={activeTab === 'overview'} aria-controls="tabpanel-overview" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'overview' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "overview")}>Overview</button>
-                    <button type="button" role="tab" id="tab-processes" aria-selected={activeTab === 'processes'} aria-controls="tabpanel-processes" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'processes' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "processes")}>Processes</button>
-                    <button type="button" role="tab" id="tab-stations" aria-selected={activeTab === 'stations'} aria-controls="tabpanel-stations" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'stations' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "stations")}>Stations</button>
-                    <button type="button" role="tab" id="tab-staff" aria-selected={activeTab === 'staff'} aria-controls="tabpanel-staff" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'staff' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "staff")}>Staff</button>
-                    <button type="button" role="tab" id="tab-tracks" aria-selected={activeTab === 'tracks'} aria-controls="tabpanel-tracks" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'tracks' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "tracks")}>Track</button>
-                    <button type="button" role="tab" id="tab-diagram" aria-selected={activeTab === 'diagram'} aria-controls="tabpanel-diagram" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'diagram' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "diagram")}>Diagram</button>
-                    <button type="button" role="tab" id="tab-settings" aria-selected={activeTab === 'settings'} aria-controls="tabpanel-settings" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[48px] flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'settings' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "settings")}>Settings</button>
+                    <button type="button" role="tab" id="tab-overview" tabindex={activeTab === 'overview' ? 0 : -1} aria-selected={activeTab === 'overview'} aria-controls="tabpanel-overview" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'overview' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "overview")}>Overview</button>
+                    <button type="button" role="tab" id="tab-processes" tabindex={activeTab === 'processes' ? 0 : -1} aria-selected={activeTab === 'processes'} aria-controls="tabpanel-processes" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'processes' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "processes")}>Processes</button>
+                    <button type="button" role="tab" id="tab-stations" tabindex={activeTab === 'stations' ? 0 : -1} aria-selected={activeTab === 'stations'} aria-controls="tabpanel-stations" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'stations' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "stations")}>Stations</button>
+                    <button type="button" role="tab" id="tab-staff" tabindex={activeTab === 'staff' ? 0 : -1} aria-selected={activeTab === 'staff'} aria-controls="tabpanel-staff" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'staff' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "staff")}>Staff</button>
+                    <button type="button" role="tab" id="tab-tracks" tabindex={activeTab === 'tracks' ? 0 : -1} aria-selected={activeTab === 'tracks'} aria-controls="tabpanel-tracks" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'tracks' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "tracks")}>Track</button>
+                    <button type="button" role="tab" id="tab-diagram" tabindex={activeTab === 'diagram' ? 0 : -1} aria-selected={activeTab === 'diagram'} aria-controls="tabpanel-diagram" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'diagram' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "diagram")}>Diagram</button>
+                    <button type="button" role="tab" id="tab-settings" tabindex={activeTab === 'settings' ? 0 : -1} aria-selected={activeTab === 'settings'} aria-controls="tabpanel-settings" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'settings' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "settings")}>Settings</button>
                 </div>
                 {#if canScrollRight}
                     <button
@@ -1946,29 +1975,9 @@
             </div>
         </nav>
 
-        {#if error}
-            <div
-                class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4"
-                role="alert"
-            >
-                <span>{error}</span>
-                {#if activateMissing.length > 0}
-                    <ul class="mt-2 list-disc list-inside text-sm">
-                        {#each activateMissing as label}
-                            <li>{label}</li>
-                        {/each}
-                    </ul>
-                {/if}
-                <button
-                    type="button"
-                    class="btn preset-tonal btn-sm"
-                    onclick={() => { error = ""; activateMissing = []; }}
-                >Dismiss</button>
-            </div>
-        {/if}
 
         {#if activeTab === "overview"}
-            <div id="tabpanel-overview" role="tabpanel" aria-labelledby="tab-overview" class="space-y-8">
+            <div id="tabpanel-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="-1" class="space-y-8">
                 <section>
                     <h2 class="text-lg font-semibold text-surface-950 mb-4">
                         Program stats
@@ -2035,7 +2044,7 @@
                 </section>
             </div>
         {:else if activeTab === "diagram"}
-            <div id="tabpanel-diagram" role="tabpanel" aria-labelledby="tab-diagram" class="space-y-4">
+            <div id="tabpanel-diagram" role="tabpanel" aria-labelledby="tab-diagram" tabindex="-1" class="space-y-4">
                 <section>
                     <h2 class="text-lg font-semibold text-surface-950 mb-2">
                         Program diagram
@@ -2051,7 +2060,7 @@
                 </section>
             </div>
         {:else if activeTab === "processes"}
-            <div id="tabpanel-processes" role="tabpanel" aria-labelledby="tab-processes" class="space-y-6">
+            <div id="tabpanel-processes" role="tabpanel" aria-labelledby="tab-processes" tabindex="-1" class="space-y-6">
                 <section>
                     <h2 class="text-lg font-semibold text-surface-950 mb-2">
                         Processes
@@ -2170,7 +2179,7 @@
             </div>
         {:else if activeTab === "stations"}
             <!-- Stations tab (BD-010) -->
-            <div id="tabpanel-stations" role="tabpanel" aria-labelledby="tab-stations">
+            <div id="tabpanel-stations" role="tabpanel" aria-labelledby="tab-stations" tabindex="-1">
             <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
                 <div>
                     <h2 class="text-lg font-semibold text-surface-950">
@@ -2205,6 +2214,8 @@
             {/if}
             {#if localStations.length === 0}
                 <div
+                    role="status"
+                    aria-label="No stations defined"
                     class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
                 >
                     <div
@@ -2377,7 +2388,7 @@
             </div>
         {:else if activeTab === "staff"}
             <!-- Staff tab: station assignments + supervisors -->
-            <div id="tabpanel-staff" role="tabpanel" aria-labelledby="tab-staff" class="space-y-8">
+            <div id="tabpanel-staff" role="tabpanel" aria-labelledby="tab-staff" tabindex="-1" class="space-y-8">
                 <section>
                     <h2 class="text-lg font-semibold text-surface-950 mb-4">
                         Station assignments
@@ -2413,6 +2424,8 @@
                         </div>
                     {:else if staffAssignments.length === 0}
                         <div
+                            role="status"
+                            aria-label="No staff assigned"
                             class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
                         >
                             <div
@@ -2592,7 +2605,7 @@
                 </section>
             </div>
         {:else if activeTab === "tracks"}
-            <div id="tabpanel-tracks" role="tabpanel" aria-labelledby="tab-tracks">
+            <div id="tabpanel-tracks" role="tabpanel" aria-labelledby="tab-tracks" tabindex="-1">
             <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
                 <div>
                     <h2 class="text-lg font-semibold text-surface-950">
@@ -2612,6 +2625,8 @@
             </div>
             {#if tracks.length === 0}
                 <div
+                    role="status"
+                    aria-label="No tracks defined"
                     class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
                 >
                     <div
@@ -2749,7 +2764,7 @@
             {/if}
             </div>
         {:else if activeTab === "settings"}
-            <div id="tabpanel-settings" role="tabpanel" aria-labelledby="tab-settings" class="max-w-3xl">
+            <div id="tabpanel-settings" role="tabpanel" aria-labelledby="tab-settings" tabindex="-1" class="max-w-3xl">
                 <div
                     class="flex flex-wrap items-center justify-between gap-4 mb-4"
                 >
@@ -3949,12 +3964,6 @@
             }}
             class="flex flex-col gap-4"
         >
-            {#if error}
-                <div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-3 text-sm flex items-center justify-between gap-2">
-                    <span>{error}</span>
-                    <button type="button" class="btn preset-tonal btn-xs" onclick={() => (error = "")}>Dismiss</button>
-                </div>
-            {/if}
             <p class="text-sm text-surface-600">
                 Configure how this station name is spoken in each language (voice, speed, and pronunciation). Used for the second part of the call announcement.
             </p>
@@ -4084,12 +4093,18 @@
                     onclick={async () => {
                         if (programTtsRegenerating || !program?.id) return;
                         programTtsRegenerating = true;
-                        error = "";
                         try {
                             const res = await fetch(`/api/admin/programs/${program.id}/regenerate-station-tts`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "X-Requested-With": "XMLHttpRequest", "X-CSRF-TOKEN": getCsrfToken() }, credentials: "same-origin" });
-                            if (!res.ok) error = "Failed to start regeneration.";
+                            if (res.status === 419) {
+                                toaster.error({ title: MSG_SESSION_EXPIRED });
+                                return;
+                            }
+                            if (!res.ok) toaster.error({ title: "Failed to start regeneration." });
                             else { showProgramTtsRegenerateConfirm = false; router.reload(); }
-                        } catch { error = "Failed to start regeneration."; }
+                        } catch (e) {
+                            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+                            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to start regeneration." });
+                        }
                         finally { programTtsRegenerating = false; }
                     }}
                 >
@@ -4121,12 +4136,18 @@
                     onclick={async () => {
                         if (stationTtsRegenerating || !editStation?.id) return;
                         stationTtsRegenerating = true;
-                        error = "";
                         try {
                             const res = await fetch(`/api/admin/stations/${editStation.id}/regenerate-tts`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "X-Requested-With": "XMLHttpRequest", "X-CSRF-TOKEN": getCsrfToken() }, credentials: "same-origin" });
-                            if (!res.ok) error = "Failed to start regeneration.";
+                            if (res.status === 419) {
+                                toaster.error({ title: MSG_SESSION_EXPIRED });
+                                return;
+                            }
+                            if (!res.ok) toaster.error({ title: "Failed to start regeneration." });
                             else { showStationTtsRegenerateConfirm = false; closeModals(); closeStationTtsModal(); router.reload(); }
-                        } catch { error = "Failed to start regeneration."; }
+                        } catch (e) {
+                            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+                            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to start regeneration." });
+                        }
                         finally { stationTtsRegenerating = false; }
                     }}
                 >
@@ -4145,19 +4166,6 @@
     >
         {#snippet children()}
             <div class="flex flex-col gap-4">
-                {#if error}
-                    <div
-                        class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 text-sm"
-                        role="alert"
-                    >
-                        <span>{error}</span>
-                        <button
-                            type="button"
-                            class="btn preset-tonal btn-xs"
-                            onclick={() => (error = "")}>Dismiss</button
-                        >
-                    </div>
-                {/if}
                 <div class="text-sm text-surface-950/70">
                     Define the station sequence for this track. Clients will
                     follow this order.
@@ -4690,7 +4698,7 @@
 <ConfirmModal
     open={confirmStopProgram}
     title="Stop session?"
-    message={`Stop session for "${program.name}"? You can only stop when no clients are in the queue.`}
+    message={`Stop session for "${program?.name ?? 'this program'}"? You can only stop when no clients are in the queue.`}
     confirmLabel="Stop session"
     cancelLabel="Cancel"
     variant="danger"

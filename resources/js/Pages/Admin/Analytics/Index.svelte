@@ -1,6 +1,7 @@
 <script lang="ts">
     import AdminLayout from "../../../Layouts/AdminLayout.svelte";
     import ApexChart from "../../../Components/Analytics/ApexChart.svelte";
+    import { toaster } from "../../../lib/toaster.js";
     import {
         BarChart3,
         Download,
@@ -12,6 +13,7 @@
         CheckCircle2,
         Layers,
         AlertTriangle,
+        Filter,
     } from "lucide-svelte";
     import { onMount } from "svelte";
     import { get } from "svelte/store";
@@ -41,6 +43,9 @@
     }
 
     const page = usePage();
+
+    const MSG_SESSION_EXPIRED = "Session expired. Please refresh and try again.";
+    const MSG_NETWORK_ERROR = "Network error. Please try again.";
 
     function getCsrfToken(): string {
         const p = get(page);
@@ -89,7 +94,6 @@
 
     let loadingSummary = $state(true);
     let loadingCharts = $state(true);
-    let error = $state("");
     /** Chart lib from dynamic import; avoids Vite resolving apexcharts when compiling ApexChart.svelte */
     let chartLib = $state<{
         new (el: HTMLElement, opts: Record<string, unknown>): { render(): void; updateOptions(o: Record<string, unknown>): void; destroy(): void };
@@ -117,6 +121,10 @@
             },
             credentials: "same-origin",
         });
+        if (res.status === 419) {
+            toaster.error({ title: MSG_SESSION_EXPIRED });
+            throw new Error("Session expired");
+        }
         if (!res.ok) throw new Error(await res.text());
         return res.json() as Promise<T>;
     }
@@ -125,8 +133,12 @@
         try {
             const data = await apiGet<{ programs: ProgramItem[] }>("/api/admin/programs");
             programs = data.programs ?? [];
-        } catch {
+        } catch (e) {
             programs = [];
+            const msg = e instanceof Error ? e.message : "";
+            if (msg !== "Session expired" && e instanceof TypeError && msg === "Failed to fetch") {
+                toaster.error({ title: MSG_NETWORK_ERROR });
+            }
         }
     }
 
@@ -138,26 +150,45 @@
         try {
             const data = await apiGet<{ tracks: TrackItem[] }>(`/api/admin/programs/${programId}/tracks`);
             tracks = data.tracks ?? [];
-        } catch {
+        } catch (e) {
             tracks = [];
+            const msg = e instanceof Error ? e.message : "";
+            if (msg !== "Session expired" && e instanceof TypeError && msg === "Failed to fetch") {
+                toaster.error({ title: MSG_NETWORK_ERROR });
+            }
         }
     }
 
+    async function fetchJson(url: string): Promise<unknown> {
+        const res = await fetch(url, {
+            headers: {
+                Accept: "application/json",
+                "X-CSRF-TOKEN": getCsrfToken(),
+                "X-Requested-With": "XMLHttpRequest",
+            },
+            credentials: "same-origin",
+        });
+        if (res.status === 419) {
+            toaster.error({ title: MSG_SESSION_EXPIRED });
+            throw new Error("Session expired");
+        }
+        return res.ok ? res.json() : null;
+    }
+
     async function fetchAll() {
-        error = "";
         loadingSummary = true;
         loadingCharts = true;
         try {
             const q = queryParams();
             const [s, tp, wd, su, tp2, bh, fn, tt] = await Promise.all([
-                fetch(`/api/admin/analytics/summary?${q}`).then((r) => (r.ok ? r.json() : null)),
-                fetch(`/api/admin/analytics/throughput?${q}`).then((r) => (r.ok ? r.json() : [])),
-                fetch(`/api/admin/analytics/wait-time-distribution?${q}`).then((r) => (r.ok ? r.json() : null)),
-                fetch(`/api/admin/analytics/station-utilization?${q}`).then((r) => (r.ok ? r.json() : null)),
-                fetch(`/api/admin/analytics/tracks?${q}`).then((r) => (r.ok ? r.json() : null)),
-                fetch(`/api/admin/analytics/busiest-hours?${q}`).then((r) => (r.ok ? r.json() : null)),
-                fetch(`/api/admin/analytics/drop-off-funnel?${q}`).then((r) => (r.ok ? r.json() : null)),
-                fetch("/api/admin/analytics/token-tts-health").then((r) => (r.ok ? r.json() : null)),
+                fetchJson(`/api/admin/analytics/summary?${q}`),
+                fetchJson(`/api/admin/analytics/throughput?${q}`),
+                fetchJson(`/api/admin/analytics/wait-time-distribution?${q}`),
+                fetchJson(`/api/admin/analytics/station-utilization?${q}`),
+                fetchJson(`/api/admin/analytics/tracks?${q}`),
+                fetchJson(`/api/admin/analytics/busiest-hours?${q}`),
+                fetchJson(`/api/admin/analytics/drop-off-funnel?${q}`),
+                fetchJson("/api/admin/analytics/token-tts-health"),
             ]);
             summary = s as SummaryData | null;
             throughput = Array.isArray(tp) ? tp : [];
@@ -168,7 +199,10 @@
             funnel = fn;
             tokenTts = tt;
         } catch (e) {
-            error = e instanceof Error ? e.message : "Failed to load analytics.";
+            const msg = e instanceof Error ? e.message : "";
+            if (msg === "Session expired") return;
+            const isNetwork = e instanceof TypeError && msg === "Failed to fetch";
+            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : msg || "Failed to load analytics." });
         } finally {
             loadingSummary = false;
             loadingCharts = false;
@@ -251,7 +285,7 @@
             <div class="flex gap-2">
                 <button
                     type="button"
-                    class="btn preset-outlined-surface btn-sm gap-2"
+                    class="btn preset-outlined-surface btn-sm gap-2 touch-target-h"
                     onclick={exportCsv}
                     disabled={!summary}
                 >
@@ -260,7 +294,7 @@
                 </button>
                 <button
                     type="button"
-                    class="btn preset-outlined-surface btn-sm gap-2"
+                    class="btn preset-outlined-surface btn-sm gap-2 touch-target-h"
                     onclick={() => window.print()}
                 >
                     <Download class="w-4 h-4" />
@@ -269,17 +303,9 @@
             </div>
         </div>
 
-        {#if error}
-            <div
-                class="rounded-container border border-error-200 bg-error-50 text-error-900 p-4 flex items-center gap-3"
-            >
-                <AlertTriangle class="w-5 h-5 shrink-0" />
-                <p class="text-sm">{error}</p>
-            </div>
-        {/if}
-
         <!-- Zone 2 — Filter Bar (Sticky): date range, program, track; debounced re-fetch; all charts react -->
         <div
+            id="analytics-filter-bar"
             class="sticky top-0 z-10 rounded-container border border-surface-200 bg-white shadow-sm p-4 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-4"
         >
             <div class="flex flex-wrap items-center gap-3">
@@ -287,7 +313,7 @@
                 <div class="flex rounded-lg border border-surface-200 overflow-hidden [&_button]:px-3 [&_button]:py-2 [&_button]:text-sm [&_button]:font-medium">
                     <button
                         type="button"
-                        class="{dateRangeKey === 'today'
+                        class="touch-target-h {dateRangeKey === 'today'
                             ? 'bg-primary-500 text-white'
                             : 'bg-surface-50 text-surface-700 hover:bg-surface-100'} transition-colors"
                         onclick={() => (dateRangeKey = "today")}
@@ -296,7 +322,7 @@
                     </button>
                     <button
                         type="button"
-                        class="{dateRangeKey === '7'
+                        class="touch-target-h {dateRangeKey === '7'
                             ? 'bg-primary-500 text-white'
                             : 'bg-surface-50 text-surface-700 hover:bg-surface-100'} transition-colors border-l border-surface-200"
                         onclick={() => (dateRangeKey = "7")}
@@ -305,7 +331,7 @@
                     </button>
                     <button
                         type="button"
-                        class="{dateRangeKey === '30'
+                        class="touch-target-h {dateRangeKey === '30'
                             ? 'bg-primary-500 text-white'
                             : 'bg-surface-50 text-surface-700 hover:bg-surface-100'} transition-colors border-l border-surface-200"
                         onclick={() => (dateRangeKey = "30")}
@@ -314,7 +340,7 @@
                     </button>
                     <button
                         type="button"
-                        class="{dateRangeKey === 'custom'
+                        class="touch-target-h {dateRangeKey === 'custom'
                             ? 'bg-primary-500 text-white'
                             : 'bg-surface-50 text-surface-700 hover:bg-surface-100'} transition-colors border-l border-surface-200"
                         onclick={() => (dateRangeKey = "custom")}
@@ -326,13 +352,13 @@
                     <div class="flex items-center gap-2">
                         <input
                             type="date"
-                            class="input input-sm rounded-container border border-surface-200 w-[140px]"
+                            class="input input-sm rounded-container border border-surface-200 w-[140px] touch-target-h"
                             bind:value={customFrom}
                         />
                         <span class="text-surface-500">to</span>
                         <input
                             type="date"
-                            class="input input-sm rounded-container border border-surface-200 w-[140px]"
+                            class="input input-sm rounded-container border border-surface-200 w-[140px] touch-target-h"
                             bind:value={customTo}
                         />
                     </div>
@@ -344,7 +370,7 @@
                 >
                 <select
                     id="analytics-program"
-                    class="select select-sm rounded-container border border-surface-200 w-[180px]"
+                    class="select select-sm rounded-container border border-surface-200 w-[180px] touch-target-h"
                     bind:value={programId}
                     onchange={() => (trackId = "")}
                 >
@@ -360,7 +386,7 @@
                 >
                 <select
                     id="analytics-track"
-                    class="select select-sm rounded-container border border-surface-200 w-[160px]"
+                    class="select select-sm rounded-container border border-surface-200 w-[160px] touch-target-h"
                     bind:value={trackId}
                 >
                     <option value="">All Tracks</option>
@@ -371,6 +397,33 @@
             </div>
         </div>
 
+        {#if !loadingSummary && !loadingCharts && !summary}
+            <!-- Page-level empty state when no data for range -->
+            <div
+                role="status"
+                aria-label="No analytics data for this range"
+                class="rounded-container border border-surface-200 bg-surface-50 p-12 flex flex-col items-center justify-center text-center shadow-sm"
+            >
+                <div
+                    class="bg-surface-100 p-4 rounded-full text-surface-400 mb-4"
+                >
+                    <BarChart3 class="w-8 h-8" />
+                </div>
+                <h3 class="text-lg font-semibold text-surface-950">
+                    No data for this range
+                </h3>
+                <p class="text-surface-600 max-w-sm mt-2 mb-6">
+                    Try changing the date range or selecting a different program.
+                </p>
+                <button
+                    type="button"
+                    class="btn preset-filled-primary-500 flex items-center gap-2 touch-target-h"
+                    onclick={() => document.getElementById('analytics-filter-bar')?.scrollIntoView({ behavior: 'smooth' })}
+                >
+                    <Filter class="w-4 h-4" /> Change filters
+                </button>
+            </div>
+        {:else}
         <!-- Zone 3 — KPI Summary Strip -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             {#if loadingSummary && !summary}
@@ -731,5 +784,6 @@
                 {/if}
             </div>
         </div>
+        {/if}
     </div>
 </AdminLayout>

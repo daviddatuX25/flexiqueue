@@ -5,6 +5,7 @@
 	import { Camera } from 'lucide-svelte';
 	import { get } from 'svelte/store';
 	import { usePage } from '@inertiajs/svelte';
+	import { toaster } from '../../lib/toaster.js';
 
 	interface Track {
 		id: number;
@@ -52,7 +53,6 @@
 	let barcodeInputEl = $state<HTMLInputElement | null>(null);
 	let selectedCategory = $state<string | null>(null);
 	let selectedTrackId = $state<number | null>(null);
-	let error = $state('');
 	let isSubmitting = $state(false);
 	let scanCountdown = $state(0);
 	let scanCountdownIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
@@ -83,20 +83,32 @@
 		return meta ?? '';
 	}
 
+	const MSG_SESSION_EXPIRED = 'Session expired. Please refresh and try again.';
+	const MSG_NETWORK_ERROR = 'Network error. Please try again.';
+
 	async function api(method: string, url: string, body?: object): Promise<{ ok: boolean; data?: object; message?: string; errors?: Record<string, string[]> }> {
-		const res = await fetch(url, {
-			method,
-			headers: {
-				'Content-Type': 'application/json',
-				Accept: 'application/json',
-				'X-CSRF-TOKEN': getCsrfToken(),
-				'X-Requested-With': 'XMLHttpRequest',
-			},
-			credentials: 'same-origin',
-			...(body ? { body: JSON.stringify(body) } : {}),
-		});
-		const data = await res.json().catch(() => ({}));
-		return { ok: res.ok, data, message: data?.message, errors: data?.errors };
+		try {
+			const res = await fetch(url, {
+				method,
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-CSRF-TOKEN': getCsrfToken(),
+					'X-Requested-With': 'XMLHttpRequest',
+				},
+				credentials: 'same-origin',
+				...(body ? { body: JSON.stringify(body) } : {}),
+			});
+			if (res.status === 419) {
+				toaster.error({ title: MSG_SESSION_EXPIRED });
+				return { ok: false, message: MSG_SESSION_EXPIRED };
+			}
+			const data = await res.json().catch(() => ({}));
+			return { ok: res.ok, data, message: data?.message, errors: data?.errors };
+		} catch (e) {
+			toaster.error({ title: MSG_NETWORK_ERROR });
+			return { ok: false, message: MSG_NETWORK_ERROR };
+		}
 	}
 
 	function setDefaultTrack() {
@@ -176,11 +188,11 @@
 					scannedToken = { physical_id: t.physical_id, qr_hash: t.qr_hash, status: 'available' };
 					showScanner = false;
 				} else if (t?.status === 'in_use') {
-					error = 'Token is already in use.';
+					toaster.error({ title: 'Token is already in use.' });
 				} else if (t?.status === 'deactivated') {
-					error = 'Token deactivated.';
+					toaster.error({ title: 'Token deactivated.' });
 				} else {
-					error = 'Token not found.';
+					toaster.error({ title: 'Token not found.' });
 				}
 				scanHandled = false;
 			});
@@ -195,17 +207,16 @@
 	async function handleLookup() {
 		const id = manualPhysicalId.trim();
 		if (!id) return;
-		error = '';
 		scannedToken = null;
 		const { ok, data, message } = await api('GET', `/api/sessions/token-lookup?physical_id=${encodeURIComponent(id)}`);
 		if (!ok) {
-			error = message ?? 'Token not found.';
+			toaster.error({ title: message ?? 'Token not found.' });
 			scanHandled = false;
 			return;
 		}
 		const t = data as { physical_id: string; qr_hash: string; status: string };
 		if (t.status !== 'available') {
-			error = t.status === 'in_use' ? 'Token is already in use.' : `Token is marked as ${t.status}.`;
+			toaster.error({ title: t.status === 'in_use' ? 'Token is already in use.' : `Token is marked as ${t.status}.` });
 			// Consume the scan so QR scanner doesn't keep firing and re-clearing/setting error (flashing)
 			scanHandled = true;
 			return;
@@ -216,7 +227,6 @@
 	async function handleQrScan(decodedText: string) {
 		if (scanHandled) return;
 		scanHandled = true;
-		error = '';
 		const trimmed = decodedText.trim();
 		const branchA = trimmed.length <= 10 && /^[A-Za-z0-9]+$/.test(trimmed);
 		const branchB = trimmed.length === 64 && /^[a-f0-9]+$/.test(trimmed);
@@ -237,11 +247,11 @@
 				scannedToken = { physical_id: t.physical_id, qr_hash: t.qr_hash, status: 'available' };
 				showScanner = false;
 			} else if (t?.status === 'in_use') {
-				error = 'Token is already in use.';
+				toaster.error({ title: 'Token is already in use.' });
 			} else if (t?.status === 'deactivated') {
-				error = 'Token deactivated.';
+				toaster.error({ title: 'Token deactivated.' });
 			} else {
-				error = 'Token not found.';
+				toaster.error({ title: 'Token not found.' });
 			}
 			return;
 		}
@@ -255,19 +265,16 @@
 		manualPhysicalId = '';
 		selectedCategory = null;
 		setDefaultTrack();
-		error = '';
 		showScanner = false;
 	}
 
 	/** Per ISSUES-ELABORATION §12: clear error and allow scan/lookup again without refresh (e.g. after token freed elsewhere). */
 	function tryAgain() {
-		error = '';
 		scanHandled = false;
 	}
 
 	async function handleConfirm() {
 		if (!scannedToken || selectedCategory === null || selectedTrackId === null) return;
-		error = '';
 		isSubmitting = true;
 		const { ok, data, message } = await api('POST', '/api/sessions/bind', {
 			qr_hash: scannedToken.qr_hash,
@@ -282,11 +289,11 @@
 		}
 		const d = data as { active_session?: { alias: string }; token_status?: string } | undefined;
 		if (d?.active_session) {
-			error = `Token already in use (${d.active_session.alias}).`;
+			toaster.error({ title: `Token already in use (${d.active_session.alias}).` });
 		} else if (d?.token_status) {
-			error = `Token is marked as ${d.token_status}.`;
+			toaster.error({ title: `Token is marked as ${d.token_status}.` });
 		} else {
-			error = message ?? 'Bind failed.';
+			toaster.error({ title: message ?? 'Bind failed.' });
 		}
 	}
 </script>
@@ -325,13 +332,12 @@
 						<p class="flex-1 text-base font-medium text-surface-950">Scan or enter token ID</p>
 						<button
 							type="button"
-							class="btn btn-icon preset-filled-primary-500 shrink-0 min-h-[48px] min-w-[48px]"
+							class="btn btn-icon preset-filled-primary-500 shrink-0 touch-target"
 							aria-label="Open camera to scan QR"
 							title="Tap to scan with device camera"
 							onclick={() => {
 								showScanner = true;
 								scanHandled = false;
-								error = '';
 							}}
 						>
 							<Camera class="w-6 h-6" />
@@ -351,23 +357,15 @@
 						<div class="flex gap-2">
 							<input
 								type="text"
-								class="input flex-1 rounded-container border border-surface-200 px-3 min-h-[48px]"
+								class="input flex-1 rounded-container border border-surface-200 px-3 touch-target-h"
 								placeholder="e.g. A1"
 								bind:value={manualPhysicalId}
 								onfocus={startManualFocusWindow}
 								onkeydown={(e) => e.key === 'Enter' && handleLookup()}
 							/>
-							<button type="button" class="btn preset-filled-primary-500 min-h-[48px] min-w-[48px] px-4" onclick={handleLookup}>Look up</button>
+							<button type="button" class="btn preset-filled-primary-500 touch-target px-4" onclick={handleLookup}>Look up</button>
 						</div>
 					</div>
-					{#if error}
-						<div class="rounded-container bg-error-100 text-error-900 border border-error-300 p-3 md:p-4 text-sm flex flex-col gap-3">
-							<span>{error}</span>
-							<button type="button" class="btn preset-tonal min-h-[48px] min-w-[48px] px-4 w-fit" onclick={tryAgain}>
-								Try again
-							</button>
-						</div>
-					{/if}
 				</div>
 
 				<Modal open={showScanner} title="Scan QR via device" onClose={closeScanner} wide={true}>
@@ -397,7 +395,7 @@
 							{#each CATEGORIES as cat}
 								<button
 									type="button"
-									class="btn min-h-[48px] px-4 py-2 {selectedCategory === cat.value ? 'preset-filled-primary-500' : 'preset-tonal'}"
+									class="btn touch-target-h px-4 py-2 {selectedCategory === cat.value ? 'preset-filled-primary-500' : 'preset-tonal'}"
 									onclick={() => (selectedCategory = cat.value)}
 								>
 									{cat.label}
@@ -413,7 +411,7 @@
 								{#each activeProgram?.tracks ?? [] as track (track.id)}
 									<button
 										type="button"
-										class="btn min-h-[48px] px-4 py-2 {selectedTrackId === track.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
+										class="btn touch-target-h px-4 py-2 {selectedTrackId === track.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
 										onclick={() => (selectedTrackId = track.id)}
 									>
 										{track.name}
@@ -421,7 +419,7 @@
 								{/each}
 							</div>
 						{:else}
-							<select id="triage-track" class="w-full rounded-container border border-surface-200 px-3 py-2 min-h-[48px]" bind:value={selectedTrackId}>
+							<select id="triage-track" class="w-full rounded-container border border-surface-200 px-3 py-2 touch-target-h" bind:value={selectedTrackId}>
 								{#each activeProgram?.tracks ?? [] as track (track.id)}
 									<option value={track.id}>{track.name}</option>
 								{/each}
@@ -429,17 +427,14 @@
 						{/if}
 					</div>
 
-					{#if error}
-						<div class="rounded-container bg-error-100 text-error-900 border border-error-300 p-3 text-sm">{error}</div>
-					{/if}
 
 					<div class="flex gap-2 pt-2">
-						<button type="button" class="btn preset-tonal flex-1 min-h-[48px]" onclick={resetScan} disabled={isSubmitting}>
+						<button type="button" class="btn preset-tonal flex-1 touch-target-h" onclick={resetScan} disabled={isSubmitting}>
 							Cancel
 						</button>
 						<button
 							type="button"
-							class="btn preset-filled-primary-500 flex-1 min-h-[48px]"
+							class="btn preset-filled-primary-500 flex-1 touch-target-h"
 							onclick={handleConfirm}
 							disabled={isSubmitting || selectedCategory === null || selectedTrackId === null}
 						>

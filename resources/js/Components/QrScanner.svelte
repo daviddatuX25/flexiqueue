@@ -373,7 +373,8 @@
 				<label for="qr-camera-select" class="text-xs font-medium text-surface-950/70">Camera</label>
 				<select
 					id="qr-camera-select"
-					class="select rounded-container border border-surface-200 px-3 py-2 text-sm w-full bg-surface-50"
+					class="select rounded-container border border-surface-200 px-3 py-2 text-sm w-full bg-surface-50 touch-target-h"
+					aria-label="Select camera"
 					disabled={isLoading}
 					value={selectedCameraId ?? ''}
 					onchange={(e) => {
@@ -405,7 +406,7 @@
 		{#if mode === 'file' && showFileFallback}
 			<div class="rounded-container border border-surface-200 bg-surface-50 p-4 flex flex-col gap-3">
 				<p class="text-sm text-surface-950/80">{errorMessage || 'No camera available.'}</p>
-				<label for={fileInputId} class="btn preset-filled-primary-500 cursor-pointer text-center">
+				<label for={fileInputId} class="btn preset-filled-primary-500 cursor-pointer text-center touch-target-h inline-flex items-center justify-center" aria-label="Scan from image file">
 					Scan from file
 				</label>
 			</div>
@@ -426,7 +427,7 @@
 				>
 					{errorMessage}
 				</div>
-				<label for={fileInputId} class="btn preset-tonal cursor-pointer text-center text-sm">
+				<label for={fileInputId} class="btn preset-tonal cursor-pointer text-center text-sm touch-target-h inline-flex items-center justify-center" aria-label="Scan from image file instead">
 					Scan from file instead
 				</label>
 			</div>

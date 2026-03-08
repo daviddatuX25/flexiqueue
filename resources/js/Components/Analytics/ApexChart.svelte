@@ -59,9 +59,11 @@
 <div bind:this={chartEl} class="w-full" style="min-height: {height}px;">
     {#if !chartLib}
         <div
+            role="status"
+            aria-label="Chart unavailable"
             class="flex items-center justify-center h-full min-h-[200px] rounded-container bg-surface-100 text-surface-500 text-sm"
         >
-            Chart library not loaded. Run: npm install apexcharts
+            Chart could not be loaded. Try refreshing the page.
         </div>
     {/if}
 </div>

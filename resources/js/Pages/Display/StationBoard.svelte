@@ -7,6 +7,7 @@
 	import { router } from '@inertiajs/svelte';
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
 	import { prepareDisplayTts, cancelCurrentAnnouncement, playSegmentAQueued } from '../../lib/displayTts.js';
+	import { toaster } from '../../lib/toaster.js';
 
 let {
 	program_name = null,
@@ -76,7 +77,9 @@ let connectorPhrase = $state(null);
 			playSegmentAQueued(e.alias, pronounceAs, e.token_id ?? null, {
 				muted,
 				volume,
-				onFallback: (reason, text) => { console.warn?.('TTS fallback', reason, text); },
+				onCompleteFailure: () => {
+					toaster.warning({ title: 'Audio unavailable', description: 'Call announcement could not be played.' });
+				},
 			});
 		}
 		refreshStationData();
@@ -85,6 +88,9 @@ let connectorPhrase = $state(null);
 	onMount(() => {
 		prepareDisplayTts();
 		if (typeof window === 'undefined' || !window.Echo || !station_id) {
+			if (typeof window !== 'undefined') {
+				toaster.warning({ title: 'Real-time updates unavailable. Display will not receive live updates.' });
+			}
 			return () => cancelCurrentAnnouncement();
 		}
 		const echo = window.Echo;

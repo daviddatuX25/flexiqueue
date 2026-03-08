@@ -6,6 +6,7 @@
     import { Link, router, usePage } from "@inertiajs/svelte";
 
     // Import icons to make the UI look more professional
+    import { toaster } from "../../../lib/toaster.js";
     import {
         Plus,
         Play,
@@ -15,7 +16,6 @@
         Edit2,
         Eye,
         FolderOpen,
-        AlertCircle,
     } from "lucide-svelte";
 
     interface ProgramItem {
@@ -37,7 +37,6 @@
     let editName = $state("");
     let editDescription = $state("");
     let submitting = $state(false);
-    let error = $state("");
 
     const page = usePage();
 
@@ -57,30 +56,41 @@
         return meta ?? "";
     }
 
+    const MSG_SESSION_EXPIRED = "Session expired. Please refresh and try again.";
+    const MSG_NETWORK_ERROR = "Network error. Please try again.";
+
     async function api(
         method: string,
         url: string,
         body?: object,
     ): Promise<{ ok: boolean; data?: object; message?: string }> {
-        const res = await fetch(url, {
-            method,
-            headers: {
-                "Content-Type": "application/json",
-                Accept: "application/json",
-                "X-CSRF-TOKEN": getCsrfToken(),
-                "X-Requested-With": "XMLHttpRequest",
-            },
-            credentials: "same-origin",
-            ...(body ? { body: JSON.stringify(body) } : {}),
-        });
-        const data = await res.json().catch(() => ({}));
-        return { ok: res.ok, data, message: data?.message };
+        try {
+            const res = await fetch(url, {
+                method,
+                headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                    "X-CSRF-TOKEN": getCsrfToken(),
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+                credentials: "same-origin",
+                ...(body ? { body: JSON.stringify(body) } : {}),
+            });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return { ok: false, message: MSG_SESSION_EXPIRED };
+            }
+            const data = await res.json().catch(() => ({}));
+            return { ok: res.ok, data, message: data?.message };
+        } catch (e) {
+            toaster.error({ title: MSG_NETWORK_ERROR });
+            return { ok: false, message: MSG_NETWORK_ERROR };
+        }
     }
 
     function openCreate() {
         createName = "";
         createDescription = "";
-        error = "";
         showCreateModal = true;
     }
 
@@ -88,20 +98,17 @@
         editProgram = p;
         editName = p.name;
         editDescription = p.description ?? "";
-        error = "";
     }
 
     function closeModals() {
         showCreateModal = false;
         editProgram = null;
         deleteConfirmProgram = null;
-        error = "";
     }
 
     async function handleCreate() {
         if (!createName.trim()) return;
         submitting = true;
-        error = "";
         const { ok, message } = await api("POST", "/api/admin/programs", {
             name: createName.trim(),
             description: createDescription.trim() || null,
@@ -111,14 +118,13 @@
             closeModals();
             router.reload();
         } else {
-            error = message ?? "Failed to create program.";
+            toaster.error({ title: message ?? "Failed to create program." });
         }
     }
 
     async function handleUpdate() {
         if (!editProgram || !editName.trim()) return;
         submitting = true;
-        error = "";
         const { ok, message } = await api(
             "PUT",
             `/api/admin/programs/${editProgram.id}`,
@@ -132,7 +138,7 @@
             closeModals();
             router.reload();
         } else {
-            error = message ?? "Failed to update program.";
+            toaster.error({ title: message ?? "Failed to update program." });
         }
     }
 
@@ -147,7 +153,6 @@
 
     async function handleActivate(p: ProgramItem) {
         submitting = true;
-        error = "";
         activateMissing = [];
         const { ok, message, data } = await api(
             "POST",
@@ -155,80 +160,74 @@
         );
         submitting = false;
         if (ok) {
-            error = "";
             activateMissing = [];
             router.reload();
         } else {
-            error = message ?? "Failed to start session.";
             const missing = (data as { missing?: string[] } | undefined)
                 ?.missing;
             if (Array.isArray(missing))
                 activateMissing = missing.map(
                     (k) => ACTIVATE_MISSING_LABELS[k] ?? k,
                 );
+            toaster.error({
+                title: message ?? "Failed to start session.",
+                description: activateMissing.length ? activateMissing.join(", ") : undefined,
+            });
         }
     }
 
     async function handlePause(p: ProgramItem) {
         submitting = true;
-        error = "";
         const { ok, message } = await api(
             "POST",
             `/api/admin/programs/${p.id}/pause`,
         );
         submitting = false;
         if (ok) {
-            error = "";
             router.reload();
         } else {
-            error = message ?? "Failed to pause.";
+            toaster.error({ title: message ?? "Failed to pause." });
         }
     }
 
     async function handleResume(p: ProgramItem) {
         submitting = true;
-        error = "";
         const { ok, message } = await api(
             "POST",
             `/api/admin/programs/${p.id}/resume`,
         );
         submitting = false;
         if (ok) {
-            error = "";
             router.reload();
         } else {
-            error = message ?? "Failed to resume.";
+            toaster.error({ title: message ?? "Failed to resume." });
         }
     }
 
     async function handleDeactivate(p: ProgramItem) {
         submitting = true;
-        error = "";
         const { ok, message } = await api(
             "POST",
             `/api/admin/programs/${p.id}/deactivate`,
         );
         submitting = false;
         if (ok) {
-            error = "";
             router.reload();
         } else {
-            error =
-                message ??
-                "You can only stop the session when no clients are in the queue.";
+            toaster.error({
+                title: message ?? "You can only stop the session when no clients are in the queue.",
+            });
         }
     }
 
     function openDeleteConfirm(p: ProgramItem) {
         deleteConfirmProgram = p;
-        error = "";
     }
 
     async function handleDeleteConfirm() {
         if (!deleteConfirmProgram) return;
         const p = deleteConfirmProgram;
         submitting = true;
-        error = "";
         const { ok, message } = await api(
             "DELETE",
             `/api/admin/programs/${p.id}`,
@@ -238,7 +237,7 @@
             closeModals();
             router.reload();
         } else {
-            error = message ?? "Cannot delete: program has sessions.";
+            toaster.error({ title: message ?? "Cannot delete: program has sessions." });
             deleteConfirmProgram = null;
         }
     }
@@ -279,38 +278,11 @@
             </div>
         </div>
 
-        {#if error}
-            <div
-                class="bg-error-50 text-error-900 border border-error-200 rounded-container p-4 flex items-start gap-3 shadow-sm"
-                role="alert"
-            >
-                <AlertCircle class="w-5 h-5 text-error-500 mt-0.5 shrink-0" />
-                <div class="flex-grow">
-                    <span class="font-medium text-sm">{error}</span>
-                    {#if activateMissing.length > 0}
-                        <ul class="mt-2 list-disc list-inside text-sm">
-                            {#each activateMissing as label}
-                                <li>{label}</li>
-                            {/each}
-                        </ul>
-                    {/if}
-                </div>
-                <button
-                    type="button"
-                    class="text-error-500 hover:text-error-700 transition-colors"
-                    onclick={() => {
-                        error = "";
-                        activateMissing = [];
-                    }}
-                >
-                    Dismiss
-                </button>
-            </div>
-        {/if}
-
         {#if programs.length === 0}
             <div
+                role="status"
                 class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
+                aria-label="No programs yet"
             >
                 <div
                     class="bg-surface-100 p-4 rounded-full text-surface-400 mb-4"
@@ -318,15 +290,14 @@
                     <FolderOpen class="w-8 h-8" />
                 </div>
                 <h3 class="text-lg font-semibold text-surface-950">
-                    No programs found
+                    Create your first program
                 </h3>
                 <p class="text-surface-600 max-w-sm mt-2 mb-6">
-                    You haven't set up any programs or services yet. Create one
-                    to start managing queues.
+                    Add a program to start managing queues.
                 </p>
                 <button
                     type="button"
-                    class="btn preset-filled-primary-500 flex items-center gap-2"
+                    class="btn preset-filled-primary-500 flex items-center gap-2 touch-target-h"
                     onclick={openCreate}
                 >
                     <Plus class="w-4 h-4" /> Create First Program

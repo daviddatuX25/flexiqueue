@@ -8,6 +8,7 @@
 	import { get } from "svelte/store";
 	import { usePage } from "@inertiajs/svelte";
 	import { onMount } from "svelte";
+	import { toaster } from "../../lib/toaster.js";
 	import { Clock, Users, GitMerge, AlertCircle } from "lucide-svelte";
 
 	const page = usePage();
@@ -19,26 +20,37 @@
 		return meta ?? "";
 	}
 
+	const MSG_SESSION_EXPIRED = "Session expired. Please refresh and try again.";
+	const MSG_NETWORK_ERROR = "Network error. Please try again.";
+
 	async function api(method: string, url: string, body?: object): Promise<{ ok: boolean; data?: object; message?: string }> {
-		const res = await fetch(url, {
-			method,
-			headers: {
-				"Content-Type": "application/json",
-				Accept: "application/json",
-				"X-CSRF-TOKEN": getCsrfToken(),
-				"X-Requested-With": "XMLHttpRequest",
-			},
-			credentials: "same-origin",
-			...(body ? { body: JSON.stringify(body) } : {}),
-		});
-		const data = await res.json().catch(() => ({}));
-		return { ok: res.ok, data, message: data?.message };
+		try {
+			const res = await fetch(url, {
+				method,
+				headers: {
+					"Content-Type": "application/json",
+					Accept: "application/json",
+					"X-CSRF-TOKEN": getCsrfToken(),
+					"X-Requested-With": "XMLHttpRequest",
+				},
+				credentials: "same-origin",
+				...(body ? { body: JSON.stringify(body) } : {}),
+			});
+			if (res.status === 419) {
+				toaster.error({ title: MSG_SESSION_EXPIRED });
+				return { ok: false, message: MSG_SESSION_EXPIRED };
+			}
+			const data = await res.json().catch(() => ({}));
+			return { ok: res.ok, data, message: data?.message };
+		} catch (e) {
+			toaster.error({ title: MSG_NETWORK_ERROR });
+			return { ok: false, message: MSG_NETWORK_ERROR };
+		}
 	}
 
 	let loading = $state(true);
-	let loadError = $state("");
+	let loadFailed = $state(false);
 	let submitting = $state(false);
-	let error = $state("");
 	let noShowTimer = $state(10);
 	let requireOverride = $state(true);
 	let priorityFirst = $state(true);
@@ -49,11 +61,14 @@
 
 	async function loadSettings() {
 		loading = true;
-		loadError = "";
-		const { ok, data } = await api("GET", "/api/admin/program-default-settings");
+		loadFailed = false;
+		const { ok, data, message } = await api("GET", "/api/admin/program-default-settings");
 		loading = false;
 		if (!ok || !data) {
-			loadError = "Unable to load settings. Try again or refresh the page.";
+			loadFailed = true;
+			if (message !== MSG_SESSION_EXPIRED && message !== MSG_NETWORK_ERROR) {
+				toaster.error({ title: "Unable to load settings. Try again or refresh the page." });
+			}
 			return;
 		}
 		const s = (data as { settings?: Record<string, unknown> }).settings ?? {};
@@ -73,7 +88,6 @@
 
 	async function handleSave() {
 		submitting = true;
-		error = "";
 		const { ok, message } = await api("PUT", "/api/admin/program-default-settings", {
 			settings: {
 				no_show_timer_seconds: noShowTimer,
@@ -85,8 +99,7 @@
 			},
 		});
 		submitting = false;
-		if (ok) error = "";
-		else error = message ?? "Failed to save.";
+		if (!ok) toaster.error({ title: message ?? "Failed to save." });
 	}
 </script>
 
@@ -106,15 +119,12 @@
 
 		{#if loading}
 			<p class="text-surface-500">Loading…</p>
-		{:else if loadError}
-			<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 mb-4" role="alert">
-				<p>{loadError}</p>
-				<button type="button" class="btn preset-tonal btn-sm mt-3 min-h-[48px]" onclick={() => loadSettings()}>Try again</button>
+		{:else if loadFailed}
+			<div role="alert" class="rounded-container border border-error-200 bg-error-50 p-4 mb-4">
+				<p class="text-error-800 text-sm">Failed to load settings.</p>
+				<button type="button" class="btn preset-tonal btn-sm mt-3 touch-target-h" onclick={() => loadSettings()}>Try again</button>
 			</div>
 		{:else}
-			{#if error}
-				<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-3 text-sm mb-4" role="alert">{error}</div>
-			{/if}
 			<div class="rounded-container bg-surface-50 border border-surface-200 shadow-sm p-6 space-y-6">
 				<div class="flex flex-col sm:flex-row gap-4">
 					<div class="sm:w-1/3 shrink-0">

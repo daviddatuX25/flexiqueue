@@ -4,11 +4,16 @@
  * Set B = connector + station phrase (server TTS → browser).
  * Used by Board (A+B), StationBoard (A only).
  *
+ * Fallback chain: token/server TTS → server TTS → browser TTS. Each intermediate fallback
+ * invokes onFallback. Only when all options are exhausted and browser TTS fails do we
+ * invoke onCompleteFailure (use this for user-facing error toasts).
+ *
  * @typedef {Object} DisplayTtsOptions
  * @property {boolean} [muted=false]
  * @property {number} [volume=1] 0-1
  * @property {string|null} [preferredVoiceName=null]
- * @property {(reason: string, text: string) => void} [onFallback] Called when falling back (e.g. 'token_failed', 'server_tts_failed')
+ * @property {(reason: string, text: string) => void} [onFallback] Called on each intermediate fallback (e.g. 'token_failed', 'server_tts_failed')
+ * @property {(reason: string, text: string) => void} [onCompleteFailure] Called only when all TTS options exhausted and playback failed
  */
 
 import { getVoiceForTts, ensureVoicesLoaded, TTS_DEFAULT_RATE } from './speechUtils.js';
@@ -18,6 +23,7 @@ export const DEFAULT_OPTIONS = {
 	volume: 1,
 	preferredVoiceName: null,
 	onFallback: undefined,
+	onCompleteFailure: undefined,
 };
 
 const LETTER_PHONETIC = {
@@ -240,10 +246,15 @@ async function playServerTts(text, opts) {
 /**
  * Returns a Promise that resolves when the utterance ends (or on error).
  * We only resolve on onend/onerror so Segment B never starts while A is still speaking (no early-out; browser TTS timing varies by voice and rate).
+ * Calls onCompleteFailure when browser TTS is unavailable or fails (all options exhausted).
  */
 function speakBrowser(text, opts) {
 	const o = resolveOptions(opts);
-	if (o.muted || typeof window === 'undefined' || !window.speechSynthesis) return Promise.resolve();
+	if (o.muted) return Promise.resolve();
+	if (typeof window === 'undefined' || !window.speechSynthesis) {
+		o.onCompleteFailure?.('browser_unavailable', text);
+		return Promise.resolve();
+	}
 	window.speechSynthesis.cancel();
 	const u = new SpeechSynthesisUtterance(text);
 	u.rate = TTS_DEFAULT_RATE;
@@ -252,7 +263,10 @@ function speakBrowser(text, opts) {
 	if (voice) u.voice = voice;
 	return new Promise((resolve) => {
 		u.onend = () => resolve();
-		u.onerror = () => resolve();
+		u.onerror = () => {
+			o.onCompleteFailure?.('browser_tts_failed', text);
+			resolve();
+		};
 		window.speechSynthesis.speak(u);
 	});
 }
@@ -388,6 +402,7 @@ export function createFullAnnouncementParams(event, options) {
 			muted: options?.muted ?? false,
 			volume: options?.volume ?? 1,
 			onFallback: options?.onFallback,
+			onCompleteFailure: options?.onCompleteFailure,
 		},
 		repeatCount: Math.max(1, Math.floor(Number(options?.repeatCount) ?? 1)),
 		repeatDelayMs: Math.max(0, Math.floor(Number(options?.repeatDelayMs) ?? 2000)),

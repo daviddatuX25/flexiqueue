@@ -6,6 +6,7 @@
     import { get } from "svelte/store";
     import { onMount } from "svelte";
     import { usePage } from "@inertiajs/svelte";
+    import { toaster } from "../../../lib/toaster.js";
     import {
         HardDrive,
         Database,
@@ -49,6 +50,9 @@
 
     const page = usePage();
 
+    const MSG_SESSION_EXPIRED = "Session expired. Please refresh and try again.";
+    const MSG_NETWORK_ERROR = "Network error. Please try again.";
+
     function getCsrfToken(): string {
         const p = get(page);
         const fromProps = (p?.props as { csrf_token?: string } | undefined)
@@ -67,12 +71,10 @@
 
     let summary = $state<StorageSummary | null>(null);
     let loading = $state(true);
-    let error = $state("");
     let showClearTtsConfirm = $state(false);
     let clearTtsLoading = $state(false);
     let showClearOrphanedTtsConfirm = $state(false);
     let clearOrphanedTtsLoading = $state(false);
-    let successMessage = $state("");
 
     type SettingsTab = "storage" | "integrations";
     let activeTab = $state<SettingsTab>("storage");
@@ -148,7 +150,6 @@
 
     async function fetchSummary() {
         loading = true;
-        error = "";
         try {
             const res = await fetch("/api/admin/system/storage", {
                 headers: {
@@ -158,6 +159,11 @@
                 },
                 credentials: "same-origin",
             });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                summary = null;
+                return;
+            }
             const json = (await res.json().catch(() => ({}))) as
                 | StorageSummary
                 | { message?: string };
@@ -170,10 +176,10 @@
             summary = json as StorageSummary;
         } catch (e) {
             console.error(e);
-            error =
-                e instanceof Error
-                    ? e.message
-                    : "Failed to load system storage.";
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            toaster.error({
+                title: isNetwork ? MSG_NETWORK_ERROR : (e instanceof Error ? e.message : "Failed to load system storage."),
+            });
             summary = null;
         } finally {
             loading = false;
@@ -218,8 +224,6 @@
 
     async function handleClearTtsConfirm() {
         clearTtsLoading = true;
-        error = "";
-        successMessage = "";
         try {
             const res = await fetch("/api/admin/system/storage/clear", {
                 method: "POST",
@@ -232,6 +236,10 @@
                 credentials: "same-origin",
                 body: JSON.stringify({ category: "tts_audio" }),
             });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
             const json = (await res.json().catch(() => ({}))) as
                 | { cleared?: { bytes: number; file_count: number }; message?: string }
                 | { message?: string };
@@ -241,16 +249,18 @@
                 );
             }
             const cleared = (json as { cleared?: { bytes: number; file_count: number } }).cleared;
-            successMessage =
-                cleared?.file_count != null && cleared?.bytes != null
-                    ? `Cleared ${formatBytes(cleared.bytes)} (${cleared.file_count} file${cleared.file_count === 1 ? "" : "s"}).`
-                    : "TTS cache cleared.";
+            toaster.success({
+                title:
+                    cleared?.file_count != null && cleared?.bytes != null
+                        ? `Cleared ${formatBytes(cleared.bytes)} (${cleared.file_count} file${cleared.file_count === 1 ? "" : "s"}).`
+                        : "TTS cache cleared.",
+            });
             showClearTtsConfirm = false;
             await fetchSummary();
         } catch (e) {
             console.error(e);
-            error =
-                e instanceof Error ? e.message : "Failed to clear TTS cache.";
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : (e instanceof Error ? e.message : "Failed to clear TTS cache.") });
         } finally {
             clearTtsLoading = false;
         }
@@ -262,8 +272,6 @@
 
     async function handleClearOrphanedTtsConfirm() {
         clearOrphanedTtsLoading = true;
-        error = "";
-        successMessage = "";
         try {
             const res = await fetch("/api/admin/system/storage/clear-orphaned-tts", {
                 method: "POST",
@@ -274,6 +282,10 @@
                 },
                 credentials: "same-origin",
             });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
             const json = (await res.json().catch(() => ({}))) as
                 | { cleared?: { bytes: number; file_count: number }; message?: string }
                 | { message?: string };
@@ -283,16 +295,18 @@
                 );
             }
             const cleared = (json as { cleared?: { bytes: number; file_count: number } }).cleared;
-            successMessage =
-                cleared?.file_count != null && cleared?.bytes != null
-                    ? `Removed ${formatBytes(cleared.bytes)} (${cleared.file_count} unused file${cleared.file_count === 1 ? "" : "s"}).`
-                    : "Unused TTS files removed.";
+            toaster.success({
+                title:
+                    cleared?.file_count != null && cleared?.bytes != null
+                        ? `Removed ${formatBytes(cleared.bytes)} (${cleared.file_count} unused file${cleared.file_count === 1 ? "" : "s"}).`
+                        : "Unused TTS files removed.",
+            });
             showClearOrphanedTtsConfirm = false;
             await fetchSummary();
         } catch (e) {
             console.error(e);
-            error =
-                e instanceof Error ? e.message : "Failed to remove orphan TTS files.";
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : (e instanceof Error ? e.message : "Failed to remove orphan TTS files.") });
         } finally {
             clearOrphanedTtsLoading = false;
         }
@@ -313,6 +327,11 @@
                 },
                 credentials: "same-origin",
             });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                elevenLabsStatus = null;
+                return;
+            }
             const json = (await res.json().catch(() => ({}))) as
                 | ElevenLabsStatus
                 | { message?: string };
@@ -321,8 +340,10 @@
             } else {
                 elevenLabsStatus = null;
             }
-        } catch {
+        } catch (e) {
             elevenLabsStatus = null;
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
         } finally {
             elevenLabsLoading = false;
         }
@@ -348,14 +369,21 @@
                 },
                 credentials: "same-origin",
             });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                usageData = { subscription: null, usage_time_series: null, message: "Usage unavailable." };
+                return;
+            }
             const json = (await res.json().catch(() => ({}))) as ElevenLabsUsageResponse & { error?: string };
             if (res.ok) {
                 usageData = json;
             } else {
                 usageData = { subscription: null, usage_time_series: null, message: json.message ?? "Usage unavailable." };
             }
-        } catch {
+        } catch (e) {
             usageData = { subscription: null, usage_time_series: null, message: "Usage unavailable." };
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
         } finally {
             usageLoading = false;
         }
@@ -372,6 +400,11 @@
                 },
                 credentials: "same-origin",
             });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                voicesList = [];
+                return;
+            }
             const json = (await res.json().catch(() => ({}))) as
                 | { voices: VoiceItem[] }
                 | { message?: string };
@@ -380,8 +413,10 @@
             } else {
                 voicesList = [];
             }
-        } catch {
+        } catch (e) {
             voicesList = [];
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
         } finally {
             voicesLoading = false;
         }
@@ -452,6 +487,11 @@
                 credentials: "same-origin",
                 body: JSON.stringify(body),
             });
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                accountFormError = MSG_SESSION_EXPIRED;
+                return;
+            }
             const json = (await res.json().catch(() => ({}))) as
                 | TtsAccountApi
                 | { message?: string; errors?: Record<string, string[]> };
@@ -467,8 +507,9 @@
             accountFormOpen = false;
             await fetchElevenLabsStatus();
         } catch (e) {
-            accountFormError =
-                e instanceof Error ? e.message : "Failed to save account.";
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            accountFormError = isNetwork ? MSG_NETWORK_ERROR : (e instanceof Error ? e.message : "Failed to save account.");
+            if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
         } finally {
             accountFormSubmitting = false;
         }
@@ -498,10 +539,17 @@
                     credentials: "same-origin",
                 },
             );
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
             if (res.ok) {
                 deleteAccountTarget = null;
                 await fetchElevenLabsStatus();
             }
+        } catch (e) {
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
         } finally {
             deleteAccountLoading = false;
         }
@@ -521,11 +569,16 @@
                     credentials: "same-origin",
                 },
             );
+            if (res.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
             if (res.ok) {
                 await fetchElevenLabsStatus();
             }
-        } catch {
-            /* ignore */
+        } catch (e) {
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
         }
     }
 
@@ -577,7 +630,7 @@
         <div class="flex gap-1 rounded-container border border-surface-200 bg-surface-50 p-1 shadow-sm">
             <button
                 type="button"
-                class="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors min-h-[2.75rem] {activeTab === 'storage'
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors touch-target-h {activeTab === 'storage'
                     ? 'bg-primary-500 text-primary-contrast-500 shadow-sm'
                     : 'text-surface-700 hover:bg-surface-200 hover:text-surface-950'}"
                 onclick={() => selectTab("storage")}
@@ -587,7 +640,7 @@
             </button>
             <button
                 type="button"
-                class="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors min-h-[2.75rem] {activeTab === 'integrations'
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors touch-target-h {activeTab === 'integrations'
                     ? 'bg-primary-500 text-primary-contrast-500 shadow-sm'
                     : 'text-surface-700 hover:bg-surface-200 hover:text-surface-950'}"
                 onclick={() => selectTab("integrations")}
@@ -598,18 +651,6 @@
         </div>
 
         {#if activeTab === "storage"}
-        {#if error}
-            <div
-                class="bg-error-50 text-error-900 border border-error-200 rounded-container p-4 flex items-center gap-3 shadow-sm"
-            >
-                <AlertTriangle class="w-5 h-5 text-error-600" />
-                <div>
-                    <p class="font-semibold text-sm">Failed to load status</p>
-                    <p class="text-xs mt-0.5">{error}</p>
-                </div>
-            </div>
-        {/if}
-
         {#if loading && !summary}
             <div
                 class="rounded-container border border-surface-200 bg-surface-50 p-10 flex flex-col items-center justify-center text-center shadow-sm"
@@ -683,6 +724,7 @@
                     >
                         <span>Free: {formatBytes(summary.disk.free_bytes)}</span>
                         <span
+                            role={summary.disk.used_percent >= 85 ? "alert" : undefined}
                             class={summary.disk.used_percent >= 85
                                 ? "text-error-600 font-semibold"
                                 : ""}
@@ -718,6 +760,7 @@
                         </div>
                         {#if ttsWarning}
                             <span
+                                role="alert"
                                 class="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full bg-error-100 text-error-800 border border-error-300"
                             >
                                 <AlertTriangle
@@ -795,13 +838,6 @@
                                     space.
                                 </p>
                             </div>
-                        </div>
-                    {/if}
-                    {#if successMessage}
-                        <div
-                            class="rounded-container border border-primary-200 bg-primary-100/80 px-4 py-2 text-sm text-primary-900"
-                        >
-                            {successMessage}
                         </div>
                     {/if}
                     <div class="flex flex-wrap justify-end gap-2">
@@ -977,6 +1013,7 @@
 
             {#if !elevenLabsLoading && !elevenLabsStatus}
                 <div
+                    role="alert"
                     class="rounded-container border border-error-200 bg-error-50 p-4 text-sm text-error-900"
                 >
                     Unable to load ElevenLabs integration status.
@@ -1280,7 +1317,7 @@
                 }}
             >
                 {#if accountFormError}
-                    <div class="rounded-container border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-900">
+                    <div role="alert" class="rounded-container border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-900">
                         {accountFormError}
                     </div>
                 {/if}

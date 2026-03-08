@@ -21,7 +21,8 @@
         ShieldCheck,
     } from "lucide-svelte";
     import StatusFooter from "./StatusFooter.svelte";
-    import Toast from "../Components/Toast.svelte";
+    import FlexiQueueToaster from "../Components/FlexiQueueToaster.svelte";
+    import FlashToToast from "../Components/FlashToToast.svelte";
     import ThemeToggle from "../Components/ThemeToggle.svelte";
     import OfflineBanner from "../Components/OfflineBanner.svelte";
     import UserAvatar from "../Components/UserAvatar.svelte";
@@ -97,7 +98,7 @@
                         {@const active = isActive(item.href)}
                         <Link
                             href={item.href}
-                            class="flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors min-h-[2.75rem] {active
+                            class="flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors touch-target-h {active
                                 ? 'bg-primary-500 text-primary-contrast-500 shadow-sm'
                                 : 'text-surface-700 hover:bg-surface-200 hover:text-surface-950'}"
                         >
@@ -120,14 +121,14 @@
                     <div class="flex flex-col gap-1.5">
                         <Link
                             href="/profile"
-                            class="flex items-center gap-3 px-4 py-2.5 rounded-xl text-surface-700 hover:bg-surface-200 hover:text-surface-950 font-medium transition-colors min-h-[2.75rem]"
+                            class="flex items-center gap-3 px-4 py-2.5 rounded-xl text-surface-700 hover:bg-surface-200 hover:text-surface-950 font-medium transition-colors touch-target-h"
                         >
                             <User class="w-5 h-5 shrink-0 opacity-70" aria-hidden="true" />
                             <span>Profile</span>
                         </Link>
                         <button
                             type="button"
-                            class="flex items-center gap-3 px-4 py-2.5 rounded-xl text-surface-700 hover:bg-surface-200 hover:text-surface-950 font-medium transition-colors min-h-[2.75rem] w-full text-left border-0 bg-transparent cursor-pointer"
+                            class="flex items-center gap-3 px-4 py-2.5 rounded-xl text-surface-700 hover:bg-surface-200 hover:text-surface-950 font-medium transition-colors touch-target-h w-full text-left border-0 bg-transparent cursor-pointer"
                             onclick={() => router.post("/logout")}
                         >
                             <LogOut class="w-5 h-5 shrink-0 opacity-70" aria-hidden="true" />
@@ -145,7 +146,7 @@
             >
                 <label
                     for="admin-drawer"
-                    class="p-2 -ml-2 cursor-pointer text-surface-600 hover:text-surface-950 transition-colors rounded-lg hover:bg-surface-200 lg:hidden touch-manipulation min-h-[2.75rem] min-w-[2.75rem] flex items-center justify-center"
+                    class="p-2 -ml-2 cursor-pointer text-surface-600 hover:text-surface-950 transition-colors rounded-lg hover:bg-surface-200 lg:hidden touch-manipulation touch-target flex items-center justify-center"
                     aria-label="Open menu"
                 >
                     <Menu class="w-6 h-6" aria-hidden="true" />
@@ -173,5 +174,6 @@
         </div>
     </div>
 
-    <Toast />
+    <FlexiQueueToaster />
+    <FlashToToast />
 </div>

@@ -3,7 +3,8 @@
 	import { get } from 'svelte/store';
 	import { onMount } from 'svelte';
 	import { usePage } from '@inertiajs/svelte';
-	import { RefreshCw, LayoutDashboard, AlertCircle } from 'lucide-svelte';
+	import { toaster } from '../../lib/toaster.js';
+	import { RefreshCw, LayoutDashboard } from 'lucide-svelte';
 
 	// Components
 	import HealthStats from '../../Components/Dashboard/HealthStats.svelte';
@@ -17,8 +18,10 @@
 	let stats = $state<DashboardStats | null>(null);
 	let stations = $state<DashboardStation[]>([]);
 	let loading = $state(true);
-	let error = $state('');
 	let refreshIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
+
+	const MSG_SESSION_EXPIRED = "Session expired. Please refresh and try again.";
+	const MSG_NETWORK_ERROR = "Network error. Please try again.";
 
 	const page = usePage();
 	function getCsrfToken(): string {
@@ -41,6 +44,10 @@
 			},
 			credentials: 'same-origin'
 		});
+		if (res.status === 419) {
+			toaster.error({ title: MSG_SESSION_EXPIRED });
+			return null;
+		}
 		const data = await res.json().catch(() => ({}));
 		return res.ok ? data : null;
 	}
@@ -54,18 +61,27 @@
 			},
 			credentials: 'same-origin'
 		});
+		if (res.status === 419) {
+			toaster.error({ title: MSG_SESSION_EXPIRED });
+			return [];
+		}
 		const data = await res.json().catch(() => ({}));
 		return res.ok && data.stations ? data.stations : [];
 	}
 
 	async function refresh() {
 		loading = true;
-		error = '';
-		const [s, st] = await Promise.all([fetchStats(), fetchStations()]);
-		loading = false;
-		if (s) stats = s;
-		else error = 'Failed to load dashboard stats.';
-		stations = st;
+		try {
+			const [s, st] = await Promise.all([fetchStats(), fetchStations()]);
+			if (s) stats = s;
+			else toaster.error({ title: 'Failed to load dashboard stats.' });
+			stations = st;
+		} catch (e) {
+			const isNetwork = e instanceof TypeError && (e as Error).message === 'Failed to fetch';
+			toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : 'Failed to load dashboard.' });
+		} finally {
+			loading = false;
+		}
 	}
 
 	function formatDate(): string {
@@ -118,16 +134,6 @@
 				Refresh
 			</button>
 		</div>
-
-		<!-- Error Alert -->
-		{#if error}
-			<div
-				class="bg-error-50 text-error-900 border border-error-200 rounded-container p-4 flex items-center gap-3 shadow-sm"
-			>
-				<AlertCircle class="h-5 w-5 text-error-600" />
-				<span class="font-medium">{error}</span>
-			</div>
-		{/if}
 
 		<!-- Loading State -->
 		{#if loading && !stats}

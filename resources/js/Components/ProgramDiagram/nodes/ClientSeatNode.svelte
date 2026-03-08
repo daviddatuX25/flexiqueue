@@ -7,7 +7,7 @@
 </script>
 
 <div
-	class="rounded-lg border-2 border-surface-400 bg-surface-100 px-3 py-2 min-w-[80px] min-h-[48px] flex items-center justify-center text-xs font-medium text-surface-700 shadow-sm"
+	class="rounded-lg border-2 border-surface-400 bg-surface-100 px-3 py-2 min-w-[80px] touch-target-h flex items-center justify-center text-xs font-medium text-surface-700 shadow-sm"
 	data-id={id}
 >
 	{label}

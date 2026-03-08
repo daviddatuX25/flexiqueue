@@ -8,6 +8,7 @@
 	import { usePage } from '@inertiajs/svelte';
 	import { ensureVoicesLoaded, speakSample } from '../../lib/speechUtils.js';
 	import { router } from '@inertiajs/svelte';
+	import { toaster } from '../../lib/toaster.js';
 
 	type AuthType = 'pin' | 'qr' | 'request_approval';
 
@@ -91,7 +92,6 @@
 
 	let queue = $state<QueueData | null>(null);
 	let loading = $state(true);
-	let error = $state('');
 	let actionLoading = $state<string | null>(null);
 	let showOverrideModal = $state(false);
 	let overrideTargetTrackId = $state<number | null>(null);
@@ -164,24 +164,36 @@
 		return meta ?? '';
 	}
 
+	const MSG_SESSION_EXPIRED = 'Session expired. Please refresh and try again.';
+	const MSG_NETWORK_ERROR = 'Network error. Please try again.';
+
 	async function api(
 		method: string,
 		url: string,
 		body?: object
 	): Promise<{ ok: boolean; data?: object; message?: string }> {
-		const res = await fetch(url, {
-			method,
-			headers: {
-				'Content-Type': 'application/json',
-				Accept: 'application/json',
-				'X-CSRF-TOKEN': getCsrfToken(),
-				'X-Requested-With': 'XMLHttpRequest',
-			},
-			credentials: 'same-origin',
-			...(body ? { body: JSON.stringify(body) } : {}),
-		});
-		const data = await res.json().catch(() => ({}));
-		return { ok: res.ok, data, message: (data as { message?: string })?.message };
+		try {
+			const res = await fetch(url, {
+				method,
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-CSRF-TOKEN': getCsrfToken(),
+					'X-Requested-With': 'XMLHttpRequest',
+				},
+				credentials: 'same-origin',
+				...(body ? { body: JSON.stringify(body) } : {}),
+			});
+			if (res.status === 419) {
+				toaster.error({ title: MSG_SESSION_EXPIRED });
+				return { ok: false, message: MSG_SESSION_EXPIRED };
+			}
+			const data = await res.json().catch(() => ({}));
+			return { ok: res.ok, data, message: (data as { message?: string })?.message };
+		} catch (e) {
+			toaster.error({ title: MSG_NETWORK_ERROR });
+			return { ok: false, message: MSG_NETWORK_ERROR };
+		}
 	}
 
 	/**
@@ -192,7 +204,6 @@
 	async function fetchQueue(silent = false, onSuccess?: () => void) {
 		if (!station) return;
 		if (!silent) loading = true;
-		error = '';
 		const { ok, data } = await api('GET', `/api/stations/${station.id}/queue`);
 		if (!silent) loading = false;
 		if (ok) {
@@ -209,7 +220,7 @@
 			noShowCountdown = next;
 			onSuccess?.();
 		} else {
-			error = (data as { message?: string })?.message ?? 'Failed to load queue';
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Failed to load queue' });
 		}
 	}
 
@@ -381,7 +392,7 @@
 			actionLoading = null;
 			// Revert on failure
 			queue = { ...queue, priority_first: prev };
-			error = 'Failed to update priority setting';
+			toaster.error({ title: 'Failed to update priority setting' });
 		}
 	}
 
@@ -406,7 +417,7 @@
 			await fetchQueue(true, () => { actionLoading = null; });
 		} else {
 			actionLoading = null;
-			error = (data as { message?: string })?.message ?? 'Call failed';
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Call failed' });
 		}
 	}
 
@@ -416,7 +427,6 @@
 		const authBody = buildAuthBody();
 		if (!authBody) return;
 		actionLoading = 'call';
-		error = '';
 		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/call`, authBody);
 		actionLoading = null;
 		if (ok) {
@@ -427,7 +437,7 @@
 			resetAuthState();
 			await fetchQueue(true, () => { actionLoading = null; });
 		} else {
-			error = (data as { message?: string })?.message ?? 'Call failed';
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Call failed' });
 		}
 	}
 
@@ -440,7 +450,7 @@
 			await fetchQueue(true, () => { actionLoading = null; });
 		} else {
 			actionLoading = null;
-			error = (data as { message?: string })?.message ?? 'Serve failed';
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Serve failed' });
 		}
 	}
 
@@ -454,7 +464,7 @@
 			await fetchQueue(true, () => { actionLoading = null; });
 		} else {
 			actionLoading = null;
-			error = (data as { message?: string })?.message ?? 'Serve failed';
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Serve failed' });
 		}
 	}
 
@@ -466,7 +476,7 @@
 		const raw = decodedText.trim();
 		const qrHash = raw.includes('/') ? (raw.split('/').pop() ?? raw).split('?')[0].trim() : raw;
 		if (!qrHash) {
-			scannedSessionError = 'Invalid scan.';
+			toaster.create({ type: 'error', title: 'Invalid scan.' });
 			showStationTokenScanner = false;
 			return;
 		}
@@ -474,18 +484,70 @@
 		try {
 			const { ok, data } = await api('GET', `/api/stations/${station.id}/session-by-token?qr_hash=${encodeURIComponent(qrHash)}`);
 			if (ok && data && typeof data === 'object' && 'session_id' in data) {
-				scannedSession = data as ScannedSession;
+				const s = data as ScannedSession;
+				scannedSession = s;
 				scannedSessionError = '';
 				scannedSessionErrorCode = null;
+				if (!s.at_this_station) {
+					toaster.create({
+						type: 'warning',
+						title: 'Client at another station',
+						description: `This client is at ${s.current_station ?? 'another station'}, not here.`,
+						duration: 8000
+					});
+				} else if (s.status === 'waiting' || s.status === 'called') {
+					toaster.create({
+						type: 'success',
+						title: `Scanned: ${s.alias}`,
+						description: `${s.track} · Step ${s.current_step_order} of ${s.total_steps}. Ready to serve.`,
+						action: { label: 'Mark as serving', onClick: serveScannedSession },
+						duration: 10000
+					});
+				} else if (s.status === 'serving') {
+					const isLast = (s.current_step_order ?? 0) >= (s.total_steps ?? 1);
+					toaster.create({
+						type: 'success',
+						title: `Scanned: ${s.alias}`,
+						description: `${s.track} · Step ${s.current_step_order} of ${s.total_steps}.`,
+						action: {
+							label: isLast ? 'Complete session' : 'Send to next process',
+							onClick: isLast ? completeScannedSession : transferScannedSession
+						},
+						duration: 10000
+					});
+				}
 			} else {
 				scannedSession = null;
 				const payload = (data && typeof data === 'object' ? data : {}) as { message?: string; error_code?: string };
 				scannedSessionError = payload?.message ?? 'Token not found or not in use.';
 				scannedSessionErrorCode = payload?.error_code ?? null;
+				if (payload?.error_code === 'not_registered') {
+					toaster.create({
+						type: 'warning',
+						title: 'Token not registered',
+						description: 'Send the client to triage to register and get in the queue.',
+						action: {
+							label: 'Go to triage',
+							onClick: () => router.visit('/triage')
+						},
+						duration: 10000
+					});
+				} else {
+					toaster.create({
+						type: 'error',
+						title: payload?.message ?? 'Token not found or not in use.',
+						duration: 8000
+					});
+				}
 			}
 		} catch {
 			scannedSession = null;
-			scannedSessionError = 'Request failed. Check your connection and try again.';
+			toaster.create({
+				type: 'error',
+				title: 'Request failed. Check your connection and try again.',
+				duration: 8000
+			});
+			scannedSessionError = '';
 			scannedSessionErrorCode = null;
 		}
 	}
@@ -516,7 +578,7 @@
 			closeScannedSessionPanel();
 			await fetchQueue(true);
 		} else {
-			error = (data as { message?: string })?.message ?? 'Serve failed';
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Serve failed' });
 		}
 	}
 
@@ -530,7 +592,7 @@
 			closeScannedSessionPanel();
 			await fetchQueue(true);
 		} else {
-			error = (data as { message?: string })?.message ?? 'Transfer failed';
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Transfer failed' });
 		}
 	}
 
@@ -544,24 +606,23 @@
 			closeScannedSessionPanel();
 			await fetchQueue(true);
 		} else {
-			error = 'Complete failed';
+			toaster.error({ title: 'Complete failed' });
 		}
 	}
 
 	async function transfer(s: ServingSession) {
 		if (!s || s.status !== 'serving' || actionLoading) return;
 		actionLoading = `transfer-${s.session_id}`;
-		error = '';
 		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/transfer`, { mode: 'standard' });
 		if (ok) {
 			const d = data as { action_required?: string };
 			if (d?.action_required === 'complete') {
-				error = 'No next process in track. Complete the session instead.';
+				toaster.error({ title: 'No next process in track. Complete the session instead.' });
 			}
 			await fetchQueue(true, () => { actionLoading = null; });
 		} else {
 			actionLoading = null;
-			error = (data as { message?: string })?.message ?? 'Transfer failed';
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Transfer failed' });
 		}
 	}
 
@@ -573,7 +634,7 @@
 			await fetchQueue(true, () => { actionLoading = null; });
 		} else {
 			actionLoading = null;
-			error = (data as { message?: string })?.message ?? 'Complete failed';
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Complete failed' });
 		}
 	}
 
@@ -585,7 +646,7 @@
 			await fetchQueue(true, () => { actionLoading = null; });
 		} else {
 			actionLoading = null;
-			error = 'Cancel failed';
+			toaster.error({ title: 'Cancel failed' });
 		}
 	}
 
@@ -603,7 +664,7 @@
 			await fetchQueue(true, () => { actionLoading = null; });
 		} else {
 			actionLoading = null;
-			error = (data as { message?: string })?.message ?? 'No-show failed';
+			toaster.error({ title: (data as { message?: string })?.message ?? 'No-show failed' });
 		}
 	}
 
@@ -672,7 +733,6 @@
 			return;
 		}
 		actionLoading = 'override';
-		error = '';
 		const overrideBody: { target_track_id?: number; custom_steps?: number[]; reason: string } = {
 			reason: overrideReason.trim(),
 			target_track_id: overrideTargetTrackId ?? undefined,
@@ -692,7 +752,7 @@
 			resetAuthState();
 			await fetchQueue(true);
 		} else {
-			error = (data as { message?: string })?.message ?? 'Override failed';
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Override failed' });
 		}
 	}
 
@@ -700,7 +760,6 @@
 		const s = overrideSession;
 		if (!s || (!overrideTargetTrackId && !overrideIsCustom) || !overrideReason.trim() || actionLoading) return;
 		actionLoading = 'override';
-		error = '';
 		const body: { session_id: number; action_type: string; reason: string; target_track_id?: number | null; is_custom?: boolean } = {
 			session_id: s.session_id,
 			action_type: 'override',
@@ -729,14 +788,23 @@
 				signal: ac.signal,
 			});
 			clearTimeout(t);
+			if (res.status === 419) {
+				toaster.error({ title: MSG_SESSION_EXPIRED });
+				return;
+			}
 			const data = (await res.json().catch(() => ({}))) as { message?: string };
 			ok = res.ok;
 		} catch (e) {
 			actionLoading = null;
 			const isAbort = e instanceof Error && e.name === 'AbortError';
-			error = isAbort
-				? 'Request timed out. The request may have succeeded – check Track Overrides.'
-				: 'Failed to send request';
+			const isNetwork = e instanceof TypeError && (e as Error).message === 'Failed to fetch';
+			toaster.error({
+				title: isAbort
+					? 'Request timed out. The request may have succeeded – check Track Overrides.'
+					: isNetwork
+						? MSG_NETWORK_ERROR
+						: 'Failed to send request',
+			});
 			return;
 		}
 		actionLoading = null;
@@ -749,7 +817,7 @@
 			resetAuthState();
 			window.location.href = '/track-overrides';
 		} else {
-			error = 'Failed to send request';
+			toaster.error({ title: 'Failed to send request' });
 		}
 	}
 
@@ -757,7 +825,6 @@
 		const s = forceCompleteSession;
 		if (!s || !forceCompleteReason.trim() || actionLoading) return;
 		actionLoading = 'force-complete';
-		error = '';
 		const { ok } = await api('POST', '/api/permission-requests', {
 			session_id: s.session_id,
 			action_type: 'force_complete',
@@ -772,7 +839,7 @@
 			await fetchQueue(true);
 			router.visit('/track-overrides');
 		} else {
-			error = 'Failed to send request';
+			toaster.error({ title: 'Failed to send request' });
 		}
 	}
 
@@ -786,7 +853,6 @@
 		const authBody = needsAuthForOverride ? buildAuthBody() : {};
 		if (needsAuthForOverride && !authBody) return;
 		actionLoading = 'force-complete';
-		error = '';
 		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/force-complete`, {
 			reason: forceCompleteReason.trim(),
 			...authBody,
@@ -801,7 +867,7 @@
 			resetAuthState();
 			await fetchQueue(true);
 		} else {
-			error = (data as { message?: string })?.message ?? 'Force complete failed';
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Force complete failed' });
 		}
 	}
 
@@ -855,7 +921,7 @@
 					<p class="font-medium mb-4">Select a station</p>
 					<div class="flex flex-col gap-3 max-w-xs mx-auto">
 						{#each stations as s (s.id)}
-							<button type="button" class="btn preset-outlined min-h-[48px] w-full" onclick={() => switchStation(s)}>
+							<button type="button" class="btn preset-outlined touch-target-h w-full" onclick={() => switchStation(s)}>
 								{s.name}
 							</button>
 						{/each}
@@ -869,8 +935,6 @@
 			<div class="flex justify-center py-16 md:py-24">
 				<span class="loading-spinner loading-lg text-primary-500"></span>
 			</div>
-		{:else if error}
-			<div class="rounded-container bg-error-100 text-error-900 border border-error-300 p-4 md:p-5">{error}</div>
 		{:else if queue}
 			<!-- Station switcher (pill bar) -->
 			{#if canSwitchStation && stations.length > 1}
@@ -880,7 +944,7 @@
 							type="button"
 							role="tab"
 							aria-selected={s.id === station.id}
-							class="btn btn-sm shrink-0 min-h-[48px] px-4 {s.id === station.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
+							class="btn btn-sm shrink-0 touch-target-h px-4 {s.id === station.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
 							onclick={() => switchStation(s)}
 						>
 							{s.name}
@@ -891,12 +955,12 @@
 
 			<!-- Toolbar: capacity, priority, display audio (single row, wraps on small) -->
 			<div class="flex flex-wrap items-center justify-between gap-3 py-2 px-3 rounded-container bg-surface-50/80 border border-surface-200 elevation-card">
-				<div class="flex items-center gap-3 min-h-[48px]">
+				<div class="flex items-center gap-3 touch-target-h">
 					<span class="text-sm font-medium text-surface-950/80 tabular-nums" aria-label="Serving count">
 						Serving {servingCount}/{clientCapacity}
 					</span>
 					{#if canSwitchStation}
-						<label for="priority-first-switch" class="label cursor-pointer gap-2 items-center min-h-[48px]">
+						<label for="priority-first-switch" class="label cursor-pointer gap-2 items-center touch-target-h">
 							<span class="label-text text-sm">Priority first</span>
 							<div class="relative inline-block w-11 h-5">
 								<input
@@ -914,7 +978,7 @@
 				</div>
 				<button
 					type="button"
-					class="btn preset-tonal btn-sm gap-2 min-h-[48px] min-w-[48px] md:min-w-[auto] px-3"
+					class="btn preset-tonal btn-sm gap-2 touch-target md:min-w-auto px-3"
 					title="Scan client token to identify and act"
 					onclick={openStationTokenScanner}
 					aria-label="Scan token"
@@ -926,7 +990,7 @@
 				</button>
 				<button
 					type="button"
-					class="btn preset-tonal btn-sm gap-2 min-h-[48px] min-w-[48px] md:min-w-[auto] px-3"
+					class="btn preset-tonal btn-sm gap-2 touch-target md:min-w-auto px-3"
 					title="Display board audio"
 					onclick={() => (showDisplayAudioModal = true)}
 					aria-label="Display board audio settings"
@@ -935,80 +999,6 @@
 					<span class="hidden md:inline text-sm">Display audio</span>
 				</button>
 			</div>
-
-			<!-- Scanned token panel (after resolve from Scan token) -->
-			{#if scannedSession || scannedSessionError}
-				<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5 space-y-3">
-					{#if scannedSession}
-						{@const s = scannedSession}
-						<p class="text-xs font-semibold text-surface-950/80 uppercase tracking-wide">Scanned: {s.alias}</p>
-						<p class="text-sm text-surface-950/90">
-							{s.track} · {s.client_category ?? 'Regular'} · Step {s.current_step_order} of {s.total_steps} · {s.current_station}
-						</p>
-						<p class="text-sm text-surface-950/70">
-							Status: <span class="font-medium">{s.status}</span>
-							{#if s.at_this_station}
-								<span class="text-success-600 font-medium"> · At this station</span>
-							{:else}
-								<span class="text-warning-600"> · At another station</span>
-							{/if}
-						</p>
-						{#if s.at_this_station}
-							<div class="flex flex-wrap gap-2 pt-2">
-								{#if s.status === 'waiting' || s.status === 'called'}
-									<button
-										type="button"
-										class="btn preset-filled-primary-500 btn-lg min-h-[48px]"
-										disabled={!!actionLoading}
-										onclick={serveScannedSession}
-									>
-										{actionLoading === `serve-${s.session_id}` ? 'Processing…' : 'Mark as serving'}
-									</button>
-								{:else if s.status === 'serving'}
-									<button
-										type="button"
-										class="btn preset-filled-primary-500 min-h-[48px]"
-										disabled={!!actionLoading}
-										onclick={transferScannedSession}
-									>
-										{actionLoading === `transfer-${s.session_id}` ? 'Transferring…' : 'Send to next process'}
-									</button>
-									<button
-										type="button"
-										class="btn preset-filled-primary-500 min-h-[48px]"
-										disabled={!!actionLoading}
-										onclick={completeScannedSession}
-									>
-										{actionLoading === `complete-${s.session_id}` ? 'Completing…' : 'Complete session'}
-									</button>
-								{/if}
-							</div>
-						{:else}
-							<p class="text-sm text-surface-950/70 pt-1">This client is at {s.current_station}, not here.</p>
-						{/if}
-					{:else}
-						<p class="text-sm text-surface-950/90">{scannedSessionError}</p>
-						{#if scannedSessionErrorCode === 'not_registered'}
-							<p class="text-sm text-surface-950/70">Send the client to triage to register and get in the queue.</p>
-							<button
-								type="button"
-								class="btn preset-filled-primary-500 btn-sm min-h-[40px]"
-								onclick={() => router.visit('/triage')}
-							>
-								Go to triage
-							</button>
-						{/if}
-					{/if}
-					<div class="flex flex-wrap gap-2">
-						<button type="button" class="btn preset-tonal btn-sm min-h-[40px]" onclick={closeScannedSessionPanel}>
-							Close
-						</button>
-						<button type="button" class="btn preset-outlined btn-sm min-h-[40px]" onclick={() => { closeScannedSessionPanel(); openStationTokenScanner(); }}>
-							Scan another
-						</button>
-					</div>
-				</div>
-			{/if}
 
 			<!-- Main content: grid on desktop, stack on mobile -->
 			<div class="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">
@@ -1040,7 +1030,7 @@
 								{#if s.status === 'called'}
 									<button
 										type="button"
-										class="btn preset-filled-primary-500 btn-lg min-h-[48px]"
+										class="btn preset-filled-primary-500 btn-lg touch-target-h"
 										disabled={!!actionLoading}
 										onclick={() => serve(s)}
 									>
@@ -1048,7 +1038,7 @@
 									</button>
 									<button
 										type="button"
-										class="btn btn-sm min-h-[48px] {s.no_show_attempts >= 2 ? 'preset-filled-warning-500' : 'preset-tonal'}"
+										class="btn btn-sm touch-target-h {s.no_show_attempts >= 2 ? 'preset-filled-warning-500' : 'preset-tonal'}"
 										disabled={!!actionLoading || !canNoShow(s)}
 										onclick={() => openNoShowModal(s)}
 									>
@@ -1058,7 +1048,7 @@
 									{#if isLastStep(s)}
 										<button
 											type="button"
-											class="btn preset-filled-primary-500 btn-lg min-h-[48px]"
+											class="btn preset-filled-primary-500 btn-lg touch-target-h"
 											disabled={!!actionLoading}
 											onclick={() => complete(s)}
 										>
@@ -1067,7 +1057,7 @@
 									{:else}
 										<button
 											type="button"
-											class="btn preset-filled-primary-500 btn-lg min-h-[48px]"
+											class="btn preset-filled-primary-500 btn-lg touch-target-h"
 											disabled={!!actionLoading}
 											onclick={() => transfer(s)}
 										>
@@ -1075,9 +1065,9 @@
 										</button>
 									{/if}
 									<div class="flex flex-wrap gap-2">
-										<button type="button" class="btn preset-outlined btn-sm min-h-[48px]" disabled={!!actionLoading} onclick={() => openOverrideModal(s)}>Override</button>
-										<button type="button" class="btn preset-filled-warning-500 btn-sm min-h-[48px]" disabled={!!actionLoading} onclick={() => openForceCompleteModal(s)}>Force Complete</button>
-										<button type="button" class="btn preset-tonal btn-sm min-h-[48px]" disabled={!!actionLoading} onclick={() => cancel(s)}>Cancel</button>
+										<button type="button" class="btn preset-outlined btn-sm touch-target-h" disabled={!!actionLoading} onclick={() => openOverrideModal(s)}>Override</button>
+										<button type="button" class="btn preset-filled-warning-500 btn-sm touch-target-h" disabled={!!actionLoading} onclick={() => openForceCompleteModal(s)}>Force Complete</button>
+										<button type="button" class="btn preset-tonal btn-sm touch-target-h" disabled={!!actionLoading} onclick={() => cancel(s)}>Cancel</button>
 									</div>
 								{/if}
 							</div>
@@ -1136,7 +1126,7 @@
 											<span class="text-surface-950/60 text-xs">{w.track} · {formatDuration(w.queued_at)}</span>
 											<button
 												type="button"
-												class="btn preset-filled-primary-500 btn-sm min-h-[40px]"
+												class="btn preset-filled-primary-500 btn-sm touch-target-h"
 												disabled={!!actionLoading || atCapacity}
 												title={atCapacity ? 'At capacity' : 'Start serving (no call)'}
 												onclick={() => serveFromWaiting(w)}
@@ -1157,7 +1147,7 @@
 				<!-- Station notes: full width -->
 				<div class="lg:col-span-12">
 			<details class="rounded-box bg-surface-50 border border-surface-200 elevation-card overflow-hidden" open={notesExpanded}>
-				<summary class="cursor-pointer px-4 py-3 font-medium text-surface-950 select-none flex items-center justify-between gap-2 min-h-[48px]">
+				<summary class="cursor-pointer px-4 py-3 font-medium text-surface-950 select-none flex items-center justify-between gap-2 touch-target-h">
 					<span>Station notes</span>
 					{#if stationNote?.author_name}
 						<span class="text-xs font-normal text-surface-950/60 truncate max-w-[50%]" title={stationNote.author_name}>
@@ -1195,7 +1185,7 @@
 						></textarea>
 						<div class="flex items-center justify-between gap-2">
 							<span class="text-xs text-surface-950/50">{noteMessage.length}/500</span>
-							<button type="submit" class="btn preset-filled-primary-500 btn-sm min-h-[48px] px-4" disabled={noteSubmitting}>
+							<button type="submit" class="btn preset-filled-primary-500 btn-sm touch-target-h px-4" disabled={noteSubmitting}>
 								{noteSubmitting ? 'Saving…' : 'Save note'}
 							</button>
 						</div>
@@ -1218,8 +1208,8 @@
 						: 'Client can be called again.'}
 				</p>
 				<div class="flex justify-end gap-2 mt-4">
-					<button type="button" class="btn preset-tonal" onclick={() => (noShowModalSession = null)}>Cancel</button>
-					<button type="button" class="btn preset-filled-warning-500" onclick={noShow} disabled={!!actionLoading}>
+					<button type="button" class="btn preset-tonal touch-target-h" onclick={() => (noShowModalSession = null)}>Cancel</button>
+					<button type="button" class="btn preset-filled-warning-500 touch-target-h" onclick={noShow} disabled={!!actionLoading}>
 						{actionLoading === 'noShow' ? 'Processing…' : 'Mark No-Show'}
 					</button>
 				</div>
@@ -1242,7 +1232,7 @@
 				/>
 				<button
 					type="button"
-					class="btn preset-tonal btn-sm mt-4 min-h-[48px] w-full"
+					class="btn preset-tonal btn-sm mt-4 touch-target-h w-full"
 					onclick={() => { showStationTokenScanner = false; stationScanHandled = true; }}
 				>
 					Cancel
@@ -1301,9 +1291,9 @@
 				<div class="form-control w-full mt-2">
 					<label class="label"><span class="label-text">Authorize with</span></label>
 					<div class="join join-horizontal w-full">
-						<button type="button" class="btn btn-sm flex-1 {authType === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }} title="Enter 6-digit code">PIN</button>
-						<button type="button" class="btn btn-sm flex-1 {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }} title="Scan QR">QR</button>
-						<button type="button" class="btn btn-sm flex-1 {authType === 'request_approval' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'request_approval'; tempCodeEntered = ''; tempQrScanToken = ''; showQrScanner = false; }} title="Request supervisor approval">Request</button>
+						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }} title="Enter 6-digit code">PIN</button>
+						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }} title="Scan QR">QR</button>
+						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'request_approval' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'request_approval'; tempCodeEntered = ''; tempQrScanToken = ''; showQrScanner = false; }} title="Request supervisor approval">Request</button>
 					</div>
 				</div>
 				{#if authType === 'request_approval'}
@@ -1319,21 +1309,18 @@
 						{#if showQrScanner && scanCountdown > 0}
 							<div class="flex flex-wrap items-center gap-2 mt-2">
 								<span class="text-sm text-surface-950/70" aria-live="polite">Closing in {scanCountdown}s</span>
-								<button type="button" class="btn preset-tonal btn-sm min-h-[2.75rem] px-3" onclick={extendScannerCountdown}>Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)</button>
+								<button type="button" class="btn preset-tonal btn-sm touch-target-h px-3" onclick={extendScannerCountdown}>Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)</button>
 							</div>
 						{/if}
-						<button type="button" class="btn preset-tonal btn-sm mt-1 min-h-[2.75rem]" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
+						<button type="button" class="btn preset-tonal btn-sm mt-1 touch-target-h" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
 						{#if tempQrScanToken}<p class="text-xs text-success-500 mt-1">✓ QR scanned</p>{/if}
 					</div>
 				{/if}
 				{/if}
-				{#if error}
-					<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 mt-2 text-sm">{error}</div>
-				{/if}
 				<div class="flex justify-end gap-2 mt-4">
 					<button
 						type="button"
-						class="btn preset-tonal"
+						class="btn preset-tonal touch-target-h"
 						onclick={() => {
 							showOverrideModal = false;
 							overrideSession = null;
@@ -1343,14 +1330,13 @@
 							overridePin = '';
 							overrideSupervisorId = null;
 							resetAuthState();
-							error = '';
 						}}
 					>
 						Cancel
 					</button>
 					<button
 						type="button"
-						class="btn preset-filled-primary-500"
+						class="btn preset-filled-primary-500 touch-target-h"
 						disabled={(!overrideTargetTrackId && !overrideIsCustom) || !overrideReason.trim() || (needsAuthForOverride && !canConfirmAuth()) || !!actionLoading}
 						onclick={override}
 					>
@@ -1380,9 +1366,9 @@
 				<div class="form-control w-full mt-2">
 					<label class="label"><span class="label-text">Authorize with</span></label>
 					<div class="join join-horizontal w-full">
-						<button type="button" class="btn btn-sm flex-1 {authType === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }}>PIN</button>
-						<button type="button" class="btn btn-sm flex-1 {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }}>QR</button>
-						<button type="button" class="btn btn-sm flex-1 {authType === 'request_approval' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'request_approval'; tempCodeEntered = ''; tempQrScanToken = ''; showQrScanner = false; }}>Request</button>
+						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }}>PIN</button>
+						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }}>QR</button>
+						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'request_approval' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'request_approval'; tempCodeEntered = ''; tempQrScanToken = ''; showQrScanner = false; }}>Request</button>
 					</div>
 				</div>
 				{#if authType === 'request_approval'}
@@ -1398,18 +1384,17 @@
 						{#if showQrScanner && scanCountdown > 0}
 							<div class="flex flex-wrap items-center gap-2 mt-2">
 								<span class="text-sm text-surface-950/70" aria-live="polite">Closing in {scanCountdown}s</span>
-								<button type="button" class="btn preset-tonal btn-sm min-h-[2.75rem] px-3" onclick={extendScannerCountdown}>Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)</button>
+								<button type="button" class="btn preset-tonal btn-sm touch-target-h px-3" onclick={extendScannerCountdown}>Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)</button>
 							</div>
 						{/if}
-						<button type="button" class="btn preset-tonal btn-sm mt-1 min-h-[2.75rem]" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
+						<button type="button" class="btn preset-tonal btn-sm mt-1 touch-target-h" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
 						{#if tempQrScanToken}<p class="text-xs text-success-500 mt-1">✓ QR scanned</p>{/if}
 					</div>
 				{/if}
 				{/if}
-				{#if error}<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 mt-2 text-sm">{error}</div>{/if}
 				<div class="flex justify-end gap-2 mt-4">
-					<button type="button" class="btn preset-tonal" onclick={() => { showForceCompleteModal = false; forceCompleteSession = null; forceCompleteReason = ''; overridePin = ''; overrideSupervisorId = null; resetAuthState(); error = ''; }}>Cancel</button>
-					<button type="button" class="btn preset-filled-primary-500" disabled={!forceCompleteReason.trim() || (needsAuthForOverride && !canConfirmAuth()) || !!actionLoading} onclick={forceComplete}>
+					<button type="button" class="btn preset-tonal touch-target-h" onclick={() => { showForceCompleteModal = false; forceCompleteSession = null; forceCompleteReason = ''; overridePin = ''; overrideSupervisorId = null; resetAuthState(); }}>Cancel</button>
+					<button type="button" class="btn preset-filled-primary-500 touch-target-h" disabled={!forceCompleteReason.trim() || (needsAuthForOverride && !canConfirmAuth()) || !!actionLoading} onclick={forceComplete}>
 						{actionLoading === 'force-complete' ? 'Processing…' : 'Force Complete'}
 					</button>
 				</div>
@@ -1428,8 +1413,8 @@
 				<div class="form-control w-full mt-2">
 					<label class="label"><span class="label-text">Authorize with</span></label>
 					<div class="join join-horizontal w-full">
-						<button type="button" class="btn btn-sm flex-1 {authType === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }}>PIN</button>
-						<button type="button" class="btn btn-sm flex-1 {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }}>QR</button>
+						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }}>PIN</button>
+						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }}>QR</button>
 					</div>
 				</div>
 				{#if authType === 'pin'}
@@ -1443,17 +1428,16 @@
 						{#if showQrScanner && scanCountdown > 0}
 							<div class="flex flex-wrap items-center gap-2 mt-2">
 								<span class="text-sm text-surface-950/70" aria-live="polite">Closing in {scanCountdown}s</span>
-								<button type="button" class="btn preset-tonal btn-sm min-h-[2.75rem] px-3" onclick={extendScannerCountdown}>Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)</button>
+								<button type="button" class="btn preset-tonal btn-sm touch-target-h px-3" onclick={extendScannerCountdown}>Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)</button>
 							</div>
 						{/if}
-						<button type="button" class="btn preset-tonal btn-sm mt-1 min-h-[2.75rem]" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
+						<button type="button" class="btn preset-tonal btn-sm mt-1 touch-target-h" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
 						{#if tempQrScanToken}<p class="text-xs text-success-500 mt-1">✓ QR scanned</p>{/if}
 					</div>
 				{/if}
-				{#if error}<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-4 mt-2 text-sm">{error}</div>{/if}
 				<div class="flex justify-end gap-2 mt-4">
-					<button type="button" class="btn preset-tonal" onclick={() => { showCallNextOverrideModal = false; callNextSession = null; overridePin = ''; overrideSupervisorId = null; resetAuthState(); error = ''; }}>Cancel</button>
-					<button type="button" class="btn preset-filled-primary-500" disabled={!canConfirmAuth() || !!actionLoading} onclick={callNextWithAuth}>
+					<button type="button" class="btn preset-tonal touch-target-h" onclick={() => { showCallNextOverrideModal = false; callNextSession = null; overridePin = ''; overrideSupervisorId = null; resetAuthState(); }}>Cancel</button>
+					<button type="button" class="btn preset-filled-primary-500 touch-target-h" disabled={!canConfirmAuth() || !!actionLoading} onclick={callNextWithAuth}>
 						{actionLoading === 'call' ? 'Calling…' : 'Call Next'}
 					</button>
 				</div>

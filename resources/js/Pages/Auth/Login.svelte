@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { useForm } from '@inertiajs/svelte';
+	import AuthLayout from '../../Layouts/AuthLayout.svelte';
 
-	// Flashed messages from controller (lockout, etc.)
 	let { status = null, error = null } = $props();
 
 	const form = useForm({
@@ -14,16 +14,11 @@
 	<title>Login — FlexiQueue</title>
 </svelte:head>
 
-<main class="min-h-screen bg-surface-100 flex flex-col items-center justify-center p-6">
-	<div class="card bg-surface-50 rounded-container shadow-xl max-w-md w-full p-6">
-		<h1 class="text-2xl font-bold text-primary-500 text-center">FlexiQueue</h1>
-		<p class="text-center text-surface-950/80 text-sm mt-1">Sign in with your email and password.</p>
-
-		{#if error}
-			<div class="bg-error-100 text-error-900 border border-error-300 rounded-container p-3 mt-4" role="alert">
-				<span>{error}</span>
-			</div>
-		{/if}
+<AuthLayout>
+	<main class="min-h-screen bg-surface-100 flex flex-col items-center justify-center p-6">
+		<div class="card bg-surface-50 rounded-container shadow-xl max-w-md w-full p-6">
+			<h1 class="text-2xl font-bold text-primary-500 text-center">FlexiQueue</h1>
+			<p class="text-center text-surface-950/80 text-sm mt-1">Sign in with your email and password.</p>
 
 			<form
 				class="flex flex-col gap-4 mt-4"
@@ -72,11 +67,12 @@
 
 				<button
 					type="submit"
-					class="btn preset-filled-primary-500 w-full mt-2 min-h-[48px]"
+					class="btn preset-filled-primary-500 w-full mt-2 touch-target-h"
 					disabled={$form.processing}
 				>
 					{$form.processing ? 'Signing in…' : 'Sign in'}
 				</button>
 			</form>
-	</div>
-</main>
+		</div>
+	</main>
+</AuthLayout>

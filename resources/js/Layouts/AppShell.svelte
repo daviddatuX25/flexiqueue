@@ -7,7 +7,8 @@
 	import { usePage } from '@inertiajs/svelte';
 	import StatusFooter from './StatusFooter.svelte';
 	import ThemeToggle from '../Components/ThemeToggle.svelte';
-	import Toast from '../Components/Toast.svelte';
+	import FlexiQueueToaster from '../Components/FlexiQueueToaster.svelte';
+	import FlashToToast from '../Components/FlashToToast.svelte';
 	import OfflineBanner from '../Components/OfflineBanner.svelte';
 	import UserAvatar from '../Components/UserAvatar.svelte';
 
@@ -48,5 +49,6 @@
 		<StatusFooter {queueCount} {processedToday} />
 	{/if}
 
-	<Toast />
+	<FlexiQueueToaster />
+	<FlashToToast />
 </div>

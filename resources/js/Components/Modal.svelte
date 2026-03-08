@@ -13,10 +13,13 @@
 	} = $props();
 
 	let dialogEl = $state(/** @type {HTMLDialogElement | null} */ (null));
+	/** Stored before showModal(); restored in handleClose for focus-return a11y. */
+	let previousActiveElement = $state(/** @type {HTMLElement | null} */ (null));
 
 	$effect(() => {
 		if (!dialogEl) return;
 		if (open) {
+			previousActiveElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 			dialogEl.showModal();
 			// Focus trap: focus first focusable inside the dialog (per UI-UX-QA)
 			requestAnimationFrame(() => {
@@ -25,7 +28,10 @@
 				if (first && typeof first.focus === 'function') first.focus();
 			});
 		} else {
+			const prev = previousActiveElement;
+			previousActiveElement = null;
 			dialogEl.close();
+			if (prev && document.contains(prev) && typeof prev.focus === 'function') prev.focus();
 		}
 	});
 
@@ -49,8 +55,14 @@
 	}
 
 	function handleClose() {
-		if (dialogEl) dialogEl.close();
+		if (!dialogEl || !dialogEl.open) return;
+		const previous = previousActiveElement;
+		previousActiveElement = null;
+		dialogEl.close();
 		onClose();
+		if (previous && document.contains(previous) && typeof previous.focus === 'function') {
+			previous.focus();
+		}
 	}
 </script>
 

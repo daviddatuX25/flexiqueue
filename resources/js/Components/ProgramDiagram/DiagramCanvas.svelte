@@ -5,6 +5,10 @@
 	import { SvelteFlowProvider } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 	import DiagramFlowContent from './DiagramFlowContent.svelte';
+	import { toaster } from '../../lib/toaster.js';
+
+	const MSG_SESSION_EXPIRED = 'Session expired. Please refresh and try again.';
+	const MSG_NETWORK_ERROR = 'Network error. Please try again.';
 
 	interface LayoutShape {
 		viewport?: { x?: number; y?: number; zoom?: number };
@@ -75,11 +79,18 @@
 		}
 		let cancelled = false;
 		loadError = null;
+		const check419 = (r: Response) => {
+			if (r.status === 419) {
+				toaster.error({ title: MSG_SESSION_EXPIRED });
+				return Promise.resolve({});
+			}
+			return r.json().catch(() => ({}));
+		};
 		fetch(`/api/admin/programs/${id}/diagram`, {
 			headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
 			credentials: 'same-origin',
 		})
-			.then((r) => r.json())
+			.then(check419)
 			.then((data) => {
 				if (cancelled) return;
 				const layout = data?.layout;
@@ -94,17 +105,20 @@
 				}
 			})
 			.catch(() => {
-				if (!cancelled) loadError = 'Failed to load diagram';
+				if (!cancelled) {
+					loadError = 'Failed to load diagram';
+					toaster.error({ title: MSG_NETWORK_ERROR });
+				}
 			});
 		Promise.all([
 				fetch(`/api/admin/programs/${id}/staff-assignments`, {
 					headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
 					credentials: 'same-origin',
-				}).then((r) => r.json()),
+				}).then(check419),
 				fetch(`/api/admin/programs/${id}/supervisors`, {
 					headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
 					credentials: 'same-origin',
-				}).then((r) => r.json()),
+				}).then(check419),
 			])
 				.then(([assignmentsData, supervisorsData]) => {
 					if (cancelled) return;
@@ -129,7 +143,10 @@
 					staffList = list.sort((a, b) => a.name.localeCompare(b.name));
 				})
 				.catch(() => {
-					if (!cancelled) staffList = [];
+					if (!cancelled) {
+						staffList = [];
+						toaster.error({ title: MSG_NETWORK_ERROR });
+					}
 				});
 		return () => {
 			cancelled = true;
