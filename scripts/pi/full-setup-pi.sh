@@ -14,6 +14,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+# Must run as root (apt, systemctl, /etc, chown)
+if [ "$(id -u)" -ne 0 ]; then
+  echo "This script must be run as root (e.g. sudo)." >&2
+  echo "Usage: sudo $0 [--hostname=orangepione]" >&2
+  exit 1
+fi
+
 HOSTNAME_ARG=""
 for arg in "$@"; do
   case "$arg" in
