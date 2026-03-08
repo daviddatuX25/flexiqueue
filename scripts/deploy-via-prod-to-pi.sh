@@ -42,12 +42,21 @@ if [ "$DO_MERGE" -eq 1 ]; then
     exit 1
   fi
   ensure_prod_branch "[FlexiQueue][via-prod-to-pi]"
-  msg "Merging $CURRENT_BRANCH into prod and pushing..."
-  git checkout prod
-  git merge --no-edit "$CURRENT_BRANCH"
-  git push origin prod
-  git checkout "$CURRENT_BRANCH"
-  msg_ok "Merged to prod and pushed."
+  EXISTING_PROD_WT="$(get_existing_prod_worktree_path)"
+  if [[ -n "$EXISTING_PROD_WT" ]] && [[ -d "$EXISTING_PROD_WT" ]]; then
+    # Prod is checked out in another worktree; merge there instead of checking out here
+    ensure_prod_worktree_fixed "[FlexiQueue][via-prod-to-pi]"
+    msg "Merging $CURRENT_BRANCH into prod (in prod worktree) and pushing..."
+    (cd "$PROD_WORKTREE" && git merge --no-edit "$CURRENT_BRANCH" && git push origin prod)
+    msg_ok "Merged to prod and pushed."
+  else
+    msg "Merging $CURRENT_BRANCH into prod and pushing..."
+    git checkout prod
+    git merge --no-edit "$CURRENT_BRANCH"
+    git push origin prod
+    git checkout "$CURRENT_BRANCH"
+    msg_ok "Merged to prod and pushed."
+  fi
 fi
 
 ensure_prod_branch "[FlexiQueue][via-prod-to-pi]"
@@ -68,5 +77,10 @@ msg "Running deploy-to-pi.sh from prod worktree..."
 msg_ok "Deploy to Pi finished."
 
 cd "$REPO_ROOT"
-git checkout prod
-msg_ok "Deploy to Pi complete. Switched to branch prod."
+# Only switch main repo to prod if prod is not checked out in another worktree
+if [[ -z "$(get_existing_prod_worktree_path)" ]]; then
+  git checkout prod
+  msg_ok "Deploy to Pi complete. Switched to branch prod."
+else
+  msg_ok "Deploy to Pi complete. Main repo left on branch $CURRENT_BRANCH (prod is in worktree)."
+fi
