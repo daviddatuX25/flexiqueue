@@ -8,6 +8,7 @@ Deploy FlexiQueue to a Laragon host or laptop using the same tarball and apply f
 - **SSH:** Target must be reachable via SSH (e.g. OpenSSH on Windows, or WSL). Use `LARAGON_USER` if not root.
 - **PHP:** PHP 8.2+ with required extensions (sqlite3, mbstring, xml, curl, zip, bcmath, intl). Laragon provides this.
 - **Reverb (WebSocket):** Run `php artisan reverb:start` or install as a service (e.g. systemd on WSL). For same-origin proxy, configure Nginx or your web server to proxy `/app` to `127.0.0.1:6001` (see [scripts/pi/nginx-flexiqueue.conf](../pi/nginx-flexiqueue.conf)).
+- **Queue worker (TTS and other queued jobs):** For token/station TTS pre-generation and any queued jobs, the queue worker must be running. Run `php artisan queue:work --tries=3` in a separate terminal, or on WSL with systemd copy `scripts/pi/flexiqueue-queue.service` to `/etc/systemd/system/`, then `sudo systemctl enable --now flexiqueue-queue`. Apply-tarball restarts `flexiqueue-queue` if the unit is present.
 
 ## Deploy from your PC
 

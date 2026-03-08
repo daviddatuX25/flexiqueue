@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run ON THE PI after the tarball is present (e.g. /tmp/flexiqueue-deploy.tar.gz).
-# Apply tarball: extract, chown, .env from .env.prod if missing, DB to sqlite, cache, migrate, restart Reverb.
+# Apply tarball: extract, chown, .env from .env.prod if missing, DB to sqlite, cache, migrate, restart Reverb and queue worker.
 # Callable from deploy-to-pi.sh (via SSH) or manually on the Pi.
 #
 # Usage (on the Pi):
@@ -107,5 +107,7 @@ esac
 
 echo "Restarting Reverb..."
 sudo systemctl restart flexiqueue-reverb 2>/dev/null || true
+echo "Restarting queue worker..."
+sudo systemctl restart flexiqueue-queue 2>/dev/null || true
 
 echo "Apply complete. App is at $APP_DIR"

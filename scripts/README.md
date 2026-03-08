@@ -112,10 +112,11 @@ After deploy, these live at `/var/www/flexiqueue/scripts/pi/` on the Pi.
 | File | Purpose |
 |------|--------|
 | `full-setup-pi.sh` | Run **once** on the Pi: install PHP, Nginx, SQLite, create app dir and database, nginx site, Reverb systemd unit. Optional `--hostname=...`. Then deploy from PC. |
-| `apply-tarball.sh` | Run on the Pi after tarball is present: extract, .env from .env.prod if missing, cache, migrate (incremental|fresh|skip), restart Reverb. Used by deploy-to-pi.sh; can be run manually. |
+| `apply-tarball.sh` | Run on the Pi after tarball is present: extract, .env from .env.prod if missing, cache, migrate (incremental|fresh|skip), restart Reverb and queue worker. Used by deploy-to-pi.sh; can be run manually. |
 | `update-from-url.sh` | On Pi: download tarball from URL and apply. Install as `flexiqueue-update` once. |
 | `migrate-with-repair.sh` | `php artisan migrate --force`. |
-| `flexiqueue-reverb.service` | systemd unit for Reverb. |
+| `flexiqueue-reverb.service` | systemd unit for Reverb (WebSocket). |
+| `flexiqueue-queue.service` | systemd unit for queue worker (TTS generation and other queued jobs). |
 | `nginx-flexiqueue.conf` | Nginx site config (proxies `/app` to Reverb). |
 | `zerotier-when-idle.sh` | Cron helper to start/stop ZeroTier when idle. |
 
@@ -125,7 +126,7 @@ Details: [scripts/pi/README.md](pi/README.md).
 
 ## 5. Laptop / Laragon (production)
 
-Same tarball as Pi. Use **deploy-to-laragon.sh** with `LARAGON_HOST=...`. Prepare the laptop once: app directory, SSH; nginx + Reverb if you need WebSockets. After build you see: **"Merged to prod and pushed. Tarball built from prod."**
+Same tarball as Pi. Use **deploy-to-laragon.sh** with `LARAGON_HOST=...`. Prepare the laptop once: app directory, SSH; nginx, Reverb, and queue worker if you need WebSockets and TTS/queued jobs. After build you see: **"Merged to prod and pushed. Tarball built from prod."**
 
 See [scripts/laragon/README.md](laragon/README.md) for preparing the target and [docs/architecture/10-DEPLOYMENT.md](../docs/architecture/10-DEPLOYMENT.md) for nginx/Reverb.
 
@@ -156,7 +157,7 @@ npx playwright test
 
 ### On the Pi
 
-See [scripts/pi/README.md — Common tasks on Pi](pi/README.md#common-tasks-on-pi) (migrate --force, config:cache, restart Reverb).
+See [scripts/pi/README.md — Common tasks on Pi](pi/README.md#common-tasks-on-pi) (migrate --force, config:cache, restart Reverb and queue worker). For full functionality (real-time updates and TTS pre-generation), both Reverb and the queue worker must run — use the systemd units installed by full-setup-pi.sh, or manually: `sudo -u www-data php artisan reverb:start` and `sudo -u www-data php artisan queue:work --tries=3` (in separate terminals if not using systemd).
 
 ---
 

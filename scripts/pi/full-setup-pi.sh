@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run ONCE on the Pi to prepare the system (PHP, Nginx, SQLite, app dir, nginx site, Reverb service).
+# Run ONCE on the Pi to prepare the system (PHP, Nginx, SQLite, app dir, nginx site, Reverb + queue worker services).
 # Does NOT install app code or .env — deploy from PC (deploy-to-pi.sh --build) does that.
 # Run from the Pi, from the app directory (e.g. after extracting tarball to /var/www/flexiqueue).
 #
@@ -48,8 +48,11 @@ nginx -t && systemctl reload nginx
 
 echo "Installing Reverb systemd unit..."
 cp "$SCRIPT_DIR/flexiqueue-reverb.service" /etc/systemd/system/
+echo "Installing queue worker systemd unit..."
+cp "$SCRIPT_DIR/flexiqueue-queue.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now flexiqueue-reverb
+systemctl enable --now flexiqueue-queue
 
 echo ""
 echo "=== Full setup complete. ==="

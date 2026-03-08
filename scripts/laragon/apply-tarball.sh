@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run ON THE LARAGON/LAPTOP after the tarball is present (e.g. /tmp/flexiqueue-deploy.tar.gz).
-# Same logic as scripts/pi/apply-tarball.sh: extract, .env from .env.prod if missing, DB to sqlite, cache, migrate, restart Reverb.
+# Same logic as scripts/pi/apply-tarball.sh: extract, .env from .env.prod if missing, DB to sqlite, cache, migrate, restart Reverb and queue worker.
 # App dir configurable via LARAGON_APP_DIR (default /var/www/flexiqueue for WSL/Linux).
 #
 # Usage (on the target machine, e.g. via SSH from deploy-to-laragon.sh):
@@ -89,5 +89,7 @@ esac
 
 echo "Restarting Reverb (if systemd unit present)..."
 sudo systemctl restart flexiqueue-reverb 2>/dev/null || true
+echo "Restarting queue worker (if systemd unit present)..."
+sudo systemctl restart flexiqueue-queue 2>/dev/null || true
 
 echo "Apply complete. App is at $APP_DIR"

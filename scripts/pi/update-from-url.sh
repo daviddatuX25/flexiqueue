@@ -46,5 +46,6 @@ sudo -u www-data php artisan config:cache
 sudo -u www-data php artisan route:cache
 
 sudo systemctl restart flexiqueue-reverb 2>/dev/null || true
+sudo systemctl restart flexiqueue-queue 2>/dev/null || true
 
 echo "Update complete."

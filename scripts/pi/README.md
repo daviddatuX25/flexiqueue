@@ -4,7 +4,7 @@
 
 **Full deployment runbook** (first-time install, SQLite for prod to save RAM, Nginx, verify): see [docs/architecture/10-DEPLOYMENT.md](../../docs/architecture/10-DEPLOYMENT.md). Use SQLite on Orange Pi One to avoid running MariaDB and save memory.
 
-The deploy tarball **includes this folder** (`scripts/pi/`): Reverb systemd unit, zerotier-when-idle, nginx config, update-from-url, migrate-with-repair. After a full deploy they live at `/var/www/flexiqueue/scripts/pi/` on the Pi.
+The deploy tarball **includes this folder** (`scripts/pi/`): Reverb and queue worker systemd units, zerotier-when-idle, nginx config, update-from-url, migrate-with-repair. After a full deploy they live at `/var/www/flexiqueue/scripts/pi/` on the Pi.
 
 Overview of all scripts (dev + Pi): [scripts/README.md](../README.md).
 
@@ -14,11 +14,12 @@ Overview of all scripts (dev + Pi): [scripts/README.md](../README.md).
 
 | File | Purpose |
 |------|--------|
-| `full-setup-pi.sh` | Run **once** on the Pi: install PHP, Nginx, SQLite, app dir, nginx site, Reverb service. Optional `--hostname=...`. Then deploy from PC. |
-| `apply-tarball.sh` | Run on the Pi after tarball is at e.g. `/tmp/flexiqueue-deploy.tar.gz`: extract, cache, migrate (incremental, fresh, or skip), restart Reverb. Used by deploy-to-pi.sh via SSH; can be run manually. |
+| `full-setup-pi.sh` | Run **once** on the Pi: install PHP, Nginx, SQLite, app dir, nginx site, Reverb + queue worker services. Optional `--hostname=...`. Then deploy from PC. |
+| `apply-tarball.sh` | Run on the Pi after tarball is at e.g. `/tmp/flexiqueue-deploy.tar.gz`: extract, cache, migrate (incremental, fresh, or skip), restart Reverb and queue worker. Used by deploy-to-pi.sh via SSH; can be run manually. |
 | `migrate-with-repair.sh` | Run `php artisan migrate --force` on the Pi (idempotent migrations). |
 | `update-from-url.sh` | On Pi: download tarball from URL and apply. |
 | `flexiqueue-reverb.service` | systemd unit for Laravel Reverb (WebSocket). |
+| `flexiqueue-queue.service` | systemd unit for Laravel queue worker (TTS generation and other queued jobs). |
 | `zerotier-when-idle.sh` | Cron helper to start/stop ZeroTier when idle. |
 | `nginx-flexiqueue.conf` | Nginx site config for FlexiQueue (HTTP). |
 | `nginx-flexiqueue-ssl.conf` | Nginx site config with HTTPS (for camera on mobile). |
@@ -28,7 +29,7 @@ Overview of all scripts (dev + Pi): [scripts/README.md](../README.md).
 
 ## Full setup (first-time on Pi)
 
-Prepare the Pi system once (PHP, Nginx, SQLite, app dir, nginx site, Reverb). Then deploy the app from your PC.
+Prepare the Pi system once (PHP, Nginx, SQLite, app dir, nginx site, Reverb and queue worker). Then deploy the app from your PC.
 
 1. Copy this folder to the Pi (or extract the deploy tarball into `/var/www/flexiqueue`).
 2. On the Pi: `sudo ./scripts/pi/full-setup-pi.sh` (optionally `--hostname=orangepione` for mDNS).
@@ -69,6 +70,9 @@ sudo -u www-data php artisan view:cache
 
 # Restart Reverb (WebSocket) if installed
 sudo systemctl restart flexiqueue-reverb
+
+# Restart queue worker (TTS generation, etc.) if installed
+sudo systemctl restart flexiqueue-queue
 ```
 
 ### WebSocket (Reverb) networking model on the Pi
@@ -105,7 +109,7 @@ If the backend uses old broadcast credentials (e.g. app id `747972` or key `fwa0
 
 ## Copy scripts to Pi without full deploy
 
-Use this when you only want to update or add the Pi helper scripts (Reverb service, zerotier-when-idle, nginx config) without running a full tarball deploy.
+Use this when you only want to update or add the Pi helper scripts (Reverb and queue worker services, zerotier-when-idle, nginx config) without running a full tarball deploy.
 
 **From your PC** (repo root). Replace `<pi-ip>` with the Pi’s IP (local or ZeroTier):
 
@@ -120,8 +124,11 @@ scp -r scripts/pi root@<pi-ip>:/var/www/flexiqueue/scripts/
 ```bash
 # Reverb: start at boot and restart on failure
 sudo cp /var/www/flexiqueue/scripts/pi/flexiqueue-reverb.service /etc/systemd/system/
+# Queue worker: required for TTS generation (token/station pre-generate)
+sudo cp /var/www/flexiqueue/scripts/pi/flexiqueue-queue.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now flexiqueue-reverb
+sudo systemctl enable --now flexiqueue-queue
 
 # ZeroTier when idle (optional): copy to /usr/local/bin and add cron
 sudo cp /var/www/flexiqueue/scripts/pi/zerotier-when-idle.sh /usr/local/bin/zerotier-when-idle
