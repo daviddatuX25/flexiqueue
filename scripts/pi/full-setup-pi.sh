@@ -24,9 +24,14 @@ FQ_HOSTNAME="${FQ_HOSTNAME:-$HOSTNAME_ARG}"
 
 echo "=== FlexiQueue Pi: full system setup (app root: $APP_ROOT) ==="
 
-echo "Installing PHP 8.3, Nginx, SQLite..."
-apt-get update -qq
-apt-get install -y php8.3-fpm php8.3-cli php8.3-sqlite3 php8.3-mbstring php8.3-xml php8.3-curl php8.3-zip php8.3-bcmath php8.3-intl nginx
+# Install PHP 8.3, Nginx, SQLite only if not already present (re-run safe; skip heavy apt when already set up)
+if ! dpkg -l php8.3-fpm &>/dev/null || ! dpkg -l nginx &>/dev/null; then
+  echo "Installing PHP 8.3, Nginx, SQLite..."
+  apt-get update -qq
+  apt-get install -y php8.3-fpm php8.3-cli php8.3-sqlite3 php8.3-mbstring php8.3-xml php8.3-curl php8.3-zip php8.3-bcmath php8.3-intl nginx
+else
+  echo "PHP and Nginx already installed, skipping package install."
+fi
 
 echo "Creating app directory and database..."
 mkdir -p "$APP_ROOT/database"
@@ -34,10 +39,15 @@ touch "$APP_ROOT/database/database.sqlite"
 chown -R www-data:www-data "$APP_ROOT"
 
 if [ -n "$FQ_HOSTNAME" ]; then
-  echo "Setting hostname to $FQ_HOSTNAME and installing Avahi..."
-  hostnamectl set-hostname "$FQ_HOSTNAME"
-  apt-get install -y avahi-daemon
-  systemctl enable --now avahi-daemon 2>/dev/null || true
+  hostnamectl set-hostname "$FQ_HOSTNAME" 2>/dev/null || true
+  if ! dpkg -l avahi-daemon &>/dev/null; then
+    echo "Installing Avahi..."
+    apt-get update -qq
+    apt-get install -y avahi-daemon
+    systemctl enable --now avahi-daemon 2>/dev/null || true
+  else
+    echo "Avahi already installed, skipping."
+  fi
 fi
 
 echo "Installing Nginx site..."
@@ -46,9 +56,9 @@ ln -sf /etc/nginx/sites-available/flexiqueue /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 
-echo "Installing Reverb systemd unit..."
+# Always copy FlexiQueue systemd units (so re-running applies any changes to the service files)
+echo "Updating Reverb and queue worker systemd units..."
 cp "$SCRIPT_DIR/flexiqueue-reverb.service" /etc/systemd/system/
-echo "Installing queue worker systemd unit..."
 cp "$SCRIPT_DIR/flexiqueue-queue.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now flexiqueue-reverb

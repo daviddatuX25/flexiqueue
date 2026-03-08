@@ -105,6 +105,24 @@ case "$MIGRATE" in
     ;;
 esac
 
+# Install Reverb and queue worker systemd units from tarball if not already on the system
+# (so deploy works even when full-setup-pi.sh was not run or was run before these were added)
+INSTALLED_UNITS=0
+if [ ! -f /etc/systemd/system/flexiqueue-reverb.service ] && [ -f "$APP_DIR/scripts/pi/flexiqueue-reverb.service" ]; then
+  echo "Installing Reverb systemd unit..."
+  sudo cp "$APP_DIR/scripts/pi/flexiqueue-reverb.service" /etc/systemd/system/
+  INSTALLED_UNITS=1
+fi
+if [ ! -f /etc/systemd/system/flexiqueue-queue.service ] && [ -f "$APP_DIR/scripts/pi/flexiqueue-queue.service" ]; then
+  echo "Installing queue worker systemd unit..."
+  sudo cp "$APP_DIR/scripts/pi/flexiqueue-queue.service" /etc/systemd/system/
+  INSTALLED_UNITS=1
+fi
+if [ "$INSTALLED_UNITS" -eq 1 ]; then
+  sudo systemctl daemon-reload
+  sudo systemctl enable flexiqueue-reverb flexiqueue-queue 2>/dev/null || true
+fi
+
 echo "Restarting Reverb..."
 sudo systemctl restart flexiqueue-reverb 2>/dev/null || true
 echo "Restarting queue worker..."

@@ -15,7 +15,7 @@ Overview of all scripts (dev + Pi): [scripts/README.md](../README.md).
 | File | Purpose |
 |------|--------|
 | `full-setup-pi.sh` | Run **once** on the Pi: install PHP, Nginx, SQLite, app dir, nginx site, Reverb + queue worker services. Optional `--hostname=...`. Then deploy from PC. |
-| `apply-tarball.sh` | Run on the Pi after tarball is at e.g. `/tmp/flexiqueue-deploy.tar.gz`: extract, cache, migrate (incremental, fresh, or skip), restart Reverb and queue worker. Used by deploy-to-pi.sh via SSH; can be run manually. |
+| `apply-tarball.sh` | Run on the Pi after tarball is at e.g. `/tmp/flexiqueue-deploy.tar.gz`: extract, cache, migrate (incremental, fresh, or skip), install Reverb + queue worker systemd units if missing, then restart both. Used by deploy-to-pi.sh via SSH; can be run manually. |
 | `migrate-with-repair.sh` | Run `php artisan migrate --force` on the Pi (idempotent migrations). |
 | `update-from-url.sh` | On Pi: download tarball from URL and apply. |
 | `flexiqueue-reverb.service` | systemd unit for Laravel Reverb (WebSocket). |
