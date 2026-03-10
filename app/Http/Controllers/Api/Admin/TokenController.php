@@ -12,6 +12,7 @@ use App\Models\Token;
 use App\Models\TokenTtsSetting;
 use App\Services\TokenService;
 use App\Services\TtsService;
+use App\Support\QueueWorkerIdleCheck;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -109,12 +110,22 @@ class TokenController extends Controller
                 ]);
 
             if ($this->ttsService->isEnabled() && TokenTtsSetting::instance()->getEffectiveVoiceId() !== null) {
-                if ($this->queueWorkerAppearsIdle()) {
+                $workerIdle = QueueWorkerIdleCheck::appearsIdle();
+                if ($workerIdle && ! config('tts.allow_sync_when_queue_unavailable', false)) {
                     Token::query()
                         ->whereIn('id', $tokenIds)
                         ->update(['tts_status' => 'failed']);
                     return response()->json([
                         'message' => 'Queue worker is not running. Start it with: php artisan queue:work',
+                    ], 503);
+                }
+                $maxSync = (int) config('tts.max_sync_tokens', 20);
+                if ($workerIdle && config('tts.allow_sync_when_queue_unavailable', false) && count($tokenIds) > $maxSync) {
+                    Token::query()
+                        ->whereIn('id', $tokenIds)
+                        ->update(['tts_status' => 'failed']);
+                    return response()->json([
+                        'message' => 'Queue worker is required for large batches. Start it with: php artisan queue:work, or reduce batch size to '.$maxSync.' or fewer.',
                     ], 503);
                 }
                 // Clear tokens stuck in "generating" (no worker, job died), but never touch tokens we're about to generate.
@@ -130,7 +141,11 @@ class TokenController extends Controller
                         'tts_status' => 'generating',
                     ]);
 
-                GenerateTokenTtsJob::dispatch($tokenIds);
+                if ($workerIdle && config('tts.allow_sync_when_queue_unavailable', false)) {
+                    GenerateTokenTtsJob::dispatchSync($tokenIds);
+                } else {
+                    GenerateTokenTtsJob::dispatch($tokenIds);
+                }
             }
         }
 
@@ -262,6 +277,20 @@ class TokenController extends Controller
 
         if (is_array($requestIds) && $requestIds !== []) {
             $tokenIds = array_values(array_map('intval', $requestIds));
+            $workerIdle = QueueWorkerIdleCheck::appearsIdle();
+            if ($workerIdle && ! config('tts.allow_sync_when_queue_unavailable', false)) {
+                Token::query()->whereIn('id', $tokenIds)->update(['tts_pre_generate_enabled' => true, 'tts_status' => 'failed']);
+                return response()->json([
+                    'message' => 'Queue worker is not running. Start it with: php artisan queue:work',
+                ], 503);
+            }
+            $maxSync = (int) config('tts.max_sync_tokens', 20);
+            if ($workerIdle && config('tts.allow_sync_when_queue_unavailable', false) && count($tokenIds) > $maxSync) {
+                Token::query()->whereIn('id', $tokenIds)->update(['tts_pre_generate_enabled' => true, 'tts_status' => 'failed']);
+                return response()->json([
+                    'message' => 'Queue worker is required for large batches. Start it with: php artisan queue:work, or select '.$maxSync.' or fewer tokens.',
+                ], 503);
+            }
             Token::query()
                 ->whereIn('id', $tokenIds)
                 ->update([
@@ -280,12 +309,22 @@ class TokenController extends Controller
                 ]);
             }
 
-            if ($this->queueWorkerAppearsIdle()) {
+            $workerIdle = QueueWorkerIdleCheck::appearsIdle();
+            if ($workerIdle && ! config('tts.allow_sync_when_queue_unavailable', false)) {
                 Token::query()
                     ->whereIn('id', $tokenIds)
                     ->update(['tts_status' => 'failed']);
                 return response()->json([
                     'message' => 'Queue worker is not running. Start it with: php artisan queue:work',
+                ], 503);
+            }
+            $maxSync = (int) config('tts.max_sync_tokens', 20);
+            if ($workerIdle && config('tts.allow_sync_when_queue_unavailable', false) && count($tokenIds) > $maxSync) {
+                Token::query()
+                    ->whereIn('id', $tokenIds)
+                    ->update(['tts_status' => 'failed']);
+                return response()->json([
+                    'message' => 'Queue worker is required for large batches. Start it with: php artisan queue:work, or select '.$maxSync.' or fewer tokens.',
                 ], 503);
             }
             // Clear tokens stuck in "generating" (no worker, job died), but never touch tokens we're about to generate.
@@ -302,34 +341,16 @@ class TokenController extends Controller
                 ]);
         }
 
-        GenerateTokenTtsJob::dispatch($tokenIds);
+        $workerIdle = QueueWorkerIdleCheck::appearsIdle();
+        if ($workerIdle && config('tts.allow_sync_when_queue_unavailable', false)) {
+            GenerateTokenTtsJob::dispatchSync($tokenIds);
+        } else {
+            GenerateTokenTtsJob::dispatch($tokenIds);
+        }
 
         return response()->json([
             'queued' => count($tokenIds),
         ]);
-    }
-
-    /**
-     * Heuristic: queue is database and has pending jobs older than 2 min → likely no worker.
-     * With sync driver, job runs inline so we never fail.
-     */
-    private function queueWorkerAppearsIdle(): bool
-    {
-        if (config('queue.default') !== 'database') {
-            return false;
-        }
-
-        $connection = config('queue.connections.database.connection') ?? config('database.default');
-        $table = config('queue.connections.database.table', 'jobs');
-        $queue = config('queue.connections.database.queue', 'default');
-        $cutoff = now()->subMinutes(2)->timestamp;
-
-        return DB::connection($connection)->table($table)
-            ->where('queue', $queue)
-            ->whereNull('reserved_at')
-            ->where('available_at', '<=', time())
-            ->where('created_at', '<', $cutoff)
-            ->exists();
     }
 
     private function tokenResource(Token $token): array

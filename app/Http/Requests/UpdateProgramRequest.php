@@ -43,6 +43,7 @@ class UpdateProgramRequest extends FormRequest
             'settings.enable_public_triage_hid_barcode' => ['sometimes', 'boolean'],
             'settings.tts' => ['sometimes', 'array'],
             'settings.tts.active_language' => ['sometimes', 'string', 'in:en,fil,ilo'],
+            'settings.tts.auto_generate_station_tts' => ['sometimes', 'boolean'],
             'settings.tts.connector' => ['sometimes', 'array'],
             'settings.tts.connector.languages' => ['sometimes', 'array'],
             'settings.tts.connector.languages.en' => ['sometimes', 'array'],

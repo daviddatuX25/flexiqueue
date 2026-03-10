@@ -38,6 +38,7 @@ use App\Http\Controllers\Admin\ReportPageController;
 use App\Http\Controllers\Admin\TokenPrintController;
 use App\Http\Controllers\Admin\UserPageController;
 use App\Http\Controllers\DisplayController;
+use App\Http\Controllers\HomeController;
 use App\Http\Controllers\AuthorizationPageController;
 use App\Http\Controllers\StationPageController;
 use App\Http\Controllers\TriagePageController;
@@ -231,6 +232,9 @@ Route::get('/api/public/tts', [TtsController::class, 'stream'])->middleware('thr
 Route::get('/api/public/tts/voices', [TtsController::class, 'voices']);
 Route::get('/api/public/tts/token/{token}', [TtsController::class, 'token']);
 
+// Per HOMEPAGE-PLAN: public landing + auth strip (Option B). No auth required.
+Route::get('/', [HomeController::class, 'index'])->name('home');
+
 // Per 05-SECURITY-CONTROLS §3.4: admin-only routes
 Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->group(function (): void {
     Route::redirect('/', '/admin/dashboard', 302)->name('index');
@@ -258,12 +262,6 @@ Route::middleware(['auth', 'role:admin,supervisor,staff'])->group(function (): v
 
 // All other web routes require authentication
 Route::middleware('auth')->group(function (): void {
-    Route::get('/', function () {
-        return Inertia::render('Welcome', [
-            'appName' => config('app.name'),
-        ]);
-    });
-
     // BD-002: Test broadcast page and trigger route
     Route::get('/broadcast-test', function () {
         return Inertia::render('BroadcastTest');

@@ -12,9 +12,9 @@ class ExampleTest extends TestCase
      */
     public function test_the_application_returns_a_successful_response(): void
     {
-        // Unauthenticated: / redirects to login (BD-005 auth middleware)
+        // Per HOMEPAGE-PLAN: / is public (Option B — public landing + auth strip)
         $response = $this->get('/');
-        $response->assertRedirect('/login');
+        $response->assertStatus(200);
 
         // Login page is public and returns 200
         $response = $this->get('/login');

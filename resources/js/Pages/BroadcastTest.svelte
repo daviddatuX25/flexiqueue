@@ -72,7 +72,7 @@
 			{/if}
 
 			<div class="mt-4 pt-4 border-t border-surface-200">
-				<a href="/" class="link link-primary text-sm touch-target-h inline-flex items-center">← Back to welcome</a>
+				<a href="/" class="link link-primary text-sm touch-target-h inline-flex items-center">← Back to home</a>
 			</div>
 		</div>
 	</div>

@@ -18,6 +18,7 @@ Overview of all scripts (dev + Pi): [scripts/README.md](../README.md).
 | `apply-tarball.sh` | Run on the Pi after tarball is at e.g. `/tmp/flexiqueue-deploy.tar.gz`: extract, cache, migrate (incremental, fresh, or skip), install Reverb + queue worker systemd units if missing, then restart both. Used by deploy-to-pi.sh via SSH; can be run manually. |
 | `migrate-with-repair.sh` | Run `php artisan migrate --force` on the Pi (idempotent migrations). |
 | `update-from-url.sh` | On Pi: download tarball from URL and apply. |
+| `install-flexiqueue-services.sh` | Install or update **only** Reverb + queue worker systemd units (no PHP/Nginx). Use when you already have the stack and just want FlexiQueue services. Run on Pi: `sudo ./scripts/pi/install-flexiqueue-services.sh`. |
 | `flexiqueue-reverb.service` | systemd unit for Laravel Reverb (WebSocket). |
 | `flexiqueue-queue.service` | systemd unit for Laravel queue worker (TTS generation and other queued jobs). |
 | `zerotier-when-idle.sh` | Cron helper to start/stop ZeroTier when idle. |
@@ -111,17 +112,26 @@ If the backend uses old broadcast credentials (e.g. app id `747972` or key `fwa0
 
 Use this when you only want to update or add the Pi helper scripts (Reverb and queue worker services, zerotier-when-idle, nginx config) without running a full tarball deploy.
 
-**From your PC** (repo root). Replace `<pi-ip>` with the Pi’s IP (local or ZeroTier):
+**From your PC** (repo root). Replace `<pi-ip>` with the Pi’s hostname or IP (e.g. `orangepione.local` or `192.168.1.50`), and `root` with your Pi user if different:
 
 ```bash
-# Create scripts dir on Pi if needed, then copy scripts/pi into it
+# 1. Create scripts dir on Pi if needed, then copy scripts/pi into it
 ssh root@<pi-ip> "mkdir -p /var/www/flexiqueue/scripts"
 scp -r scripts/pi root@<pi-ip>:/var/www/flexiqueue/scripts/
 ```
 
-**Then on the Pi**, install from the copied files:
+**Then on the Pi**, either run the one-liner to install only Reverb + queue worker:
 
 ```bash
+# 2a. Only FlexiQueue services (no nginx/PHP) — use when stack is already installed
+cd /var/www/flexiqueue
+sudo ./scripts/pi/install-flexiqueue-services.sh
+```
+
+Or install manually (same effect as `install-flexiqueue-services.sh`):
+
+```bash
+# 2b. Manual copy of service units
 # Reverb: start at boot and restart on failure
 sudo cp /var/www/flexiqueue/scripts/pi/flexiqueue-reverb.service /etc/systemd/system/
 # Queue worker: required for TTS generation (token/station pre-generate)
@@ -129,6 +139,11 @@ sudo cp /var/www/flexiqueue/scripts/pi/flexiqueue-queue.service /etc/systemd/sys
 sudo systemctl daemon-reload
 sudo systemctl enable --now flexiqueue-reverb
 sudo systemctl enable --now flexiqueue-queue
+
+# Optional: allow TTS without queue worker (sync fallback). In .env set:
+# TTS_ALLOW_SYNC_WHEN_QUEUE_UNAVAILABLE=1
+# TTS_MAX_SYNC_TOKENS=20
+# Large batches may cause slow HTTP requests; prefer running the queue worker.
 
 # ZeroTier when idle (optional): copy to /usr/local/bin and add cron
 sudo cp /var/www/flexiqueue/scripts/pi/zerotier-when-idle.sh /usr/local/bin/zerotier-when-idle

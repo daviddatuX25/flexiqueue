@@ -10,6 +10,7 @@ use App\Jobs\GenerateStationTtsJob;
 use App\Models\Program;
 use App\Models\Station;
 use App\Models\TrackStep;
+use App\Support\QueueWorkerIdleCheck;
 use Illuminate\Http\JsonResponse;
 
 /**
@@ -61,9 +62,19 @@ class StationController extends Controller
             $station->processes()->sync($processIds);
         }
 
-        GenerateStationTtsJob::dispatch($station->fresh());
+        $station = $station->fresh();
+        $program = $station->program;
+        $autoGenerateStationTts = $program->settings['tts']['auto_generate_station_tts'] ?? true;
+        if ($autoGenerateStationTts) {
+            $workerIdle = QueueWorkerIdleCheck::appearsIdle();
+            if ($workerIdle && config('tts.allow_sync_when_queue_unavailable', false)) {
+                GenerateStationTtsJob::dispatchSync($station);
+            } else {
+                GenerateStationTtsJob::dispatch($station);
+            }
+        }
 
-        return response()->json(['station' => $this->stationResource($station->fresh())], 201);
+        return response()->json(['station' => $this->stationResource($station)], 201);
     }
 
     /**
@@ -202,7 +213,13 @@ class StationController extends Controller
      */
     public function regenerateTts(Station $station): JsonResponse
     {
-        GenerateStationTtsJob::dispatch($station->fresh());
+        $station = $station->fresh();
+        $workerIdle = QueueWorkerIdleCheck::appearsIdle();
+        if ($workerIdle && config('tts.allow_sync_when_queue_unavailable', false)) {
+            GenerateStationTtsJob::dispatchSync($station);
+        } else {
+            GenerateStationTtsJob::dispatch($station);
+        }
 
         return response()->json(['message' => 'Station TTS regeneration started.']);
     }

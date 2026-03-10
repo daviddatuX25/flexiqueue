@@ -9,6 +9,7 @@ use App\Http\Requests\UpdateProgramRequest;
 use App\Jobs\GenerateStationTtsJob;
 use App\Models\Program;
 use App\Services\ProgramService;
+use App\Support\QueueWorkerIdleCheck;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -96,13 +97,16 @@ class ProgramController extends Controller
         }
         $requiresRegeneration = false;
         if ($settings !== null && array_key_exists('tts', $settings)) {
-            $stations = $program->stations()->get();
-            foreach ($stations as $station) {
-                $langs = $station->settings['tts']['languages'] ?? [];
-                foreach ($langs as $config) {
-                    if (is_array($config) && (! empty($config['audio_path']) || ($config['status'] ?? '') === 'ready')) {
-                        $requiresRegeneration = true;
-                        break 2;
+            $autoGenerateStationTts = $program->settings['tts']['auto_generate_station_tts'] ?? true;
+            if ($autoGenerateStationTts) {
+                $stations = $program->stations()->get();
+                foreach ($stations as $station) {
+                    $langs = $station->settings['tts']['languages'] ?? [];
+                    foreach ($langs as $config) {
+                        if (is_array($config) && (! empty($config['audio_path']) || ($config['status'] ?? '') === 'ready')) {
+                            $requiresRegeneration = true;
+                            break 2;
+                        }
                     }
                 }
             }
@@ -121,8 +125,15 @@ class ProgramController extends Controller
      */
     public function regenerateStationTts(Program $program): JsonResponse
     {
+        $workerIdle = QueueWorkerIdleCheck::appearsIdle();
+        $useSync = $workerIdle && config('tts.allow_sync_when_queue_unavailable', false);
+
         foreach ($program->stations()->get() as $station) {
-            GenerateStationTtsJob::dispatch($station);
+            if ($useSync) {
+                GenerateStationTtsJob::dispatchSync($station);
+            } else {
+                GenerateStationTtsJob::dispatch($station);
+            }
         }
 
         return response()->json(['message' => 'Station TTS regeneration started.']);
@@ -256,6 +267,7 @@ class ProgramController extends Controller
                 'allow_public_triage' => $program->getAllowPublicTriage(),
                 'tts' => [
                     'active_language' => $program->getTtsActiveLanguage(),
+                    'auto_generate_station_tts' => ($settings['tts']['auto_generate_station_tts'] ?? true) === true,
                     'connector' => [
                         'languages' => $connectorLanguages,
                     ],

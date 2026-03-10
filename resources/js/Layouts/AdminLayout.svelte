@@ -8,7 +8,7 @@
     import {
         LayoutDashboard,
         FolderKanban,
-        KeyRound,
+        Ticket,
         Users,
         BarChart3,
         PieChart,
@@ -42,7 +42,7 @@
     const navItems = [
         { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
         { href: "/admin/programs", label: "Programs", icon: FolderKanban },
-        { href: "/admin/tokens", label: "Tokens", icon: KeyRound },
+        { href: "/admin/tokens", label: "Tokens", icon: Ticket },
         { href: "/admin/users", label: "Staff", icon: Users },
         { href: "/admin/logs", label: "Audit log", icon: BarChart3 },
         { href: "/admin/analytics", label: "Analytics", icon: PieChart },
@@ -70,7 +70,7 @@
             >
                 <!-- Brand header -->
                 <div class="h-20 flex items-center justify-between px-6 border-b border-surface-200 shrink-0">
-                    <div class="flex items-center gap-3">
+                    <Link href="/" class="flex items-center gap-3 no-underline text-inherit hover:opacity-90 transition-opacity">
                         <div
                             class="w-10 h-10 rounded-xl bg-primary-500 flex items-center justify-center text-white shadow-md shrink-0"
                             aria-hidden="true"
@@ -78,7 +78,7 @@
                             <Zap class="w-5 h-5" />
                         </div>
                         <span class="text-xl font-bold tracking-tight text-surface-950">FlexiQueue</span>
-                    </div>
+                    </Link>
                     <!-- Mobile-only close button for sidebar drawer -->
                     <label
                         for="admin-drawer"
@@ -151,7 +151,7 @@
                 >
                     <Menu class="w-6 h-6" aria-hidden="true" />
                 </label>
-                <span class="font-semibold text-surface-950 lg:invisible lg:w-0 lg:overflow-hidden">FlexiQueue</span>
+                <Link href="/" class="font-semibold text-surface-950 lg:invisible lg:w-0 lg:overflow-hidden no-underline hover:opacity-90">FlexiQueue</Link>
                 <div class="flex items-center gap-2 ml-auto">
                     <ThemeToggle />
                     <span

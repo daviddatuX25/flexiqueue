@@ -64,6 +64,9 @@ Concise checklist so we don’t repeat the same failures. Add new items here whe
   Frontend Echo is created with `VITE_REVERB_APP_KEY` (from `.env` at build time). If empty/undefined, Pusher throws.  
   → echo.js now only creates Echo when key is set (otherwise `window.Echo = null`; Display pages already guard with `if (!window.Echo) return`). For real-time: set `REVERB_APP_KEY` (and `REVERB_APP_ID`, `REVERB_APP_SECRET`) in the env used when building (e.g. `.env.prod` or Pi `.env`) and rebuild.
 
+- **Hosting build: Echo not connecting / live updates unavailable**  
+  Hosting uses Pusher (not Reverb). Ensure `./scripts/build-deploy-hosting.sh` is run with `.env.hosting` present and `PUSHER_APP_KEY` set. `VITE_BROADCASTER=pusher` and `VITE_PUSHER_APP_KEY` must be passed at build time. Copy `.env.hosting.example` to `.env.hosting`, fill credentials, then run the hosting build.
+
 - **Dev: "Pusher/cURL error: Failed to connect to localhost port 6001"**  
   Laravel is set to broadcast via Reverb but the Reverb server isn’t running.  
   → On local we use the `log` driver when `BROADCAST_CONNECTION=reverb` (so no error). To test real-time: add `BROADCAST_FORCE_REVERB=1` to `.env` and run `./vendor/bin/sail artisan reverb:start`. Prod/Pi are safe: build and apply-tarball use only `.env.prod`.

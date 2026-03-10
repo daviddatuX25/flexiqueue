@@ -346,6 +346,31 @@ class ProgramControllerTest extends TestCase
         $this->assertTrue($program->settings['alternate_priority_first'] ?? false);
     }
 
+    public function test_update_persists_auto_generate_station_tts_and_includes_in_resource(): void
+    {
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/programs/{$program->id}", [
+            'name' => 'P',
+            'description' => null,
+            'settings' => [
+                'tts' => [
+                    'auto_generate_station_tts' => false,
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('program.settings.tts.auto_generate_station_tts', false);
+        $program->refresh();
+        $this->assertFalse($program->settings['tts']['auto_generate_station_tts'] ?? true);
+    }
+
     /** Per ISSUES-ELABORATION §16: activate returns 422 when pre-session checks fail. */
     public function test_activate_returns_422_when_missing_required_config(): void
     {

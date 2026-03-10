@@ -3,6 +3,7 @@
 	 * DisplayLayout — client-facing informant (no auth). Per 09-UI-ROUTES-PHASE1 §2.4.
 	 * Header: FlexiQueue, program name, date, and live time. Main: full-screen content.
 	 */
+	import { Link } from '@inertiajs/svelte';
 	import FlexiQueueToaster from '../Components/FlexiQueueToaster.svelte';
 	import FlashToToast from '../Components/FlashToToast.svelte';
 
@@ -29,7 +30,7 @@
 	<FlashToToast />
 	<header class="flex items-center justify-between gap-4 bg-primary-500 text-primary-contrast-500 px-4 py-2.5 shrink-0">
 		<div class="shrink-0">
-			<span class="text-lg font-bold">FlexiQueue</span>
+			<Link href="/" class="text-lg font-bold text-inherit no-underline hover:opacity-90 transition-opacity">FlexiQueue</Link>
 		</div>
 		<div class="flex-1 flex justify-center min-w-0">
 			{#if programName}

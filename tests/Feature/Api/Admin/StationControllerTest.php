@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api\Admin;
 
+use App\Jobs\GenerateStationTtsJob;
 use App\Models\Process;
 use App\Models\Program;
 use App\Models\ServiceTrack;
@@ -9,6 +10,7 @@ use App\Models\Station;
 use App\Models\TrackStep;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Tests\TestCase;
 
 /**
@@ -308,5 +310,45 @@ class StationControllerTest extends TestCase
         $this->assertContains($this->process->id, $ids);
         $this->assertContains($process2->id, $ids);
         $this->assertCount(2, $station->fresh()->processes);
+    }
+
+    public function test_store_does_not_dispatch_station_tts_job_when_auto_generate_station_tts_disabled(): void
+    {
+        $this->program->update([
+            'settings' => array_merge($this->program->settings ?? [], [
+                'tts' => ['auto_generate_station_tts' => false],
+            ]),
+        ]);
+
+        Bus::fake();
+
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$this->program->id}/stations", [
+            'name' => 'Cashier',
+            'capacity' => 2,
+            'process_ids' => [$this->process->id],
+        ]);
+
+        $response->assertStatus(201);
+        Bus::assertNotDispatched(GenerateStationTtsJob::class);
+    }
+
+    public function test_store_dispatches_station_tts_job_when_auto_generate_station_tts_enabled(): void
+    {
+        $this->program->update([
+            'settings' => array_merge($this->program->settings ?? [], [
+                'tts' => ['auto_generate_station_tts' => true],
+            ]),
+        ]);
+
+        Bus::fake();
+
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$this->program->id}/stations", [
+            'name' => 'Cashier',
+            'capacity' => 2,
+            'process_ids' => [$this->process->id],
+        ]);
+
+        $response->assertStatus(201);
+        Bus::assertDispatched(GenerateStationTtsJob::class);
     }
 }

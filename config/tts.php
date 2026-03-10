@@ -61,6 +61,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Sync fallback when queue worker unavailable
+    |--------------------------------------------------------------------------
+    | When true, token/station TTS generation runs synchronously (inline) when
+    | the queue worker appears idle instead of returning 503. Use for setups
+    | without a running queue worker; large batches may cause slow requests.
+    */
+    'allow_sync_when_queue_unavailable' => (bool) env('TTS_ALLOW_SYNC_WHEN_QUEUE_UNAVAILABLE', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Max tokens for sync TTS generation
+    |--------------------------------------------------------------------------
+    | When using sync fallback, cap the number of tokens generated in one
+    | request. Above this, API returns 503 and asks to run queue worker.
+    */
+    'max_sync_tokens' => (int) env('TTS_MAX_SYNC_TOKENS', 20),
+
+    /*
+    |--------------------------------------------------------------------------
     | ElevenLabs (when driver = elevenlabs)
     |--------------------------------------------------------------------------
     */

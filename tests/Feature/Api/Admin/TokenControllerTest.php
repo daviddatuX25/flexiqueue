@@ -5,7 +5,9 @@ namespace Tests\Feature\Api\Admin;
 use App\Models\Token;
 use App\Models\User;
 use App\Jobs\GenerateTokenTtsJob;
+use App\Models\TokenTtsSetting;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -402,5 +404,105 @@ class TokenControllerTest extends TestCase
         $staff = User::factory()->create(['role' => 'staff']);
         $response = $this->actingAs($staff)->putJson("/api/admin/tokens/{$token->id}", ['status' => 'available']);
         $response->assertStatus(403);
+    }
+
+    /**
+     * When queue worker appears idle and sync fallback is disabled, batch create returns 503.
+     */
+    public function test_batch_create_returns_503_when_queue_worker_idle_and_sync_fallback_disabled(): void
+    {
+        $this->app['config']->set('queue.default', 'database');
+        $this->app['config']->set('tts.allow_sync_when_queue_unavailable', false);
+        $this->app['config']->set('tts.driver', 'elevenlabs');
+        $this->app['config']->set('tts.elevenlabs.api_key', 'fake-key');
+        TokenTtsSetting::instance()->update(['voice_id' => 'voice-1', 'rate' => 1.0]);
+
+        $cutoff = now()->subMinutes(3)->timestamp;
+        DB::table('jobs')->insert([
+            'queue' => 'default',
+            'payload' => json_encode(['displayName' => 'App\Jobs\SomeJob', 'job' => 'Illuminate\Queue\CallQueuedHandler@call']),
+            'attempts' => 0,
+            'reserved_at' => null,
+            'available_at' => $cutoff,
+            'created_at' => $cutoff,
+        ]);
+
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/tokens/batch', [
+            'prefix' => 'A',
+            'count' => 2,
+            'start_number' => 1,
+        ]);
+
+        $response->assertStatus(503);
+        $response->assertJsonPath('message', 'Queue worker is not running. Start it with: php artisan queue:work');
+    }
+
+    /**
+     * When queue worker appears idle and sync fallback is enabled, batch create succeeds (TTS runs sync).
+     */
+    public function test_batch_create_succeeds_with_sync_fallback_when_queue_worker_idle(): void
+    {
+        $this->app['config']->set('queue.default', 'database');
+        $this->app['config']->set('tts.allow_sync_when_queue_unavailable', true);
+        $this->app['config']->set('tts.driver', 'elevenlabs');
+        $this->app['config']->set('tts.elevenlabs.api_key', 'fake-key');
+        TokenTtsSetting::instance()->update(['voice_id' => 'voice-1', 'rate' => 1.0]);
+
+        $ttsService = $this->createMock(\App\Services\TtsService::class);
+        $ttsService->method('isEnabled')->willReturn(true);
+        $ttsService->method('storeSegment')->willReturn('tts/tokens/1/en.mp3');
+        $ttsService->method('storeTokenTts')->willReturn('tts/tokens/1.mp3');
+        $this->app->instance(\App\Services\TtsService::class, $ttsService);
+
+        $cutoff = now()->subMinutes(3)->timestamp;
+        DB::table('jobs')->insert([
+            'queue' => 'default',
+            'payload' => json_encode(['displayName' => 'App\Jobs\SomeJob', 'job' => 'Illuminate\Queue\CallQueuedHandler@call']),
+            'attempts' => 0,
+            'reserved_at' => null,
+            'available_at' => $cutoff,
+            'created_at' => $cutoff,
+        ]);
+
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/tokens/batch', [
+            'prefix' => 'A',
+            'count' => 2,
+            'start_number' => 1,
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('created', 2);
+    }
+
+    /**
+     * When queue worker idle, sync fallback enabled, and batch size exceeds max_sync_tokens, returns 503.
+     */
+    public function test_batch_create_returns_503_when_sync_fallback_but_batch_exceeds_max_sync_tokens(): void
+    {
+        $this->app['config']->set('queue.default', 'database');
+        $this->app['config']->set('tts.allow_sync_when_queue_unavailable', true);
+        $this->app['config']->set('tts.max_sync_tokens', 5);
+        $this->app['config']->set('tts.driver', 'elevenlabs');
+        $this->app['config']->set('tts.elevenlabs.api_key', 'fake-key');
+        TokenTtsSetting::instance()->update(['voice_id' => 'voice-1', 'rate' => 1.0]);
+
+        $cutoff = now()->subMinutes(3)->timestamp;
+        DB::table('jobs')->insert([
+            'queue' => 'default',
+            'payload' => json_encode(['displayName' => 'App\Jobs\SomeJob', 'job' => 'Illuminate\Queue\CallQueuedHandler@call']),
+            'attempts' => 0,
+            'reserved_at' => null,
+            'available_at' => $cutoff,
+            'created_at' => $cutoff,
+        ]);
+
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/tokens/batch', [
+            'prefix' => 'A',
+            'count' => 10,
+            'start_number' => 1,
+        ]);
+
+        $response->assertStatus(503);
+        $this->assertStringContainsString('Queue worker is required for large batches', $response->json('message'));
     }
 }

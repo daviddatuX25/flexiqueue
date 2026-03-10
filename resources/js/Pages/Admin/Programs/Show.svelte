@@ -316,6 +316,8 @@
         connector_phrase: string;
     }
     let ttsActiveLanguage = $state<TtsLangKey>("en");
+    /** When true, creating a station automatically queues station TTS generation. When false, save/create without triggering generation. */
+    let autoGenerateStationTts = $state(true);
     let connectorTts = $state<Record<TtsLangArrayKey, ConnectorTtsConfig>>({
         en: { voice_id: "", rate: 0.84, connector_phrase: "" },
         fil: { voice_id: "", rate: 0.84, connector_phrase: "" },
@@ -380,8 +382,9 @@
             allowPublicTriage = s.allow_public_triage === true;
             enableDisplayHidBarcode = (s.enable_display_hid_barcode ?? true) === true;
             enablePublicTriageHidBarcode = (s.enable_public_triage_hid_barcode ?? true) === true;
-            const tts = (s as { tts?: { active_language?: string; connector?: { languages?: Record<string, { voice_id?: string; rate?: number; connector_phrase?: string }> } } }).tts;
+            const tts = (s as { tts?: { active_language?: string; auto_generate_station_tts?: boolean; connector?: { languages?: Record<string, { voice_id?: string; rate?: number; connector_phrase?: string }> } } }).tts;
             if (tts) {
+                autoGenerateStationTts = tts.auto_generate_station_tts !== false;
                 const lang = (tts.active_language as string | undefined) ?? "en";
                 ttsActiveLanguage = (["en", "fil", "ilo"].includes(lang) ? lang : "en") as TtsLangKey;
                 const langs = (tts.connector?.languages ?? {}) as Record<
@@ -1574,6 +1577,7 @@
                     enable_public_triage_hid_barcode: enablePublicTriageHidBarcode,
                     tts: {
                         active_language: ttsActiveLanguage,
+                        auto_generate_station_tts: autoGenerateStationTts,
                         connector: {
                             languages: {
                                 en: {
@@ -2905,9 +2909,10 @@
                                     />
                                     <span class="text-xs text-surface-500">{Math.round(displayAudioVolume * 100)}%</span>
                                 </label>
-                                <label class="flex flex-col gap-1">
-                                    <span class="text-sm text-surface-600">TTS announcement repeat</span>
+                                <div class="flex flex-col gap-1">
+                                    <label for="display-tts-repeat" class="text-sm text-surface-600">TTS announcement repeat</label>
                                     <select
+                                        id="display-tts-repeat"
                                         class="select select-bordered w-fit"
                                         bind:value={settingsDisplayTtsRepeatCount}
                                         aria-label="How many times to repeat each call announcement"
@@ -2916,10 +2921,11 @@
                                         <option value={2}>Twice</option>
                                         <option value={3}>Three times</option>
                                     </select>
-                                </label>
-                                <label class="flex flex-col gap-1">
-                                    <span class="text-sm text-surface-600">Delay between repeats (seconds)</span>
+                                </div>
+                                <div class="flex flex-col gap-1">
+                                    <label for="display-tts-repeat-delay" class="text-sm text-surface-600">Delay between repeats (seconds)</label>
                                     <input
+                                        id="display-tts-repeat-delay"
                                         type="number"
                                         min="0.5"
                                         max="10"
@@ -2928,7 +2934,7 @@
                                         bind:value={settingsDisplayTtsRepeatDelaySec}
                                         aria-label="Delay between repeated announcements in seconds"
                                     />
-                                </label>
+                                </div>
                                 <!-- TTS source/voice are now global; program controls only mute/volume/repeat. -->
                             </div>
                         </div>
@@ -4434,6 +4440,15 @@
                 </select>
                 <p class="text-xs text-surface-500 mt-1">
                     Displays use this language first for announcements.
+                </p>
+            </div>
+            <div class="form-control mt-4">
+                <label class="label cursor-pointer justify-start gap-3">
+                    <input type="checkbox" class="checkbox checkbox-sm" bind:checked={autoGenerateStationTts} />
+                    <span class="label-text font-medium">Automatically generate station TTS when creating stations</span>
+                </label>
+                <p class="text-xs text-surface-500 mt-1 ml-6">
+                    When off, new stations are saved without generating audio; use "Regenerate station TTS" when needed.
                 </p>
             </div>
             <div class="space-y-3 max-h-[26rem] overflow-y-auto pr-1">

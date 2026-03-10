@@ -21,7 +21,7 @@ Helper scripts for local development, building, and deploying to Orange Pi or La
 
 | Location | Purpose |
 |----------|---------|
-| **scripts/** (root) | Build and deploy entry points: `build-deploy-tarball.sh`, `build-deploy-tarball-sail.sh`, `deploy-to-pi.sh`, `deploy-to-laragon.sh`, `deploy-via-prod-to-pi.sh`, `dev-start-sail.sh`, `dev-stop-sail.sh`, `dev-start-local.sh`, `dev-stop-local.sh` |
+| **scripts/** (root) | Build and deploy entry points: `build-deploy-tarball.sh`, `build-deploy-tarball-sail.sh`, `build-deploy-hosting.sh`, `deploy-to-pi.sh`, `deploy-to-laragon.sh`, `deploy-via-prod-to-pi.sh`, `dev-start-sail.sh`, `dev-stop-sail.sh`, `dev-start-local.sh`, `dev-stop-local.sh` |
 | **scripts/dev/** | Development: `setup.sh`, `full-setup-dev.sh`, `quick-check.sh`, `cache-clear.sh`, `common.sh` |
 | **scripts/pi/** | Run on the Pi: `apply-tarball.sh`, `full-setup-pi.sh`, `update-from-url.sh`, nginx/Reverb configs |
 | **scripts/laragon/** | Run on Laragon/laptop: `apply-tarball.sh` |
@@ -37,6 +37,7 @@ Helper scripts for local development, building, and deploying to Orange Pi or La
 | Dev one-click (setup + start) | Development | `./scripts/dev/full-setup-dev.sh` |
 | Build tarball (host) | Build | `./scripts/build-deploy-tarball.sh` |
 | Build tarball (Sail) | Build | `./scripts/build-deploy-tarball-sail.sh` |
+| Build hosting tarball | Build | `./scripts/build-deploy-hosting.sh` |
 | Deploy to Pi (interactive) | Deploy Pi | `PI_HOST=... ./scripts/deploy-to-pi.sh --build` |
 | Deploy to Pi (one-click) | Deploy Pi | `PI_HOST=... DEPLOY_MIGRATE=1 ./scripts/deploy-to-pi.sh --build` |
 | Deploy to Pi from prod (merge + build + deploy) | Deploy Pi | `PI_HOST=... ./scripts/deploy-via-prod-to-pi.sh --build` |
@@ -67,6 +68,7 @@ Helper scripts for local development, building, and deploying to Orange Pi or La
 |--------|--------|
 | `build-deploy-tarball.sh` | Build production tarball on host from a **temporary prod worktree** (Composer --no-dev, npm build). Output: `flexiqueue-deploy.tar.gz` in repo root. Main repo and dev environment are untouched. |
 | `build-deploy-tarball-sail.sh` | Same, using Docker (worktree mounted in container). Use when host has no PHP/Node. |
+| `build-deploy-hosting.sh` | Build for **hosting** (PHP 8.2 max, MySQL, Pusher). Requires `.env.hosting` (copy from `.env.hosting.example`). Output: `flexiqueue-hosting.tar.gz`. Uses `VITE_BROADCASTER=pusher` so Echo connects to Pusher.com. |
 
 **Prod worktree and prompts:**
 
