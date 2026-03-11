@@ -292,10 +292,10 @@
 </script>
 
 <svelte:head>
-	<title>Track Overrides — FlexiQueue</title>
+	<title>Program Overrides — FlexiQueue</title>
 </svelte:head>
 
-<MobileLayout headerTitle="Track Overrides" {queueCount} {processedToday}>
+<MobileLayout headerTitle="Program Overrides" {queueCount} {processedToday}>
 	<div class="flex flex-col gap-4 md:gap-6 text-surface-950 w-full max-w-2xl mx-auto px-4 md:px-6 py-4 md:py-6">
 		{#if canApprove}
 			<!-- Generate PIN/QR for staff -->

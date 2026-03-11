@@ -52,6 +52,7 @@
 	let loadFailed = $state(false);
 	let submitting = $state(false);
 	let noShowTimer = $state(10);
+	let maxNoShowAttempts = $state(3);
 	let requireOverride = $state(true);
 	let priorityFirst = $state(true);
 	let balanceMode = $state<"fifo" | "alternate">("fifo");
@@ -73,6 +74,7 @@
 		}
 		const s = (data as { settings?: Record<string, unknown> }).settings ?? {};
 		noShowTimer = Number(s.no_show_timer_seconds ?? 10);
+		maxNoShowAttempts = Number(s.max_no_show_attempts ?? 3);
 		requireOverride = Boolean(s.require_permission_before_override ?? true);
 		priorityFirst = Boolean(s.priority_first ?? true);
 		balanceMode = ((s.balance_mode as string) ?? "fifo") as "fifo" | "alternate";
@@ -91,6 +93,7 @@
 		const { ok, message } = await api("PUT", "/api/admin/program-default-settings", {
 			settings: {
 				no_show_timer_seconds: noShowTimer,
+				max_no_show_attempts: maxNoShowAttempts,
 				require_permission_before_override: requireOverride,
 				priority_first: priorityFirst,
 				balance_mode: balanceMode,
@@ -135,6 +138,15 @@
 					<div class="sm:w-2/3">
 						<input type="number" class="input rounded-container border border-surface-200 px-3 py-2 w-24" min="5" max="120" bind:value={noShowTimer} />
 						<span class="text-sm text-surface-600 ml-2">seconds</span>
+					</div>
+				</div>
+				<div class="flex flex-col sm:flex-row gap-4">
+					<div class="sm:w-1/3 shrink-0">
+						<h3 class="font-medium text-surface-950 flex items-center gap-2"><AlertCircle class="w-4 h-4 text-surface-500" /> Max no-show attempts</h3>
+						<p class="text-xs text-surface-500 mt-1">After this many no-shows, staff must choose Extend or Last call (default 3).</p>
+					</div>
+					<div class="sm:w-2/3">
+						<input type="number" class="input rounded-container border border-surface-200 px-3 py-2 w-24" min="1" max="10" bind:value={maxNoShowAttempts} />
 					</div>
 				</div>
 				<div class="flex flex-col sm:flex-row gap-4">

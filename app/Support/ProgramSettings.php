@@ -125,6 +125,12 @@ final class ProgramSettings
         return (bool) ($this->settings['enable_public_triage_hid_barcode'] ?? true);
     }
 
+    /** Per plan: enable camera/QR scanner on Display board. Default true. */
+    public function getEnableDisplayCameraScanner(): bool
+    {
+        return (bool) ($this->settings['enable_display_camera_scanner'] ?? true);
+    }
+
     /**
      * Active TTS language for this program (used by displays and generation).
      * Defaults to 'en' when not explicitly configured.

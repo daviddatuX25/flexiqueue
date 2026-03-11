@@ -66,6 +66,7 @@ class ProgramDefaultSettingsController extends Controller
     {
         return [
             'no_show_timer_seconds' => (int) ($settings['no_show_timer_seconds'] ?? 10),
+            'max_no_show_attempts' => (int) max(1, min(10, $settings['max_no_show_attempts'] ?? 3)),
             'require_permission_before_override' => (bool) ($settings['require_permission_before_override'] ?? true),
             'priority_first' => (bool) ($settings['priority_first'] ?? true),
             'balance_mode' => $settings['balance_mode'] ?? 'fifo',

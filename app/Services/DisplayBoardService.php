@@ -44,6 +44,7 @@ class DisplayBoardService
                 'display_tts_repeat_count' => 1,
                 'display_tts_repeat_delay_ms' => 2000,
                 'enable_display_hid_barcode' => true,
+                'enable_display_camera_scanner' => true,
                 'tts_active_language' => 'en',
                 'tts_connector_phrase' => null,
                 'station_tts_by_name' => [],
@@ -62,6 +63,7 @@ class DisplayBoardService
         $servingAndCalled = Session::query()
             ->where('program_id', $program->id)
             ->whereIn('status', ['serving', 'called'])
+            ->where(fn ($q) => $q->whereNull('is_on_hold')->orWhere('is_on_hold', false))
             ->with(['currentStation', 'serviceTrack.trackSteps.process'])
             ->orderBy('started_at')
             ->get();
@@ -175,6 +177,7 @@ class DisplayBoardService
             'display_tts_repeat_count' => $program->settings()->getDisplayTtsRepeatCount(),
             'display_tts_repeat_delay_ms' => $program->settings()->getDisplayTtsRepeatDelayMs(),
             'enable_display_hid_barcode' => $program->settings()->getEnableDisplayHidBarcode(),
+            'enable_display_camera_scanner' => $program->settings()->getEnableDisplayCameraScanner(),
             'tts_active_language' => $activeLanguage,
             'tts_connector_phrase' => $connectorPhrase,
             'station_tts_by_name' => $stationTtsByName,

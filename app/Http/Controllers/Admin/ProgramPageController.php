@@ -168,6 +168,7 @@ class ProgramPageController extends Controller
                 'created_at' => $program->created_at?->toIso8601String(),
                 'settings' => [
                     'no_show_timer_seconds' => (int) ($settings['no_show_timer_seconds'] ?? 10),
+                    'max_no_show_attempts' => $program->settings()->getMaxNoShowAttempts(),
                     'require_permission_before_override' => (bool) ($settings['require_permission_before_override'] ?? true),
                     'priority_first' => (bool) ($settings['priority_first'] ?? true),
                     'balance_mode' => $settings['balance_mode'] ?? 'fifo',
@@ -187,6 +188,7 @@ class ProgramPageController extends Controller
                     'allow_public_triage' => $program->settings()->getAllowPublicTriage(),
                     'enable_display_hid_barcode' => $program->settings()->getEnableDisplayHidBarcode(),
                     'enable_public_triage_hid_barcode' => $program->settings()->getEnablePublicTriageHidBarcode(),
+                    'enable_display_camera_scanner' => $program->settings()->getEnableDisplayCameraScanner(),
                     'tts' => [
                         'active_language' => $program->settings()->getTtsActiveLanguage(),
                         'connector' => [

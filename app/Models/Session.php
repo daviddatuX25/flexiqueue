@@ -82,6 +82,17 @@ class Session extends Model
         return $query->whereIn('status', ['waiting', 'called', 'serving']);
     }
 
+    /**
+     * Sessions that consume station "client_capacity" (called reserves a slot; held does not).
+     */
+    public function scopeCapacityConsumingAtStation(Builder $query, int $stationId): Builder
+    {
+        return $query
+            ->where('current_station_id', $stationId)
+            ->whereIn('status', ['called', 'serving'])
+            ->where(fn (Builder $q) => $q->whereNull('is_on_hold')->orWhere('is_on_hold', false));
+    }
+
     public function isOnHold(): bool
     {
         return (bool) $this->is_on_hold;

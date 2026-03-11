@@ -166,14 +166,44 @@ class ProgramControllerTest extends TestCase
             'description' => null,
             'settings' => [
                 'require_permission_before_override' => false,
+                'max_no_show_attempts' => 5,
             ],
         ]);
 
         $response->assertStatus(200);
+        $response->assertJsonPath('program.settings.max_no_show_attempts', 5);
         $program->refresh();
         $settings = $program->settings ?? [];
         $this->assertSame(15, $settings['no_show_timer_seconds']);
         $this->assertFalse($settings['require_permission_before_override']);
+        $this->assertSame(5, $settings['max_no_show_attempts']);
+    }
+
+    /** Max no-show attempts must be 1–10; invalid values return 422. */
+    public function test_update_rejects_max_no_show_attempts_out_of_range(): void
+    {
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+
+        $responseZero = $this->actingAs($this->admin)->putJson("/api/admin/programs/{$program->id}", [
+            'name' => 'P',
+            'description' => null,
+            'settings' => ['max_no_show_attempts' => 0],
+        ]);
+        $responseZero->assertStatus(422);
+        $responseZero->assertJsonValidationErrors(['settings.max_no_show_attempts']);
+
+        $responseEleven = $this->actingAs($this->admin)->putJson("/api/admin/programs/{$program->id}", [
+            'name' => 'P',
+            'description' => null,
+            'settings' => ['max_no_show_attempts' => 11],
+        ]);
+        $responseEleven->assertStatus(422);
+        $responseEleven->assertJsonValidationErrors(['settings.max_no_show_attempts']);
     }
 
     /** Per plan: display_audio_volume must be 0-1; invalid value returns 422. */

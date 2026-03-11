@@ -12,6 +12,7 @@ class ProgramSettingsTest extends TestCase
         $s = ProgramSettings::fromArray([]);
 
         $this->assertSame(10, $s->getNoShowTimerSeconds());
+        $this->assertSame(3, $s->getMaxNoShowAttempts());
         $this->assertTrue($s->getRequirePermissionBeforeOverride());
         $this->assertTrue($s->getPriorityFirst());
         $this->assertSame('fifo', $s->getBalanceMode());
@@ -25,7 +26,15 @@ class ProgramSettingsTest extends TestCase
         $this->assertFalse($s->getAllowPublicTriage());
         $this->assertTrue($s->getEnableDisplayHidBarcode());
         $this->assertTrue($s->getEnablePublicTriageHidBarcode());
+        $this->assertTrue($s->getEnableDisplayCameraScanner());
         $this->assertSame('en', $s->getTtsActiveLanguage());
+    }
+
+    public function test_enable_display_camera_scanner_defaults_true_and_respects_setting(): void
+    {
+        $this->assertTrue(ProgramSettings::fromArray([])->getEnableDisplayCameraScanner());
+        $this->assertTrue(ProgramSettings::fromArray(['enable_display_camera_scanner' => true])->getEnableDisplayCameraScanner());
+        $this->assertFalse(ProgramSettings::fromArray(['enable_display_camera_scanner' => false])->getEnableDisplayCameraScanner());
     }
 
     public function test_balance_mode_is_validated(): void
@@ -73,6 +82,14 @@ class ProgramSettingsTest extends TestCase
     {
         $this->assertSame('en', ProgramSettings::fromArray(['tts' => ['active_language' => 'xx']])->getTtsActiveLanguage());
         $this->assertSame('fil', ProgramSettings::fromArray(['tts' => ['active_language' => 'fil']])->getTtsActiveLanguage());
+    }
+
+    public function test_max_no_show_attempts_defaults_and_clamped(): void
+    {
+        $this->assertSame(3, ProgramSettings::fromArray([])->getMaxNoShowAttempts());
+        $this->assertSame(5, ProgramSettings::fromArray(['max_no_show_attempts' => 5])->getMaxNoShowAttempts());
+        $this->assertSame(1, ProgramSettings::fromArray(['max_no_show_attempts' => 0])->getMaxNoShowAttempts());
+        $this->assertSame(10, ProgramSettings::fromArray(['max_no_show_attempts' => 99])->getMaxNoShowAttempts());
     }
 }
 

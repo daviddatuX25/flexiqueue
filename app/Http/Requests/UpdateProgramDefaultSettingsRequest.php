@@ -23,6 +23,7 @@ class UpdateProgramDefaultSettingsRequest extends FormRequest
         return [
             'settings' => ['required', 'array'],
             'settings.no_show_timer_seconds' => ['sometimes', 'integer', 'min:5', 'max:600'],
+            'settings.max_no_show_attempts' => ['sometimes', 'integer', 'min:1', 'max:10'],
             'settings.require_permission_before_override' => ['sometimes', 'boolean'],
             'settings.priority_first' => ['sometimes', 'boolean'],
             'settings.balance_mode' => ['sometimes', 'string', 'in:fifo,alternate'],

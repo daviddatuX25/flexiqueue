@@ -123,4 +123,29 @@ class PublicDisplaySettingsTest extends TestCase
 
         $response->assertStatus(422);
     }
+
+    public function test_valid_pin_updates_enable_display_camera_scanner(): void
+    {
+        $admin = User::factory()->admin()->withOverridePin('123456')->create();
+        $program = Program::create([
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $admin->id,
+            'settings' => [
+                'enable_display_camera_scanner' => true,
+            ],
+        ]);
+
+        $response = $this->postJson('/api/public/display-settings', [
+            'pin' => '123456',
+            'enable_display_camera_scanner' => false,
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('enable_display_camera_scanner', false);
+
+        $program->refresh();
+        $this->assertFalse($program->settings()->getEnableDisplayCameraScanner());
+    }
 }

@@ -9,6 +9,8 @@
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
 	import Modal from '../../Components/Modal.svelte';
 	import QrScanner from '../../Components/QrScanner.svelte';
+	import AuthChoiceButtons from '../../Components/AuthChoiceButtons.svelte';
+	import PinOrQrInput from '../../Components/PinOrQrInput.svelte';
 	import { onMount } from 'svelte';
 	import { Camera, Settings } from 'lucide-svelte';
 	import { toaster } from '../../lib/toaster.js';
@@ -18,6 +20,10 @@
 		getLocalAllowHidOnThisDevice,
 		setLocalAllowHidOnThisDevice,
 	} from '../../lib/displayHid.js';
+	import {
+		shouldAllowCameraScanner,
+		setLocalAllowCameraOnThisDevice,
+	} from '../../lib/displayCamera.js';
 
 	interface Track {
 		id: number;
@@ -81,6 +87,7 @@
 
 	let showScanner = $state(false);
 	let scanHandled = $state(false);
+	let localAllowCameraScanner = $state(true);
 	let barcodeValue = $state('');
 	let barcodeInputEl = $state<HTMLInputElement | null>(null);
 	let scannedToken = $state<{ physical_id: string; qr_hash: string; status: string } | null>(null);
@@ -97,14 +104,26 @@
 	let enablePublicTriageHidBarcode = $state(true);
 	/** Settings modal. */
 	let showTriageSettingsModal = $state(false);
+	let triageSettingsAuthMode = $state<'pin' | 'qr'>('pin');
 	let triageSettingsPin = $state('');
+	let triageSettingsQrScanToken = $state('');
+	let triagePinOrQrRef = $state(null);
 	let triageSettingsError = $state('');
 	let triageSettingsSaving = $state(false);
 	let triageSettingsProgramHid = $state(true);
 	let triageSettingsLocalAllowHid = $state(false);
+	let triageSettingsLocalAllowCamera = $state(true);
 
 	$effect(() => {
 		enablePublicTriageHidBarcode = enable_public_triage_hid_barcode !== false;
+	});
+
+	onMount(() => {
+		localAllowCameraScanner = shouldAllowCameraScanner('triage');
+	});
+
+	$effect(() => {
+		if (!localAllowCameraScanner) showScanner = false;
 	});
 
 	function setDefaultTrack() {
@@ -160,21 +179,24 @@
 	function openTriageSettingsModal() {
 		triageSettingsProgramHid = enablePublicTriageHidBarcode;
 		triageSettingsLocalAllowHid = getLocalAllowHidOnThisDevice('triage') === true;
+		triageSettingsLocalAllowCamera = shouldAllowCameraScanner('triage');
+		triageSettingsAuthMode = 'pin';
 		triageSettingsPin = '';
+		triageSettingsQrScanToken = '';
 		triageSettingsError = '';
 		showTriageSettingsModal = true;
 	}
 
 	async function saveTriageSettings() {
 		triageSettingsError = '';
-		if (!/^\d{6}$/.test(triageSettingsPin.trim())) {
-			triageSettingsError = 'Enter a 6-digit PIN.';
-			return;
-		}
+		const authBody = triagePinOrQrRef?.buildPinOrQrPayload?.() ?? null;
+		if (!authBody) return (triageSettingsError = triageSettingsAuthMode === 'pin'
+			? 'Enter a 6-digit PIN.'
+			: 'Scan QR first.');
 		triageSettingsSaving = true;
 		try {
 			const body = {
-				pin: triageSettingsPin.trim(),
+				...authBody, // { pin } or { qr_scan_token }
 				enable_public_triage_hid_barcode: triageSettingsProgramHid,
 			};
 			const res = await fetch('/api/public/display-settings', {
@@ -195,7 +217,15 @@
 			}
 			const data = await res.json().catch(() => ({}));
 			if (res.status === 401) {
-				triageSettingsError = (data as { message?: string }).message || 'Invalid PIN.';
+				triageSettingsError = (data as { message?: string }).message || 'Authorization failed.';
+				return;
+			}
+			if (res.status === 403) {
+				triageSettingsError = (data as { message?: string }).message || 'Not authorized for this program.';
+				return;
+			}
+			if (res.status === 429) {
+				triageSettingsError = (data as { message?: string }).message || 'Too many attempts. Try again later.';
 				return;
 			}
 			if (!res.ok) {
@@ -205,6 +235,7 @@
 			const d = data as { enable_public_triage_hid_barcode?: boolean };
 			enablePublicTriageHidBarcode = !!d.enable_public_triage_hid_barcode;
 			triageSettingsPin = '';
+			triageSettingsQrScanToken = '';
 			showTriageSettingsModal = false;
 		} catch (e) {
 			const isNetwork = e instanceof TypeError && (e as Error).message === 'Failed to fetch';
@@ -378,14 +409,16 @@
 						role="region"
 					>
 						<p class="flex-1 text-base font-medium text-surface-950">Scan your token or enter ID</p>
-						<button
-							type="button"
-							class="btn btn-icon preset-filled-primary-500 shrink-0 touch-target"
-							aria-label="Open camera to scan QR"
-							onclick={() => { showScanner = true; scanHandled = false; }}
-						>
-							<Camera class="w-6 h-6" />
-						</button>
+						{#if localAllowCameraScanner}
+							<button
+								type="button"
+								class="btn btn-icon preset-filled-primary-500 shrink-0 touch-target"
+								aria-label="Open camera to scan QR"
+								onclick={() => { showScanner = true; scanHandled = false; }}
+							>
+								<Camera class="w-6 h-6" />
+							</button>
+						{/if}
 					</div>
 				</section>
 
@@ -407,22 +440,18 @@
 				<Modal open={showTriageSettingsModal} title="Triage settings" onClose={() => (showTriageSettingsModal = false)}>
 					{#snippet children()}
 						<div class="flex flex-col gap-6">
-							<p class="text-sm text-surface-950/70">Changes to program settings require supervisor or admin PIN.</p>
-							<label class="flex flex-col gap-1">
-								<span class="text-sm font-medium text-surface-950">PIN (6 digits)</span>
-								<input
-									type="text"
-									inputmode="numeric"
-									autocomplete="off"
-									maxlength="6"
-									class="input input-sm bg-surface-50 border border-surface-300 rounded-container font-mono w-full max-w-[8rem]"
-									placeholder="000000"
-									bind:value={triageSettingsPin}
-									oninput={(e) => { triageSettingsPin = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }}
-									disabled={triageSettingsSaving}
-									aria-describedby="triage-settings-pin-error"
-								/>
-							</label>
+							<p class="text-sm text-surface-950/70">Changes to program settings require supervisor or admin authorization.</p>
+							<div class="flex flex-col gap-2">
+								<div class="label"><span class="label-text">Authorize with</span></div>
+								<AuthChoiceButtons includeRequest={false} disabled={triageSettingsSaving} bind:mode={triageSettingsAuthMode} />
+							</div>
+							<PinOrQrInput
+								bind:this={triagePinOrQrRef}
+								disabled={triageSettingsSaving}
+								mode={triageSettingsAuthMode}
+								bind:pin={triageSettingsPin}
+								bind:qrScanToken={triageSettingsQrScanToken}
+							/>
 							{#if triageSettingsError}
 								<p id="triage-settings-pin-error" class="text-sm text-error-600">{triageSettingsError}</p>
 							{/if}
@@ -450,6 +479,18 @@
 										onchange={() => setLocalAllowHidOnThisDevice('triage', triageSettingsLocalAllowHid)}
 									/>
 									<span class="text-sm text-surface-950">Allow HID scanner on this device</span>
+								</label>
+								<label class="flex items-center gap-2 cursor-pointer">
+									<input
+										type="checkbox"
+										class="checkbox"
+										bind:checked={triageSettingsLocalAllowCamera}
+										onchange={() => {
+											setLocalAllowCameraOnThisDevice('triage', triageSettingsLocalAllowCamera);
+											localAllowCameraScanner = triageSettingsLocalAllowCamera;
+										}}
+									/>
+									<span class="text-sm text-surface-950">Allow camera/QR scanner on this device</span>
 								</label>
 							</div>
 							<div class="flex flex-wrap gap-2 justify-end pt-2">

@@ -152,6 +152,13 @@ class Program extends Model
         return $this->settings()->getEnablePublicTriageHidBarcode();
     }
 
+    /** Per plan: enable camera/QR scanner on Display board. Default true. */
+    /** @deprecated Use `$program->settings()->getEnableDisplayCameraScanner()` */
+    public function getEnableDisplayCameraScanner(): bool
+    {
+        return $this->settings()->getEnableDisplayCameraScanner();
+    }
+
     /**
      * Active TTS language for this program (used by displays and generation).
      * Defaults to 'en' when not explicitly configured.

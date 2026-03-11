@@ -148,6 +148,39 @@ class SessionActionsTest extends TestCase
         });
     }
 
+    public function test_call_ignores_held_sessions_for_station_capacity(): void
+    {
+        $this->station1->update(['client_capacity' => 1]);
+
+        $heldToken = new Token;
+        $heldToken->qr_code_hash = hash('sha256', Str::random(32).'H1');
+        $heldToken->physical_id = 'H1';
+        $heldToken->status = 'in_use';
+        $heldToken->save();
+        $heldSession = Session::create([
+            'token_id' => $heldToken->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'H1',
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+            'is_on_hold' => true,
+            'holding_station_id' => $this->station1->id,
+            'held_at' => now(),
+            'held_order' => 1,
+        ]);
+        $heldToken->update(['current_session_id' => $heldSession->id]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/call");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('status', 'called');
+        $this->assertDatabaseHas('queue_sessions', ['id' => $this->session->id, 'status' => 'called']);
+        $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'call']);
+    }
+
     /** Display activity: only indicate "priority lane" when client has priority classification; regular client must not get "priority lane" in message. */
     public function test_call_regular_client_does_not_include_priority_lane_in_station_activity_message(): void
     {
@@ -357,11 +390,79 @@ class SessionActionsTest extends TestCase
         $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'cancel']);
     }
 
-    public function test_no_show_on_called_session_with_3_attempts_returns_200_and_terminates(): void
+    public function test_enqueue_back_from_called_returns_200_and_moves_to_end_of_queue(): void
     {
+        $this->staff->update(['assigned_station_id' => $this->station1->id]);
+        $this->session->update([
+            'status' => 'called',
+            'station_queue_position' => 1,
+            'no_show_attempts' => 2,
+        ]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/enqueue-back");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session.status', 'waiting');
+        $response->assertJsonPath('back_to_waiting', true);
+        $this->session->refresh();
+        $this->assertSame(2, $this->session->no_show_attempts);
+        $this->assertGreaterThanOrEqual(2, $this->session->station_queue_position);
+        $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'enqueue_back']);
+    }
+
+    public function test_enqueue_back_from_serving_returns_200_and_moves_to_end_of_queue(): void
+    {
+        $this->staff->update(['assigned_station_id' => $this->station1->id]);
+        $this->session->update([
+            'status' => 'serving',
+            'station_queue_position' => 1,
+            'no_show_attempts' => 1,
+        ]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/enqueue-back");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session.status', 'waiting');
+        $response->assertJsonPath('back_to_waiting', true);
+        $this->session->refresh();
+        $this->assertSame(1, $this->session->no_show_attempts);
+        $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'enqueue_back']);
+    }
+
+    public function test_enqueue_back_from_waiting_returns_409(): void
+    {
+        $this->staff->update(['assigned_station_id' => $this->station1->id]);
+        $this->session->update(['status' => 'waiting']);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/enqueue-back");
+
+        $response->assertStatus(409);
+        $response->assertJsonPath('message', 'Enqueue back only applies to called or serving sessions.');
+        $this->assertDatabaseMissing('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'enqueue_back']);
+    }
+
+    public function test_no_show_on_called_session_at_2_attempts_returns_to_waiting_not_terminate(): void
+    {
+        $this->staff->update(['assigned_station_id' => $this->station1->id]);
         $this->session->update(['status' => 'called', 'no_show_attempts' => 2]);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/no-show");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session.status', 'waiting');
+        $response->assertJsonPath('back_to_waiting', true);
+        $response->assertJsonPath('no_show_attempts', 3);
+        $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'no_show']);
+    }
+
+    public function test_no_show_at_max_with_last_call_terminates(): void
+    {
+        $this->staff->update(['assigned_station_id' => $this->station1->id]);
+        $this->session->update(['status' => 'called', 'no_show_attempts' => 3]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/no-show", [
+            'last_call' => true,
+        ]);
 
         $response->assertStatus(200);
         $response->assertJsonPath('session.status', 'no_show');
@@ -369,8 +470,69 @@ class SessionActionsTest extends TestCase
         $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'no_show']);
     }
 
+    public function test_no_show_at_max_with_extend_returns_to_waiting(): void
+    {
+        $this->staff->update(['assigned_station_id' => $this->station1->id]);
+        $this->session->update(['status' => 'called', 'no_show_attempts' => 3]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/no-show", [
+            'extend' => true,
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session.status', 'waiting');
+        $response->assertJsonPath('back_to_waiting', true);
+        $response->assertJsonPath('no_show_attempts', 4);
+        $response->assertJsonPath('extended', true);
+        $this->session->refresh();
+        $this->assertSame(4, $this->session->no_show_attempts);
+    }
+
+    public function test_no_show_at_max_without_extend_or_last_call_returns_422(): void
+    {
+        $this->staff->update(['assigned_station_id' => $this->station1->id]);
+        $this->session->update(['status' => 'called', 'no_show_attempts' => 3]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/no-show");
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'At max no-show attempts. Use extend or last_call.');
+    }
+
+    public function test_no_show_with_enqueue_back_moves_to_end_of_queue(): void
+    {
+        $this->staff->update(['assigned_station_id' => $this->station1->id]);
+        $this->session->update([
+            'status' => 'called',
+            'station_queue_position' => 1,
+            'no_show_attempts' => 0,
+        ]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/no-show", [
+            'enqueue_back' => true,
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session.status', 'waiting');
+        $this->session->refresh();
+        $this->assertGreaterThanOrEqual(2, $this->session->station_queue_position);
+    }
+
+    public function test_no_show_from_serving_returns_to_waiting(): void
+    {
+        $this->staff->update(['assigned_station_id' => $this->station1->id]);
+        $this->session->update(['status' => 'serving', 'no_show_attempts' => 0]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/no-show");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session.status', 'waiting');
+        $response->assertJsonPath('no_show_attempts', 1);
+    }
+
     public function test_no_show_on_called_session_with_1_attempt_returns_to_waiting(): void
     {
+        $this->staff->update(['assigned_station_id' => $this->station1->id]);
         $this->session->update(['status' => 'called', 'no_show_attempts' => 0]);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/no-show");

@@ -13,6 +13,7 @@ use App\Http\Requests\ForceCompleteSessionRequest;
 use App\Http\Requests\HoldSessionRequest;
 use App\Http\Requests\OverrideSessionRequest;
 use App\Http\Requests\EnqueueBackSessionRequest;
+use App\Http\Requests\MarkNoShowSessionRequest;
 use App\Http\Requests\ResumeFromHoldSessionRequest;
 use App\Http\Requests\ServeSessionRequest;
 use App\Http\Requests\TransferSessionRequest;
@@ -380,15 +381,34 @@ class SessionController extends Controller
     }
 
     /**
-     * Per plan: Mark no-show. From 'called' or 'waiting'.
-     * If attempts < 3: back to waiting. If 3: terminates, returns token.
+     * Per flexiqueue-a3wh: Mark no-show. From 'called', 'waiting', or 'serving'.
+     * Body: enqueue_back?, extend?, last_call? (booleans). When attempts >= max, exactly one of extend or last_call required.
      */
-    public function noShow(Session $session): JsonResponse
+    public function noShow(MarkNoShowSessionRequest $request, Session $session): JsonResponse
     {
+        Gate::authorize('update', $session);
+
+        $enqueueBack = (bool) $request->input('enqueue_back', false);
+        $extend = (bool) $request->input('extend', false);
+        $lastCall = (bool) $request->input('last_call', false);
+
+        if ($extend && $lastCall) {
+            return response()->json(['message' => 'Cannot send both extend and last_call.'], 422);
+        }
+
+        $program = $session->program;
+        $max = $program?->settings()->getMaxNoShowAttempts() ?? 3;
+        $attempts = (int) $session->no_show_attempts;
+        if ($attempts >= $max && ! $extend && ! $lastCall) {
+            return response()->json(['message' => 'At max no-show attempts. Use extend or last_call.'], 422);
+        }
+
         try {
-            $result = $this->sessionService->markNoShow($session, $this->user()->id);
+            $result = $this->sessionService->markNoShow($session, $request->user()->id, $enqueueBack, $extend, $lastCall);
         } catch (\InvalidArgumentException $e) {
-            return response()->json(['message' => $e->getMessage()], 409);
+            $status = str_contains($e->getMessage(), 'max no-show') ? 422 : 409;
+
+            return response()->json(['message' => $e->getMessage()], $status);
         }
 
         $response = [
@@ -400,6 +420,9 @@ class SessionController extends Controller
         if (isset($result['back_to_waiting'])) {
             $response['back_to_waiting'] = true;
             $response['no_show_attempts'] = $result['no_show_attempts'] ?? 0;
+        }
+        if (! empty($result['extended'])) {
+            $response['extended'] = true;
         }
 
         return response()->json($response);

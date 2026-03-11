@@ -137,6 +137,7 @@ class DashboardService
         $servingSessions = Session::query()
             ->whereIn('current_station_id', $stationIds)
             ->whereIn('status', ['called', 'serving'])
+            ->where(fn ($q) => $q->whereNull('is_on_hold')->orWhere('is_on_hold', false))
             ->orderByRaw("CASE status WHEN 'serving' THEN 0 ELSE 1 END")
             ->orderBy('started_at')
             ->get();

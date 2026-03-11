@@ -31,6 +31,7 @@
         GitMerge,
         FileText,
         Monitor,
+        Camera,
         User,
         Power,
         Rocket,
@@ -48,6 +49,7 @@
         created_at: string | null;
         settings?: {
             no_show_timer_seconds: number;
+            max_no_show_attempts?: number;
             require_permission_before_override: boolean;
             priority_first: boolean;
             balance_mode: string;
@@ -71,6 +73,8 @@
             enable_display_hid_barcode?: boolean;
             /** Per barcode-hid: enable HID barcode on Public triage. Default true. */
             enable_public_triage_hid_barcode?: boolean;
+            /** Per plan: enable camera/QR scanner on Display board. Default true. */
+            enable_display_camera_scanner?: boolean;
         };
     }
 
@@ -286,6 +290,7 @@
     /** Per ISSUES-ELABORATION §20: mm:ss display for no-show timer (5–600 seconds). */
     let noShowTimerMinutes = $state(0);
     let noShowTimerSeconds = $state(10);
+    let maxNoShowAttempts = $state(3);
     let settingsRequireOverride = $state(true);
     let settingsPriorityFirst = $state(true);
     let settingsBalanceMode = $state<"fifo" | "alternate">("fifo");
@@ -345,6 +350,8 @@
     let enableDisplayHidBarcode = $state(true);
     /** Per barcode-hid: enable HID barcode on Public triage. Default true. */
     let enablePublicTriageHidBarcode = $state(true);
+    /** Per plan: enable camera/QR scanner on Display board. Default true. */
+    let enableDisplayCameraScanner = $state(true);
     /** Per ISSUES-ELABORATION §15: expandable "More details" for station selection. */
     let showStationSelectionDetails = $state(false);
     /** Per bead flexiqueue-5gl: expandable "More details" for priority/regular ratio (alternate mode). */
@@ -363,6 +370,7 @@
             settingsNoShowTimer = total;
             noShowTimerMinutes = Math.floor(total / 60);
             noShowTimerSeconds = total % 60;
+            maxNoShowAttempts = Math.max(1, Math.min(10, Number((s as { max_no_show_attempts?: number }).max_no_show_attempts ?? 3)));
             settingsRequireOverride =
                 s.require_permission_before_override ?? true;
             settingsPriorityFirst = s.priority_first ?? true;
@@ -382,6 +390,7 @@
             allowPublicTriage = s.allow_public_triage === true;
             enableDisplayHidBarcode = (s.enable_display_hid_barcode ?? true) === true;
             enablePublicTriageHidBarcode = (s.enable_public_triage_hid_barcode ?? true) === true;
+            enableDisplayCameraScanner = (s.enable_display_camera_scanner ?? true) === true;
             const tts = (s as { tts?: { active_language?: string; auto_generate_station_tts?: boolean; connector?: { languages?: Record<string, { voice_id?: string; rate?: number; connector_phrase?: string }> } } }).tts;
             if (tts) {
                 autoGenerateStationTts = tts.auto_generate_station_tts !== false;
@@ -1558,6 +1567,7 @@
                         600,
                         Math.max(5, noShowTimerMinutes * 60 + noShowTimerSeconds),
                     ),
+                    max_no_show_attempts: Math.max(1, Math.min(10, Math.floor(Number(maxNoShowAttempts) || 3))),
                     require_permission_before_override: settingsRequireOverride,
                     priority_first: settingsPriorityFirst,
                     balance_mode: settingsBalanceMode,
@@ -1575,6 +1585,7 @@
                     allow_public_triage: allowPublicTriage,
                     enable_display_hid_barcode: enableDisplayHidBarcode,
                     enable_public_triage_hid_barcode: enablePublicTriageHidBarcode,
+                    enable_display_camera_scanner: enableDisplayCameraScanner,
                     tts: {
                         active_language: ttsActiveLanguage,
                         auto_generate_station_tts: autoGenerateStationTts,
@@ -1628,6 +1639,7 @@
         settingsAlternateRatioR = Number(ar[1] ?? 1);
         settingsAlternatePriorityFirst = (s.alternate_priority_first as boolean | undefined) !== false;
         displayScanTimeoutSeconds = Math.min(300, Math.max(0, Number((s as { display_scan_timeout_seconds?: number }).display_scan_timeout_seconds ?? 20)));
+        maxNoShowAttempts = Math.max(1, Math.min(10, Number((s as { max_no_show_attempts?: number }).max_no_show_attempts ?? 3)));
     }
 
     async function handleAssignStaff(userId: number, stationId: number | null) {
@@ -2842,6 +2854,31 @@
                             </div>
                         </div>
 
+                        <!-- Max no-show attempts: after this many no-shows staff must choose Extend or Last call -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3
+                                    class="font-medium text-surface-950 flex items-center gap-2"
+                                >
+                                    <Clock class="w-4 h-4 text-surface-500" /> Max no-show attempts
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    After this many no-shows, staff must choose Extend or Last call. 1–10, default 3.
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control">
+                                <input
+                                    type="number"
+                                    class="input rounded-container border border-surface-200 px-3 py-2 w-20 text-surface-950 bg-surface-50 shadow-sm text-center"
+                                    min="1"
+                                    max="10"
+                                    bind:value={maxNoShowAttempts}
+                                />
+                            </div>
+                        </div>
+
                         <!-- Display scan timeout: scanner modal auto-close and status page auto-dismiss (flexiqueue-87p) -->
                         <div
                             class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
@@ -3022,6 +3059,26 @@
                                 <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
                                     <input type="checkbox" class="checkbox" bind:checked={enableDisplayHidBarcode} />
                                     <span class="label-text text-surface-950 font-medium">Enable HID barcode on Display board</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Camera/QR scanner: Display board -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
+                                    <Camera class="w-4 h-4 text-surface-500" /> Camera/QR scanner (Display)
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    When on, the Display board shows the button to open the camera and scan a QR code.
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control pt-1">
+                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
+                                    <input type="checkbox" class="checkbox" bind:checked={enableDisplayCameraScanner} />
+                                    <span class="label-text text-surface-950 font-medium">Enable camera/QR scanner on Display board</span>
                                 </label>
                             </div>
                         </div>

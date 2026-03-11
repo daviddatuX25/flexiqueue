@@ -149,52 +149,57 @@ class SessionService
             throw new \InvalidArgumentException('Session has no current station.', 409);
         }
 
-        $clientCapacity = (int) ($station->client_capacity ?? 1);
-        $currentCount = Session::query()
-            ->where('current_station_id', $station->id)
-            ->whereIn('status', ['called', 'serving'])
-            ->count();
+        return DB::transaction(function () use ($session, $station, $staffUserId) {
+            // Robustness: serialize capacity-affecting transitions per station to avoid oversubscription races.
+            Station::query()->whereKey($station->id)->lockForUpdate()->first();
 
-        if ($currentCount >= $clientCapacity) {
-            throw new \InvalidArgumentException("Station at capacity ({$clientCapacity}). Cannot call more clients.", 409);
-        }
+            $clientCapacity = (int) ($station->client_capacity ?? 1);
+            $currentCount = Session::query()
+                ->capacityConsumingAtStation($station->id)
+                ->count();
 
-        $session->update(['status' => 'called']);
+            if ($currentCount >= $clientCapacity) {
+                throw new \InvalidArgumentException("Station at capacity ({$clientCapacity}). Cannot call more clients.", 409);
+            }
 
-        TransactionLog::create([
-            'session_id' => $session->id,
-            'station_id' => $session->current_station_id,
-            'staff_user_id' => $staffUserId,
-            'action_type' => 'call',
-            'created_at' => now(),
-        ]);
+            $session->update(['status' => 'called']);
 
-        $session = $session->fresh(['serviceTrack', 'currentStation', 'token']);
-        $station = $session->currentStation;
-        // Only indicate "priority lane" when the client has a priority classification (PWD/Senior/Pregnant), not when the program is merely priority-first.
-        $isPriority = $session->isPriorityCategory();
-        $message = $isPriority
-            ? "{$session->alias} called from priority lane"
-            : "{$session->alias} called";
-        event(new StatusUpdate($session->current_station_id, $session));
-        event(new QueueLengthUpdated($session->current_station_id));
-        event(new StationActivity(
-            $session->current_station_id,
-            $station?->name ?? '—',
-            $message,
-            $session->alias,
-            'call',
-            now()->toIso8601String(),
-            $session->token?->pronounce_as ?? 'letters',
-            $session->token_id
-        ));
+            TransactionLog::create([
+                'session_id' => $session->id,
+                'station_id' => $session->current_station_id,
+                'staff_user_id' => $staffUserId,
+                'action_type' => 'call',
+                'created_at' => now(),
+            ]);
 
-        return [
-            'session_id' => $session->id,
-            'alias' => $session->alias,
-            'no_show_attempts' => $session->no_show_attempts ?? 0,
-            'status' => 'called',
-        ];
+            $session = $session->fresh(['serviceTrack', 'currentStation', 'token']);
+            $station = $session->currentStation;
+            // Only indicate "priority lane" when the client has a priority classification (PWD/Senior/Pregnant), not when the program is merely priority-first.
+            $isPriority = $session->isPriorityCategory();
+            $message = $isPriority
+                ? "{$session->alias} called from priority lane"
+                : "{$session->alias} called";
+            event(new StatusUpdate($session->current_station_id, $session));
+            event(new QueueLengthUpdated($session->current_station_id));
+            event(new StationActivity(
+                $session->current_station_id,
+                $station?->name ?? '—',
+                $message,
+                $session->alias,
+                'call',
+                now()->toIso8601String(),
+                $session->token?->pronounce_as ?? 'letters',
+                $session->token_id
+            ));
+
+            return [
+                'session_id' => $session->id,
+                'alias' => $session->alias,
+                'no_show_attempts' => $session->no_show_attempts ?? 0,
+                'status' => 'called',
+            ];
+        });
+
     }
 
     /**
@@ -254,59 +259,64 @@ class SessionService
             throw new \InvalidArgumentException('Session is not in called or waiting state. Call the client first or start serving from waiting.', 409);
         }
 
-        if ($session->status === 'waiting') {
-            if ($stationId === null) {
-                throw new \InvalidArgumentException('Station context is required when serving from waiting.', 422);
-            }
-            if ($session->current_station_id !== $stationId) {
-                throw new \InvalidArgumentException('Session is not at this station.', 409);
-            }
+        return DB::transaction(function () use ($session, $staffUserId, $stationId) {
             $station = $session->currentStation;
             if (! $station) {
                 throw new \InvalidArgumentException('Session has no current station.', 409);
             }
-            $clientCapacity = (int) ($station->client_capacity ?? 1);
-            $currentCount = Session::query()
-                ->where('current_station_id', $station->id)
-                ->whereIn('status', ['called', 'serving'])
-                ->where(fn ($q) => $q->whereNull('is_on_hold')->orWhere('is_on_hold', false))
-                ->count();
-            if ($currentCount >= $clientCapacity) {
-                throw new \InvalidArgumentException("Station at capacity ({$clientCapacity}). Cannot start serving more clients.", 409);
+
+            // Robustness: serialize capacity-affecting transitions per station to avoid oversubscription races.
+            Station::query()->whereKey($station->id)->lockForUpdate()->first();
+
+            if ($session->status === 'waiting') {
+                if ($stationId === null) {
+                    throw new \InvalidArgumentException('Station context is required when serving from waiting.', 422);
+                }
+                if ($session->current_station_id !== $stationId) {
+                    throw new \InvalidArgumentException('Session is not at this station.', 409);
+                }
+
+                $clientCapacity = (int) ($station->client_capacity ?? 1);
+                $currentCount = Session::query()
+                    ->capacityConsumingAtStation($station->id)
+                    ->count();
+                if ($currentCount >= $clientCapacity) {
+                    throw new \InvalidArgumentException("Station at capacity ({$clientCapacity}). Cannot start serving more clients.", 409);
+                }
             }
-        }
 
-        $session->update(['status' => 'serving']);
+            $session->update(['status' => 'serving']);
 
-        TransactionLog::create([
-            'session_id' => $session->id,
-            'station_id' => $session->current_station_id,
-            'staff_user_id' => $staffUserId,
-            'action_type' => 'check_in',
-            'created_at' => now(),
-        ]);
+            TransactionLog::create([
+                'session_id' => $session->id,
+                'station_id' => $session->current_station_id,
+                'staff_user_id' => $staffUserId,
+                'action_type' => 'check_in',
+                'created_at' => now(),
+            ]);
 
-        $session = $session->fresh(['currentStation', 'serviceTrack', 'token']);
-        $station = $session->currentStation;
-        event(new StatusUpdate($session->current_station_id, $session));
-        event(new NowServing($session->current_station_id, [
-            'session_id' => $session->id,
-            'alias' => $session->alias,
-            'category' => $session->client_category,
-        ]));
-        event(new QueueLengthUpdated($session->current_station_id));
-        event(new StationActivity(
-            $session->current_station_id,
-            $station?->name ?? '—',
-            "{$session->alias} arrived (serving)",
-            $session->alias,
-            'check_in',
-            now()->toIso8601String(),
-            $session->token?->pronounce_as ?? 'letters',
-            $session->token_id
-        ));
+            $session = $session->fresh(['currentStation', 'serviceTrack', 'token']);
+            $station = $session->currentStation;
+            event(new StatusUpdate($session->current_station_id, $session));
+            event(new NowServing($session->current_station_id, [
+                'session_id' => $session->id,
+                'alias' => $session->alias,
+                'category' => $session->client_category,
+            ]));
+            event(new QueueLengthUpdated($session->current_station_id));
+            event(new StationActivity(
+                $session->current_station_id,
+                $station?->name ?? '—',
+                "{$session->alias} arrived (serving)",
+                $session->alias,
+                'check_in',
+                now()->toIso8601String(),
+                $session->token?->pronounce_as ?? 'letters',
+                $session->token_id
+            ));
 
-        return ['session' => $session];
+            return ['session' => $session];
+        });
     }
 
     /**
@@ -484,17 +494,18 @@ class SessionService
             throw new \InvalidArgumentException('Session is not on hold at this station.', 409);
         }
 
-        $clientCapacity = (int) ($station->client_capacity ?? 1);
-        $currentServingCount = Session::query()
-            ->where('current_station_id', $station->id)
-            ->whereIn('status', ['called', 'serving'])
-            ->where(fn ($q) => $q->whereNull('is_on_hold')->orWhere('is_on_hold', false))
-            ->count();
-        if ($currentServingCount >= $clientCapacity) {
-            throw new \InvalidArgumentException("Station at capacity ({$clientCapacity}). Complete or transfer a client first.", 422);
-        }
-
         DB::transaction(function () use ($session, $station, $staffUserId, $remarks) {
+            // Robustness: serialize capacity-affecting transitions per station to avoid oversubscription races.
+            Station::query()->whereKey($station->id)->lockForUpdate()->first();
+
+            $clientCapacity = (int) ($station->client_capacity ?? 1);
+            $currentServingCount = Session::query()
+                ->capacityConsumingAtStation($station->id)
+                ->count();
+            if ($currentServingCount >= $clientCapacity) {
+                throw new \InvalidArgumentException("Station at capacity ({$clientCapacity}). Complete or transfer a client first.", 422);
+            }
+
             $session->update([
                 'is_on_hold' => false,
                 'holding_station_id' => null,
@@ -581,34 +592,72 @@ class SessionService
     }
 
     /**
-     * Per plan: Mark no-show. From 'called' (or 'waiting').
-     * Increments no_show_attempts. If >= 3, terminates session. Else, returns to waiting.
+     * Per flexiqueue-a3wh: Mark no-show. From 'called', 'waiting', or 'serving'.
+     * Optional enqueue_back (move to end vs stay at front). At max attempts, staff must choose extend or last_call.
      *
-     * @return array{session: Session, token?: array, back_to_waiting?: bool}
+     * @return array{session: Session, token?: array, back_to_waiting?: bool, no_show_attempts?: int, extended?: bool}
      */
-    public function markNoShow(Session $session, int $staffUserId): array
+    public function markNoShow(Session $session, int $staffUserId, bool $enqueueBack = false, bool $extend = false, bool $lastCall = false): array
     {
-        if (! in_array($session->status, ['waiting', 'called'], true)) {
-            throw new \InvalidArgumentException('No-show only applies to called or waiting clients. Use Cancel for serving.', 409);
+        if (! in_array($session->status, ['waiting', 'called', 'serving'], true)) {
+            throw new \InvalidArgumentException('No-show only applies to waiting, called, or serving sessions.', 409);
         }
 
-        $session->increment('no_show_attempts');
-        $attempts = $session->fresh()->no_show_attempts;
+        $program = Program::find($session->program_id);
+        $max = $program?->settings()->getMaxNoShowAttempts() ?? 3;
+        $attempts = (int) $session->no_show_attempts;
 
-        if ($attempts >= 3) {
+        if ($lastCall) {
             return $this->finishSession($session, $staffUserId, 'no_show');
         }
 
-        return DB::transaction(function () use ($session, $staffUserId) {
-            $stationId = $session->current_station_id;
-            $session->update(['status' => 'waiting']);
+        if ($extend) {
+            $session->increment('no_show_attempts');
+            $session->refresh();
+            return $this->applyNoShowBackToWaiting($session, $staffUserId, $enqueueBack, true);
+        }
+
+        if ($attempts < $max) {
+            $session->increment('no_show_attempts');
+            $session->refresh();
+            return $this->applyNoShowBackToWaiting($session, $staffUserId, $enqueueBack, false);
+        }
+
+        throw new \InvalidArgumentException('At max no-show attempts. Use extend or last_call.', 422);
+    }
+
+    /**
+     * Apply back-to-waiting state after no-show (increment already done by caller). Optionally move to end of queue.
+     */
+    private function applyNoShowBackToWaiting(Session $session, int $staffUserId, bool $enqueueBack, bool $extended): array
+    {
+        $stationId = $session->current_station_id;
+        $updates = ['status' => 'waiting'];
+        if ($enqueueBack && $stationId) {
+            $updates['station_queue_position'] = $this->getNextQueuePositionAtStation($stationId);
+            $updates['queued_at_station'] = now();
+        }
+
+        return DB::transaction(function () use ($session, $staffUserId, $stationId, $updates, $enqueueBack, $extended) {
+            $session->update($updates);
+
+            $metadata = [
+                'back_to_waiting' => true,
+                'attempt' => $session->no_show_attempts,
+            ];
+            if ($enqueueBack) {
+                $metadata['enqueue_back'] = true;
+            }
+            if ($extended) {
+                $metadata['extended'] = true;
+            }
 
             TransactionLog::create([
                 'session_id' => $session->id,
                 'station_id' => $stationId,
                 'staff_user_id' => $staffUserId,
                 'action_type' => 'no_show',
-                'metadata' => ['back_to_waiting' => true, 'attempt' => $session->no_show_attempts],
+                'metadata' => $metadata,
                 'created_at' => now(),
             ]);
 
@@ -618,11 +667,16 @@ class SessionService
                 event(new QueueLengthUpdated($stationId));
             }
 
-            return [
+            $result = [
                 'session' => $session,
                 'back_to_waiting' => true,
                 'no_show_attempts' => $session->no_show_attempts,
             ];
+            if ($extended) {
+                $result['extended'] = true;
+            }
+
+            return $result;
         });
     }
 

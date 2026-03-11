@@ -76,6 +76,7 @@
 		serving: ServingSession[];
 		holding?: HoldingSession[];
 		no_show_timer_seconds: number;
+		max_no_show_attempts?: number;
 		waiting: WaitingSession[];
 		priority_first?: boolean;
 		require_permission_before_override?: boolean;
@@ -708,12 +709,16 @@
 		noShowModalSession = s;
 	}
 
-	async function noShow() {
+	async function noShowWithOptions(enqueueBackOption: boolean, extend: boolean, lastCall: boolean) {
 		const s = noShowModalSession;
 		if (!s || actionLoading) return;
 		actionLoading = 'noShow';
 		noShowModalSession = null;
-		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/no-show`, {});
+		const body: { enqueue_back?: boolean; extend?: boolean; last_call?: boolean } = {};
+		if (enqueueBackOption) body.enqueue_back = true;
+		if (extend) body.extend = true;
+		if (lastCall) body.last_call = true;
+		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/no-show`, body);
 		if (ok) {
 			await fetchQueue(true, () => { actionLoading = null; });
 		} else {
@@ -930,15 +935,30 @@
 	}
 
 	function canNoShow(s: ServingSession): boolean {
+		if (s.status === 'serving') return true;
 		if (s.status !== 'called') return false;
 		const remaining = noShowCountdown[s.session_id] ?? 0;
 		return remaining <= 0;
 	}
 
+	const maxNoShowAttempts = $derived(queue?.max_no_show_attempts ?? 3);
+
 	function noShowButtonLabel(s: ServingSession): string {
 		const remaining = noShowCountdown[s.session_id] ?? 0;
-		if (remaining > 0) return `No-Show (${remaining}s)`;
-		return s.no_show_attempts > 0 ? `No-Show (${s.no_show_attempts}/3)` : 'No-Show';
+		if (remaining > 0 && s.status === 'called') return `No-Show (${remaining}s)`;
+		return s.no_show_attempts > 0 ? `No-Show (${s.no_show_attempts}/${maxNoShowAttempts})` : 'No-Show';
+	}
+
+	async function enqueueBack(s: ServingSession) {
+		if (!s || actionLoading) return;
+		actionLoading = `enqueue-back-${s.session_id}`;
+		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/enqueue-back`, {});
+		actionLoading = null;
+		if (ok) {
+			await fetchQueue(true);
+		} else {
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Enqueue back failed' });
+		}
 	}
 
 	/** Format note updated_at for display (e.g. "2 min ago", "Today 10:30"). */
@@ -1090,11 +1110,19 @@
 									</button>
 									<button
 										type="button"
-										class="btn btn-sm touch-target-h {s.no_show_attempts >= 2 ? 'preset-filled-warning-500' : 'preset-tonal'}"
+										class="btn btn-sm touch-target-h {s.no_show_attempts >= (maxNoShowAttempts - 1) ? 'preset-filled-warning-500' : 'preset-tonal'}"
 										disabled={!!actionLoading || !canNoShow(s)}
 										onclick={() => openNoShowModal(s)}
 									>
 										{noShowButtonLabel(s)}
+									</button>
+									<button
+										type="button"
+										class="btn preset-outlined btn-sm touch-target-h"
+										disabled={!!actionLoading}
+										onclick={() => enqueueBack(s)}
+									>
+										{actionLoading === `enqueue-back-${s.session_id}` ? '…' : 'Enqueue back'}
 									</button>
 								{:else}
 									{#if isLastStep(s)}
@@ -1117,6 +1145,22 @@
 										</button>
 									{/if}
 									<div class="flex flex-wrap gap-2">
+										<button
+											type="button"
+											class="btn btn-sm touch-target-h {s.no_show_attempts >= (maxNoShowAttempts - 1) ? 'preset-filled-warning-500' : 'preset-tonal'}"
+											disabled={!!actionLoading}
+											onclick={() => openNoShowModal(s)}
+										>
+											{noShowButtonLabel(s)}
+										</button>
+										<button
+											type="button"
+											class="btn preset-outlined btn-sm touch-target-h"
+											disabled={!!actionLoading}
+											onclick={() => enqueueBack(s)}
+										>
+											{actionLoading === `enqueue-back-${s.session_id}` ? '…' : 'Enqueue back'}
+										</button>
 										<button
 											type="button"
 											class="btn preset-outlined btn-sm touch-target-h"
@@ -1291,20 +1335,35 @@
 	</div>
 
 	{#if noShowModalSession}
+		{@const atMax = (noShowModalSession.no_show_attempts ?? 0) >= maxNoShowAttempts}
 		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
 			<div class="card bg-surface-50 rounded-container shadow-xl p-6 text-surface-950">
 				<h3 class="font-bold text-lg">Mark No-Show</h3>
 				<p class="py-2">
 					Mark <span class="font-mono font-semibold text-surface-950">{noShowModalSession.alias}</span> as no-show?
-					{noShowModalSession.no_show_attempts >= 2
-						? 'This will end the session and free the token (3/3).'
-						: 'Client can be called again.'}
+					{#if atMax}
+						({noShowModalSession.no_show_attempts}/{maxNoShowAttempts}) Extend to allow one more call, or end the session.
+					{:else}
+						Client can be called again. Stay at front or send back to end of queue?
+					{/if}
 				</p>
-				<div class="flex justify-end gap-2 mt-4">
+				<div class="flex flex-wrap justify-end gap-2 mt-4">
 					<button type="button" class="btn preset-tonal touch-target-h" onclick={() => (noShowModalSession = null)}>Cancel</button>
-					<button type="button" class="btn preset-filled-warning-500 touch-target-h" onclick={noShow} disabled={!!actionLoading}>
-						{actionLoading === 'noShow' ? 'Processing…' : 'Mark No-Show'}
-					</button>
+					{#if atMax}
+						<button type="button" class="btn preset-tonal touch-target-h" onclick={() => noShowWithOptions(false, true, false)} disabled={!!actionLoading}>
+							{actionLoading === 'noShow' ? 'Processing…' : 'Extend no show'}
+						</button>
+						<button type="button" class="btn preset-filled-warning-500 touch-target-h" onclick={() => noShowWithOptions(false, false, true)} disabled={!!actionLoading}>
+							{actionLoading === 'noShow' ? 'Processing…' : 'Mark no-show (last call)'}
+						</button>
+					{:else}
+						<button type="button" class="btn preset-tonal touch-target-h" onclick={() => noShowWithOptions(false, false, false)} disabled={!!actionLoading}>
+							{actionLoading === 'noShow' ? 'Processing…' : 'Mark no-show only'}
+						</button>
+						<button type="button" class="btn preset-filled-warning-500 touch-target-h" onclick={() => noShowWithOptions(true, false, false)} disabled={!!actionLoading}>
+							{actionLoading === 'noShow' ? 'Processing…' : 'Mark no-show and enqueue back'}
+						</button>
+					{/if}
 				</div>
 			</div>
 			<!-- Per flexiqueue-ldd: backdrop does not close modal; only Cancel/buttons do -->
@@ -1382,10 +1441,10 @@
 				{#if needsAuthForOverride}
 				<!-- Auth: PIN | QR | Request approval (icon toggle row) -->
 				<div class="form-control w-full mt-2">
-					<label class="label"><span class="label-text">Authorize with</span></label>
+					<div class="label"><span class="label-text">Authorize with</span></div>
 					<div class="join join-horizontal w-full">
 						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }} title="Enter 6-digit code">PIN</button>
-						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }} title="Scan QR">QR</button>
+						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; }} title="Scan QR">QR</button>
 						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'request_approval' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'request_approval'; tempCodeEntered = ''; tempQrScanToken = ''; showQrScanner = false; }} title="Request supervisor approval">Request</button>
 					</div>
 				</div>
@@ -1393,7 +1452,7 @@
 					<p class="text-sm text-surface-950/70 mt-2">Request will be sent to supervisor. Check Track Overrides page for status.</p>
 				{:else if authType === 'pin'}
 					<div class="form-control w-full mt-2">
-						<label class="label"><span class="label-text">Enter 6-digit code from supervisor</span></label>
+						<div class="label"><span class="label-text">Enter 6-digit code from supervisor</span></div>
 						<input type="text" inputmode="numeric" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} oninput={(e) => { tempCodeEntered = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }} />
 					</div>
 				{:else if authType === 'qr'}
@@ -1457,10 +1516,10 @@
 				</div>
 				{#if needsAuthForOverride}
 				<div class="form-control w-full mt-2">
-					<label class="label"><span class="label-text">Authorize with</span></label>
+					<div class="label"><span class="label-text">Authorize with</span></div>
 					<div class="join join-horizontal w-full">
 						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }}>PIN</button>
-						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }}>QR</button>
+						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; }}>QR</button>
 						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'request_approval' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'request_approval'; tempCodeEntered = ''; tempQrScanToken = ''; showQrScanner = false; }}>Request</button>
 					</div>
 				</div>
@@ -1468,7 +1527,7 @@
 					<p class="text-sm text-surface-950/70 mt-2">Request will be sent to supervisor. Check Track Overrides page for status.</p>
 				{:else if authType === 'pin'}
 					<div class="form-control w-full mt-2">
-						<label class="label"><span class="label-text">Enter 6-digit code from supervisor</span></label>
+						<div class="label"><span class="label-text">Enter 6-digit code from supervisor</span></div>
 						<input type="text" inputmode="numeric" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} oninput={(e) => { tempCodeEntered = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }} />
 					</div>
 				{:else if authType === 'qr'}
@@ -1504,15 +1563,15 @@
 					Calling <span class="font-mono font-semibold text-surface-950">{callNextSession?.alias ?? ''}</span> would skip priority clients. Get authorization from supervisor.
 				</p>
 				<div class="form-control w-full mt-2">
-					<label class="label"><span class="label-text">Authorize with</span></label>
+					<div class="label"><span class="label-text">Authorize with</span></div>
 					<div class="join join-horizontal w-full">
 						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }}>PIN</button>
-						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; qrScanHandled = false; showQrScanner = true; }}>QR</button>
+						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; }}>QR</button>
 					</div>
 				</div>
 				{#if authType === 'pin'}
 					<div class="form-control w-full mt-2">
-						<label class="label"><span class="label-text">Enter 6-digit code from supervisor</span></label>
+						<div class="label"><span class="label-text">Enter 6-digit code from supervisor</span></div>
 						<input type="text" inputmode="numeric" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} oninput={(e) => { tempCodeEntered = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }} />
 					</div>
 				{:else if authType === 'qr'}

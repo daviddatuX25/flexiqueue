@@ -18,6 +18,8 @@
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
 	import Modal from '../../Components/Modal.svelte';
 	import QrScanner from '../../Components/QrScanner.svelte';
+	import AuthChoiceButtons from '../../Components/AuthChoiceButtons.svelte';
+	import PinOrQrInput from '../../Components/PinOrQrInput.svelte';
 	import UserAvatar from '../../Components/UserAvatar.svelte';
 	import { Camera, Settings } from 'lucide-svelte';
 	import {
@@ -33,6 +35,10 @@
 		setLocalAllowHidOnThisDevice,
 		isMobileTouch,
 	} from '../../lib/displayHid.js';
+	import {
+		shouldAllowCameraScanner,
+		setLocalAllowCameraOnThisDevice,
+	} from '../../lib/displayCamera.js';
 	import { toaster } from '../../lib/toaster.js';
 
 	const page = usePage();
@@ -62,6 +68,7 @@ let {
 	display_audio_muted = false,
 	display_audio_volume = 1,
 	enable_display_hid_barcode = true,
+	enable_display_camera_scanner = true,
 	tts_active_language = 'en',
 	tts_connector_phrase = null,
 	station_tts_by_name = {},
@@ -87,6 +94,11 @@ let connectorPhrase = $state(null);
 let stationTtsByName = $state({});
 	/** Program HID setting — from props and .display_settings broadcast; both program and device-local decide focus. */
 	let enableDisplayHidBarcode = $state(true);
+	/** Program camera/QR scanner setting — from props and .display_settings broadcast. */
+	let enableDisplayCameraScanner = $state(true);
+	/** Device-local camera/QR scanner allow (default ON when unset). */
+	let localAllowCameraScanner = $state(true);
+	const effectiveAllowCameraScanner = $derived(enableDisplayCameraScanner && localAllowCameraScanner);
 
 	$effect(() => {
 		programIsPaused = !!program_is_paused;
@@ -97,6 +109,7 @@ let stationTtsByName = $state({});
 		displayTtsRepeatCount = Math.max(1, Math.min(3, Math.floor(Number(display_tts_repeat_count) || 1)));
 		displayTtsRepeatDelayMs = Math.max(500, Math.min(10000, Math.floor(Number(display_tts_repeat_delay_ms) || 2000)));
 		enableDisplayHidBarcode = enable_display_hid_barcode !== false;
+		enableDisplayCameraScanner = enable_display_camera_scanner !== false;
 		const lang =
 			typeof tts_active_language === 'string' && tts_active_language
 				? tts_active_language
@@ -112,15 +125,26 @@ let stationTtsByName = $state({});
 				: {};
 	});
 
-	/** Open camera modal when URL has ?scan=1 (e.g. "Scan again" from Status page). */
+	onMount(() => {
+		localAllowCameraScanner = shouldAllowCameraScanner('display');
+	});
+
+	$effect(() => {
+		// If device-local camera scanning is disabled while open, close immediately.
+		if (!localAllowCameraScanner) showScanner = false;
+	});
+
+	/** Open camera modal when URL has ?scan=1 only if camera scanner is enabled. */
 	$effect(() => {
 		const pageData = get(page);
 		const url = typeof pageData?.url === 'string' ? pageData.url : (typeof window !== 'undefined' ? window.location.href : '');
 		try {
 			const parsed = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
 			if (parsed.searchParams.get('scan') === '1') {
-				showScanner = true;
-				scanHandled = false;
+				if (effectiveAllowCameraScanner) {
+					showScanner = true;
+					scanHandled = false;
+				}
 				if (typeof window !== 'undefined') {
 					window.history.replaceState({}, '', '/display');
 				}
@@ -143,13 +167,18 @@ let stationTtsByName = $state({});
 	let activityFeed = $state([]);
 	/** Display settings modal (PIN + program HID/volume + device-local). */
 	let showDisplaySettingsModal = $state(false);
+	let displaySettingsAuthMode = $state('pin');
 	let displaySettingsPin = $state('');
+	let displaySettingsQrScanToken = $state('');
+	let displayPinOrQrRef = $state(null);
 	let displaySettingsError = $state('');
 	let displaySettingsSaving = $state(false);
 	let displaySettingsProgramHid = $state(true);
+	let displaySettingsCameraScanner = $state(true);
 	let displaySettingsMuted = $state(false);
 	let displaySettingsVolume = $state(1);
 	let displaySettingsLocalAllowHid = $state(false);
+	let displaySettingsLocalAllowCamera = $state(true);
 	let availableTtsVoices = $state([]);
 	$effect(() => {
 		activityFeed = [...(station_activity ?? [])];
@@ -178,15 +207,16 @@ let stationTtsByName = $state({});
 
 	async function saveDisplaySettings() {
 		displaySettingsError = '';
-		if (!/^\d{6}$/.test(displaySettingsPin.trim())) {
-			displaySettingsError = 'Enter a 6-digit PIN.';
-			return;
-		}
+		const authBody = displayPinOrQrRef?.buildPinOrQrPayload?.() ?? null;
+		if (!authBody) return (displaySettingsError = displaySettingsAuthMode === 'pin'
+			? 'Enter a 6-digit PIN.'
+			: 'Scan QR first.');
 		displaySettingsSaving = true;
 		try {
 			const body = {
-				pin: displaySettingsPin.trim(),
+				...authBody, // { pin } or { qr_scan_token }
 				enable_display_hid_barcode: displaySettingsProgramHid,
+				enable_display_camera_scanner: displaySettingsCameraScanner,
 				display_audio_muted: displaySettingsMuted,
 				display_audio_volume: displaySettingsVolume,
 			};
@@ -203,8 +233,18 @@ let stationTtsByName = $state({});
 			});
 			const data = await res.json().catch(() => ({}));
 			if (res.status === 401) {
-				displaySettingsError = data.message || 'Invalid PIN.';
-				toaster.error({ title: data.message || 'Invalid PIN.' });
+				displaySettingsError = data.message || 'Authorization failed.';
+				toaster.error({ title: data.message || 'Authorization failed.' });
+				return;
+			}
+			if (res.status === 403) {
+				displaySettingsError = data.message || 'Not authorized for this program.';
+				toaster.error({ title: data.message || 'Not authorized for this program.' });
+				return;
+			}
+			if (res.status === 429) {
+				displaySettingsError = data.message || 'Too many attempts. Try again later.';
+				toaster.error({ title: data.message || 'Too many attempts. Try again later.' });
 				return;
 			}
 			if (!res.ok) {
@@ -216,7 +256,9 @@ let stationTtsByName = $state({});
 			displayAudioMuted = !!data.display_audio_muted;
 			displayAudioVolume = Math.max(0, Math.min(1, Number(data.display_audio_volume ?? 1)));
 			enableDisplayHidBarcode = !!data.enable_display_hid_barcode;
+			if (typeof data.enable_display_camera_scanner === 'boolean') enableDisplayCameraScanner = data.enable_display_camera_scanner;
 			displaySettingsPin = '';
+			displaySettingsQrScanToken = '';
 			showDisplaySettingsModal = false;
 		} finally {
 			displaySettingsSaving = false;
@@ -225,10 +267,14 @@ let stationTtsByName = $state({});
 
 	async function openDisplaySettingsModal() {
 		displaySettingsProgramHid = enableDisplayHidBarcode;
+		displaySettingsCameraScanner = enableDisplayCameraScanner;
 		displaySettingsMuted = displayAudioMuted;
 		displaySettingsVolume = displayAudioVolume;
 		displaySettingsLocalAllowHid = getLocalAllowHidOnThisDevice('display') === true;
+		displaySettingsLocalAllowCamera = shouldAllowCameraScanner('display');
+		displaySettingsAuthMode = 'pin';
 		displaySettingsPin = '';
+		displaySettingsQrScanToken = '';
 		displaySettingsError = '';
 		showDisplaySettingsModal = true;
 		try {
@@ -281,11 +327,15 @@ let stationTtsByName = $state({});
 		activityChannel.listen('.program_status', (e) => {
 			programIsPaused = !!e.program_is_paused;
 		});
-		// Per plan: admin or PIN-verified user changed display settings → update local state (audio + HID flags)
+		// Per plan: admin or PIN-verified user changed display settings → update local state (audio + HID + camera scanner)
 		activityChannel.listen('.display_settings', (e) => {
 			displayAudioMuted = !!e.display_audio_muted;
 			displayAudioVolume = Math.max(0, Math.min(1, Number(e.display_audio_volume ?? 1)));
 			if (typeof e.enable_display_hid_barcode === 'boolean') enableDisplayHidBarcode = e.enable_display_hid_barcode;
+			if (typeof e.enable_display_camera_scanner === 'boolean') {
+				enableDisplayCameraScanner = e.enable_display_camera_scanner;
+				if (!e.enable_display_camera_scanner) showScanner = false;
+			}
 			if (typeof e.display_tts_repeat_count === 'number') displayTtsRepeatCount = Math.max(1, Math.min(3, e.display_tts_repeat_count));
 			if (typeof e.display_tts_repeat_delay_ms === 'number') displayTtsRepeatDelayMs = Math.max(500, Math.min(10000, e.display_tts_repeat_delay_ms));
 		});
@@ -483,7 +533,7 @@ let stationTtsByName = $state({});
 				</section>
 			{/if}
 
-			<!-- Scan section: hidden input for HID barcode; pulsing CTA + camera icon opens camera modal. Per display scanner refactor plan. -->
+			<!-- Scan section: HID barcode input and/or camera scanner CTA. Section always visible for Settings. -->
 		<section>
 			<div class="flex items-center justify-between gap-2 mb-3">
 				<h2 class="text-xl font-bold text-surface-950">CHECK YOUR STATUS</h2>
@@ -497,44 +547,56 @@ let stationTtsByName = $state({});
 					<Settings class="w-5 h-5" />
 				</button>
 			</div>
-			<input
-				type="text"
-				autocomplete="off"
-				inputmode={shouldUseInputModeNone(enableDisplayHidBarcode, 'display') ? 'none' : 'text'}
-				aria-label="Barcode scanner input; scan with hardware scanner or type and press Enter"
-				class="sr-only"
-				bind:value={displayBarcodeValue}
-				bind:this={displayBarcodeInputEl}
-				onkeydown={onDisplayBarcodeKeydown}
-			/>
-			<div
-				class="flex items-center gap-3 rounded-container border-2 border-primary-500/30 bg-primary-500/5 p-4 animate-pulse"
-				role="region"
-				aria-label="Scan to check status"
-			>
-				<p class="flex-1 text-base font-medium text-surface-950">
-					Scan your QR or barcode to check status
+			{#if !enableDisplayHidBarcode && !effectiveAllowCameraScanner}
+				<p class="text-sm text-surface-950/80 rounded-container border border-surface-200 bg-surface-50 p-4">
+					Scanning is disabled. Use Settings to enable HID or camera scanner.
 				</p>
-				<button
-					type="button"
-					class="btn btn-icon preset-filled-primary-500 shrink-0 touch-target"
-					aria-label="Open camera to scan QR code"
-					title="Tap to scan with device camera"
-					onclick={() => {
-						showScanner = true;
-						scanHandled = false;
-					}}
+			{:else}
+				{#if enableDisplayHidBarcode}
+					<input
+						type="text"
+						autocomplete="off"
+						inputmode={shouldUseInputModeNone(enableDisplayHidBarcode, 'display') ? 'none' : 'text'}
+						aria-label="Barcode scanner input; scan with hardware scanner or type and press Enter"
+						class="sr-only"
+						bind:value={displayBarcodeValue}
+						bind:this={displayBarcodeInputEl}
+						onkeydown={onDisplayBarcodeKeydown}
+					/>
+				{/if}
+				<div
+					class="flex items-center gap-3 rounded-container border-2 border-primary-500/30 bg-primary-500/5 p-4 animate-pulse"
+					role="region"
+					aria-label="Scan to check status"
 				>
-					<Camera class="w-6 h-6" />
-				</button>
-			</div>
+					<p class="flex-1 text-base font-medium text-surface-950">
+						Scan your QR or barcode to check status
+					</p>
+					{#if effectiveAllowCameraScanner}
+						<button
+							type="button"
+							class="btn btn-icon preset-filled-primary-500 shrink-0 touch-target"
+							aria-label="Open camera to scan QR code"
+							title="Tap to scan with device camera"
+							onclick={() => {
+								showScanner = true;
+								scanHandled = false;
+							}}
+						>
+							<Camera class="w-6 h-6" />
+						</button>
+					{/if}
+				</div>
+			{/if}
 		</section>
 
 		<!-- Camera scan modal: camera-only QrScanner, countdown, Cancel -->
 		<Modal open={showScanner} title="Scan QR via Device" onClose={closeScanner} wide={true}>
 			{#snippet children()}
 				<div class="flex flex-col gap-3 w-full min-w-[20rem] mx-auto">
-					<QrScanner active={true} cameraOnly={true} onScan={handleQrScan} />
+					{#if showScanner}
+						<QrScanner active={showScanner} cameraOnly={true} onScan={handleQrScan} />
+					{/if}
 					{#if scanCountdown > 0}
 						<div class="flex flex-wrap items-center justify-center gap-2">
 							<p class="text-sm text-surface-600" aria-live="polite">Closing in {scanCountdown}s</p>
@@ -562,23 +624,23 @@ let stationTtsByName = $state({});
 		<Modal open={showDisplaySettingsModal} title="Display settings" onClose={() => (showDisplaySettingsModal = false)}>
 			{#snippet children()}
 				<div class="flex flex-col gap-6">
-					<p class="text-sm text-surface-950/70">Changes to program settings require supervisor or admin PIN.</p>
+					<p class="text-sm text-surface-950/70">Changes to program settings require supervisor or admin authorization.</p>
 					<div class="flex flex-col gap-3">
-						<label class="flex flex-col gap-1">
-							<span class="text-sm font-medium text-surface-950">PIN (6 digits)</span>
-							<input
-								type="text"
-								inputmode="numeric"
-								autocomplete="off"
-								maxlength="6"
-								class="input input-sm bg-surface-50 border border-surface-300 rounded-container font-mono w-full max-w-[8rem]"
-								placeholder="000000"
-								bind:value={displaySettingsPin}
-								oninput={(e) => { displaySettingsPin = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }}
+						<div class="flex flex-col gap-2">
+							<div class="label"><span class="label-text">Authorize with</span></div>
+							<AuthChoiceButtons
+								includeRequest={false}
 								disabled={displaySettingsSaving}
-								aria-describedby="display-settings-pin-error"
+								bind:mode={displaySettingsAuthMode}
 							/>
-						</label>
+						</div>
+						<PinOrQrInput
+							bind:this={displayPinOrQrRef}
+							disabled={displaySettingsSaving}
+							mode={displaySettingsAuthMode}
+							bind:pin={displaySettingsPin}
+							bind:qrScanToken={displaySettingsQrScanToken}
+						/>
 						{#if displaySettingsError}
 							<p id="display-settings-pin-error" class="text-sm text-error-600">{displaySettingsError}</p>
 						{/if}
@@ -594,6 +656,15 @@ let stationTtsByName = $state({});
 								disabled={displaySettingsSaving}
 							/>
 							<span class="text-sm text-surface-950">Allow HID barcode scanner</span>
+						</label>
+						<label class="flex items-center gap-2 cursor-pointer">
+							<input
+								type="checkbox"
+								class="checkbox"
+								bind:checked={displaySettingsCameraScanner}
+								disabled={displaySettingsSaving}
+							/>
+							<span class="text-sm text-surface-950">Allow camera/QR scanner</span>
 						</label>
 						<label class="flex items-center gap-2 cursor-pointer">
 							<input
@@ -630,6 +701,18 @@ let stationTtsByName = $state({});
 							/>
 							<span class="text-sm text-surface-950">Allow HID scanner on this device</span>
 						</label>
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input
+							type="checkbox"
+							class="checkbox"
+							bind:checked={displaySettingsLocalAllowCamera}
+							onchange={() => {
+								setLocalAllowCameraOnThisDevice('display', displaySettingsLocalAllowCamera);
+								localAllowCameraScanner = displaySettingsLocalAllowCamera;
+							}}
+						/>
+						<span class="text-sm text-surface-950">Allow camera/QR scanner on this device</span>
+					</label>
 					</div>
 					<div class="flex flex-wrap gap-2 justify-end pt-2">
 						<button

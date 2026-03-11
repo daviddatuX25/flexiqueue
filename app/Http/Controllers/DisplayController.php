@@ -98,6 +98,7 @@ class DisplayController extends Controller
         $inertiaProps['program_name'] = $program?->name;
         $inertiaProps['date'] = now()->format('F j, Y');
         $inertiaProps['enable_display_hid_barcode'] = $program ? $program->settings()->getEnableDisplayHidBarcode() : true;
+        $inertiaProps['enable_display_camera_scanner'] = $program ? $program->settings()->getEnableDisplayCameraScanner() : true;
 
         if ($data['result'] === 'in_use' && ! empty($data['program_id']) && ! empty($data['track_id'])) {
             $this->addDiagramProps($inertiaProps, (int) $data['program_id'], (int) $data['track_id']);

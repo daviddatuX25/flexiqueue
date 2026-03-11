@@ -85,12 +85,13 @@ class ProgramController extends Controller
         $program->update($validated);
 
         $program = $program->fresh();
-        if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('enable_display_hid_barcode', $settings) || array_key_exists('enable_public_triage_hid_barcode', $settings) || array_key_exists('display_tts_repeat_count', $settings) || array_key_exists('display_tts_repeat_delay_ms', $settings))) {
+        if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('enable_display_hid_barcode', $settings) || array_key_exists('enable_public_triage_hid_barcode', $settings) || array_key_exists('enable_display_camera_scanner', $settings) || array_key_exists('display_tts_repeat_count', $settings) || array_key_exists('display_tts_repeat_delay_ms', $settings))) {
             event(new DisplaySettingsUpdated(
                 $program->settings()->getDisplayAudioMuted(),
                 $program->settings()->getDisplayAudioVolume(),
                 $program->settings()->getEnableDisplayHidBarcode(),
                 $program->settings()->getEnablePublicTriageHidBarcode(),
+                $program->settings()->getEnableDisplayCameraScanner(),
                 $program->settings()->getDisplayTtsRepeatCount(),
                 $program->settings()->getDisplayTtsRepeatDelayMs(),
             ));
@@ -250,6 +251,7 @@ class ProgramController extends Controller
             'created_at' => $program->created_at?->toIso8601String(),
             'settings' => [
                 'no_show_timer_seconds' => (int) ($settings['no_show_timer_seconds'] ?? 10),
+                'max_no_show_attempts' => $program->settings()->getMaxNoShowAttempts(),
                 'require_permission_before_override' => (bool) ($settings['require_permission_before_override'] ?? true),
                 'priority_first' => (bool) ($settings['priority_first'] ?? true),
                 'balance_mode' => $settings['balance_mode'] ?? 'fifo',
