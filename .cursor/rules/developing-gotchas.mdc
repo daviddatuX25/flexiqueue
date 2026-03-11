@@ -52,18 +52,6 @@ Concise checklist so we don’t repeat the same failures. Add new items here whe
   Svelte `class:name={cond}` only works on DOM elements, not components like Inertia `<Link>`.  
   → Use `class={cond ? 'menu-active' : ''}` instead of `class:menu-active={cond}`.
 
-- **Playwright: "require is not defined in ES module scope"**  
-  `playwright.config.js` uses CommonJS (`require`/`module.exports`) but `package.json` has `"type": "module"`.  
-  → Use ESM: `import { defineConfig, devices } from '@playwright/test'` and `export default defineConfig({...})`.
-
-- **Playwright: "headed browser without XServer" in Sail**  
-  Sail/Docker has no display. Headed mode fails with "Missing X server or $DISPLAY".  
-  → Use headless in Sail. To see the browser, run from host: `npx playwright test --headed` (app must be up).
-
-- **Playwright show-report: localhost:9323 doesn't load in browser**  
-  Report server runs inside Sail; port wasn't forwarded. Also binds to localhost by default.  
-  → Port 9323 added to compose.yaml. Run `sail npx playwright show-report --host 0.0.0.0` then open http://localhost:9323.
-
 - **Display: "Uncaught You must pass your app key when you instantiate Pusher"**  
   Frontend Echo is created with `VITE_REVERB_APP_KEY` (from `.env` at build time). If empty/undefined, Pusher throws.  
   → echo.js now only creates Echo when key is set (otherwise `window.Echo = null`; Display pages already guard with `if (!window.Echo) return`). For real-time: set `REVERB_APP_KEY` (and `REVERB_APP_ID`, `REVERB_APP_SECRET`) in the env used when building (e.g. `.env.prod` or Pi `.env`) and rebuild.

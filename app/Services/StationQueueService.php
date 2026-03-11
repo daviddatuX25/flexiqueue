@@ -415,7 +415,7 @@ class StationQueueService
 
     /**
      * Program-level stats for mobile layout footer (Queue / Processed today).
-     * Used by Station, Triage, and Track Overrides pages.
+     * Used by Station, Triage, and Program Overrides pages.
      */
     public function getProgramFooterStats(?Program $program): array
     {

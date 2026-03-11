@@ -320,6 +320,37 @@ class ProgramControllerTest extends TestCase
         $response->assertJsonValidationErrors(['settings.display_tts_repeat_delay_ms']);
     }
 
+    public function test_identity_binding_mode_defaults_to_disabled_and_can_be_updated(): void
+    {
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+
+        // Defaults: no explicit identity_binding_mode should resolve to "disabled" in the API resource.
+        $showResponse = $this->actingAs($this->admin)->getJson("/api/admin/programs/{$program->id}");
+        $showResponse->assertStatus(200);
+        $showResponse->assertJsonPath('program.settings.identity_binding_mode', 'disabled');
+
+        // Updating via settings.identity_binding_mode should persist and be reflected in the resource.
+        $updateResponse = $this->actingAs($this->admin)->putJson("/api/admin/programs/{$program->id}", [
+            'name' => 'P',
+            'description' => null,
+            'settings' => [
+                'identity_binding_mode' => 'required',
+            ],
+        ]);
+
+        $updateResponse->assertStatus(200);
+        $updateResponse->assertJsonPath('program.settings.identity_binding_mode', 'required');
+
+        $program->refresh();
+        $settings = $program->settings ?? [];
+        $this->assertSame('required', $settings['identity_binding_mode'] ?? null);
+    }
+
     public function test_update_persists_station_selection_mode(): void
     {
         $program = Program::create([

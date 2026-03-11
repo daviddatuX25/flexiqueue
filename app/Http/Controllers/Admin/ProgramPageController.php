@@ -140,6 +140,7 @@ class ProgramPageController extends Controller
             });
 
         $settings = $program->settings ?? [];
+        $programSettings = $program->settings();
         $connectorLanguages = [];
         if (
             isset($settings['tts']) &&
@@ -168,7 +169,7 @@ class ProgramPageController extends Controller
                 'created_at' => $program->created_at?->toIso8601String(),
                 'settings' => [
                     'no_show_timer_seconds' => (int) ($settings['no_show_timer_seconds'] ?? 10),
-                    'max_no_show_attempts' => $program->settings()->getMaxNoShowAttempts(),
+                    'max_no_show_attempts' => $programSettings->getMaxNoShowAttempts(),
                     'require_permission_before_override' => (bool) ($settings['require_permission_before_override'] ?? true),
                     'priority_first' => (bool) ($settings['priority_first'] ?? true),
                     'balance_mode' => $settings['balance_mode'] ?? 'fifo',
@@ -181,16 +182,17 @@ class ProgramPageController extends Controller
                     'display_scan_timeout_seconds' => array_key_exists('display_scan_timeout_seconds', $settings)
                         ? (int) $settings['display_scan_timeout_seconds']
                         : 20,
-                    'display_audio_muted' => $program->settings()->getDisplayAudioMuted(),
-                    'display_audio_volume' => $program->settings()->getDisplayAudioVolume(),
-                    'display_tts_repeat_count' => $program->settings()->getDisplayTtsRepeatCount(),
-                    'display_tts_repeat_delay_ms' => $program->settings()->getDisplayTtsRepeatDelayMs(),
-                    'allow_public_triage' => $program->settings()->getAllowPublicTriage(),
-                    'enable_display_hid_barcode' => $program->settings()->getEnableDisplayHidBarcode(),
-                    'enable_public_triage_hid_barcode' => $program->settings()->getEnablePublicTriageHidBarcode(),
-                    'enable_display_camera_scanner' => $program->settings()->getEnableDisplayCameraScanner(),
+                    'display_audio_muted' => $programSettings->getDisplayAudioMuted(),
+                    'display_audio_volume' => $programSettings->getDisplayAudioVolume(),
+                    'display_tts_repeat_count' => $programSettings->getDisplayTtsRepeatCount(),
+                    'display_tts_repeat_delay_ms' => $programSettings->getDisplayTtsRepeatDelayMs(),
+                    'allow_public_triage' => $programSettings->getAllowPublicTriage(),
+                    'identity_binding_mode' => $programSettings->getIdentityBindingMode(),
+                    'enable_display_hid_barcode' => $programSettings->getEnableDisplayHidBarcode(),
+                    'enable_public_triage_hid_barcode' => $programSettings->getEnablePublicTriageHidBarcode(),
+                    'enable_display_camera_scanner' => $programSettings->getEnableDisplayCameraScanner(),
                     'tts' => [
-                        'active_language' => $program->settings()->getTtsActiveLanguage(),
+                        'active_language' => $programSettings->getTtsActiveLanguage(),
                         'connector' => [
                             'languages' => $connectorLanguages,
                         ],

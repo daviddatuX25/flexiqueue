@@ -12,10 +12,10 @@ use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Track Overrides page: Generate PIN/QR, view and manage permission requests.
+ * Program Overrides page: Generate PIN/QR, view and manage permission requests.
  * Per TRACK-OVERRIDES-REFACTOR: tracks, authorizations list, target_track.
  */
-class AuthorizationPageController extends Controller
+class ProgramOverridesPageController extends Controller
 {
     public function __construct(
         private StationQueueService $stationQueueService
@@ -94,7 +94,7 @@ class AuthorizationPageController extends Controller
             'target_track' => $pr->targetTrack ? ['id' => $pr->targetTrack->id, 'name' => $pr->targetTrack->name] : null,
         ])->values()->all();
 
-        return Inertia::render('TrackOverrides/Index', [
+        return Inertia::render('ProgramOverrides/Index', [
             'canApprove' => $canApprove,
             'stations' => $stations,
             'tracks' => $tracks,
@@ -105,3 +105,4 @@ class AuthorizationPageController extends Controller
         ]);
     }
 }
+

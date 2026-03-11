@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\IdentityBindingException;
 use App\Exceptions\TokenInUseException;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\ClientLookupByIdRequest;
 use App\Http\Requests\BindSessionRequest;
 use App\Models\Program;
 use App\Models\Token;
+use App\Services\ClientIdDocumentService;
 use App\Services\SessionService;
 use App\Services\TriageScanLogService;
 use Illuminate\Http\JsonResponse;
@@ -23,6 +26,8 @@ class PublicTriageController extends Controller
 
     private const BIND_THROTTLE = 'public_triage_bind:';
 
+    private const ID_LOOKUP_THROTTLE = 'public_triage_id_lookup:';
+
     private const TOKEN_LOOKUP_MAX = 30;
 
     private const BIND_MAX = 20;
@@ -30,6 +35,7 @@ class PublicTriageController extends Controller
     public function __construct(
         private SessionService $sessionService,
         private TriageScanLogService $triageScanLogService,
+        private ClientIdDocumentService $clientIdDocumentService,
     ) {}
 
     /**
@@ -99,7 +105,20 @@ class PublicTriageController extends Controller
         $clientCategory = $request->validated('client_category') ?? 'Regular';
 
         try {
-            $result = $this->sessionService->bind($qrHash, $trackId, $clientCategory, null);
+            $result = $this->sessionService->bind(
+                $qrHash,
+                $trackId,
+                $clientCategory,
+                null,
+                $request->validated('client_binding')
+            );
+        } catch (IdentityBindingException $e) {
+            return response()->json([
+                'message' => 'Validation failed.',
+                'errors' => [
+                    'client_binding' => [$e->getMessage()],
+                ],
+            ], 422);
         } catch (\InvalidArgumentException $e) {
             $code = $e->getCode() === 422 ? 422 : 400;
             if (str_contains($e->getMessage(), 'Token not found')) {
@@ -164,5 +183,62 @@ class PublicTriageController extends Controller
             ],
             'token' => $result['token'],
         ], 201);
+    }
+
+    /**
+     * POST /api/public/clients/lookup-by-id — limited identity lookup for public triage.
+     * No auth. Rate limited. 403 when program does not allow public binding.
+     *
+     * Response shape mirrors staff /api/clients/lookup-by-id but never returns raw ID numbers:
+     * - { match_status: 'not_found', client: null }
+     * - {
+     *     match_status: 'existing',
+     *     client: { id, name, birth_year },
+     *     id_document: { id, id_type, id_last4 }
+     *   }
+     */
+    public function publicLookupById(ClientLookupByIdRequest $request): JsonResponse
+    {
+        $ipKey = self::ID_LOOKUP_THROTTLE.$request->ip();
+        if (RateLimiter::tooManyAttempts($ipKey, self::TOKEN_LOOKUP_MAX)) {
+            return response()->json(['message' => 'Too many requests. Try again later.'], 429);
+        }
+
+        $program = Program::where('is_active', true)->first();
+        if (! $program || ! $program->settings()->allowsPublicBinding()) {
+            return response()->json(['message' => 'Public identity binding is not available.'], 403);
+        }
+
+        $data = $request->validated();
+
+        $result = $this->clientIdDocumentService->lookupById(
+            $data['id_type'],
+            $data['id_number'],
+        );
+
+        RateLimiter::hit($ipKey);
+
+        if (! $result['client'] || ! $result['id_document']) {
+            return response()->json([
+                'match_status' => 'not_found',
+                'client' => null,
+            ]);
+        }
+
+        $idLast4 = $this->clientIdDocumentService->getIdLast4FromDocument($result['id_document']);
+
+        return response()->json([
+            'match_status' => 'existing',
+            'client' => [
+                'id' => $result['client']->id,
+                'name' => $result['client']->name,
+                'birth_year' => $result['client']->birth_year,
+            ],
+            'id_document' => [
+                'id' => $result['id_document']->id,
+                'id_type' => $result['id_document']->id_type,
+                'id_last4' => $idLast4,
+            ],
+        ]);
     }
 }

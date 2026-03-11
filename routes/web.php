@@ -18,11 +18,13 @@ use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\Admin\AnalyticsController as AdminAnalyticsController;
 use App\Http\Controllers\Api\Admin\ElevenLabsIntegrationController;
 use App\Http\Controllers\Api\Admin\SystemController as AdminSystemController;
+use App\Http\Controllers\Api\Admin\ClientIdDocumentRevealController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\CheckStatusController;
 use App\Http\Controllers\Api\PublicDisplaySettingsController;
 use App\Http\Controllers\Api\PublicTriageController;
 use App\Http\Controllers\Api\SessionController as ApiSessionController;
+use App\Http\Controllers\Api\ClientController as ApiClientController;
 use App\Http\Controllers\Api\TtsController;
 use App\Http\Controllers\Api\PermissionRequestController;
 use App\Http\Controllers\Api\StationController as ApiStationController;
@@ -37,9 +39,10 @@ use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Admin\ReportPageController;
 use App\Http\Controllers\Admin\TokenPrintController;
 use App\Http\Controllers\Admin\UserPageController;
+use App\Http\Controllers\Admin\ClientPageController;
 use App\Http\Controllers\DisplayController;
 use App\Http\Controllers\HomeController;
-use App\Http\Controllers\AuthorizationPageController;
+use App\Http\Controllers\ProgramOverridesPageController;
 use App\Http\Controllers\StationPageController;
 use App\Http\Controllers\TriagePageController;
 use App\Enums\UserRole;
@@ -143,6 +146,8 @@ Route::middleware(['auth', 'role:admin'])->prefix('api/admin')->group(function (
     Route::get('/logs/program-sessions', [AdminReportController::class, 'programSessions']);
     Route::get('/logs/audit', [AdminReportController::class, 'audit']);
     Route::get('/logs/audit/export', [AdminReportController::class, 'auditExport']);
+    Route::post('/client-id-documents/{client_id_document}/reveal', [ClientIdDocumentRevealController::class, 'reveal'])
+        ->middleware('throttle:5,1');
 });
 
 // Per 08-API-SPEC-PHASE1 §6.1: Dashboard API (admin, supervisor)
@@ -188,6 +193,10 @@ Route::middleware(['auth', 'role:admin,supervisor,staff'])->prefix('api')->group
 
 // Per 08-API-SPEC-PHASE1 §3–4: Session and station endpoints (any staff)
 Route::middleware(['auth', 'role:admin,supervisor,staff'])->prefix('api')->group(function (): void {
+    Route::post('/clients/lookup-by-id', [ApiClientController::class, 'lookupById'])
+        ->middleware('throttle:60,1');
+    Route::post('/clients', [ApiClientController::class, 'store']);
+    Route::post('/clients/{client}/id-documents', [ApiClientController::class, 'attachIdDocument']);
     Route::post('/sessions/bind', [ApiSessionController::class, 'bind']);
     Route::get('/sessions/token-lookup', [ApiSessionController::class, 'tokenLookup']);
     Route::post('/sessions/{session}/call', [ApiSessionController::class, 'call']);
@@ -228,6 +237,8 @@ Route::get('/display/status/{qr_hash}', [DisplayController::class, 'status'])->n
 Route::get('/triage/start', [DisplayController::class, 'publicTriage'])->name('triage.start');
 Route::get('/api/public/token-lookup', [PublicTriageController::class, 'tokenLookup']);
 Route::post('/api/public/sessions/bind', [PublicTriageController::class, 'bind']);
+Route::post('/api/public/clients/lookup-by-id', [PublicTriageController::class, 'publicLookupById'])
+    ->middleware('throttle:10,1');
 // Per plan: public display/triage settings (PIN required); rate limit 10/min by IP
 Route::post('/api/public/display-settings', [PublicDisplaySettingsController::class, 'update'])
     ->middleware('throttle:10,1');
@@ -254,13 +265,24 @@ Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->grou
     Route::get('/settings', fn () => Inertia::render('Admin/Settings/Index'))->name('settings');
 });
 
-// All staff (admin, supervisor, staff): station, triage, track-overrides, profile, dashboard
+// Admin + program supervisors: client list/detail (no reveal; reveal remains API admin-only).
+Route::middleware(['auth', 'role:admin,staff'])->prefix('admin')->name('admin.')->group(function (): void {
+    Route::get('/clients', [ClientPageController::class, 'index'])->name('clients');
+    Route::get('/clients/{client}', [ClientPageController::class, 'show'])->name('clients.show');
+});
+
+// All staff (admin, supervisor, staff): station, triage, program-overrides, profile, dashboard
 Route::middleware(['auth', 'role:admin,supervisor,staff'])->group(function (): void {
     Route::get('/dashboard', \App\Http\Controllers\StaffDashboardController::class)->name('dashboard');
     Route::get('/station/{station?}', StationPageController::class)->name('station');
     Route::get('/triage', TriagePageController::class)->name('triage');
-    Route::redirect('/authorize', '/track-overrides', 302)->name('authorize');
-    Route::get('/track-overrides', AuthorizationPageController::class)->name('track-overrides');
+    Route::redirect('/authorize', '/program-overrides', 302)->name('authorize');
+
+    // Canonical: Program Overrides
+    Route::get('/program-overrides', ProgramOverridesPageController::class)->name('program-overrides');
+
+    // Backwards compatibility: old URL redirects to canonical
+    Route::redirect('/track-overrides', '/program-overrides', 302);
     Route::get('/profile', fn () => Inertia::render('Profile/Index'))->name('profile');
 });
 

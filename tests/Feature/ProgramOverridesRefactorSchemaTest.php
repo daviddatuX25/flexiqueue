@@ -16,7 +16,7 @@ use Tests\TestCase;
 /**
  * Per docs/plans/TRACK-OVERRIDES-REFACTOR.md §1: schema for awaiting_approval, override_steps, permission_requests track-based.
  */
-class TrackOverridesRefactorSchemaTest extends TestCase
+class ProgramOverridesRefactorSchemaTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -171,3 +171,4 @@ class TrackOverridesRefactorSchemaTest extends TestCase
         $this->assertNull($session->current_station_id);
     }
 }
+

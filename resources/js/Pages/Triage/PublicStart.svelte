@@ -6,12 +6,13 @@
 	import { get } from 'svelte/store';
 	import { usePage } from '@inertiajs/svelte';
 	import { router } from '@inertiajs/svelte';
-	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
-	import Modal from '../../Components/Modal.svelte';
-	import QrScanner from '../../Components/QrScanner.svelte';
-	import AuthChoiceButtons from '../../Components/AuthChoiceButtons.svelte';
-	import PinOrQrInput from '../../Components/PinOrQrInput.svelte';
-	import { onMount } from 'svelte';
+import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
+import Modal from '../../Components/Modal.svelte';
+import QrScanner from '../../Components/QrScanner.svelte';
+import CountdownTimer from '../../Components/CountdownTimer.svelte';
+import AuthChoiceButtons from '../../Components/AuthChoiceButtons.svelte';
+import PinOrQrInput from '../../Components/PinOrQrInput.svelte';
+import { onMount } from 'svelte';
 	import { Camera, Settings } from 'lucide-svelte';
 	import { toaster } from '../../lib/toaster.js';
 	import {
@@ -25,13 +26,15 @@
 		setLocalAllowCameraOnThisDevice,
 	} from '../../lib/displayCamera.js';
 
-	interface Track {
+type IdentityBindingMode = 'disabled' | 'optional' | 'required';
+
+interface Track {
 		id: number;
 		name: string;
 		is_default?: boolean;
 	}
 
-	let {
+let {
 		allowed = false,
 		program_name = null,
 		tracks = [],
@@ -39,6 +42,9 @@
 		display_scan_timeout_seconds = 20,
 		/** Per barcode-hid plan: when false, hidden HID input is disabled (no auto-focus) so mobile keyboard doesn't open. */
 		enable_public_triage_hid_barcode = true,
+		identity_binding_mode = 'disabled',
+		/** Auto-reset duration for NOT_FOUND state; overridable for tests. */
+		not_found_reset_seconds = 45,
 	}: {
 		allowed: boolean;
 		program_name: string | null;
@@ -46,6 +52,8 @@
 		date: string;
 		display_scan_timeout_seconds?: number;
 		enable_public_triage_hid_barcode?: boolean;
+		identity_binding_mode?: IdentityBindingMode;
+		not_found_reset_seconds?: number;
 	} = $props();
 
 	const page = usePage();
@@ -85,21 +93,22 @@
 		}
 	}
 
-	let showScanner = $state(false);
-	let scanHandled = $state(false);
-	let localAllowCameraScanner = $state(true);
-	let barcodeValue = $state('');
-	let barcodeInputEl = $state<HTMLInputElement | null>(null);
-	let scannedToken = $state<{ physical_id: string; qr_hash: string; status: string } | null>(null);
-	let selectedTrackId = $state<number | null>(null);
+let showScanner = $state(false);
+let scanHandled = $state(false);
+let localAllowCameraScanner = $state(true);
+let barcodeValue = $state('');
+let barcodeInputEl = $state<HTMLInputElement | null>(null);
+let publicTokenValue = $state('');
+let publicIdValue = $state('');
+let scannedToken = $state<{ physical_id: string; qr_hash: string; status: string } | null>(null);
+let selectedTrackId = $state<number | null>(null);
 
 	/** When track count is at or below this, show buttons instead of dropdown. */
 	const MAX_TRACKS_FOR_BUTTONS = 4;
 	const showTrackButtons = $derived(tracks.length <= MAX_TRACKS_FOR_BUTTONS);
 	let isSubmitting = $state(false);
 	let bindSuccess = $state(false);
-	let scanCountdown = $state(0);
-	let scanCountdownIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
+	let scannerCountdownRef = $state<{ extend: (seconds: number) => void } | null>(null);
 	/** Program HID setting — from props and .display_settings broadcast. */
 	let enablePublicTriageHidBarcode = $state(true);
 	/** Settings modal. */
@@ -114,6 +123,58 @@
 	let triageSettingsLocalAllowHid = $state(false);
 	let triageSettingsLocalAllowCamera = $state(true);
 
+// Identity binding mode for public triage (per ProgramSettings)
+const identityBindingMode = $derived(
+	(identity_binding_mode ?? 'disabled') as IdentityBindingMode
+);
+
+const notFoundResetSecondsDefault = $derived(
+	(() => {
+		if (typeof window === 'undefined') {
+			return not_found_reset_seconds;
+		}
+		try {
+			const url = new URL(window.location.href);
+			const param = url.searchParams.get('_reset_seconds');
+			const parsed = param ? parseInt(param, 10) : NaN;
+			if (Number.isFinite(parsed) && parsed > 0) {
+				return parsed;
+			}
+		} catch {
+			// Ignore URL parse errors and fall back to prop.
+		}
+		return not_found_reset_seconds;
+	})()
+);
+
+// Public identity binding state (per Bead 4 plan)
+type PublicBinderMode =
+	| 'idle'
+	| 'scanning'
+	| 'lookup_in_progress'
+	| 'match_found'
+	| 'not_found'
+	| 'skipped'
+	| 'completed';
+
+let binderMode = $state<PublicBinderMode>('idle');
+let binderStatus = $state<'idle' | 'bound' | 'skipped'>('idle');
+
+type PublicClientSummary = {
+	id: number;
+	name: string;
+	birth_year: number | null;
+	id_document?: { id: number; id_type: string; id_last4: string };
+};
+
+let boundClient = $state<PublicClientSummary | null>(null);
+
+// Scanner + HID mode switching between token and identity binding
+type ScannerContext = 'token' | 'identity';
+let scannerContext = $state<ScannerContext>('token');
+type HidMode = 'token' | 'identity' | 'off';
+let hidMode = $state<HidMode>('token');
+
 	$effect(() => {
 		enablePublicTriageHidBarcode = enable_public_triage_hid_barcode !== false;
 	});
@@ -126,6 +187,17 @@
 		if (!localAllowCameraScanner) showScanner = false;
 	});
 
+// Keep HID mode in sync with token vs identity flows
+$effect(() => {
+	if (!scannedToken) {
+		hidMode = 'token';
+	} else if (identityBindingMode !== 'disabled' && binderMode !== 'completed') {
+		hidMode = 'identity';
+	} else {
+		hidMode = 'off';
+	}
+});
+
 	function setDefaultTrack() {
 		if (tracks?.length) {
 			const def = tracks.find((t) => t.is_default);
@@ -134,33 +206,6 @@
 	}
 	$effect(() => {
 		if (tracks?.length && selectedTrackId === null) setDefaultTrack();
-	});
-
-	$effect(() => {
-		if (!showScanner) {
-			if (scanCountdownIntervalId != null) {
-				clearInterval(scanCountdownIntervalId);
-				scanCountdownIntervalId = null;
-			}
-			scanCountdown = 0;
-			return;
-		}
-		const timeout = Math.max(0, Number(display_scan_timeout_seconds) || 20);
-		if (timeout === 0) return;
-		scanCountdown = timeout;
-		const id = setInterval(() => {
-			scanCountdown = scanCountdown - 1;
-			if (scanCountdown <= 0) {
-				clearInterval(id);
-				scanCountdownIntervalId = null;
-				queueMicrotask(() => { showScanner = false; });
-			}
-		}, 1000);
-		scanCountdownIntervalId = id;
-		return () => {
-			if (scanCountdownIntervalId != null) clearInterval(scanCountdownIntervalId);
-			scanCountdownIntervalId = null;
-		};
 	});
 
 	/** Refocus hidden barcode input every 10s when camera modal is closed. Both program and device-local must allow (per plan). */
@@ -261,7 +306,7 @@
 
 	function extendCountdown() {
 		const extra = Math.max(0, Number(display_scan_timeout_seconds) || 20);
-		scanCountdown += extra;
+		scannerCountdownRef?.extend(extra);
 	}
 
 	async function doTokenLookup(qrHash: string, physicalId: string): Promise<boolean> {
@@ -298,6 +343,7 @@
 	}
 
 	function handleQrScan(decodedText: string) {
+		if (scannerContext !== 'token') return;
 		if (scanHandled) return;
 		scanHandled = true;
 		const raw = decodedText.trim();
@@ -314,31 +360,107 @@
 		});
 	}
 
+	async function submitIdLookup(idValue: string) {
+		const trimmed = idValue.trim();
+		if (!trimmed) return;
+
+		binderMode = 'lookup_in_progress';
+		boundClient = null;
+
+		const { ok, data, message } = await api('POST', '/api/public/clients/lookup-by-id', {
+			id_type: 'PhilHealth',
+			id_number: trimmed,
+		});
+
+		if (!ok) {
+			console.error('ID lookup failed', message);
+			binderMode = 'not_found';
+			return;
+		}
+
+		const d = data as {
+			match_status?: string;
+			client?: { id: number; name: string; birth_year: number | null };
+			id_document?: { id: number; id_type: string; id_last4: string };
+		};
+		if (d.match_status === 'existing' && d.client) {
+			boundClient = {
+				id: d.client.id,
+				name: d.client.name,
+				birth_year: d.client.birth_year,
+				id_document: d.id_document,
+			};
+			binderStatus = 'bound';
+			binderMode = 'match_found';
+			queueMicrotask(() => {
+				binderMode = 'completed';
+			});
+		} else {
+			binderMode = 'not_found';
+		}
+	}
+
+	function handleIdQrScan(decodedText: string) {
+		if (scannerContext !== 'identity') return;
+		if (scanHandled) return;
+		scanHandled = true;
+		const raw = decodedText.trim();
+		submitIdLookup(raw).finally(() => {
+			scanHandled = false;
+		});
+	}
+
 	function onBarcodeKeydown(e: KeyboardEvent) {
 		if (e.key !== 'Enter') return;
 		const raw = barcodeValue.trim();
 		if (!raw) return;
 		e.preventDefault();
-			scanHandled = true;
+		scanHandled = true;
+
+		if (hidMode === 'token') {
 			const isHash = (s: string) => s.length === 64 && /^[a-f0-9]+$/.test(s);
 			const physicalId = raw.length <= 10 && /^[A-Za-z0-9]+$/.test(raw) ? raw : '';
-			const qrHash = raw.includes('/') ? (raw.split('/').pop() ?? '').split('?')[0].trim() : (isHash(raw) ? raw : '');
+			const qrHash = raw.includes('/')
+				? (raw.split('/').pop() ?? '').split('?')[0].trim()
+				: isHash(raw)
+					? raw
+					: '';
 			doTokenLookup(qrHash, physicalId || raw).then((ok) => {
 				if (ok) showScanner = false;
 				scanHandled = false;
 				barcodeValue = '';
 				if (shouldFocusHidInput(enablePublicTriageHidBarcode, 'triage')) barcodeInputEl?.focus();
 			});
+		} else if (hidMode === 'identity') {
+			submitIdLookup(raw).finally(() => {
+				scanHandled = false;
+				barcodeValue = '';
+				if (shouldFocusHidInput(enablePublicTriageHidBarcode, 'triage')) barcodeInputEl?.focus();
+			});
+		} else {
+			scanHandled = false;
+			barcodeValue = '';
+		}
 	}
 
 	async function handleBind() {
 		if (!scannedToken || selectedTrackId == null) return;
 		isSubmitting = true;
-		const { ok, data } = await api('POST', '/api/public/sessions/bind', {
+		const body: any = {
 			qr_hash: scannedToken.qr_hash,
 			track_id: Number(selectedTrackId),
 			client_category: 'Regular',
-		});
+		};
+
+		if (binderStatus === 'bound' && boundClient) {
+			body.client_binding = {
+				client_id: boundClient.id,
+				source: 'existing_id_document',
+				id_document_id: boundClient.id_document?.id,
+			};
+		}
+
+		const { ok, data } = await api('POST', '/api/public/sessions/bind', body);
 		isSubmitting = false;
 		if (ok) {
 			bindSuccess = true;
@@ -357,6 +479,9 @@
 		selectedTrackId = null;
 		setDefaultTrack();
 		bindSuccess = false;
+		binderMode = 'idle';
+		binderStatus = 'idle';
+		boundClient = null;
 	}
 </script>
 
@@ -392,18 +517,20 @@
 				</button>
 			</div>
 
+			<!-- Global HID barcode input (sr-only) to support both token and ID scans -->
+			<input
+				type="text"
+				autocomplete="off"
+				inputmode={shouldUseInputModeNone(enablePublicTriageHidBarcode, 'triage') ? 'none' : 'text'}
+				aria-label="Barcode scanner input"
+				class="sr-only"
+				bind:value={barcodeValue}
+				bind:this={barcodeInputEl}
+				onkeydown={onBarcodeKeydown}
+			/>
+
 			{#if !scannedToken}
 				<section>
-					<input
-						type="text"
-						autocomplete="off"
-						inputmode={shouldUseInputModeNone(enablePublicTriageHidBarcode, 'triage') ? 'none' : 'text'}
-						aria-label="Barcode scanner input"
-						class="sr-only"
-						bind:value={barcodeValue}
-						bind:this={barcodeInputEl}
-						onkeydown={onBarcodeKeydown}
-					/>
 					<div
 						class="flex items-center gap-3 rounded-container border-2 border-primary-500/30 bg-primary-500/5 p-4 animate-pulse"
 						role="region"
@@ -414,20 +541,76 @@
 								type="button"
 								class="btn btn-icon preset-filled-primary-500 shrink-0 touch-target"
 								aria-label="Open camera to scan QR"
-								onclick={() => { showScanner = true; scanHandled = false; }}
+								onclick={() => {
+									scannerContext = 'token';
+									showScanner = true;
+									scanHandled = false;
+								}}
 							>
 								<Camera class="w-6 h-6" />
 							</button>
 						{/if}
 					</div>
+
+					<div class="mt-3 flex flex-col gap-2">
+						<div class="flex gap-2">
+							<input
+								type="text"
+								class="input rounded-container border border-surface-200 px-3 py-2 text-sm flex-1"
+								placeholder="Enter token ID"
+								data-testid="public-token-input"
+								bind:value={publicTokenValue}
+							/>
+							<button
+								type="button"
+								class="btn preset-filled-primary-500 touch-target-h"
+								data-testid="public-token-lookup-button"
+								onclick={() => {
+									const raw = publicTokenValue.trim();
+									if (!raw) return;
+									const isHash = (s: string) => s.length === 64 && /^[a-f0-9]+$/.test(s);
+									const physicalId = raw.length <= 10 && /^[A-Za-z0-9]+$/.test(raw) ? raw : '';
+									const qrHash = raw.includes('/')
+										? (raw.split('/').pop() ?? '').split('?')[0].trim()
+										: isHash(raw)
+											? raw
+											: '';
+									doTokenLookup(qrHash, physicalId || raw).then((ok) => {
+										if (ok) {
+											publicTokenValue = '';
+											setDefaultTrack();
+										}
+									});
+								}}
+							>
+								Start
+							</button>
+						</div>
+					</div>
 				</section>
 
-				<Modal open={showScanner} title="Scan QR" onClose={closeScanner} wide={true}>
+				<Modal
+					open={showScanner}
+					title={scannerContext === 'identity' ? 'Scan ID card' : 'Scan QR'}
+					onClose={closeScanner}
+					wide={true}
+				>
 					{#snippet children()}
 						<div class="flex flex-col gap-3">
-							<QrScanner active={showScanner} cameraOnly={true} onScan={handleQrScan} />
-							{#if scanCountdown > 0}
-								<p class="text-sm text-surface-600">Closing in {scanCountdown}s</p>
+							<QrScanner
+								active={showScanner}
+								cameraOnly={true}
+								onScan={scannerContext === 'identity' ? handleIdQrScan : handleQrScan}
+							/>
+							<CountdownTimer
+								bind:this={scannerCountdownRef}
+								active={showScanner}
+								initialSeconds={display_scan_timeout_seconds}
+								prefix="Closing in "
+								suffix="s"
+								onExpire={() => { showScanner = false; }}
+							/>
+							{#if showScanner}
 								<button type="button" class="btn preset-tonal text-sm" onclick={extendCountdown}>
 									Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)
 								</button>
@@ -515,7 +698,10 @@
 					{/snippet}
 				</Modal>
 			{:else}
-				<div class="rounded-container border border-surface-200 bg-surface-50 p-4 md:p-6 space-y-4">
+				<div
+					class="rounded-container border border-surface-200 bg-surface-50 p-4 md:p-6 space-y-4"
+					data-testid="public-scanned-token-card"
+				>
 					<p class="font-medium text-surface-950">Token: <span class="font-mono text-primary-500">{scannedToken.physical_id}</span></p>
 					<div>
 						<p class="text-sm font-medium text-surface-950 mb-2">Choose track</p>
@@ -543,6 +729,168 @@
 							</select>
 						{/if}
 					</div>
+
+					{#if identityBindingMode !== 'disabled'}
+						<div
+							class="rounded-container border border-surface-200 bg-surface-100 p-3 space-y-3"
+							data-testid="public-id-binding-step"
+						>
+							<div class="space-y-1">
+								<p class="text-sm font-semibold text-surface-950">
+									{identityBindingMode === 'required' ? 'Link your ID (required)' : 'Link your ID (optional)'}
+								</p>
+								<p class="text-xs text-surface-700">
+									{identityBindingMode === 'required'
+										? 'Scan your ID card to link your visit to your record.'
+										: 'Scan your ID card to link your visit, or continue without ID.'}
+								</p>
+							</div>
+
+							{#if binderMode === 'not_found'}
+								<div class="space-y-3">
+									<p
+										class="text-sm font-medium text-error-900"
+										data-testid="public-id-rejection-title"
+									>
+										We couldn’t find your details
+									</p>
+									<p
+										class="text-xs text-surface-700"
+										data-testid="public-id-rejection-body"
+									>
+										This ID card isn’t linked to a record in our system. Please check you’re using the right card, or ask a
+										staff member for help.
+									</p>
+									<p class="text-xs text-surface-600">
+										If you don’t choose an option, this screen will reset automatically.
+									</p>
+									<div class="text-xs text-surface-600" data-testid="public-id-rejection-countdown">
+										<CountdownTimer
+											active={binderMode === 'not_found'}
+											initialSeconds={notFoundResetSecondsDefault}
+											prefix="Resetting to the start in "
+											suffix=" seconds…"
+											onExpire={() => {
+												binderMode = 'idle';
+												binderStatus = 'idle';
+												boundClient = null;
+											}}
+										/>
+									</div>
+									<div class="flex flex-wrap gap-2">
+										<button
+											type="button"
+											class="btn preset-filled-primary-500 flex-1 touch-target-h"
+											data-testid="public-id-rejection-try-again"
+											onclick={() => {
+												binderMode = 'scanning';
+											}}
+										>
+											Try again
+										</button>
+										{#if identityBindingMode === 'optional'}
+											<button
+												type="button"
+												class="btn preset-tonal flex-1 touch-target-h"
+												data-testid="public-id-rejection-continue-without-id"
+												onclick={() => {
+													binderMode = 'skipped';
+													binderStatus = 'skipped';
+													boundClient = null;
+													binderMode = 'completed';
+												}}
+											>
+												Continue without ID
+											</button>
+										{/if}
+									</div>
+								</div>
+							{:else if binderMode === 'completed' && binderStatus === 'bound' && boundClient}
+								<div
+									class="space-y-1"
+									data-testid="public-id-binding-completed"
+								>
+									<p class="text-xs font-medium text-success-900">ID linked</p>
+									<p class="text-xs text-surface-700">
+										{boundClient.name}
+										{#if boundClient.birth_year}
+											({boundClient.birth_year})
+										{/if}
+										{#if boundClient.id_document}
+											· {boundClient.id_document.id_type} ending in {boundClient.id_document.id_last4}
+										{/if}
+									</p>
+								</div>
+							{:else}
+								<div class="space-y-2">
+									<div class="flex flex-wrap gap-2">
+										<button
+											type="button"
+											class="btn preset-filled-primary-500 flex-1 touch-target-h"
+											data-testid="public-id-scan-button"
+											onclick={() => {
+												binderMode = 'scanning';
+												scannerContext = 'identity';
+												showScanner = true;
+												scanHandled = false;
+											}}
+										>
+											Scan ID card
+										</button>
+										{#if identityBindingMode === 'optional'}
+											<button
+												type="button"
+												class="btn preset-tonal flex-1 touch-target-h"
+												data-testid="public-id-skip-button"
+												onclick={() => {
+													binderMode = 'skipped';
+													binderStatus = 'skipped';
+													boundClient = null;
+													binderMode = 'completed';
+												}}
+											>
+												Continue without ID
+											</button>
+										{/if}
+									</div>
+									<div class="flex flex-col gap-2 pt-2">
+										<div class="flex gap-2">
+											<input
+												type="text"
+												class="input rounded-container border border-surface-200 px-3 py-2 text-xs flex-1"
+												placeholder="Enter ID number"
+												data-testid="public-id-number-input"
+												bind:value={publicIdValue}
+												onkeydown={(e) => {
+													if (e.key === 'Enter') {
+														e.preventDefault();
+														submitIdLookup(publicIdValue);
+													}
+												}}
+											/>
+											<button
+												type="button"
+												class="btn preset-tonal touch-target-h"
+												data-testid="public-id-submit-button"
+												onclick={() => submitIdLookup(publicIdValue)}
+											>
+												Lookup
+											</button>
+										</div>
+									</div>
+									{#if identityBindingMode === 'optional'}
+										<p
+											class="text-xs text-surface-600"
+											data-testid="public-id-skip-helper"
+										>
+											You can still join the queue without linking your ID card.
+										</p>
+									{/if}
+								</div>
+							{/if}
+						</div>
+					{/if}
+
 					<div class="flex gap-2 pt-2">
 						<button type="button" class="btn preset-tonal flex-1 touch-target-h" onclick={reset} disabled={isSubmitting}>
 							Cancel
@@ -551,7 +899,11 @@
 							type="button"
 							class="btn preset-filled-primary-500 flex-1 touch-target-h"
 							onclick={handleBind}
-							disabled={isSubmitting || selectedTrackId == null}
+							disabled={
+								isSubmitting ||
+								selectedTrackId == null ||
+								(identityBindingMode === 'required' && binderStatus !== 'bound')
+							}
 						>
 							{isSubmitting ? 'Starting…' : 'Start my visit'}
 						</button>

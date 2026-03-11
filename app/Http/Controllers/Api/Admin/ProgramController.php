@@ -230,6 +230,7 @@ class ProgramController extends Controller
     private function programResource(Program $program): array
     {
         $settings = $program->settings ?? [];
+        $programSettings = $program->settings();
         $connectorLanguages = [];
         if (
             isset($settings['tts']) &&
@@ -251,7 +252,7 @@ class ProgramController extends Controller
             'created_at' => $program->created_at?->toIso8601String(),
             'settings' => [
                 'no_show_timer_seconds' => (int) ($settings['no_show_timer_seconds'] ?? 10),
-                'max_no_show_attempts' => $program->settings()->getMaxNoShowAttempts(),
+                'max_no_show_attempts' => $programSettings->getMaxNoShowAttempts(),
                 'require_permission_before_override' => (bool) ($settings['require_permission_before_override'] ?? true),
                 'priority_first' => (bool) ($settings['priority_first'] ?? true),
                 'balance_mode' => $settings['balance_mode'] ?? 'fifo',
@@ -261,14 +262,15 @@ class ProgramController extends Controller
                     (int) (($settings['alternate_ratio'] ?? [1, 1])[1] ?? 1),
                 ],
                 'alternate_priority_first' => (bool) ($settings['alternate_priority_first'] ?? true),
-                'display_scan_timeout_seconds' => $program->settings()->getDisplayScanTimeoutSeconds(),
-                'display_audio_muted' => $program->settings()->getDisplayAudioMuted(),
-                'display_audio_volume' => $program->settings()->getDisplayAudioVolume(),
-                'display_tts_repeat_count' => $program->settings()->getDisplayTtsRepeatCount(),
-                'display_tts_repeat_delay_ms' => $program->settings()->getDisplayTtsRepeatDelayMs(),
-                'allow_public_triage' => $program->settings()->getAllowPublicTriage(),
+                'display_scan_timeout_seconds' => $programSettings->getDisplayScanTimeoutSeconds(),
+                'display_audio_muted' => $programSettings->getDisplayAudioMuted(),
+                'display_audio_volume' => $programSettings->getDisplayAudioVolume(),
+                'display_tts_repeat_count' => $programSettings->getDisplayTtsRepeatCount(),
+                'display_tts_repeat_delay_ms' => $programSettings->getDisplayTtsRepeatDelayMs(),
+                'allow_public_triage' => $programSettings->getAllowPublicTriage(),
+                'identity_binding_mode' => $programSettings->getIdentityBindingMode(),
                 'tts' => [
-                    'active_language' => $program->settings()->getTtsActiveLanguage(),
+                    'active_language' => $programSettings->getTtsActiveLanguage(),
                     'auto_generate_station_tts' => ($settings['tts']['auto_generate_station_tts'] ?? true) === true,
                     'connector' => [
                         'languages' => $connectorLanguages,

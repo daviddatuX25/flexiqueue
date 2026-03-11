@@ -76,6 +76,7 @@ class DisplayController extends Controller
             'allowed' => true,
             'program_name' => $program->name,
             'tracks' => $tracks,
+            'identity_binding_mode' => $program->settings()->getIdentityBindingMode(),
             'date' => now()->format('F j, Y'),
             'display_scan_timeout_seconds' => $program->settings()->getDisplayScanTimeoutSeconds(),
             'enable_public_triage_hid_barcode' => $program->settings()->getEnablePublicTriageHidBarcode(),

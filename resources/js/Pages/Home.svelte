@@ -2,6 +2,7 @@
     import { usePage } from "@inertiajs/svelte";
     import { Link } from "@inertiajs/svelte";
     import AuthLayout from "../Layouts/AuthLayout.svelte";
+    import AppBackground from "../Components/AppBackground.svelte";
     import ThemeToggle from "../Components/ThemeToggle.svelte";
     import { fade } from "svelte/transition";
 
@@ -253,22 +254,7 @@
 </svelte:head>
 
 <AuthLayout>
-    <!-- 1. The Raw Background Image -->
-    <div
-        class="fixed inset-0 z-[-3] bg-cover bg-center bg-no-repeat"
-        style={`background-image: url('${heroImageUrl}')`}
-    ></div>
-
-    <!-- 2. The Adaptive Wash (Unthemed standard colors so Skeleton doesn't flip them) -->
-    <!-- Light mode gets a bright frosty wash, Dark mode gets a deep dark-blue wash -->
-    <div
-        class="fixed inset-0 z-[-2] bg-slate-50/85 dark:bg-slate-900/85 backdrop-blur-[2px]"
-    ></div>
-
-    <!-- 3. The Subtle Vibrant Gradient Overlay -->
-    <div
-        class="fixed inset-0 z-[-1] bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent pointer-events-none"
-    ></div>
+    <AppBackground {heroImageUrl} />
 
     <div
         class="relative min-h-screen text-surface-900 font-sans selection:bg-primary-500 selection:text-white pb-10 overflow-hidden"

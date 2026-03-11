@@ -19,6 +19,8 @@ export default defineConfig({
   reporter: 'html',
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost',
+    // Laravel Playwright bridge endpoints (per hyvor/laravel-playwright config).
+    laravelBaseUrl: process.env.PLAYWRIGHT_LARAVEL_BASE_URL || 'http://localhost/playwright',
     trace: 'on-first-retry',
     headless: true, // Sail/Docker has no display. For headed: run from host with --headed
     video: 'on-first-retry',

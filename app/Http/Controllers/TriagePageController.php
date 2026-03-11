@@ -22,11 +22,15 @@ class TriagePageController extends Controller
 
         $programPayload = null;
         if ($activeProgram) {
+            $programSettings = $activeProgram->settings();
+
             $programPayload = [
                 'id' => $activeProgram->id,
                 'name' => $activeProgram->name,
                 'is_active' => $activeProgram->is_active,
                 'is_paused' => $activeProgram->is_paused,
+                // Per XM2O identity-binding plan: expose mode to staff triage UI.
+                'identity_binding_mode' => $programSettings->getIdentityBindingMode(),
                 'tracks' => $activeProgram->serviceTracks->map(fn ($t) => [
                     'id' => $t->id,
                     'name' => $t->name,

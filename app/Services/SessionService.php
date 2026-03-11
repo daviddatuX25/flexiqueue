@@ -27,7 +27,8 @@ class SessionService
     public function __construct(
         private FlowEngine $flowEngine,
         private PinService $pinService,
-        private StationSelectionService $stationSelectionService
+        private StationSelectionService $stationSelectionService,
+        private IdentityBindingService $identityBindingService,
     ) {}
 
     /**
@@ -36,12 +37,19 @@ class SessionService
      *
      * @return array{session: \App\Models\Session, token: array}
      */
-    public function bind(string $qrHash, int $trackId, ?string $clientCategory, ?int $staffUserId = null): array
+    public function bind(string $qrHash, int $trackId, ?string $clientCategory, ?int $staffUserId = null, ?array $clientBindingPayload = null, ?string $bindingSource = null): array
     {
         $program = Program::where('is_active', true)->first();
         if (! $program) {
             throw new \InvalidArgumentException('No active program. Please activate a program first.');
         }
+
+        $settings = $program->settings();
+        $isPublic = $staffUserId === null;
+        $bindingMode = $settings->getIdentityBindingMode();
+        $bindingRequired = $isPublic ? $settings->requiresPublicBinding() : $settings->isBindingRequired();
+        $bindingAllowed = $isPublic ? $settings->allowsPublicBinding() : true;
+        $bindingSource = $bindingSource ?? ($isPublic ? 'public_triage' : 'staff_triage');
 
         $token = Token::where('qr_code_hash', $qrHash)->first();
         if (! $token) {
@@ -74,12 +82,20 @@ class SessionService
         if ($firstStationId === null) {
             throw new \InvalidArgumentException('Track first step has no stations.', 422);
         }
+        $bindingResult = $this->identityBindingService->resolve(
+            $clientBindingPayload,
+            $bindingAllowed,
+            $bindingRequired,
+            $bindingSource,
+            $bindingMode
+        );
 
-        return DB::transaction(function () use ($token, $program, $track, $firstStep, $firstStationId, $clientCategory, $staffUserId) {
+        return DB::transaction(function () use ($token, $program, $track, $firstStep, $firstStationId, $clientCategory, $staffUserId, $bindingResult) {
             $clientCategory = ClientCategory::normalize($clientCategory) ?? $clientCategory;
             $nextPos = $this->getNextQueuePositionAtStation($firstStationId);
             $session = \App\Models\Session::create([
                 'token_id' => $token->id,
+                'client_id' => $bindingResult['client_id'],
                 'program_id' => $program->id,
                 'track_id' => $track->id,
                 'alias' => $token->physical_id,
@@ -104,6 +120,17 @@ class SessionService
                 'next_station_id' => $firstStationId,
                 'created_at' => now(),
             ]);
+
+            if ($bindingResult['client_id'] !== null && $bindingResult['metadata'] !== null) {
+                TransactionLog::create([
+                    'session_id' => $session->id,
+                    'station_id' => null,
+                    'staff_user_id' => $staffUserId,
+                    'action_type' => 'identity_bind',
+                    'metadata' => $bindingResult['metadata'],
+                    'created_at' => now(),
+                ]);
+            }
 
             event(new ClientArrived($session->fresh(['currentStation', 'serviceTrack']), $firstStationId));
             event(new QueueLengthUpdated($firstStationId));

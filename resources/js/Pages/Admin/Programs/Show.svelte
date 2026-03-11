@@ -69,6 +69,8 @@
             display_tts_repeat_delay_ms?: number;
             /** Per plan: allow public self-serve triage at /triage/start. */
             allow_public_triage?: boolean;
+            /** Per flexiqueue-xm2o: per-program identity binding mode. */
+            identity_binding_mode?: "disabled" | "optional" | "required";
             /** Per barcode-hid: enable HID barcode on Display board. Default true. */
             enable_display_hid_barcode?: boolean;
             /** Per barcode-hid: enable HID barcode on Public triage. Default true. */
@@ -346,6 +348,10 @@
     let stationRegeneratingId = $state<number | null>(null);
     /** Per plan: allow public self-serve triage at /triage/start. */
     let allowPublicTriage = $state(false);
+    /** Per flexiqueue-xm2o: identity binding mode knob (Disabled / Optional / Required). */
+    let identityBindingMode = $state<"disabled" | "optional" | "required">(
+        "disabled",
+    );
     /** Per barcode-hid: enable HID barcode on Display board. Default true. */
     let enableDisplayHidBarcode = $state(true);
     /** Per barcode-hid: enable HID barcode on Public triage. Default true. */
@@ -386,8 +392,22 @@
             displayAudioMuted = s.display_audio_muted === true;
             displayAudioVolume = Math.max(0, Math.min(1, Number(s.display_audio_volume ?? 1)));
             settingsDisplayTtsRepeatCount = Math.max(1, Math.min(3, Math.floor(Number(s.display_tts_repeat_count ?? 1))));
-            settingsDisplayTtsRepeatDelaySec = Math.max(0.5, Math.min(10, (Number(s.display_tts_repeat_delay_ms ?? 2000) / 1000)));
+            settingsDisplayTtsRepeatDelaySec = Math.max(
+                0.5,
+                Math.min(
+                    10,
+                    (Number(s.display_tts_repeat_delay_ms ?? 2000) / 1000),
+                ),
+            );
             allowPublicTriage = s.allow_public_triage === true;
+            if (
+                s.identity_binding_mode === "optional" ||
+                s.identity_binding_mode === "required"
+            ) {
+                identityBindingMode = s.identity_binding_mode;
+            } else {
+                identityBindingMode = "disabled";
+            }
             enableDisplayHidBarcode = (s.enable_display_hid_barcode ?? true) === true;
             enablePublicTriageHidBarcode = (s.enable_public_triage_hid_barcode ?? true) === true;
             enableDisplayCameraScanner = (s.enable_display_camera_scanner ?? true) === true;
@@ -1580,11 +1600,23 @@
                     display_scan_timeout_seconds: displayScanTimeoutSeconds,
                     display_audio_muted: displayAudioMuted,
                     display_audio_volume: displayAudioVolume,
-                    display_tts_repeat_count: Math.max(1, Math.min(3, Math.floor(Number(settingsDisplayTtsRepeatCount) || 1))),
-                    display_tts_repeat_delay_ms: Math.round(settingsDisplayTtsRepeatDelaySec * 1000),
+                    display_tts_repeat_count: Math.max(
+                        1,
+                        Math.min(
+                            3,
+                            Math.floor(
+                                Number(settingsDisplayTtsRepeatCount) || 1,
+                            ),
+                        ),
+                    ),
+                    display_tts_repeat_delay_ms: Math.round(
+                        settingsDisplayTtsRepeatDelaySec * 1000,
+                    ),
                     allow_public_triage: allowPublicTriage,
+                    identity_binding_mode: identityBindingMode,
                     enable_display_hid_barcode: enableDisplayHidBarcode,
-                    enable_public_triage_hid_barcode: enablePublicTriageHidBarcode,
+                    enable_public_triage_hid_barcode:
+                        enablePublicTriageHidBarcode,
                     enable_display_camera_scanner: enableDisplayCameraScanner,
                     tts: {
                         active_language: ttsActiveLanguage,
@@ -3039,6 +3071,78 @@
                                         ></span>
                                     </div>
                                     <span class="label-text text-surface-950 font-medium">Allow public self-serve triage</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Identity binding mode (flexiqueue-xm2o) -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
+                                    Identity binding
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    Control whether this program requires binding a real-world client identity to each session.
+                                </p>
+                                <p class="text-[11px] text-surface-500 mt-2 space-y-1">
+                                    <span class="block">
+                                        <strong>Disabled</strong>: triage works as today; no identity UI is shown.
+                                    </span>
+                                    <span class="block">
+                                        <strong>Optional</strong>: staff/public triage may bind an ID, but can skip.
+                                    </span>
+                                    <span class="block">
+                                        <strong>Required</strong>: staff triage must bind; public triage (when allowed) requires a recognized ID to proceed.
+                                    </span>
+                                </p>
+                                {#if !allowPublicTriage}
+                                    <p class="text-[11px] text-surface-500 mt-2">
+                                        Public triage is currently disabled; identity binding will only affect staff triage until public triage is enabled.
+                                    </p>
+                                {:else}
+                                    <p class="text-[11px] text-surface-500 mt-2">
+                                        When public triage is enabled, <strong>Optional</strong> and <strong>Required</strong> also apply to the public triage page.
+                                    </p>
+                                {/if}
+                            </div>
+                            <div class="sm:w-2/3 form-control pt-1 space-y-2">
+                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
+                                    <input
+                                        type="radio"
+                                        class="radio radio-sm"
+                                        name="identity-binding-mode"
+                                        value="disabled"
+                                        bind:group={identityBindingMode}
+                                    />
+                                    <span class="label-text text-surface-950 font-medium">
+                                        Disabled
+                                    </span>
+                                </label>
+                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
+                                    <input
+                                        type="radio"
+                                        class="radio radio-sm"
+                                        name="identity-binding-mode"
+                                        value="optional"
+                                        bind:group={identityBindingMode}
+                                    />
+                                    <span class="label-text text-surface-950 font-medium">
+                                        Optional
+                                    </span>
+                                </label>
+                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
+                                    <input
+                                        type="radio"
+                                        class="radio radio-sm"
+                                        name="identity-binding-mode"
+                                        value="required"
+                                        bind:group={identityBindingMode}
+                                    />
+                                    <span class="label-text text-surface-950 font-medium">
+                                        Required
+                                    </span>
                                 </label>
                             </div>
                         </div>

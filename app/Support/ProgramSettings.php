@@ -131,6 +131,47 @@ final class ProgramSettings
         return (bool) ($this->settings['enable_display_camera_scanner'] ?? true);
     }
 
+    public function getIdentityBindingMode(): string
+    {
+        $mode = $this->settings['identity_binding_mode'] ?? 'disabled';
+        $allowed = ['disabled', 'optional', 'required'];
+
+        return in_array($mode, $allowed, true) ? $mode : 'disabled';
+    }
+
+    public function isBindingDisabled(): bool
+    {
+        return $this->getIdentityBindingMode() === 'disabled';
+    }
+
+    public function isBindingOptional(): bool
+    {
+        return $this->getIdentityBindingMode() === 'optional';
+    }
+
+    public function isBindingRequired(): bool
+    {
+        return $this->getIdentityBindingMode() === 'required';
+    }
+
+    public function allowsPublicBinding(): bool
+    {
+        if (! $this->getAllowPublicTriage()) {
+            return false;
+        }
+
+        return $this->isBindingOptional() || $this->isBindingRequired();
+    }
+
+    public function requiresPublicBinding(): bool
+    {
+        if (! $this->getAllowPublicTriage()) {
+            return false;
+        }
+
+        return $this->isBindingRequired();
+    }
+
     /**
      * Active TTS language for this program (used by displays and generation).
      * Defaults to 'en' when not explicitly configured.

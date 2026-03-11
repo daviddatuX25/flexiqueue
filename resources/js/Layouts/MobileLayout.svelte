@@ -13,6 +13,7 @@
     import OfflineBanner from "../Components/OfflineBanner.svelte";
     import UserAvatar from "../Components/UserAvatar.svelte";
     import Marquee from "../Components/Marquee.svelte";
+    import AppBackground from "../Components/AppBackground.svelte";
 
     let {
         children,
@@ -29,27 +30,41 @@
         currentPath === "/station" || currentPath.startsWith("/station/"),
     );
     const isTriage = $derived(currentPath === "/triage");
-    const isTrackOverrides = $derived(currentPath === "/track-overrides");
+    const isProgramOverrides = $derived(currentPath === "/program-overrides");
     const isAdmin = $derived(user?.role === "admin");
     const backHref = $derived(isAdmin ? "/admin/dashboard" : "/dashboard");
     const backLabel = $derived(isAdmin ? "Admin panel" : "Dashboard");
 </script>
 
-<div class="flex flex-col h-screen overflow-hidden bg-surface-100">
+<div class="flex flex-col h-screen overflow-hidden bg-transparent">
+    <AppBackground />
     <OfflineBanner />
 
     <header
-        class="flex items-center justify-between gap-2 bg-surface-50 border-b border-surface-200 px-3 min-h-0 h-14 shrink-0"
+        class="flex items-center justify-between gap-2 bg-surface-50/70 dark:bg-slate-900/80 backdrop-blur-xl border-b border-surface-200 px-3 min-h-0 h-14 shrink-0 z-10"
     >
         <div class="min-w-0 flex-1 flex items-center gap-2">
-            <div class="fq-mobile-header-marquee fq-mobile-header-marquee--mobile min-w-0">
-                <Marquee overflowOnly={false} duration={5.5} gapEm={1.5} class="fq-mobile-header-marquee__inner w-full">
+            <div
+                class="fq-mobile-header-marquee fq-mobile-header-marquee--mobile min-w-0"
+            >
+                <Marquee
+                    overflowOnly={false}
+                    duration={5.5}
+                    gapEm={1.5}
+                    class="fq-mobile-header-marquee__inner w-full"
+                >
                     {#snippet children()}
-                        <span class="text-base font-semibold text-surface-950 whitespace-nowrap">{headerTitle}</span>
+                        <span
+                            class="text-base font-semibold text-surface-950 whitespace-nowrap"
+                            >{headerTitle}</span
+                        >
                     {/snippet}
                 </Marquee>
             </div>
-            <span class="fq-mobile-header-marquee--desktop text-base font-semibold text-surface-950">{headerTitle}</span>
+            <span
+                class="fq-mobile-header-marquee--desktop text-base font-semibold text-surface-950"
+                >{headerTitle}</span
+            >
         </div>
         <div class="flex items-center gap-1.5 shrink-0">
             <ThemeToggle />
@@ -64,7 +79,7 @@
                 >
                     <UserAvatar {user} size="sm" />
                 </div>
-                <!-- Profile dropdown: no Station/Triage/Track Overrides (they are in bottom nav). Per ISSUES-ELABORATION §3. -->
+                <!-- Profile dropdown: no Station/Triage/Program Overrides (they are in bottom nav). Per ISSUES-ELABORATION §3. -->
                 <ul
                     role="menu"
                     tabindex="0"
@@ -110,7 +125,9 @@
         {/if}
     </main>
 
-    <div class="shrink-0 bg-surface-50 border-t border-surface-200">
+    <div
+        class="shrink-0 bg-surface-50/70 dark:bg-slate-900/80 backdrop-blur-xl z-10 border-t border-surface-200"
+    >
         <p
             class="text-[0.65rem] text-surface-950/50 text-center py-1 font-medium uppercase tracking-wide"
         >
@@ -161,8 +178,8 @@
                 <span class="text-[0.6rem]">Triage</span>
             </Link>
             <Link
-                href="/track-overrides"
-                class="flex flex-col items-center gap-0.5 touch-target justify-center {isTrackOverrides
+                href="/program-overrides"
+                class="flex flex-col items-center gap-0.5 touch-target justify-center {isProgramOverrides
                     ? 'text-primary-500 font-semibold'
                     : 'text-surface-950/70'}"
             >
@@ -179,7 +196,7 @@
                         d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
                     /></svg
                 >
-                <span class="text-[0.6rem]">Track Overrides</span>
+                <span class="text-[0.6rem]">Program Overrides</span>
             </Link>
         </div>
     </div>

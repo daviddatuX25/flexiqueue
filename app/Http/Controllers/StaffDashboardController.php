@@ -10,7 +10,7 @@ use Inertia\Response;
 
 /**
  * Staff dashboard: per-staff metrics only. Per docs/plans/STAFF-DASHBOARD-PLAN.md.
- * No quick links; footer nav provides Station / Triage / Track Overrides.
+ * No quick links; footer nav provides Station / Triage / Program Overrides.
  */
 class StaffDashboardController extends Controller
 {

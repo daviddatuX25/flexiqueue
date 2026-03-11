@@ -2,6 +2,11 @@
 	import MobileLayout from '../../Layouts/MobileLayout.svelte';
 	import Modal from '../../Components/Modal.svelte';
 	import QrScanner from '../../Components/QrScanner.svelte';
+	import TriageClientBinder, {
+		type BindingMode as BinderBindingMode,
+		type BinderStatus as BinderComponentStatus,
+		type ClientBindingPayload,
+	} from '../../Components/TriageClientBinder.svelte';
 	import { Camera } from 'lucide-svelte';
 	import { get } from 'svelte/store';
 	import { usePage } from '@inertiajs/svelte';
@@ -20,6 +25,7 @@
 		is_active?: boolean;
 		is_paused?: boolean;
 		tracks: Track[];
+		identity_binding_mode?: 'disabled' | 'optional' | 'required';
 	}
 
 	let {
@@ -61,6 +67,12 @@
 	/** When true, user is in the "manual token input" focus window; pause HID refocus for 10s then return focus to hidden input. */
 	let manualFocusActive = $state(false);
 	let manualFocusTimeoutId = $state<ReturnType<typeof setTimeout> | null>(null);
+
+	let bindingMode = $derived<BinderBindingMode>(
+		(activeProgram?.identity_binding_mode as BinderBindingMode | undefined) ?? 'disabled',
+	);
+	let clientBinding = $state<ClientBindingPayload | null>(null);
+	let binderStatus = $state<BinderComponentStatus>('idle');
 
 	const MANUAL_FOCUS_SECONDS = 10;
 
@@ -275,12 +287,23 @@
 
 	async function handleConfirm() {
 		if (!scannedToken || selectedCategory === null || selectedTrackId === null) return;
+		if (bindingMode === 'required' && binderStatus !== 'bound') {
+			toaster.error({
+				title: 'Client identity binding is required before completing triage.',
+			});
+			return;
+		}
 		isSubmitting = true;
-		const { ok, data, message } = await api('POST', '/api/sessions/bind', {
+		const payload: any = {
 			qr_hash: scannedToken.qr_hash,
 			track_id: Number(selectedTrackId),
 			client_category: selectedCategory,
-		});
+		};
+		if (clientBinding) {
+			payload.client_binding = clientBinding;
+		}
+
+		const { ok, data, message } = await api('POST', '/api/sessions/bind', payload);
 		isSubmitting = false;
 		if (ok) {
 			resetScan();
@@ -314,7 +337,10 @@
 
 			{#if !scannedToken}
 				<!-- Get token: hidden HID input + pulsing CTA with camera icon opens modal (same pattern as display). -->
-				<div class="rounded-container border border-surface-200 bg-surface-50 elevation-card p-4 md:p-6 flex flex-col gap-4">
+				<div
+					class="rounded-container border border-surface-200 bg-surface-50 elevation-card p-4 md:p-6 flex flex-col gap-4"
+					data-testid="triage-token-card"
+				>
 					<input
 						type="text"
 						autocomplete="off"
@@ -359,11 +385,19 @@
 								type="text"
 								class="input flex-1 rounded-container border border-surface-200 px-3 touch-target-h"
 								placeholder="e.g. A1"
+								data-testid="triage-token-input"
 								bind:value={manualPhysicalId}
 								onfocus={startManualFocusWindow}
 								onkeydown={(e) => e.key === 'Enter' && handleLookup()}
 							/>
-							<button type="button" class="btn preset-filled-primary-500 touch-target px-4" onclick={handleLookup}>Look up</button>
+							<button
+								type="button"
+								class="btn preset-filled-primary-500 touch-target px-4"
+								data-testid="triage-token-lookup-button"
+								onclick={handleLookup}
+							>
+								Look up
+							</button>
 						</div>
 					</div>
 				</div>
@@ -385,8 +419,11 @@
 					{/snippet}
 				</Modal>
 			{:else}
-				<!-- Category + track + confirm -->
-				<div class="rounded-container border border-surface-200 bg-surface-50 elevation-card p-4 md:p-6 space-y-4">
+				<!-- Category + track + binder + confirm -->
+				<div
+					class="rounded-container border border-surface-200 bg-surface-50 elevation-card p-4 md:p-6 space-y-4"
+					data-testid="triage-confirm-card"
+				>
 					<p class="font-medium text-surface-950">Token: <span class="font-mono text-primary-500">{scannedToken.physical_id}</span></p>
 
 					<div>
@@ -396,6 +433,9 @@
 								<button
 									type="button"
 									class="btn touch-target-h px-4 py-2 {selectedCategory === cat.value ? 'preset-filled-primary-500' : 'preset-tonal'}"
+									data-testid={cat.value === 'Regular'
+										? 'triage-category-regular'
+										: 'triage-category-priority'}
 									onclick={() => (selectedCategory = cat.value)}
 								>
 									{cat.label}
@@ -412,6 +452,9 @@
 									<button
 										type="button"
 										class="btn touch-target-h px-4 py-2 {selectedTrackId === track.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
+										data-testid={track.name === 'Regular'
+											? 'triage-track-regular'
+											: 'triage-track-priority'}
 										onclick={() => (selectedTrackId = track.id)}
 									>
 										{track.name}
@@ -419,7 +462,11 @@
 								{/each}
 							</div>
 						{:else}
-							<select id="triage-track" class="w-full rounded-container border border-surface-200 px-3 py-2 touch-target-h" bind:value={selectedTrackId}>
+							<select
+								id="triage-track"
+								class="w-full rounded-container border border-surface-200 px-3 py-2 touch-target-h"
+								bind:value={selectedTrackId}
+							>
 								{#each activeProgram?.tracks ?? [] as track (track.id)}
 									<option value={track.id}>{track.name}</option>
 								{/each}
@@ -427,6 +474,17 @@
 						{/if}
 					</div>
 
+					{#if bindingMode !== 'disabled'}
+						<div class="border-t border-surface-200 pt-4" data-testid="triage-client-binder-wrapper">
+							<TriageClientBinder
+								bindingMode={bindingMode}
+								onBindingChange={({ status, client_binding }) => {
+									binderStatus = status;
+									clientBinding = client_binding;
+								}}
+							/>
+						</div>
+					{/if}
 
 					<div class="flex gap-2 pt-2">
 						<button type="button" class="btn preset-tonal flex-1 touch-target-h" onclick={resetScan} disabled={isSubmitting}>
@@ -435,8 +493,14 @@
 						<button
 							type="button"
 							class="btn preset-filled-primary-500 flex-1 touch-target-h"
+							data-testid="triage-confirm-button"
 							onclick={handleConfirm}
-							disabled={isSubmitting || selectedCategory === null || selectedTrackId === null}
+							disabled={
+								isSubmitting ||
+								selectedCategory === null ||
+								selectedTrackId === null ||
+								(bindingMode === 'required' && binderStatus !== 'bound')
+							}
 						>
 							{isSubmitting ? 'Binding…' : 'Confirm'}
 						</button>

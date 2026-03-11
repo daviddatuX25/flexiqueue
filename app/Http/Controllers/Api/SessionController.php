@@ -18,6 +18,7 @@ use App\Http\Requests\ResumeFromHoldSessionRequest;
 use App\Http\Requests\ServeSessionRequest;
 use App\Http\Requests\TransferSessionRequest;
 use App\Http\Resources\SessionResource;
+use App\Exceptions\IdentityBindingException;
 use App\Models\Session;
 use App\Models\User;
 use App\Services\PinService;
@@ -61,8 +62,16 @@ class SessionController extends Controller
                 $request->validated('qr_hash'),
                 (int) $request->validated('track_id'),
                 $request->validated('client_category'),
-                $request->user()->id
+                $request->user()->id,
+                $request->validated('client_binding')
             );
+        } catch (IdentityBindingException $e) {
+            return response()->json([
+                'message' => 'Validation failed.',
+                'errors' => [
+                    'client_binding' => [$e->getMessage()],
+                ],
+            ], 422);
         } catch (\InvalidArgumentException $e) {
             $code = $e->getCode() === 422 ? 422 : 400;
             if (str_contains($e->getMessage(), 'Token not found')) {

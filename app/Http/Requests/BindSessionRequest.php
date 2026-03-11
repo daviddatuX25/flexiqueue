@@ -23,6 +23,10 @@ class BindSessionRequest extends FormRequest
             'qr_hash' => ['required', 'string', 'max:64'],
             'track_id' => ['required', 'integer'],
             'client_category' => ['nullable', 'string', 'max:50'],
+            'client_binding' => ['nullable', 'array'],
+            'client_binding.client_id' => ['required_with:client_binding', 'integer', 'exists:clients,id'],
+            'client_binding.source' => ['required_with:client_binding', 'string', 'max:50'],
+            'client_binding.id_document_id' => ['required_with:client_binding', 'integer', 'exists:client_id_documents,id'],
         ];
     }
 }

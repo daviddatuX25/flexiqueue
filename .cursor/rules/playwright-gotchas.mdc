@@ -1,0 +1,54 @@
+---
+description: Playwright E2E gotchas — avoid repeat bugs when editing Playwright config or tests.
+globs: e2e/**/*.ts,playwright.config.js
+alwaysApply: false
+---
+
+# Playwright gotchas (living doc)
+
+Concise checklist so we don’t repeat the same Playwright failures. Add new items here when we fix a non-obvious bug.
+
+---
+
+## When to use this rule (ALWAYS)
+
+Use this rule **every single time** Playwright is:
+
+- **Mentioned in a task**: user asks to add/change/fix E2E tests or config.
+- **Run in a command**: `npx playwright ...`, `./vendor/bin/sail npx playwright ...`.
+- **Touched in code**: edits under `e2e/` or `playwright.config.js`.
+
+Before doing anything Playwright-related:
+
+- **Scan this file top-to-bottom once** for the current task.
+- **Apply any matching gotcha** (config, login flow, seeding, etc.).
+- **Add a new bullet** here whenever you fix a non-obvious Playwright issue, so future tasks benefit.
+
+---
+
+## Configuration & runtime
+
+- **"require is not defined in ES module scope"**  
+  `playwright.config.js` uses CommonJS (`require`/`module.exports`) but `package.json` has `"type": "module"`.  
+  → Use ESM: `import { defineConfig, devices } from '@playwright/test'` and `export default defineConfig({...})`.
+
+- **"headed browser without XServer" in Sail**  
+  Sail/Docker has no display. Headed mode fails with "Missing X server or $DISPLAY".  
+  → Use headless in Sail. To see the browser, run from host: `npx playwright test --headed` (app must be up).
+
+- **`playwright show-report` — `localhost:9323` doesn't load in browser**  
+  Report server runs inside Sail; port wasn’t forwarded. Also binds to localhost by default.  
+  → Port 9323 added to `compose.yaml`. Run `sail npx playwright show-report --host 0.0.0.0` then open `http://localhost:9323`.
+
+- **Hyvor `db:seed` 500 "Target class [...] does not exist"**  
+  Hyvor calls `/playwright/artisan` for `db:seed --class=...`; a typo in the seeder class shows up as a 500 HTML error inside Playwright, not as a CLI error.  
+  → Put test-only seeders under `Database\Seeders\*Seeder.php` and pass the **short** class name to `--class=...` (e.g. `AdminClientViewTestSeeder`), matching the PSR-4 namespace.
+
+---
+
+## Login & navigation flow
+
+- **Login redirects not complete before navigation**  
+  Tests go to `/login`, submit credentials, then immediately `page.goto('/admin/...')` and time out expecting headings because the session cookie wasn’t set yet (redirect to `/login` again).  
+  → After clicking submit, always `await page.waitForURL('**/admin/dashboard', { timeout: 10000 });` (or the appropriate post-login URL) before navigating onward.
+

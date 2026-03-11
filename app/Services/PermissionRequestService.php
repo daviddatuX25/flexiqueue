@@ -80,7 +80,7 @@ class PermissionRequestService
                 return $this->approveViaLegacyStation($session, (int) $pr->target_station_id, $pr->reason, $responderUserId, $pr->requester_user_id);
             }
 
-            throw new \InvalidArgumentException('Override requires target track or custom path. Define path on Track Overrides page.', 422);
+            throw new \InvalidArgumentException('Override requires target track or custom path. Define path on Program Overrides page.', 422);
         } else {
             $result = $this->sessionService->forceComplete(
                 $session,

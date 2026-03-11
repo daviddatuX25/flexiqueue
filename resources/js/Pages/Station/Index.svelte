@@ -859,7 +859,7 @@
 			const isNetwork = e instanceof TypeError && (e as Error).message === 'Failed to fetch';
 			toaster.error({
 				title: isAbort
-					? 'Request timed out. The request may have succeeded – check Track Overrides.'
+					? 'Request timed out. The request may have succeeded – check Program Overrides.'
 					: isNetwork
 						? MSG_NETWORK_ERROR
 						: 'Failed to send request',
@@ -874,7 +874,7 @@
 			overrideIsCustom = false;
 			overrideReason = '';
 			resetAuthState();
-			window.location.href = '/track-overrides';
+			window.location.href = '/program-overrides';
 		} else {
 			toaster.error({ title: 'Failed to send request' });
 		}
@@ -896,7 +896,7 @@
 			forceCompleteReason = '';
 			resetAuthState();
 			await fetchQueue(true);
-			router.visit('/track-overrides');
+			router.visit('/program-overrides');
 		} else {
 			toaster.error({ title: 'Failed to send request' });
 		}
@@ -1449,7 +1449,7 @@
 					</div>
 				</div>
 				{#if authType === 'request_approval'}
-					<p class="text-sm text-surface-950/70 mt-2">Request will be sent to supervisor. Check Track Overrides page for status.</p>
+					<p class="text-sm text-surface-950/70 mt-2">Request will be sent to supervisor. Check Program Overrides page for status.</p>
 				{:else if authType === 'pin'}
 					<div class="form-control w-full mt-2">
 						<div class="label"><span class="label-text">Enter 6-digit code from supervisor</span></div>
@@ -1524,7 +1524,7 @@
 					</div>
 				</div>
 				{#if authType === 'request_approval'}
-					<p class="text-sm text-surface-950/70 mt-2">Request will be sent to supervisor. Check Track Overrides page for status.</p>
+					<p class="text-sm text-surface-950/70 mt-2">Request will be sent to supervisor. Check Program Overrides page for status.</p>
 				{:else if authType === 'pin'}
 					<div class="form-control w-full mt-2">
 						<div class="label"><span class="label-text">Enter 6-digit code from supervisor</span></div>
