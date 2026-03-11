@@ -21,23 +21,4 @@ class PrintSetting extends Model
         'show_hint' => 'boolean',
         'show_cut_lines' => 'boolean',
     ];
-
-    /**
-     * Get the singleton print settings. Creates default row if none exists.
-     */
-    public static function instance(): self
-    {
-        $settings = self::first();
-        if (! $settings) {
-            $settings = self::create([
-                'cards_per_page' => 6,
-                'paper' => 'a4',
-                'orientation' => 'portrait',
-                'show_hint' => true,
-                'show_cut_lines' => true,
-            ]);
-        }
-
-        return $settings;
-    }
 }

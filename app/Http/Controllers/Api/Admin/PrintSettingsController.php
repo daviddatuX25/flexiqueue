@@ -5,16 +5,20 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\UpdatePrintSettingsRequest;
 use App\Http\Requests\UploadPrintImageRequest;
-use App\Models\PrintSetting;
+use App\Repositories\PrintSettingRepository;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class PrintSettingsController extends Controller
 {
+    public function __construct(
+        private PrintSettingRepository $printSettingRepository
+    ) {}
+
     public function show(): JsonResponse
     {
-        $settings = PrintSetting::instance();
+        $settings = $this->printSettingRepository->getInstance();
 
         return response()->json([
             'print_settings' => [
@@ -32,7 +36,7 @@ class PrintSettingsController extends Controller
 
     public function update(UpdatePrintSettingsRequest $request): JsonResponse
     {
-        $settings = PrintSetting::instance();
+        $settings = $this->printSettingRepository->getInstance();
         $settings->update($request->validated());
 
         return response()->json([
@@ -70,7 +74,7 @@ class PrintSettingsController extends Controller
 
         $url = Storage::disk('public')->url($path);
 
-        $settings = PrintSetting::instance();
+        $settings = $this->printSettingRepository->getInstance();
         if ($type === 'background') {
             $settings->bg_image_url = $url;
         } else {

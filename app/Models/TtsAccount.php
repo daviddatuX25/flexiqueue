@@ -72,15 +72,6 @@ class TtsAccount extends Model
     }
 
     /**
-     * Set this account as active; deactivate others.
-     */
-    public function activate(): void
-    {
-        static::where('id', '!=', $this->id)->update(['is_active' => false]);
-        $this->update(['is_active' => true]);
-    }
-
-    /**
      * Masked API key hint for display (never expose full key).
      */
     public function getMaskedApiKey(): string

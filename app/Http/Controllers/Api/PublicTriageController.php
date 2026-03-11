@@ -8,11 +8,10 @@ use App\Http\Requests\BindSessionRequest;
 use App\Models\Program;
 use App\Models\Token;
 use App\Services\SessionService;
+use App\Services\TriageScanLogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Support\Facades\Schema;
 
 /**
  * Public triage API: token lookup and bind when program allows public self-serve.
@@ -29,7 +28,8 @@ class PublicTriageController extends Controller
     private const BIND_MAX = 20;
 
     public function __construct(
-        private SessionService $sessionService
+        private SessionService $sessionService,
+        private TriageScanLogService $triageScanLogService,
     ) {}
 
     /**
@@ -44,7 +44,7 @@ class PublicTriageController extends Controller
         }
 
         $program = Program::where('is_active', true)->first();
-        if (! $program || ! $program->getAllowPublicTriage()) {
+        if (! $program || ! $program->settings()->getAllowPublicTriage()) {
             return response()->json(['message' => 'Public self-serve triage is not available.'], 403);
         }
 
@@ -62,13 +62,13 @@ class PublicTriageController extends Controller
             if (! (is_string($physicalId) && $physicalId !== '') && ! (is_string($qrHash) && $qrHash !== '')) {
                 return response()->json(['message' => 'physical_id or qr_hash is required.'], 422);
             }
-            $this->logTriageScan($request, null, 'not_found', null, null);
+            $this->triageScanLogService->log($request, null, 'not_found', null, null);
             RateLimiter::hit($key);
 
             return response()->json(['message' => 'Token not found.'], 404);
         }
 
-        $this->logTriageScan($request, $token->id, $token->status, $token->physical_id, $token->qr_code_hash);
+        $this->triageScanLogService->log($request, $token->id, $token->status, $token->physical_id, $token->qr_code_hash);
         RateLimiter::hit($key);
 
         return response()->json([
@@ -90,7 +90,7 @@ class PublicTriageController extends Controller
         }
 
         $program = Program::where('is_active', true)->first();
-        if (! $program || ! $program->getAllowPublicTriage()) {
+        if (! $program || ! $program->settings()->getAllowPublicTriage()) {
             return response()->json(['message' => 'Public self-serve triage is not available.'], 403);
         }
 
@@ -164,22 +164,5 @@ class PublicTriageController extends Controller
             ],
             'token' => $result['token'],
         ], 201);
-    }
-
-    private function logTriageScan(Request $request, ?int $tokenId, string $result, ?string $physicalId, ?string $qrHash): void
-    {
-        if (! Schema::hasTable('triage_scan_log')) {
-            return;
-        }
-        DB::table('triage_scan_log')->insert([
-            'physical_id' => $physicalId ?? $request->query('physical_id'),
-            'qr_hash' => $qrHash ?? $request->query('qr_hash'),
-            'result' => $result,
-            'token_id' => $tokenId,
-            'user_id' => null,
-            'ip' => $request->ip(),
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
     }
 }

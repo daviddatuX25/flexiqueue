@@ -16,8 +16,12 @@ class TemporaryAuthorization extends Model
         'user_id',
         'token_hash',
         'type',
+        'expiry_mode',
+        'max_uses',
+        'used_count',
         'expires_at',
         'used_at',
+        'last_used_at',
     ];
 
     protected function casts(): array
@@ -25,6 +29,9 @@ class TemporaryAuthorization extends Model
         return [
             'expires_at' => 'datetime',
             'used_at' => 'datetime',
+            'last_used_at' => 'datetime',
+            'max_uses' => 'integer',
+            'used_count' => 'integer',
         ];
     }
 
@@ -41,5 +48,14 @@ class TemporaryAuthorization extends Model
     public function isUsed(): bool
     {
         return $this->used_at !== null;
+    }
+
+    public function usesRemaining(): ?int
+    {
+        if ($this->max_uses === null) {
+            return null;
+        }
+
+        return max(0, (int) $this->max_uses - (int) ($this->used_count ?? 0));
     }
 }

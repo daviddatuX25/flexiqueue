@@ -51,13 +51,17 @@ class AuthorizationPageController extends Controller
             $authorizations = TemporaryAuthorization::where('user_id', $user->id)
                 ->orderByDesc('created_at')
                 ->limit(20)
-                ->get(['id', 'type', 'created_at', 'expires_at', 'used_at'])
+                ->get(['id', 'type', 'expiry_mode', 'max_uses', 'used_count', 'created_at', 'expires_at', 'used_at', 'last_used_at'])
                 ->map(fn ($a) => [
                     'id' => $a->id,
                     'type' => $a->type,
+                    'expiry_mode' => $a->expiry_mode,
+                    'max_uses' => $a->max_uses,
+                    'used_count' => $a->used_count,
                     'created_at' => $a->created_at?->toIso8601String(),
                     'expires_at' => $a->expires_at?->toIso8601String(),
                     'used_at' => $a->used_at?->toIso8601String(),
+                    'last_used_at' => $a->last_used_at?->toIso8601String(),
                 ])
                 ->values()
                 ->all();

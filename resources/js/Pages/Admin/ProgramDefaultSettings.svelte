@@ -99,7 +99,8 @@
 			},
 		});
 		submitting = false;
-		if (!ok) toaster.error({ title: message ?? "Failed to save." });
+		if (ok) toaster.success({ title: "Default settings updated." });
+		else toaster.error({ title: message ?? "Failed to save." });
 	}
 </script>
 

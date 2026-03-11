@@ -2,6 +2,7 @@
 	import MobileLayout from '../../Layouts/MobileLayout.svelte';
 	import Modal from '../../Components/Modal.svelte';
 	import QrScanner from '../../Components/QrScanner.svelte';
+	import CategoryBadge from '../../Components/CategoryBadge.svelte';
 	import { Volume2 } from 'lucide-svelte';
 	import { get } from 'svelte/store';
 	import { tick, onMount } from 'svelte';
@@ -57,9 +58,23 @@
 		at_this_station: boolean;
 	}
 
+	interface HoldingSession {
+		session_id: number;
+		alias: string;
+		track: string;
+		client_category: string;
+		status: string;
+		held_at: string;
+		process_id?: number | null;
+		process_name?: string | null;
+		current_step_order: number;
+		total_steps: number;
+	}
+
 	interface QueueData {
-		station: { id: number; name: string; client_capacity?: number; serving_count?: number };
+		station: { id: number; name: string; client_capacity?: number; serving_count?: number; holding_capacity?: number; holding_count?: number };
 		serving: ServingSession[];
+		holding?: HoldingSession[];
 		no_show_timer_seconds: number;
 		waiting: WaitingSession[];
 		priority_first?: boolean;
@@ -650,6 +665,45 @@
 		}
 	}
 
+	async function hold(s: ServingSession) {
+		if (!s || s.status !== 'serving' || actionLoading) return;
+		if ((queue?.station?.holding_count ?? 0) >= (queue?.station?.holding_capacity ?? 3)) {
+			toaster.error({ title: 'Holding area full (3/3). Resume a client first.' });
+			return;
+		}
+		actionLoading = `hold-${s.session_id}`;
+		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/hold`, {});
+		actionLoading = null;
+		if (ok) {
+			await fetchQueue(true);
+		} else {
+			const payload = (data as { message?: string; error_code?: string }) ?? {};
+			const msg = payload.message ?? 'Move to holding failed';
+			if (payload.error_code === 'holding_full') {
+				toaster.error({ title: 'Holding area full. Resume a client first.' });
+			} else {
+				toaster.error({ title: msg });
+			}
+		}
+	}
+
+	async function resumeFromHold(h: HoldingSession) {
+		if (!h || actionLoading) return;
+		actionLoading = `resume-${h.session_id}`;
+		const { ok, data } = await api('POST', `/api/sessions/${h.session_id}/resume-from-hold`, {});
+		actionLoading = null;
+		if (ok) {
+			await fetchQueue(true);
+		} else {
+			const payload = (data as { message?: string; error_code?: string }) ?? {};
+			if (payload.error_code === 'at_capacity') {
+				toaster.error({ title: 'Station at capacity. Complete or transfer a client first.' });
+			} else {
+				toaster.error({ title: payload.message ?? 'Resume failed' });
+			}
+		}
+	}
+
 	function openNoShowModal(s: ServingSession) {
 		noShowModalSession = s;
 	}
@@ -720,7 +774,7 @@
 
 	async function override() {
 		const s = overrideSession;
-		if (!s || (!overrideTargetTrackId && !overrideIsCustom) || !overrideReason.trim() || actionLoading) return;
+		if (!s || (!overrideTargetTrackId && !overrideIsCustom) || (overrideIsCustom && !overrideReason.trim()) || actionLoading) return;
 		if (needsAuthForOverride && authType === 'request_approval') {
 			await requestApprovalOverride();
 			return;
@@ -758,7 +812,7 @@
 
 	async function requestApprovalOverride() {
 		const s = overrideSession;
-		if (!s || (!overrideTargetTrackId && !overrideIsCustom) || !overrideReason.trim() || actionLoading) return;
+		if (!s || (!overrideTargetTrackId && !overrideIsCustom) || (overrideIsCustom && !overrideReason.trim()) || actionLoading) return;
 		actionLoading = 'override';
 		const body: { session_id: number; action_type: string; reason: string; target_track_id?: number | null; is_custom?: boolean } = {
 			session_id: s.session_id,
@@ -1016,9 +1070,7 @@
 									<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500/20 text-primary-700" title="Current process">{s.process_name}</span>
 								{/if}
 								<span class="text-xs px-2 py-0.5 rounded preset-outlined text-surface-950">{s.track}</span>
-								<span class="badge {categoryBadgeClass(s.client_category)} text-sm font-semibold text-surface-950">
-									{s.client_category ?? 'Regular'}
-								</span>
+								<CategoryBadge category={s.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(s.client_category)} />
 							</div>
 							<p class="text-sm text-surface-950/70">
 								Step {s.current_step_order} of {s.total_steps}
@@ -1065,6 +1117,15 @@
 										</button>
 									{/if}
 									<div class="flex flex-wrap gap-2">
+										<button
+											type="button"
+											class="btn preset-outlined btn-sm touch-target-h"
+											disabled={!!actionLoading || (queue?.station?.holding_count ?? 0) >= (queue?.station?.holding_capacity ?? 3)}
+											title={(queue?.station?.holding_count ?? 0) >= (queue?.station?.holding_capacity ?? 3) ? 'Holding area full. Resume a client first.' : 'Move to holding'}
+											onclick={() => hold(s)}
+										>
+											Move to holding
+										</button>
 										<button type="button" class="btn preset-outlined btn-sm touch-target-h" disabled={!!actionLoading} onclick={() => openOverrideModal(s)}>Override</button>
 										<button type="button" class="btn preset-filled-warning-500 btn-sm touch-target-h" disabled={!!actionLoading} onclick={() => openForceCompleteModal(s)}>Force Complete</button>
 										<button type="button" class="btn preset-tonal btn-sm touch-target-h" disabled={!!actionLoading} onclick={() => cancel(s)}>Cancel</button>
@@ -1084,7 +1145,7 @@
 								{@const nextSession = queue.next_to_call ? queue.waiting.find((w) => w.session_id === queue.next_to_call!.session_id) ?? queue.waiting[0] : queue.waiting[0]}
 								<p class="text-sm text-surface-950/60 mb-3">
 									Next: <span class="font-mono font-semibold text-surface-950">{nextSession.alias}</span>
-									<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm ml-1 text-surface-950">{nextSession.client_category ?? 'Regular'}</span>
+									<span class="ml-1"><CategoryBadge category={nextSession.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(nextSession.client_category)} size="sm" /></span>
 									({nextSession.track}{#if nextSession.process_name}) — {nextSession.process_name}{/if})
 								</p>
 								<button
@@ -1107,23 +1168,55 @@
 					{/if}
 				</div>
 
-				<!-- Right: Queue + stats (desktop) / below left on mobile -->
+				<!-- Right: Queue + holding + stats (desktop) / below left on mobile -->
 				<div class="lg:col-span-5 flex flex-col gap-4 md:gap-5">
+					<!-- On hold -->
+					<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5">
+						<h3 class="text-xs font-semibold text-surface-950/80 uppercase tracking-wide mb-3">On hold — {(queue.holding ?? []).length}/{queue.station?.holding_capacity ?? 3}</h3>
+						{#if (queue.holding ?? []).length > 0}
+							<ul class="space-y-2 max-h-[200px] lg:max-h-[260px] overflow-y-auto">
+								{#each (queue.holding ?? []) as h (h.session_id)}
+									<li class="grid gap-2 md:gap-3 items-center text-sm text-surface-950 py-1.5 border-b border-surface-100 last:border-0" style="grid-template-columns: minmax(0, 3ch) 1fr 1fr 1fr;">
+										<span class="font-mono font-medium tabular-nums min-w-0 truncate">{h.alias}</span>
+										<div class="flex items-center gap-1.5 min-w-0 overflow-hidden">
+											<CategoryBadge category={h.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(h.client_category)} size="sm" />
+											{#if h.process_name}
+												<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80 truncate">{h.process_name}</span>
+											{/if}
+										</div>
+										<span class="text-surface-950/60 text-xs min-w-0 truncate">Held {formatDuration(h.held_at)}</span>
+										<div class="flex justify-center min-w-0">
+											<button
+												type="button"
+												class="btn preset-filled-primary-500 btn-sm touch-target-h"
+												disabled={!!actionLoading}
+												onclick={() => resumeFromHold(h)}
+											>
+												{actionLoading === `resume-${h.session_id}` ? '…' : 'Resume'}
+											</button>
+										</div>
+									</li>
+								{/each}
+							</ul>
+						{:else}
+							<p class="text-sm text-surface-950/60 italic">No clients on hold.</p>
+						{/if}
+					</div>
 					{#if queue.waiting.length > 0}
 						<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5">
 							<h3 class="text-xs font-semibold text-surface-950/80 uppercase tracking-wide mb-3">Waiting — {queue.waiting.length}</h3>
 							<ul class="space-y-2 max-h-[280px] lg:max-h-[360px] overflow-y-auto">
 								{#each queue.waiting as w (w.session_id)}
-									<li class="flex justify-between items-center text-sm gap-2 text-surface-950 py-1.5 border-b border-surface-100 last:border-0">
-										<div class="flex items-center gap-2 min-w-0">
-											<span class="font-mono font-medium tabular-nums">{w.alias}</span>
-											<span class="badge {categoryBadgeClass(w.client_category)} badge-sm shrink-0">{w.client_category ?? 'Regular'}</span>
+									<li class="grid gap-2 md:gap-3 items-center text-sm text-surface-950 py-1.5 border-b border-surface-100 last:border-0" style="grid-template-columns: minmax(0, 3ch) 1fr 1fr 1fr;">
+										<span class="font-mono font-medium tabular-nums min-w-0 truncate">{w.alias}</span>
+										<div class="flex items-center gap-1.5 min-w-0 overflow-hidden">
+											<CategoryBadge category={w.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(w.client_category)} size="sm" />
 											{#if w.process_name}
-												<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80 truncate max-w-[8rem]">{w.process_name}</span>
+												<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80 truncate">{w.process_name}</span>
 											{/if}
 										</div>
-										<div class="flex items-center gap-2 shrink-0">
-											<span class="text-surface-950/60 text-xs">{w.track} · {formatDuration(w.queued_at)}</span>
+										<span class="text-surface-950/60 text-xs min-w-0 truncate" title="{w.track}">{formatDuration(w.queued_at)}</span>
+										<div class="flex justify-center min-w-0">
 											<button
 												type="button"
 												class="btn preset-filled-primary-500 btn-sm touch-target-h"
@@ -1277,7 +1370,7 @@
 					</select>
 				</div>
 				<div class="form-control w-full mt-2">
-					<label for="override-reason" class="label"><span class="label-text">Reason (required)</span></label>
+					<label for="override-reason" class="label"><span class="label-text">Reason {overrideIsCustom ? '(required)' : '(optional)'}</span></label>
 					<textarea
 						id="override-reason"
 						class="textarea rounded-container border border-surface-200 w-full"
@@ -1337,7 +1430,7 @@
 					<button
 						type="button"
 						class="btn preset-filled-primary-500 touch-target-h"
-						disabled={(!overrideTargetTrackId && !overrideIsCustom) || !overrideReason.trim() || (needsAuthForOverride && !canConfirmAuth()) || !!actionLoading}
+						disabled={(!overrideTargetTrackId && !overrideIsCustom) || (overrideIsCustom && !overrideReason.trim()) || (needsAuthForOverride && !canConfirmAuth()) || !!actionLoading}
 						onclick={override}
 					>
 						{actionLoading === 'override' ? 'Processing…' : 'Confirm Override'}
@@ -1492,3 +1585,4 @@
 		{/snippet}
 	</Modal>
 </MobileLayout>
+

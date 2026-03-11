@@ -8,7 +8,7 @@ import { setContext } from 'svelte';
 	import { SvelteFlow, Background, Controls, Panel } from '@xyflow/svelte';
 	import type { Node, Edge } from '@xyflow/svelte';
 	import { useViewport, useSvelteFlow } from '@xyflow/svelte';
-	import { toast } from '../../lib/toaster.js';
+	import { toaster } from '../../lib/toaster.js';
 	import StationNode from './nodes/StationNode.svelte';
 	import TrackNode from './nodes/TrackNode.svelte';
 	import ProcessNode from './nodes/ProcessNode.svelte';
@@ -644,7 +644,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 				'';
 			if (!csrf) {
 				setSaveStatus('error');
-				toast('Missing CSRF token. Refresh the page and try again.', 'error');
+				toaster.error({ title: 'Missing CSRF token. Refresh the page and try again.' });
 				return;
 			}
 			const res = await fetch(`/api/admin/programs/${programId}/diagram`, {
@@ -660,7 +660,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 			});
 			if (res.status === 419) {
 				setSaveStatus('error');
-				toast('Session expired. Please refresh and try again.', 'error');
+				toaster.error({ title: 'Session expired. Please refresh and try again.' });
 				return;
 			}
 			const data = await res.json().catch(() => ({}));
@@ -692,12 +692,12 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 				}
 				console.error?.('Failed to save diagram response', res.status, data);
 				setSaveStatus('error');
-				toast(message, 'error');
+				toaster.error({ title: message });
 			}
 	} catch (err) {
 		setSaveStatus('error');
 		const isNetwork = err instanceof TypeError && (err as Error).message === 'Failed to fetch';
-		toast(isNetwork ? 'Network error. Please try again.' : 'Failed to save diagram. Check your connection and try again.', 'error');
+		toaster.error({ title: isNetwork ? 'Network error. Please try again.' : 'Failed to save diagram. Check your connection and try again.' });
 		} finally {
 			saving = false;
 		}
@@ -726,7 +726,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 				body: form,
 			});
 			if (res.status === 419) {
-				toast('Session expired. Please refresh and try again.', 'error');
+				toaster.error({ title: 'Session expired. Please refresh and try again.' });
 				return;
 			}
 			const data = await res.json().catch(() => ({}));
@@ -740,14 +740,14 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 						data: { url: data.url },
 					} as unknown as Node,
 				];
-				toast('Image added.', 'success');
+				toaster.success({ title: 'Image added.' });
 				scheduleAutoSave('image-upload');
 			} else {
-				toast((data?.message as string) || 'Failed to upload image.', 'error');
+				toaster.error({ title: (data?.message as string) || 'Failed to upload image.' });
 			}
 		} catch (err) {
 			const isNetwork = err instanceof TypeError && (err as Error).message === 'Failed to fetch';
-			toast(isNetwork ? 'Network error. Please try again.' : 'Failed to upload image.', 'error');
+			toaster.error({ title: isNetwork ? 'Network error. Please try again.' : 'Failed to upload image.' });
 		} finally {
 			imageUploading = false;
 			input.value = '';
@@ -885,10 +885,10 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 					result.errors.length === 0
 						? 'Diagram is not ready to publish.'
 						: result.errors.join('\n');
-				toast(message, 'error');
+				toaster.error({ title: message });
 				return;
 			}
-			toast('Diagram passed publish checks.', 'success');
+			toaster.success({ title: 'Diagram passed publish checks.' });
 		} finally {
 			publishing = false;
 		}

@@ -7,7 +7,7 @@
     import { get } from "svelte/store";
     import { onMount } from "svelte";
     import { Link, router, usePage } from "@inertiajs/svelte";
-    import { toast, toaster } from "../../../lib/toaster.js";
+    import { toaster } from "../../../lib/toaster.js";
     import { ensureVoicesLoaded, speakSample } from "../../../lib/speechUtils.js";
 
     import {
@@ -1407,7 +1407,7 @@
                 );
             }
             if (payload?.warning) {
-                toast(payload.warning, "info");
+                toaster.info({ title: payload.warning });
             }
         } else {
             toaster.error({ title: message ?? "Failed to update station." });
@@ -1603,6 +1603,7 @@
         );
         submitting = false;
         if (ok) {
+            toaster.success({ title: "Settings saved." });
             const d = data as { requires_regeneration?: boolean } | undefined;
             if (d?.requires_regeneration) showProgramTtsRegenerateConfirm = true;
             else router.reload();

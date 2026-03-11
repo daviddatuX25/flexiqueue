@@ -6,15 +6,19 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\TtsSamplePhraseRequest;
 use App\Http\Requests\UpdateTokenTtsSettingsRequest;
 use App\Models\Token;
-use App\Models\TokenTtsSetting;
+use App\Repositories\TokenTtsSettingRepository;
 use App\Support\TtsPhrase;
 use Illuminate\Http\JsonResponse;
 
 class TokenTtsSettingsController extends Controller
 {
+    public function __construct(
+        private TokenTtsSettingRepository $tokenTtsSettingRepository
+    ) {}
+
     public function show(): JsonResponse
     {
-        $settings = TokenTtsSetting::instance();
+        $settings = $this->tokenTtsSettingRepository->getInstance();
         $defaults = $settings->default_languages;
         $languages = is_array($defaults) ? $defaults : ['en' => [], 'fil' => [], 'ilo' => []];
 
@@ -33,7 +37,7 @@ class TokenTtsSettingsController extends Controller
 
     public function update(UpdateTokenTtsSettingsRequest $request): JsonResponse
     {
-        $settings = TokenTtsSetting::instance();
+        $settings = $this->tokenTtsSettingRepository->getInstance();
         $data = $request->validated();
 
         $originalVoiceId = $settings->voice_id;

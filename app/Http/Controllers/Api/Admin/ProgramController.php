@@ -87,12 +87,12 @@ class ProgramController extends Controller
         $program = $program->fresh();
         if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('enable_display_hid_barcode', $settings) || array_key_exists('enable_public_triage_hid_barcode', $settings) || array_key_exists('display_tts_repeat_count', $settings) || array_key_exists('display_tts_repeat_delay_ms', $settings))) {
             event(new DisplaySettingsUpdated(
-                $program->getDisplayAudioMuted(),
-                $program->getDisplayAudioVolume(),
-                $program->getEnableDisplayHidBarcode(),
-                $program->getEnablePublicTriageHidBarcode(),
-                $program->getDisplayTtsRepeatCount(),
-                $program->getDisplayTtsRepeatDelayMs(),
+                $program->settings()->getDisplayAudioMuted(),
+                $program->settings()->getDisplayAudioVolume(),
+                $program->settings()->getEnableDisplayHidBarcode(),
+                $program->settings()->getEnablePublicTriageHidBarcode(),
+                $program->settings()->getDisplayTtsRepeatCount(),
+                $program->settings()->getDisplayTtsRepeatDelayMs(),
             ));
         }
         $requiresRegeneration = false;
@@ -259,14 +259,14 @@ class ProgramController extends Controller
                     (int) (($settings['alternate_ratio'] ?? [1, 1])[1] ?? 1),
                 ],
                 'alternate_priority_first' => (bool) ($settings['alternate_priority_first'] ?? true),
-                'display_scan_timeout_seconds' => $program->getDisplayScanTimeoutSeconds(),
-                'display_audio_muted' => $program->getDisplayAudioMuted(),
-                'display_audio_volume' => $program->getDisplayAudioVolume(),
-                'display_tts_repeat_count' => $program->getDisplayTtsRepeatCount(),
-                'display_tts_repeat_delay_ms' => $program->getDisplayTtsRepeatDelayMs(),
-                'allow_public_triage' => $program->getAllowPublicTriage(),
+                'display_scan_timeout_seconds' => $program->settings()->getDisplayScanTimeoutSeconds(),
+                'display_audio_muted' => $program->settings()->getDisplayAudioMuted(),
+                'display_audio_volume' => $program->settings()->getDisplayAudioVolume(),
+                'display_tts_repeat_count' => $program->settings()->getDisplayTtsRepeatCount(),
+                'display_tts_repeat_delay_ms' => $program->settings()->getDisplayTtsRepeatDelayMs(),
+                'allow_public_triage' => $program->settings()->getAllowPublicTriage(),
                 'tts' => [
-                    'active_language' => $program->getTtsActiveLanguage(),
+                    'active_language' => $program->settings()->getTtsActiveLanguage(),
                     'auto_generate_station_tts' => ($settings['tts']['auto_generate_station_tts'] ?? true) === true,
                     'connector' => [
                         'languages' => $connectorLanguages,

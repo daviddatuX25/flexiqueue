@@ -8,7 +8,6 @@ use App\Models\Token;
 use App\Models\TransactionLog;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 /**
  * Analytics aggregations for Admin Analytics page.
@@ -395,14 +394,11 @@ class AnalyticsService
             ->map(fn ($r) => ['status' => $r->status, 'count' => (int) $r->count])
             ->all();
 
-        $byTtsStatus = [];
-        if (Schema::hasColumn((new Token)->getTable(), 'tts_status')) {
-            $byTts = Token::query()
-                ->selectRaw("COALESCE(tts_status, 'none') as tts_status, count(*) as count")
-                ->groupByRaw("COALESCE(tts_status, 'none')")
-                ->get();
-            $byTtsStatus = $byTts->map(fn ($r) => ['tts_status' => $r->tts_status ?? 'none', 'count' => (int) $r->count])->all();
-        }
+        $byTts = Token::query()
+            ->selectRaw("COALESCE(tts_status, 'none') as tts_status, count(*) as count")
+            ->groupByRaw("COALESCE(tts_status, 'none')")
+            ->get();
+        $byTtsStatus = $byTts->map(fn ($r) => ['tts_status' => $r->tts_status ?? 'none', 'count' => (int) $r->count])->all();
 
         return ['by_status' => $byStatus, 'by_tts_status' => $byTtsStatus];
     }

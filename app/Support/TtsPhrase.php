@@ -16,7 +16,7 @@ class TtsPhrase
 {
     /** Letter → phonetic word (matches resources/js/Pages/Display/Board.svelte LETTER_PHONETIC). */
     private const LETTER_PHONETIC = [
-        'a' => 'ei,', 'b' => 'bee', 'c' => 'see', 'd' => 'dee', 'e' => 'ee', 'f' => 'eff',
+        'a' => 'ay', 'b' => 'bee', 'c' => 'see', 'd' => 'dee', 'e' => 'ee', 'f' => 'eff',
         'g' => 'jee', 'h' => 'aych', 'i' => 'eye', 'j' => 'jay', 'k' => 'kay', 'l' => 'ell',
         'm' => 'em', 'n' => 'en', 'o' => 'oh', 'p' => 'pee', 'q' => 'cue', 'r' => 'ar',
         's' => 'ess', 't' => 'tee', 'u' => 'you', 'v' => 'vee', 'w' => 'double you',
@@ -25,12 +25,12 @@ class TtsPhrase
 
     /** Ilocano: 'a' => 'eyy' so "A" is spoken clearly (not like "eye"). Other letters fall back to English. */
     private const LETTER_PHONETIC_ILO = [
-        'a' => 'ey-' ,'h' => 'eych', 'k' => 'khey', 'o' => 'ow',
+        'a' => 'eyy', 'h' => 'eych', 'k' => 'khey', 'o' => 'ow',
     ];
 
     /** Filipino/Tagalog: same as Ilocano for letter A. */
     private const LETTER_PHONETIC_FIL = [
-        'a' => 'ey-','h' => 'eych', 'k' => 'khey', 'o' => 'ow',
+        'a' => 'eyy', 'h' => 'eych', 'k' => 'khey', 'o' => 'ow',
     ];
 
     /**

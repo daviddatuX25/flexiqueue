@@ -115,6 +115,7 @@
         });
         submitting = false;
         if (ok) {
+            toaster.success({ title: "Program created." });
             closeModals();
             router.reload();
         } else {
@@ -135,6 +136,7 @@
         );
         submitting = false;
         if (ok) {
+            toaster.success({ title: "Program updated." });
             closeModals();
             router.reload();
         } else {
@@ -160,6 +162,7 @@
         );
         submitting = false;
         if (ok) {
+            toaster.success({ title: "Session started." });
             activateMissing = [];
             router.reload();
         } else {
@@ -184,6 +187,7 @@
         );
         submitting = false;
         if (ok) {
+            toaster.success({ title: "Program paused." });
             router.reload();
         } else {
             toaster.error({ title: message ?? "Failed to pause." });
@@ -198,6 +202,7 @@
         );
         submitting = false;
         if (ok) {
+            toaster.success({ title: "Program resumed." });
             router.reload();
         } else {
             toaster.error({ title: message ?? "Failed to resume." });
@@ -212,6 +217,7 @@
         );
         submitting = false;
         if (ok) {
+            toaster.success({ title: "Session stopped." });
             router.reload();
         } else {
             toaster.error({
@@ -234,6 +240,7 @@
         );
         submitting = false;
         if (ok) {
+            toaster.success({ title: "Program deleted." });
             closeModals();
             router.reload();
         } else {

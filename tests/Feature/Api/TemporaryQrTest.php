@@ -95,16 +95,18 @@ class TemporaryQrTest extends TestCase
     public function test_temporary_qr_generate_returns_qr_data_uri(): void
     {
         $response = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-qr', [
+            'expiry_mode' => 'time_only',
             'expires_in_seconds' => 300,
         ]);
 
         $response->assertStatus(201);
-        $response->assertJsonStructure(['qr_data_uri', 'expires_at', 'expires_in_seconds']);
+        $response->assertJsonStructure(['qr_data_uri', 'expiry_mode', 'expires_at', 'expires_in_seconds', 'max_uses']);
         $this->assertStringStartsWith('data:image/png;base64,', $response->json('qr_data_uri'));
         $this->assertDatabaseCount('temporary_authorizations', 1);
         $this->assertDatabaseHas('temporary_authorizations', [
             'user_id' => $this->supervisor->id,
             'type' => 'qr',
+            'expiry_mode' => 'time_only',
         ]);
     }
 
@@ -115,6 +117,7 @@ class TemporaryQrTest extends TestCase
             'user_id' => $this->supervisor->id,
             'token_hash' => Hash::make($scanToken),
             'type' => 'qr',
+            'expiry_mode' => 'time_only',
             'expires_at' => now()->addMinutes(5),
         ]);
 
@@ -130,33 +133,33 @@ class TemporaryQrTest extends TestCase
         $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'override']);
     }
 
-    public function test_override_with_used_temp_qr_returns_401(): void
+    public function test_time_only_temp_qr_can_be_reused_within_ttl(): void
     {
         $scanToken = Str::random(64);
         TemporaryAuthorization::create([
             'user_id' => $this->supervisor->id,
             'token_hash' => Hash::make($scanToken),
             'type' => 'qr',
+            'expiry_mode' => 'time_only',
             'expires_at' => now()->addMinutes(5),
         ]);
 
         $staff = User::factory()->create(['role' => 'staff']);
         $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
             'target_track_id' => $this->trackToStation2->id,
-            'reason' => 'First use',
+            'reason' => 'Use 1',
             'auth_type' => 'temp_qr',
             'qr_scan_token' => $scanToken,
         ])->assertStatus(200);
 
         $response = $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
             'target_track_id' => $this->track->id,
-            'reason' => 'Replay',
+            'reason' => 'Use 2',
             'auth_type' => 'temp_qr',
             'qr_scan_token' => $scanToken,
         ]);
 
-        $response->assertStatus(401);
-        $response->assertJsonPath('message', 'Authorization expired. Request a new one.');
+        $response->assertStatus(200);
     }
 
     public function test_force_complete_with_temp_qr_returns_200(): void
@@ -166,6 +169,7 @@ class TemporaryQrTest extends TestCase
             'user_id' => $this->supervisor->id,
             'token_hash' => Hash::make($scanToken),
             'type' => 'qr',
+            'expiry_mode' => 'time_only',
             'expires_at' => now()->addMinutes(5),
         ]);
 
@@ -179,6 +183,46 @@ class TemporaryQrTest extends TestCase
         $response->assertStatus(200);
         $response->assertJsonPath('session.status', 'completed');
         $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'force_complete']);
+    }
+
+    public function test_usage_only_temp_qr_expires_after_max_uses(): void
+    {
+        $genResponse = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-qr', [
+            'expiry_mode' => 'usage_only',
+            'max_uses' => 2,
+        ]);
+        $genResponse->assertStatus(201);
+        $qrDataUri = $genResponse->json('qr_data_uri');
+        $this->assertStringStartsWith('data:image/png;base64,', (string) $qrDataUri);
+
+        // We need the plaintext token to use it; for QR generation API the staff scans it.
+        // In tests, we simulate scanning by reading the response's 'scan_token' field.
+        $scanToken = $genResponse->json('scan_token');
+        $this->assertNotEmpty($scanToken);
+
+        $staff = User::factory()->create(['role' => 'staff']);
+        $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
+            'target_track_id' => $this->trackToStation2->id,
+            'reason' => 'Use 1',
+            'auth_type' => 'temp_qr',
+            'qr_scan_token' => $scanToken,
+        ])->assertStatus(200);
+
+        $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
+            'target_track_id' => $this->track->id,
+            'reason' => 'Use 2',
+            'auth_type' => 'temp_qr',
+            'qr_scan_token' => $scanToken,
+        ])->assertStatus(200);
+
+        $res3 = $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
+            'target_track_id' => $this->trackToStation2->id,
+            'reason' => 'Use 3',
+            'auth_type' => 'temp_qr',
+            'qr_scan_token' => $scanToken,
+        ]);
+        $res3->assertStatus(401);
+        $res3->assertJsonPath('message', 'Authorization expired. Request a new one.');
     }
 
     public function test_temporary_qr_staff_cannot_generate(): void

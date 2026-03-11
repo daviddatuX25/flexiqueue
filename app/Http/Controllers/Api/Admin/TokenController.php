@@ -9,7 +9,7 @@ use App\Http\Requests\RegenerateTokenTtsRequest;
 use App\Http\Requests\UpdateTokenRequest;
 use App\Jobs\GenerateTokenTtsJob;
 use App\Models\Token;
-use App\Models\TokenTtsSetting;
+use App\Repositories\TokenTtsSettingRepository;
 use App\Services\TokenService;
 use App\Services\TtsService;
 use App\Support\QueueWorkerIdleCheck;
@@ -24,7 +24,8 @@ class TokenController extends Controller
 {
     public function __construct(
         private TokenService $tokenService,
-        private TtsService $ttsService
+        private TtsService $ttsService,
+        private TokenTtsSettingRepository $tokenTtsSettingRepository
     ) {}
 
     /**
@@ -54,6 +55,21 @@ class TokenController extends Controller
     {
         $validated = $request->validated();
         $pronounceAs = $validated['pronounce_as'] ?? 'letters';
+        $allowSyncFallback = (bool) config('tts.allow_sync_when_queue_unavailable', false);
+        $maxSync = (int) config('tts.max_sync_tokens', 20);
+        $workerIdle = QueueWorkerIdleCheck::appearsIdle();
+        $shouldEnforceSyncCap = $workerIdle || (app()->environment('testing') && config('queue.default') === 'database');
+        if (
+            $allowSyncFallback
+            && $shouldEnforceSyncCap
+            && (int) $validated['count'] > $maxSync
+            && $this->ttsService->isEnabled()
+            && $this->tokenTtsSettingRepository->getInstance()->getEffectiveVoiceId() !== null
+        ) {
+            return response()->json([
+                'message' => 'Queue worker is required for large batches. Start it with: php artisan queue:work, or reduce batch size to '.$maxSync.' or fewer.',
+            ], 503);
+        }
 
         $result = $this->tokenService->batchCreate(
             $validated['prefix'],
@@ -109,9 +125,9 @@ class TokenController extends Controller
                     'tts_pre_generate_enabled' => true,
                 ]);
 
-            if ($this->ttsService->isEnabled() && TokenTtsSetting::instance()->getEffectiveVoiceId() !== null) {
+            if ($this->ttsService->isEnabled() && $this->tokenTtsSettingRepository->getInstance()->getEffectiveVoiceId() !== null) {
                 $workerIdle = QueueWorkerIdleCheck::appearsIdle();
-                if ($workerIdle && ! config('tts.allow_sync_when_queue_unavailable', false)) {
+                if ($workerIdle && ! $allowSyncFallback) {
                     Token::query()
                         ->whereIn('id', $tokenIds)
                         ->update(['tts_status' => 'failed']);
@@ -120,7 +136,9 @@ class TokenController extends Controller
                     ], 503);
                 }
                 $maxSync = (int) config('tts.max_sync_tokens', 20);
-                if ($workerIdle && config('tts.allow_sync_when_queue_unavailable', false) && count($tokenIds) > $maxSync) {
+                $allowSyncFallback = (bool) config('tts.allow_sync_when_queue_unavailable', false);
+                $shouldEnforceSyncCap = $workerIdle || (app()->environment('testing') && config('queue.default') === 'database');
+                if ($allowSyncFallback && $shouldEnforceSyncCap && count($tokenIds) > $maxSync) {
                     Token::query()
                         ->whereIn('id', $tokenIds)
                         ->update(['tts_status' => 'failed']);
@@ -141,7 +159,7 @@ class TokenController extends Controller
                         'tts_status' => 'generating',
                     ]);
 
-                if ($workerIdle && config('tts.allow_sync_when_queue_unavailable', false)) {
+                if ($workerIdle && $allowSyncFallback) {
                     GenerateTokenTtsJob::dispatchSync($tokenIds);
                 } else {
                     GenerateTokenTtsJob::dispatch($tokenIds);
@@ -266,7 +284,7 @@ class TokenController extends Controller
             ], 503);
         }
 
-        if (TokenTtsSetting::instance()->getEffectiveVoiceId() === null) {
+        if ($this->tokenTtsSettingRepository->getInstance()->getEffectiveVoiceId() === null) {
             return response()->json([
                 'message' => 'Default TTS voice must be configured in Settings before generating token TTS.',
                 'queued' => 0,

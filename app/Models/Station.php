@@ -2,11 +2,11 @@
 
 namespace App\Models;
 
+use App\Events\StationDeleted;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Support\Facades\Storage;
 
 class Station extends Model
 {
@@ -15,6 +15,7 @@ class Station extends Model
         'name',
         'capacity',
         'client_capacity',
+        'holding_capacity',
         'priority_first_override',
         'settings',
         'is_active',
@@ -77,28 +78,15 @@ class Station extends Model
         return $this->hasOne(StationNote::class);
     }
 
+    public function getHoldingCapacity(): int
+    {
+        $capacity = $this->holding_capacity ?? 3;
+
+        return (int) max(0, min(255, $capacity));
+    }
+
     protected static function booted(): void
     {
-        static::deleted(function (self $station): void {
-            // Remove any stored station TTS audio under tts/stations/{id}.
-            $baseDir = 'tts/stations/'.$station->id;
-            if (Storage::exists($baseDir)) {
-                Storage::deleteDirectory($baseDir);
-            }
-
-            $settings = $station->settings ?? [];
-            if (isset($settings['tts']['languages']) && is_array($settings['tts']['languages'])) {
-                foreach ($settings['tts']['languages'] as $lang => $config) {
-                    if (! empty($config['audio_path']) && Storage::exists($config['audio_path'])) {
-                        Storage::delete($config['audio_path']);
-                    }
-                    if (is_array($config)) {
-                        $settings['tts']['languages'][$lang]['audio_path'] = null;
-                        $settings['tts']['languages'][$lang]['status'] = null;
-                    }
-                }
-                $station->settings = $settings;
-            }
-        });
+        static::deleted(fn (self $station) => event(new StationDeleted($station)));
     }
 }

@@ -7,6 +7,7 @@ use App\Http\Requests\StoreTtsAccountRequest;
 use App\Http\Requests\UpdateTtsAccountRequest;
 use App\Models\TtsAccount;
 use App\Services\ElevenLabsClient;
+use App\Services\TtsAccountService;
 use App\Services\TtsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,6 +15,11 @@ use Illuminate\Support\Facades\Cache;
 
 class ElevenLabsIntegrationController extends Controller
 {
+    public function __construct(
+        private readonly TtsAccountService $ttsAccountService
+    ) {
+    }
+
     public function show(TtsService $ttsService): JsonResponse
     {
         $voices = $ttsService->getVoicesList();
@@ -72,7 +78,7 @@ class ElevenLabsIntegrationController extends Controller
             $account->api_key = $data['api_key'];
         }
         if (isset($data['is_active']) && $data['is_active']) {
-            $account->activate();
+            $this->ttsAccountService->setActive($account);
 
             return response()->json($account->fresh()->toApiArray());
         }
@@ -84,7 +90,7 @@ class ElevenLabsIntegrationController extends Controller
     /** Set account as active. */
     public function activate(TtsAccount $account): JsonResponse
     {
-        $account->activate();
+        $this->ttsAccountService->setActive($account);
 
         return response()->json($account->fresh()->toApiArray());
     }
@@ -98,7 +104,7 @@ class ElevenLabsIntegrationController extends Controller
         if ($wasActive) {
             $next = TtsAccount::first();
             if ($next !== null) {
-                $next->activate();
+                $this->ttsAccountService->setActive($next);
             }
         }
 

@@ -22,6 +22,10 @@ class Session extends Model
         'alias',
         'client_category',
         'current_station_id',
+        'holding_station_id',
+        'is_on_hold',
+        'held_at',
+        'held_order',
         'current_step_order',
         'override_steps',
         'station_queue_position',
@@ -38,6 +42,8 @@ class Session extends Model
             'queued_at_station' => 'datetime',
             'completed_at' => 'datetime',
             'override_steps' => 'array',
+            'is_on_hold' => 'boolean',
+            'held_at' => 'datetime',
         ];
     }
 
@@ -61,6 +67,11 @@ class Session extends Model
         return $this->belongsTo(Station::class, 'current_station_id');
     }
 
+    public function holdingStation(): BelongsTo
+    {
+        return $this->belongsTo(Station::class, 'holding_station_id');
+    }
+
     public function transactionLogs(): HasMany
     {
         return $this->hasMany(TransactionLog::class);
@@ -69,6 +80,11 @@ class Session extends Model
     public function scopeActive(Builder $query): Builder
     {
         return $query->whereIn('status', ['waiting', 'called', 'serving']);
+    }
+
+    public function isOnHold(): bool
+    {
+        return (bool) $this->is_on_hold;
     }
 
     /**

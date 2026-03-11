@@ -63,7 +63,7 @@ class GenerateStationTtsJobTest extends TestCase
             'is_active' => true,
         ]);
         $program->delete();
-        $station->refresh();
+        $this->assertDatabaseMissing('stations', ['id' => $station->id]);
 
         $ttsService = Mockery::mock(TtsService::class);
         $ttsService->shouldReceive('isEnabled')->once()->andReturn(true);

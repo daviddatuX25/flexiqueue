@@ -28,7 +28,9 @@ class TemporaryPinController
         $result = $this->temporaryPinService->generate(
             $user,
             $request->validated('program_id'),
-            $request->validated('expires_in_seconds')
+            (string) $request->validated('expiry_mode'),
+            $request->validated('expires_in_seconds'),
+            $request->validated('max_uses')
         );
 
         return response()->json($result, 201);

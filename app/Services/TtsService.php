@@ -2,12 +2,9 @@
 
 namespace App\Services;
 
-use App\Exceptions\TtsQuotaExceededException;
 use App\Models\Token;
 use App\Models\TtsAccount;
 use App\Support\TtsPhrase;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -128,6 +125,9 @@ class TtsService
         return null;
     }
 
+    /**
+     * Per REFACTORING-ISSUE-LIST Issue 16 / flexiqueue-g693: delegate to ElevenLabsClient.
+     */
     private function generateElevenLabs(string $text, string $voiceId, float $rate): ?string
     {
         $apiKey = $this->getResolvedApiKey();
@@ -135,40 +135,10 @@ class TtsService
             return null;
         }
 
-        $url = 'https://api.elevenlabs.io/v1/text-to-speech/'.urlencode($voiceId);
+        $voiceSettings = $rate !== 1.0 ? ['stability' => 0.5, 'similarity_boost' => 0.75] : null;
+        $client = new ElevenLabsClient($apiKey);
 
-        $body = [
-            'text' => $text,
-            'model_id' => $this->getResolvedModelId(),
-        ];
-        if ($rate !== 1.0) {
-            $body['voice_settings'] = ['stability' => 0.5, 'similarity_boost' => 0.75];
-            // ElevenLabs does not support rate in same way; we send as-is, engine may ignore
-        }
-
-        $response = Http::withHeaders([
-            'xi-api-key' => $apiKey,
-            'Content-Type' => 'application/json',
-            'Accept' => 'audio/mpeg',
-        ])->timeout(30)->post($url, $body);
-
-        if (! $response->successful()) {
-            $status = $response->status();
-            $body = $response->json() ?? [];
-            $detail = $body['detail'] ?? [];
-            if (is_array($detail) && ($detail['status'] ?? '') === 'quota_exceeded') {
-                throw TtsQuotaExceededException::fromApiResponse($status, $body);
-            }
-            Log::warning('ElevenLabs TTS request failed', [
-                'status' => $status,
-                'body' => $body ?: substr($response->body(), 0, 500),
-                'text_length' => strlen($text),
-            ]);
-
-            return null;
-        }
-
-        return $response->body();
+        return $client->generateSpeech($text, $voiceId, $this->getResolvedModelId(), $voiceSettings);
     }
 
     private function cacheKey(string $text, string $voiceId, float $rate): string

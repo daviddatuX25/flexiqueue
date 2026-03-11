@@ -3,14 +3,15 @@
 namespace Tests\Feature\Api\Admin;
 
 use App\Events\TokenTtsStatusUpdated;
-use App\Models\TokenTtsSetting;
 use App\Models\User;
+use App\Repositories\TokenTtsSettingRepository;
 use App\Models\Token;
 use App\Jobs\GenerateTokenTtsJob;
 use App\Services\TtsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -46,12 +47,13 @@ class TokenTtsSettingsTest extends TestCase
     public function test_update_saves_settings(): void
     {
         $admin = User::factory()->admin()->create();
-        TokenTtsSetting::instance();
+        $this->app->make(TokenTtsSettingRepository::class)->getInstance();
 
-        $token = csrf_token();
+        $this->actingAs($admin);
+        Session::start();
+        $token = Session::token();
 
-        $response = $this->actingAs($admin)
-            ->withHeader('X-CSRF-TOKEN', $token)
+        $response = $this->withHeader('X-CSRF-TOKEN', $token)
             ->putJson('/api/admin/token-tts-settings', [
                 'voice_id' => 'custom-voice-id',
                 'rate' => 1.25,
@@ -65,7 +67,7 @@ class TokenTtsSettingsTest extends TestCase
     public function test_update_includes_requires_regeneration_flag_based_on_changes_and_tokens(): void
     {
         $admin = User::factory()->admin()->create();
-        $settings = TokenTtsSetting::instance();
+        $settings = $this->app->make(TokenTtsSettingRepository::class)->getInstance();
         $settings->update([
             'voice_id' => 'voice-1',
             'rate' => 1.0,
@@ -228,7 +230,7 @@ class TokenTtsSettingsTest extends TestCase
     {
         $this->app['config']->set('tts.driver', 'elevenlabs');
         $this->app['config']->set('tts.elevenlabs.api_key', 'fake-key');
-        TokenTtsSetting::instance();
+        $this->app->make(TokenTtsSettingRepository::class)->getInstance();
 
         $t1 = $this->createToken(true, 'generating');
         $t2 = $this->createToken(true, 'generating');
@@ -236,7 +238,10 @@ class TokenTtsSettingsTest extends TestCase
         Event::fake([TokenTtsStatusUpdated::class]);
 
         $job = new GenerateTokenTtsJob([$t1->id, $t2->id]);
-        $job->handle($this->app->make(TtsService::class));
+        $job->handle(
+            $this->app->make(TtsService::class),
+            $this->app->make(TokenTtsSettingRepository::class)
+        );
 
         Event::assertDispatched(TokenTtsStatusUpdated::class, 2);
         Event::assertDispatched(TokenTtsStatusUpdated::class, function ($event) use ($t1) {

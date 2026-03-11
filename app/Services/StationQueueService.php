@@ -27,7 +27,26 @@ class StationQueueService
             return (bool) $station->priority_first_override;
         }
 
-        return $station->program?->getPriorityFirst() ?? true;
+        return $station->program?->settings()->getPriorityFirst() ?? true;
+    }
+
+    /**
+     * Effective \"who goes first\" for alternate mode cycles.
+     *
+     * When alternate_priority_first is explicitly set, use it; otherwise fall back to priority_first.
+     */
+    private function getEffectiveAlternatePriorityFirst(?Program $program): ?bool
+    {
+        if (! $program) {
+            return null;
+        }
+
+        $settings = $program->settings ?? [];
+        if (array_key_exists('alternate_priority_first', $settings)) {
+            return (bool) $settings['alternate_priority_first'];
+        }
+
+        return (bool) ($settings['priority_first'] ?? true);
     }
 
     /**
@@ -43,7 +62,16 @@ class StationQueueService
             ->where('program_id', $station->program_id)
             ->where('current_station_id', $station->id)
             ->whereIn('status', ['waiting', 'called', 'serving'])
+            ->where(fn ($q) => $q->whereNull('is_on_hold')->orWhere('is_on_hold', false))
             ->with(['serviceTrack.trackSteps.process', 'token'])
+            ->get();
+
+        $heldSessions = Session::query()
+            ->where('holding_station_id', $station->id)
+            ->where('is_on_hold', true)
+            ->with(['serviceTrack.trackSteps.process', 'token'])
+            ->orderBy('held_order')
+            ->orderBy('held_at')
             ->get();
 
         $servingAndCalled = $sessions
@@ -57,19 +85,21 @@ class StationQueueService
 
         $waitingSessions = $sessions->where('status', 'waiting')->values();
         $priorityFirst = $this->getEffectivePriorityFirst($station);
-        $balanceMode = $station->program?->getBalanceMode() ?? 'fifo';
-        $ordered = $this->orderWaiting($station, $waitingSessions, $priorityFirst, $balanceMode);
+        $program = $station->program;
+        $balanceMode = $program?->settings()->getBalanceMode() ?? 'fifo';
+        $alternatePriorityFirst = $this->getEffectiveAlternatePriorityFirst($program);
+        $ordered = $this->orderWaiting($station, $waitingSessions, $priorityFirst, $balanceMode, $alternatePriorityFirst);
 
         $stats = $this->computeStats($station);
         $clientCapacity = (int) ($station->client_capacity ?? 1);
         $servingCount = $servingAndCalled->count();
-        $noShowTimerSeconds = $station->program?->getNoShowTimerSeconds() ?? 10;
+        $noShowTimerSeconds = $station->program?->settings()->getNoShowTimerSeconds() ?? 10;
+        $maxNoShowAttempts = $station->program?->settings()->getMaxNoShowAttempts() ?? 3;
 
         $waitingFormatted = $ordered->map(fn (Session $s) => $this->formatWaitingSession($s))->all();
         $first = $ordered->first();
 
-        $program = $station->program;
-        $requirePermissionBeforeOverride = $program ? $program->getRequirePermissionBeforeOverride() : true;
+        $requirePermissionBeforeOverride = $program ? $program->settings()->getRequirePermissionBeforeOverride() : true;
         $priorityWaitingCount = $ordered->filter(fn (Session $s) => self::isPriority($s))->count();
         $nextIsRegular = $first && ! self::isPriority($first);
         $callNextRequiresOverride = $requirePermissionBeforeOverride
@@ -83,7 +113,10 @@ class StationQueueService
                 'name' => $station->name,
                 'client_capacity' => $clientCapacity,
                 'serving_count' => $servingCount,
+                'holding_capacity' => $station->getHoldingCapacity(),
+                'holding_count' => $heldSessions->count(),
             ],
+            'holding' => $heldSessions->map(fn (Session $s) => $this->formatHoldingSession($s))->values()->all(),
             'display_audio_muted' => $station->getDisplayAudioMuted(),
             'display_audio_volume' => $station->getDisplayAudioVolume(),
             'priority_first' => $priorityFirst,
@@ -94,6 +127,7 @@ class StationQueueService
             'waiting_regular' => $ordered->filter(fn (Session $s) => ! self::isPriority($s))->map(fn (Session $s) => $this->formatWaitingSession($s))->values()->all(),
             'serving' => $servingAndCalled->map(fn (Session $s) => $this->formatServingSession($s))->all(),
             'no_show_timer_seconds' => $noShowTimerSeconds,
+            'max_no_show_attempts' => $maxNoShowAttempts,
             'waiting' => $waitingFormatted,
             'next_to_call' => $first ? ['session_id' => $first->id, 'alias' => $first->alias] : null,
             'stats' => [
@@ -110,7 +144,7 @@ class StationQueueService
      * @param  \Illuminate\Support\Collection<int, Session>  $waiting
      * @return \Illuminate\Support\Collection<int, Session>
      */
-    private function orderWaiting(Station $station, $waiting, bool $priorityFirst, string $balanceMode): Collection
+    private function orderWaiting(Station $station, $waiting, bool $priorityFirst, string $balanceMode, ?bool $alternatePriorityFirst): Collection
     {
         if ($waiting->isEmpty()) {
             return $waiting;
@@ -132,7 +166,7 @@ class StationQueueService
             return $waiting->sortBy(fn (Session $s) => $s->queued_at_station ?? $s->started_at ?? now())->values();
         }
 
-        return $this->orderByAlternate($station, $waiting);
+        return $this->orderByAlternate($station, $waiting, $alternatePriorityFirst);
     }
 
     /**
@@ -141,10 +175,10 @@ class StationQueueService
      * @param  \Illuminate\Support\Collection<int, Session>  $waiting
      * @return \Illuminate\Support\Collection<int, Session>
      */
-    private function orderByAlternate(Station $station, $waiting): Collection
+    private function orderByAlternate(Station $station, $waiting, ?bool $alternatePriorityFirst): Collection
     {
         $program = $station->program;
-        [$pRatio, $rRatio] = $program ? $program->getAlternateRatio() : [1, 1];
+        [$pRatio, $rRatio] = $program ? $program->settings()->getAlternateRatio() : [1, 1];
 
         $recentCalls = TransactionLog::query()
             ->where('station_id', $station->id)
@@ -179,6 +213,15 @@ class StationQueueService
             $next = $priorityWaiting->first();
         } elseif ($regularWaiting->isNotEmpty()) {
             $next = $regularWaiting->first();
+        }
+
+        // When history does not clearly prefer one lane, fall back to the configured first lane for this program.
+        if (! $next && $alternatePriorityFirst !== null) {
+            if ($alternatePriorityFirst === true && $priorityWaiting->isNotEmpty()) {
+                $next = $priorityWaiting->first();
+            } elseif ($alternatePriorityFirst === false && $regularWaiting->isNotEmpty()) {
+                $next = $regularWaiting->first();
+            }
         }
 
         if (! $next) {
@@ -296,6 +339,29 @@ class StationQueueService
         ];
     }
 
+    private function formatHoldingSession(Session $s): array
+    {
+        $track = $s->serviceTrack;
+        $overrideSteps = $s->override_steps ?? [];
+        $totalSteps = count($overrideSteps) > 0
+            ? count($overrideSteps)
+            : ($track ? $track->trackSteps()->count() : 1);
+        $process = $this->currentProcessForSession($s);
+
+        return [
+            'session_id' => $s->id,
+            'alias' => $s->alias,
+            'track' => $track?->name ?? 'Unknown',
+            'client_category' => $s->client_category ?? 'Regular',
+            'status' => $s->status,
+            'held_at' => $s->held_at?->toIso8601String(),
+            'process_id' => $process ? $process['process_id'] : null,
+            'process_name' => $process ? $process['process_name'] : null,
+            'current_step_order' => $s->current_step_order ?? 1,
+            'total_steps' => $totalSteps,
+        ];
+    }
+
     private function computeStats(Station $station): array
     {
         $today = Carbon::today();
@@ -303,6 +369,7 @@ class StationQueueService
         $totalWaiting = Session::query()
             ->where('current_station_id', $station->id)
             ->whereIn('status', ['waiting', 'called', 'serving'])
+            ->where(fn ($q) => $q->whereNull('is_on_hold')->orWhere('is_on_hold', false))
             ->count();
 
         $checkInsToday = TransactionLog::query()

@@ -198,6 +198,49 @@ class SessionService
     }
 
     /**
+     * Whether calling this session would require supervisor auth (skipping priority when program has require_permission_before_override).
+     * Per REFACTORING-ISSUE-LIST Issue 6.
+     */
+    public function callRequiresOverrideAuth(Session $session): bool
+    {
+        if ($session->status !== 'waiting') {
+            return false;
+        }
+
+        $station = Station::find($session->current_station_id);
+        if (! $station) {
+            return false;
+        }
+
+        $station->loadMissing('program');
+        $program = $station->program;
+        if (! $program || ! $program->settings()->getRequirePermissionBeforeOverride()) {
+            return false;
+        }
+
+        $priorityFirst = $station->priority_first_override !== null
+            ? (bool) $station->priority_first_override
+            : $program->settings()->getPriorityFirst();
+        if ($priorityFirst) {
+            return false;
+        }
+
+        if (ClientCategory::isPriority($session->client_category)) {
+            return false;
+        }
+
+        $priorityWaitingCount = Session::query()
+            ->where('current_station_id', $station->id)
+            ->where('status', 'waiting')
+            ->where('id', '!=', $session->id)
+            ->get()
+            ->filter(fn (Session $s) => $s->isPriorityCategory())
+            ->count();
+
+        return $priorityWaitingCount > 0;
+    }
+
+    /**
      * Per plan: Serve session — client physically showed, staff clicks Serve.
      * From 'called' or 'waiting'. When 'waiting', staff's station_id required and session must be at that station; capacity enforced.
      * Logs check_in for both.
@@ -226,6 +269,7 @@ class SessionService
             $currentCount = Session::query()
                 ->where('current_station_id', $station->id)
                 ->whereIn('status', ['called', 'serving'])
+                ->where(fn ($q) => $q->whereNull('is_on_hold')->orWhere('is_on_hold', false))
                 ->count();
             if ($currentCount >= $clientCapacity) {
                 throw new \InvalidArgumentException("Station at capacity ({$clientCapacity}). Cannot start serving more clients.", 409);
@@ -381,6 +425,162 @@ class SessionService
     }
 
     /**
+     * Move a serving session into this station's holding area. Per station-holding-area plan.
+     */
+    public function moveToHolding(Session $session, Station $station, int $staffUserId, ?string $remarks = null): void
+    {
+        if ($session->status !== 'serving') {
+            throw new \InvalidArgumentException('Session is not being served. Only serving sessions can be moved to holding.', 409);
+        }
+        if ($session->current_station_id !== $station->id) {
+            throw new \InvalidArgumentException('Session is not at this station.', 409);
+        }
+        if ($session->isOnHold()) {
+            throw new \InvalidArgumentException('Session is already on hold.', 409);
+        }
+
+        $heldCount = Session::query()
+            ->where('holding_station_id', $station->id)
+            ->where('is_on_hold', true)
+            ->count();
+        if ($heldCount >= $station->getHoldingCapacity()) {
+            throw new \InvalidArgumentException('Holding area is full. Resume a client from hold first.', 422);
+        }
+
+        DB::transaction(function () use ($session, $station, $staffUserId, $remarks) {
+            $nextOrder = (int) Session::query()
+                ->where('holding_station_id', $station->id)
+                ->max('held_order');
+            $nextOrder = $nextOrder + 1;
+
+            $session->update([
+                'is_on_hold' => true,
+                'holding_station_id' => $station->id,
+                'held_at' => now(),
+                'held_order' => $nextOrder,
+            ]);
+
+            TransactionLog::create([
+                'session_id' => $session->id,
+                'station_id' => $station->id,
+                'staff_user_id' => $staffUserId,
+                'action_type' => 'hold',
+                'remarks' => $remarks,
+                'created_at' => now(),
+            ]);
+
+            $session = $session->fresh(['currentStation', 'serviceTrack', 'token']);
+            event(new StatusUpdate($station->id, $session));
+            event(new QueueLengthUpdated($station->id));
+        });
+    }
+
+    /**
+     * Resume a session from this station's holding area back to serving. Per station-holding-area plan.
+     */
+    public function resumeFromHolding(Session $session, Station $station, int $staffUserId, ?string $remarks = null): void
+    {
+        if (! $session->isOnHold() || $session->holding_station_id !== $station->id) {
+            throw new \InvalidArgumentException('Session is not on hold at this station.', 409);
+        }
+
+        $clientCapacity = (int) ($station->client_capacity ?? 1);
+        $currentServingCount = Session::query()
+            ->where('current_station_id', $station->id)
+            ->whereIn('status', ['called', 'serving'])
+            ->where(fn ($q) => $q->whereNull('is_on_hold')->orWhere('is_on_hold', false))
+            ->count();
+        if ($currentServingCount >= $clientCapacity) {
+            throw new \InvalidArgumentException("Station at capacity ({$clientCapacity}). Complete or transfer a client first.", 422);
+        }
+
+        DB::transaction(function () use ($session, $station, $staffUserId, $remarks) {
+            $session->update([
+                'is_on_hold' => false,
+                'holding_station_id' => null,
+                'held_at' => null,
+                'held_order' => null,
+                'status' => 'serving',
+            ]);
+
+            TransactionLog::create([
+                'session_id' => $session->id,
+                'station_id' => $station->id,
+                'staff_user_id' => $staffUserId,
+                'action_type' => 'resume_from_hold',
+                'remarks' => $remarks,
+                'created_at' => now(),
+            ]);
+
+            $session = $session->fresh(['currentStation', 'serviceTrack', 'token']);
+            event(new StatusUpdate($station->id, $session));
+            event(new QueueLengthUpdated($station->id));
+            event(new NowServing($station->id, [
+                'session_id' => $session->id,
+                'alias' => $session->alias,
+                'category' => $session->client_category,
+            ]));
+        });
+    }
+
+    /**
+     * Per flexiqueue-a3wh: Enqueue session back to same station at end of queue. From 'called' or 'serving'.
+     * Preserves no_show_attempts. Clears hold state if present.
+     *
+     * @return array{session: Session, back_to_waiting: bool}
+     */
+    public function enqueueBack(Session $session, int $staffUserId): array
+    {
+        if (! in_array($session->status, ['called', 'serving'], true)) {
+            throw new \InvalidArgumentException('Enqueue back only applies to called or serving sessions.', 409);
+        }
+
+        $stationId = $session->current_station_id;
+        if (! $stationId) {
+            throw new \InvalidArgumentException('Session has no current station.', 409);
+        }
+
+        $wasServing = $session->status === 'serving';
+
+        return DB::transaction(function () use ($session, $staffUserId, $stationId, $wasServing) {
+            $nextPos = $this->getNextQueuePositionAtStation($stationId);
+            $session->update([
+                'status' => 'waiting',
+                'station_queue_position' => $nextPos,
+                'queued_at_station' => now(),
+                'is_on_hold' => false,
+                'holding_station_id' => null,
+                'held_at' => null,
+                'held_order' => null,
+            ]);
+
+            TransactionLog::create([
+                'session_id' => $session->id,
+                'station_id' => $stationId,
+                'staff_user_id' => $staffUserId,
+                'action_type' => 'enqueue_back',
+                'created_at' => now(),
+            ]);
+
+            $session = $session->fresh(['currentStation', 'serviceTrack', 'token']);
+            event(new StatusUpdate($stationId, $session));
+            event(new QueueLengthUpdated($stationId));
+            if ($wasServing) {
+                event(new NowServing($stationId, [
+                    'session_id' => $session->id,
+                    'alias' => $session->alias,
+                    'category' => $session->client_category,
+                ]));
+            }
+
+            return [
+                'session' => $session,
+                'back_to_waiting' => true,
+            ];
+        });
+    }
+
+    /**
      * Per plan: Mark no-show. From 'called' (or 'waiting').
      * Increments no_show_attempts. If >= 3, terminates session. Else, returns to waiting.
      *
@@ -451,6 +651,7 @@ class SessionService
     /**
      * Per 08-API-SPEC-PHASE1 §3.3: Override (supervisor route deviation). Caller must validate auth first.
      *
+     * @deprecated Use overrideByTrack() with customSteps instead. TODO: remove after PermissionRequestService migration.
      * @return array{session: Session, override: array}
      */
     public function override(Session $session, int $targetStationId, string $reason, int $supervisorUserId, int $staffUserId): array
@@ -529,6 +730,10 @@ class SessionService
                 'status' => $actionType === 'cancel' ? 'cancelled' : ($actionType === 'no_show' ? 'no_show' : 'completed'),
                 'completed_at' => now(),
                 'current_station_id' => null,
+                'is_on_hold' => false,
+                'holding_station_id' => null,
+                'held_at' => null,
+                'held_order' => null,
             ]);
 
             $token->update([
@@ -583,7 +788,8 @@ class SessionService
             throw new \InvalidArgumentException('Session is not in a valid state for override.', 409);
         }
 
-        if (trim($reason) === '') {
+        // Per flexiqueue-eiju: reason required only for custom path, not predefined track
+        if (($customSteps !== null && count($customSteps) > 0) && trim($reason) === '') {
             throw new \InvalidArgumentException('Reason is required for overrides.', 422);
         }
 

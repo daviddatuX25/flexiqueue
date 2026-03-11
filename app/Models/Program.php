@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\ProgramSettings;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -28,40 +29,42 @@ class Program extends Model
         ];
     }
 
+    public function settings(): ProgramSettings
+    {
+        return ProgramSettings::fromArray($this->settings ?? []);
+    }
+
+    /** @deprecated Use `$program->settings()->getNoShowTimerSeconds()` */
     public function getNoShowTimerSeconds(): int
     {
-        return (int) ($this->settings['no_show_timer_seconds'] ?? 10);
+        return $this->settings()->getNoShowTimerSeconds();
     }
 
+    /** @deprecated Use `$program->settings()->getRequirePermissionBeforeOverride()` */
     public function getRequirePermissionBeforeOverride(): bool
     {
-        return (bool) ($this->settings['require_permission_before_override'] ?? true);
+        return $this->settings()->getRequirePermissionBeforeOverride();
     }
 
+    /** @deprecated Use `$program->settings()->getPriorityFirst()` */
     public function getPriorityFirst(): bool
     {
-        return (bool) ($this->settings['priority_first'] ?? true);
+        return $this->settings()->getPriorityFirst();
     }
 
+    /** @deprecated Use `$program->settings()->getBalanceMode()` */
     public function getBalanceMode(): string
     {
-        $mode = $this->settings['balance_mode'] ?? 'fifo';
-        return in_array($mode, ['fifo', 'alternate'], true) ? $mode : 'fifo';
+        return $this->settings()->getBalanceMode();
     }
 
     /**
      * @return array{0: int, 1: int} [priority_count, regular_count] e.g. [2, 1] = 2 priority per 1 regular
+     * @deprecated Use `$program->settings()->getAlternateRatio()`
      */
     public function getAlternateRatio(): array
     {
-        $ratio = $this->settings['alternate_ratio'] ?? [1, 1];
-        if (! is_array($ratio) || count($ratio) < 2) {
-            return [1, 1];
-        }
-        $p = max(1, (int) ($ratio[0] ?? 1));
-        $r = max(1, (int) ($ratio[1] ?? 1));
-
-        return [$p, $r];
+        return $this->settings()->getAlternateRatio();
     }
 
     public function creator(): BelongsTo
@@ -87,94 +90,76 @@ class Program extends Model
         return $this->hasMany(Process::class);
     }
 
+    /** @deprecated Use `$program->settings()->getStationSelectionMode()` */
     public function getStationSelectionMode(): string
     {
-        $mode = $this->settings['station_selection_mode'] ?? 'fixed';
-
-        return in_array($mode, ['fixed', 'shortest_queue', 'least_busy', 'round_robin', 'least_recently_served'], true)
-            ? $mode
-            : 'fixed';
+        return $this->settings()->getStationSelectionMode();
     }
 
     /** Per flexiqueue-87p: display board scan auto-close. 0 = no auto-close; default 20 seconds. */
+    /** @deprecated Use `$program->settings()->getDisplayScanTimeoutSeconds()` */
     public function getDisplayScanTimeoutSeconds(): int
     {
-        $settings = $this->settings ?? [];
-        $v = $settings['display_scan_timeout_seconds'] ?? null;
-
-        return $v === null ? 20 : max(0, (int) $v);
+        return $this->settings()->getDisplayScanTimeoutSeconds();
     }
 
     /** Per plan: display board audio mute (admin-controlled). Default false. */
+    /** @deprecated Use `$program->settings()->getDisplayAudioMuted()` */
     public function getDisplayAudioMuted(): bool
     {
-        $settings = $this->settings ?? [];
-
-        return (bool) ($settings['display_audio_muted'] ?? false);
+        return $this->settings()->getDisplayAudioMuted();
     }
 
     /** Per plan: display board audio volume 0–1 (admin-controlled). Default 1. */
+    /** @deprecated Use `$program->settings()->getDisplayAudioVolume()` */
     public function getDisplayAudioVolume(): float
     {
-        $settings = $this->settings ?? [];
-        $v = $settings['display_audio_volume'] ?? 1;
-
-        return (float) max(0, min(1, $v));
+        return $this->settings()->getDisplayAudioVolume();
     }
 
     /** Display TTS announcement repeat count (1–3: Once, Twice, Three times). Default 1. */
+    /** @deprecated Use `$program->settings()->getDisplayTtsRepeatCount()` */
     public function getDisplayTtsRepeatCount(): int
     {
-        $settings = $this->settings ?? [];
-        $v = $settings['display_tts_repeat_count'] ?? 1;
-
-        return (int) max(1, min(3, $v));
+        return $this->settings()->getDisplayTtsRepeatCount();
     }
 
     /** Delay between repeated announcements in milliseconds (500–10000). Default 2000. */
+    /** @deprecated Use `$program->settings()->getDisplayTtsRepeatDelayMs()` */
     public function getDisplayTtsRepeatDelayMs(): int
     {
-        $settings = $this->settings ?? [];
-        $v = $settings['display_tts_repeat_delay_ms'] ?? 2000;
-
-        return (int) max(500, min(10000, $v));
+        return $this->settings()->getDisplayTtsRepeatDelayMs();
     }
 
     /** Per plan: allow public self-serve triage at GET /triage/start. Default false. */
+    /** @deprecated Use `$program->settings()->getAllowPublicTriage()` */
     public function getAllowPublicTriage(): bool
     {
-        $settings = $this->settings ?? [];
-
-        return (bool) ($settings['allow_public_triage'] ?? false);
+        return $this->settings()->getAllowPublicTriage();
     }
 
     /** Per barcode-hid plan: enable HID barcode input on Display board. Default true. */
+    /** @deprecated Use `$program->settings()->getEnableDisplayHidBarcode()` */
     public function getEnableDisplayHidBarcode(): bool
     {
-        $settings = $this->settings ?? [];
-
-        return (bool) ($settings['enable_display_hid_barcode'] ?? true);
+        return $this->settings()->getEnableDisplayHidBarcode();
     }
 
     /** Per barcode-hid plan: enable HID barcode input on Public triage. Default true. */
+    /** @deprecated Use `$program->settings()->getEnablePublicTriageHidBarcode()` */
     public function getEnablePublicTriageHidBarcode(): bool
     {
-        $settings = $this->settings ?? [];
-
-        return (bool) ($settings['enable_public_triage_hid_barcode'] ?? true);
+        return $this->settings()->getEnablePublicTriageHidBarcode();
     }
 
     /**
      * Active TTS language for this program (used by displays and generation).
      * Defaults to 'en' when not explicitly configured.
+     * @deprecated Use `$program->settings()->getTtsActiveLanguage()`
      */
     public function getTtsActiveLanguage(): string
     {
-        $settings = $this->settings ?? [];
-        $lang = $settings['tts']['active_language'] ?? 'en';
-        $allowed = ['en', 'fil', 'ilo'];
-
-        return in_array($lang, $allowed, true) ? $lang : 'en';
+        return $this->settings()->getTtsActiveLanguage();
     }
 
     public function queueSessions(): HasMany

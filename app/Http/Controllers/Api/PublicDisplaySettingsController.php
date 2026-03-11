@@ -50,19 +50,19 @@ class PublicDisplaySettingsController extends Controller
         $program = $program->fresh();
 
         event(new DisplaySettingsUpdated(
-            $program->getDisplayAudioMuted(),
-            $program->getDisplayAudioVolume(),
-            $program->getEnableDisplayHidBarcode(),
-            $program->getEnablePublicTriageHidBarcode(),
-            $program->getDisplayTtsRepeatCount(),
-            $program->getDisplayTtsRepeatDelayMs(),
+            $program->settings()->getDisplayAudioMuted(),
+            $program->settings()->getDisplayAudioVolume(),
+            $program->settings()->getEnableDisplayHidBarcode(),
+            $program->settings()->getEnablePublicTriageHidBarcode(),
+            $program->settings()->getDisplayTtsRepeatCount(),
+            $program->settings()->getDisplayTtsRepeatDelayMs(),
         ));
 
         return response()->json([
-            'display_audio_muted' => $program->getDisplayAudioMuted(),
-            'display_audio_volume' => $program->getDisplayAudioVolume(),
-            'enable_display_hid_barcode' => $program->getEnableDisplayHidBarcode(),
-            'enable_public_triage_hid_barcode' => $program->getEnablePublicTriageHidBarcode(),
+            'display_audio_muted' => $program->settings()->getDisplayAudioMuted(),
+            'display_audio_volume' => $program->settings()->getDisplayAudioVolume(),
+            'enable_display_hid_barcode' => $program->settings()->getEnableDisplayHidBarcode(),
+            'enable_public_triage_hid_barcode' => $program->settings()->getEnablePublicTriageHidBarcode(),
         ]);
     }
 }

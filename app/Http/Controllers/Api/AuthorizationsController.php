@@ -24,17 +24,36 @@ class AuthorizationsController extends Controller
         $auths = TemporaryAuthorization::where('user_id', $user->id)
             ->orderByDesc('created_at')
             ->limit(20)
-            ->get(['id', 'type', 'created_at', 'expires_at', 'used_at'])
+            ->get(['id', 'type', 'expiry_mode', 'max_uses', 'used_count', 'created_at', 'expires_at', 'used_at', 'last_used_at'])
             ->map(fn (TemporaryAuthorization $a) => [
                 'id' => $a->id,
                 'type' => $a->type,
+                'expiry_mode' => $a->expiry_mode,
+                'max_uses' => $a->max_uses,
+                'used_count' => $a->used_count,
                 'created_at' => $a->created_at?->toIso8601String(),
                 'expires_at' => $a->expires_at?->toIso8601String(),
                 'used_at' => $a->used_at?->toIso8601String(),
+                'last_used_at' => $a->last_used_at?->toIso8601String(),
             ])
             ->values()
             ->all();
 
         return response()->json(['authorizations' => $auths]);
+    }
+
+    /**
+     * Delete (revoke) a temporary authorization created by the current user.
+     */
+    public function destroy(Request $request, TemporaryAuthorization $authorization): JsonResponse
+    {
+        $user = $request->user();
+        if ($authorization->user_id !== $user->id) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        $authorization->delete();
+
+        return response()->json([], 204);
     }
 }

@@ -21,9 +21,13 @@
 	interface AuthItem {
 		id: number;
 		type: string;
+		expiry_mode?: 'time_only' | 'usage_only' | 'time_or_usage' | string;
+		max_uses?: number | null;
+		used_count?: number | null;
 		created_at: string | null;
 		expires_at: string | null;
 		used_at: string | null;
+		last_used_at?: string | null;
 	}
 
 	const TTL_OPTIONS = [
@@ -31,6 +35,14 @@
 		{ label: '15 min', value: 900 },
 		{ label: '1 hr', value: 3600 },
 		{ label: 'No expiry', value: 0 },
+	];
+
+	const MAX_USES_OPTIONS = [
+		{ label: '1 use', value: 1 },
+		{ label: '2 uses', value: 2 },
+		{ label: '3 uses', value: 3 },
+		{ label: '5 uses', value: 5 },
+		{ label: '10 uses', value: 10 },
 	];
 
 	let {
@@ -56,12 +68,15 @@
 	let tempQrDataUri = $state<string | null>(null);
 	let tempQrExpiresAt = $state<string | null>(null);
 	let selectedTtlSeconds = $state(300);
+	let selectedExpiryMode = $state<'time_only' | 'usage_only' | 'time_or_usage'>('time_only');
+	let selectedMaxUses = $state(1);
 	let actionLoading = $state<string | null>(null);
 	let rejectModalRequestId = $state<number | null>(null);
 	let rejectReassignTrackId = $state<number | null>(null);
 	let approveModalRequestId = $state<number | null>(null);
 	let approveCustomPath = $state<number[]>([]);
 	let approveCustomAddStationId = $state<number | ''>('');
+	let deletingAuthorizationId = $state<number | null>(null);
 
 	/** Real-time tick for live expiry countdowns (client-side, no polling). */
 	let nowMs = $state(Date.now());
@@ -78,9 +93,10 @@
 	onMount(() => {
 		const user = (get(page)?.props as { auth?: { user?: { id: number } } })?.auth?.user;
 		const userId = user?.id;
-		if (!userId || typeof window === 'undefined' || !(window as { Echo?: { private: (ch: string) => { listen: (ev: string, cb: () => void) => void }; leave: (ch: string) => void } }).Echo) return;
+		const w = window as unknown as { Echo?: { private: (ch: string) => { listen: (ev: string, cb: () => void) => void }; leave: (ch: string) => void } };
+		if (!userId || typeof window === 'undefined' || !w.Echo) return;
 
-		const Echo = (window as { Echo: { private: (ch: string) => { listen: (ev: string, cb: () => void) => void }; leave: (ch: string) => void } }).Echo;
+		const Echo = w.Echo;
 		const ch = `App.Models.User.${userId}`;
 		Echo.private(ch).listen('.permission_request_responded', () => {
 			router.reload();
@@ -132,14 +148,23 @@
 	async function generateTempPin() {
 		if (actionLoading) return;
 		actionLoading = 'generate-temp-pin';
-		const { ok, data } = await api('POST', '/api/auth/temporary-pin', { expires_in_seconds: selectedTtlSeconds });
+		const body: Record<string, unknown> = { expiry_mode: selectedExpiryMode };
+		if (selectedExpiryMode === 'time_only' || selectedExpiryMode === 'time_or_usage') {
+			body.expires_in_seconds = selectedTtlSeconds;
+		}
+		if (selectedExpiryMode === 'usage_only' || selectedExpiryMode === 'time_or_usage') {
+			body.max_uses = selectedMaxUses;
+		}
+		const { ok, data } = await api('POST', '/api/auth/temporary-pin', body);
 		actionLoading = null;
 		if (ok) {
-			const d = data as { code?: string; expires_at?: string };
+			toaster.success({ title: 'Temporary code generated.' });
+			const d = data as { code?: string; expires_at?: string | null };
 			tempCodeGenerated = d?.code ?? null;
 			tempQrDataUri = null;
 			tempQrExpiresAt = null;
 			tempCodeExpiresAt = d?.expires_at ?? null;
+			setTimeout(() => router.reload(), 1500);
 		} else {
 			toaster.error({ title: (data as { message?: string })?.message ?? 'Failed to generate' });
 		}
@@ -148,14 +173,23 @@
 	async function generateTempQr() {
 		if (actionLoading) return;
 		actionLoading = 'generate-temp-qr';
-		const { ok, data } = await api('POST', '/api/auth/temporary-qr', { expires_in_seconds: selectedTtlSeconds });
+		const body: Record<string, unknown> = { expiry_mode: selectedExpiryMode };
+		if (selectedExpiryMode === 'time_only' || selectedExpiryMode === 'time_or_usage') {
+			body.expires_in_seconds = selectedTtlSeconds;
+		}
+		if (selectedExpiryMode === 'usage_only' || selectedExpiryMode === 'time_or_usage') {
+			body.max_uses = selectedMaxUses;
+		}
+		const { ok, data } = await api('POST', '/api/auth/temporary-qr', body);
 		actionLoading = null;
 		if (ok) {
-			const d = data as { qr_data_uri?: string; expires_at?: string };
+			toaster.success({ title: 'Temporary QR generated.' });
+			const d = data as { qr_data_uri?: string; expires_at?: string | null };
 			tempQrDataUri = d?.qr_data_uri ?? null;
 			tempCodeGenerated = null;
 			tempCodeExpiresAt = null;
 			tempQrExpiresAt = d?.expires_at ?? null;
+			setTimeout(() => router.reload(), 1500);
 		} else {
 			toaster.error({ title: (data as { message?: string })?.message ?? 'Failed to generate' });
 		}
@@ -168,6 +202,21 @@
 			approveCustomAddStationId = '';
 		} else {
 			approveRequest(pr.id);
+		}
+	}
+
+	async function deleteAuthorization(id: number) {
+		if (actionLoading) return;
+		const confirmDelete = window.confirm('Revoke this authorization? It cannot be used after this.');
+		if (!confirmDelete) return;
+		actionLoading = `delete-auth-${id}`;
+		const { ok } = await api('DELETE', `/api/auth/authorizations/${id}`);
+		actionLoading = null;
+		if (ok) {
+			toaster.success({ title: 'Authorization revoked.' });
+			router.reload();
+		} else {
+			toaster.error({ title: 'Failed to delete authorization' });
 		}
 	}
 
@@ -195,6 +244,7 @@
 		const { ok, data } = await api('POST', `/api/permission-requests/${id}/approve`, body ?? {});
 		actionLoading = null;
 		if (ok) {
+			toaster.success({ title: 'Request approved.' });
 			closeApproveModal();
 			router.reload();
 		} else {
@@ -218,6 +268,7 @@
 		const { ok } = await api('POST', `/api/permission-requests/${id}/reject`, body ?? {});
 		actionLoading = null;
 		if (ok) {
+			toaster.success({ title: 'Request rejected.' });
 			closeRejectModal();
 			router.reload();
 		} else {
@@ -251,17 +302,52 @@
 			<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-6">
 				<p class="text-sm font-medium text-surface-950/80 mb-3">Generate for staff</p>
 				<p class="text-xs text-surface-950/60 mb-4">Create temporary PIN or QR for staff to authorize override or force-complete.</p>
-				<div class="form-control w-full max-w-xs mb-4">
-					<label class="label"><span class="label-text">Expiry</span></label>
-					<select
-						class="select rounded-container border border-surface-200 px-3 touch-target-h"
-						bind:value={selectedTtlSeconds}
-						onchange={(e) => (selectedTtlSeconds = Number((e.target as HTMLSelectElement).value))}
-					>
-						{#each TTL_OPTIONS as opt}
-							<option value={opt.value}>{opt.label}</option>
-						{/each}
-					</select>
+				<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+					<div class="form-control w-full">
+						<label class="label" for="expiryMode"><span class="label-text">Mode</span></label>
+						<select
+							id="expiryMode"
+							class="select rounded-container border border-surface-200 px-3 touch-target-h"
+							bind:value={selectedExpiryMode}
+							onchange={(e) => (selectedExpiryMode = (e.target as HTMLSelectElement).value as typeof selectedExpiryMode)}
+						>
+							<option value="time_only">Time only</option>
+							<option value="usage_only">Usage only</option>
+							<option value="time_or_usage">Time or usage (whichever first)</option>
+						</select>
+					</div>
+
+					{#if selectedExpiryMode === 'usage_only' || selectedExpiryMode === 'time_or_usage'}
+						<div class="form-control w-full">
+							<label class="label" for="maxUses"><span class="label-text">Max uses</span></label>
+							<select
+								id="maxUses"
+								class="select rounded-container border border-surface-200 px-3 touch-target-h"
+								bind:value={selectedMaxUses}
+								onchange={(e) => (selectedMaxUses = Number((e.target as HTMLSelectElement).value))}
+							>
+								{#each MAX_USES_OPTIONS as opt}
+									<option value={opt.value}>{opt.label}</option>
+								{/each}
+							</select>
+						</div>
+					{/if}
+
+					{#if selectedExpiryMode === 'time_only' || selectedExpiryMode === 'time_or_usage'}
+						<div class="form-control w-full">
+							<label class="label" for="expiresIn"><span class="label-text">Expires in</span></label>
+							<select
+								id="expiresIn"
+								class="select rounded-container border border-surface-200 px-3 touch-target-h"
+								bind:value={selectedTtlSeconds}
+								onchange={(e) => (selectedTtlSeconds = Number((e.target as HTMLSelectElement).value))}
+							>
+								{#each TTL_OPTIONS as opt}
+									<option value={opt.value}>{opt.label}</option>
+								{/each}
+							</select>
+						</div>
+					{/if}
 				</div>
 				<div class="flex flex-wrap gap-3">
 					<div class="flex flex-col gap-2">
@@ -274,6 +360,7 @@
 							{actionLoading === 'generate-temp-pin' ? 'Generating…' : 'Generate 6-digit PIN'}
 						</button>
 						{#if tempCodeGenerated}
+							<p class="text-warning-600 text-xs font-medium mb-1">Save this elsewhere — it is shown only once.</p>
 							<p class="text-xl font-mono font-bold tracking-widest text-primary-500">{tempCodeGenerated}</p>
 							<p class="text-xs text-surface-950/60">{formatExpiry(tempCodeExpiresAt, nowMs)}</p>
 						{/if}
@@ -288,6 +375,7 @@
 							{actionLoading === 'generate-temp-qr' ? 'Generating…' : 'Generate QR code'}
 						</button>
 						{#if tempQrDataUri}
+							<p class="text-warning-600 text-xs font-medium mb-1">Save or share this elsewhere — it is shown only once.</p>
 							<img src={tempQrDataUri} alt="Temporary QR" class="w-28 h-28" />
 							<p class="text-xs text-surface-950/60">{formatExpiry(tempQrExpiresAt, nowMs)}</p>
 						{/if}
@@ -301,16 +389,35 @@
 					<p class="text-sm font-medium text-surface-950/80 mb-3">Recent authorizations</p>
 					<ul class="space-y-1 text-xs">
 						{#each authorizations as a (a.id)}
-							<li class="flex justify-between items-center py-1">
-								<span class="font-mono text-surface-950">{a.type === 'pin' ? 'PIN' : 'QR'}</span>
-								<span class="text-surface-950/60">{new Date(a.created_at ?? 0).toLocaleString()}</span>
-								{#if a.used_at}
-									<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm text-surface-950">Used</span>
-								{:else if a.expires_at}
-									<span class="text-surface-950/50">{formatExpiry(a.expires_at, nowMs)}</span>
-								{:else}
-									<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm text-surface-950">No expiry</span>
-								{/if}
+							{@const maxUses = a.max_uses ?? null}
+							{@const usedCount = a.used_count ?? 0}
+							{@const usesLeft = maxUses !== null ? Math.max(0, maxUses - usedCount) : null}
+							{@const timeLabel = a.expires_at ? formatExpiry(a.expires_at, nowMs) : ''}
+							<li class="flex justify-between items-center py-1 gap-2">
+								<div class="flex flex-col">
+									<span class="font-mono text-surface-950">{a.type === 'pin' ? 'PIN' : 'QR'}</span>
+									<span class="text-surface-950/60">{new Date(a.created_at ?? 0).toLocaleString()}</span>
+								</div>
+								<div class="flex items-center gap-2">
+									{#if maxUses !== null && usesLeft <= 0}
+										<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm text-surface-950">Consumed</span>
+									{:else if (a.expiry_mode === 'usage_only' || a.expiry_mode === 'time_or_usage') && usesLeft !== null}
+										<span class="text-surface-950/50">{usesLeft} use{usesLeft === 1 ? '' : 's'} left</span>
+									{:else if a.expires_at}
+										<span class="text-surface-950/50">{timeLabel}</span>
+									{:else}
+										<span class="text-xs px-2 py-0.5 rounded preset-tonal badge-sm text-surface-950">No expiry</span>
+									{/if}
+									<button
+										type="button"
+										class="btn btn-icon btn-icon-sm preset-tonal"
+										aria-label="Delete authorization"
+										disabled={!!actionLoading}
+										onclick={() => deleteAuthorization(a.id)}
+									>
+										✕
+									</button>
+								</div>
 							</li>
 						{/each}
 					</ul>
@@ -403,9 +510,10 @@
 				<h3 class="font-bold text-lg">Define custom path</h3>
 				<p class="text-sm text-surface-950/70 py-2">Add stations in the order the client should visit. Admin defines the one-off path.</p>
 				<div class="form-control w-full mt-2">
-					<label class="label"><span class="label-text">Add station</span></label>
+					<label class="label" for="customPathAddStation"><span class="label-text">Add station</span></label>
 					<div class="flex gap-2">
 						<select
+							id="customPathAddStation"
 							class="select rounded-container border border-surface-200 px-3 touch-target-h flex-1"
 							bind:value={approveCustomAddStationId}
 							onchange={(e) => { approveCustomAddStationId = (e.target as HTMLSelectElement).value === '' ? '' : Number((e.target as HTMLSelectElement).value); }}
@@ -461,8 +569,9 @@
 				<h3 class="font-bold text-lg">Reject and reassign?</h3>
 				<p class="text-sm text-surface-950/70 py-2">Optionally reassign the session to a track instead of leaving it awaiting approval.</p>
 				<div class="form-control w-full mt-2">
-					<label class="label"><span class="label-text">Reassign to track (optional)</span></label>
+					<label class="label" for="rejectReassignTrack"><span class="label-text">Reassign to track (optional)</span></label>
 					<select
+						id="rejectReassignTrack"
 						class="select rounded-container border border-surface-200 px-3 touch-target-h w-full"
 						value={rejectReassignTrackId ?? ''}
 						onchange={(e) => {

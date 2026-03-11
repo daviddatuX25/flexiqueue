@@ -154,6 +154,7 @@
         );
         submitting = false;
         if (ok) {
+            toaster.success({ title: "User created." });
             showCreateModal = false;
             router.reload();
         } else toaster.error({ title: msg ?? "Failed to create user." });
@@ -196,16 +197,16 @@
         } = await api("PUT", `/api/admin/users/${editUser.id}`, body);
         submitting = false;
         if (ok && data?.user) {
+            toaster.success({ title: "User updated." });
             showEditModal = false;
             editUser = null;
             router.reload();
-        } else error = msg ?? "Failed to update user.";
+        } else toaster.error({ title: msg ?? "Failed to update user." });
     }
 
     function openReset(u: UserItem) {
         resetUser = u;
         resetPassword = "";
-        error = "";
         showResetModal = true;
     }
 
@@ -224,6 +225,7 @@
         );
         submitting = false;
         if (ok) {
+            toaster.success({ title: "Password reset." });
             showResetModal = false;
             resetUser = null;
         } else toaster.error({ title: msg ?? "Failed to reset password." });
@@ -243,6 +245,7 @@
         );
         submitting = false;
         if (ok) {
+            toaster.success({ title: "User deactivated." });
             deactivateConfirmUser = null;
             router.reload();
         } else toaster.error({ title: msg ?? "Failed to deactivate user." });

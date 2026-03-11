@@ -34,7 +34,7 @@ class StationSelectionService
         }
 
         $program = Program::find($programId);
-        $mode = $program ? $program->getStationSelectionMode() : 'fixed';
+        $mode = $program ? $program->settings()->getStationSelectionMode() : 'fixed';
 
         return match ($mode) {
             'shortest_queue' => $this->shortestQueue($candidates),
@@ -74,13 +74,55 @@ class StationSelectionService
     }
 
     /**
-     * Same as shortest_queue for now (productive worker: fewest total load).
+     * Station with lowest active load, weighting serving sessions higher than waiting/called.
+     *
+     * Per flexiqueue-2tlu / REFACTORING-ISSUE-LIST Issue 17:
+     * - shortest_queue: fewest total waiting+called+serving sessions
+     * - least_busy: weighted load score where serving counts more than waiting/called
      *
      * @param  array<int>  $stationIds
      */
     private function leastBusy(array $stationIds): int
     {
-        return $this->shortestQueue($stationIds);
+        $counts = Session::query()
+            ->whereIn('current_station_id', $stationIds)
+            ->whereIn('status', ['waiting', 'called', 'serving'])
+            ->selectRaw("
+                current_station_id,
+                sum(case when status = 'waiting' then 1 else 0 end) as waiting_cnt,
+                sum(case when status = 'called' then 1 else 0 end) as called_cnt,
+                sum(case when status = 'serving' then 1 else 0 end) as serving_cnt
+            ")
+            ->groupBy('current_station_id')
+            ->get()
+            ->keyBy('current_station_id');
+
+        $selected = $stationIds[0];
+
+        // Weights for load computation: serving is heavier than called/waiting.
+        $weightServing = 3;
+        $weightCalled = 1;
+        $weightWaiting = 1;
+
+        $minLoad = PHP_INT_MAX;
+
+        foreach ($stationIds as $id) {
+            $row = $counts[$id] ?? null;
+            $waitingCnt = $row->waiting_cnt ?? 0;
+            $calledCnt = $row->called_cnt ?? 0;
+            $servingCnt = $row->serving_cnt ?? 0;
+
+            $load = ($servingCnt * $weightServing)
+                + ($calledCnt * $weightCalled)
+                + ($waitingCnt * $weightWaiting);
+
+            if ($load < $minLoad) {
+                $minLoad = $load;
+                $selected = $id;
+            }
+        }
+
+        return (int) $selected;
     }
 
     /**

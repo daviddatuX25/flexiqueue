@@ -67,6 +67,10 @@ let {
 	station_tts_by_name = {},
 	display_tts_repeat_count = 1,
 	display_tts_repeat_delay_ms = 2000,
+	queueing_method_label = null,
+	queue_mode_display = null,
+	alternate_ratio = null,
+	station_selection_mode = null,
 } = $props();
 
 /** Synced from prop + .program_status; when true, show "Program is paused" overlay (real-time). */
@@ -164,6 +168,10 @@ let stationTtsByName = $state({});
 				'program_is_paused',
 				'display_audio_muted',
 				'display_audio_volume',
+				'queueing_method_label',
+				'queue_mode_display',
+				'alternate_ratio',
+				'station_selection_mode',
 			],
 		});
 	}
@@ -204,6 +212,7 @@ let stationTtsByName = $state({});
 				toaster.error({ title: data.message || 'Failed to save.' });
 				return;
 			}
+			toaster.success({ title: 'Display settings saved.' });
 			displayAudioMuted = !!data.display_audio_muted;
 			displayAudioVolume = Math.max(0, Math.min(1, Number(data.display_audio_volume ?? 1)));
 			enableDisplayHidBarcode = !!data.enable_display_hid_barcode;
@@ -437,6 +446,43 @@ let stationTtsByName = $state({});
 			</div>
 		{/if}
 		<div class="flex flex-col gap-6 max-w-4xl mx-auto pb-28">
+			<!-- Station routing: how clients are sent to stations (per flexiqueue-syam). -->
+			{#if program_name && station_selection_mode}
+				{@const sel = station_selection_mode}
+				<section
+					class="rounded-container border border-surface-200 bg-surface-50 p-4"
+					aria-label="How clients are routed to stations"
+				>
+					<h2 class="text-base font-bold text-surface-950 mb-1">Station routing</h2>
+					<p class="text-lg font-semibold text-surface-900">
+						{sel === 'fixed'
+							? 'Fixed'
+							: sel === 'shortest_queue'
+								? 'Shortest queue'
+								: sel === 'least_busy'
+									? 'Least busy'
+									: sel === 'round_robin'
+										? 'Round robin'
+										: sel === 'least_recently_served'
+											? 'Least recently served'
+											: 'Fixed'}
+					</p>
+					<p class="text-sm text-surface-600 mt-1">
+						{sel === 'fixed'
+							? 'Each station serves its assigned clients.'
+							: sel === 'shortest_queue'
+								? 'Clients are sent to the station with the fewest people waiting.'
+								: sel === 'least_busy'
+									? 'Clients are sent to the least busy station (fewer active services).'
+									: sel === 'round_robin'
+										? 'Stations take turns receiving new clients.'
+										: sel === 'least_recently_served'
+											? 'The station that served clients longest ago receives the next one.'
+											: 'Each station serves its assigned clients.'}
+					</p>
+				</section>
+			{/if}
+
 			<!-- Scan section: hidden input for HID barcode; pulsing CTA + camera icon opens camera modal. Per display scanner refactor plan. -->
 		<section>
 			<div class="flex items-center justify-between gap-2 mb-3">
@@ -775,21 +821,41 @@ let stationTtsByName = $state({});
 		<div class="flex items-center gap-4 min-w-0">
 			<span class="text-xs font-semibold uppercase tracking-wider text-surface-300 shrink-0 self-center">Staff on duty</span>
 			{#if staffForBar.length > 0}
+				<!-- Footer-only: custom [chips][gap][chips][gap] track (not shared Marquee). Reduces loop flicker for this layout. -->
 				<div class="display-footer__marquee flex-1 min-w-0 overflow-hidden" aria-label="Staff availability">
-					<div class="display-footer__marquee-inner flex items-center gap-3">
-						{#each [...staffForBar, ...staffForBar] as s, i (String(i) + (s.name ?? '') + (s.station_name ?? '') + (s.availability_status ?? ''))}
-							<div
-								class="display-footer__chip inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-700/80 text-surface-100 shrink-0"
-								title="{s.name} — {availabilityLabel(s.availability_status)}"
-							>
-								<UserAvatar user={s} size="sm" />
-								<span
-									class="w-2 h-2 rounded-full shrink-0 {availabilityDotClass(s.availability_status)}"
-									aria-label="{availabilityLabel(s.availability_status)}"
-								></span>
-								<span class="text-sm max-w-[6rem] truncate">{s.name}</span>
-							</div>
-						{/each}
+					<div class="fq-marquee-track display-footer__marquee-inner flex items-center gap-3" style="animation-duration: 25s; width: max-content;">
+						<div class="flex items-center gap-3 shrink-0">
+							{#each staffForBar as s ((s.name ?? '') + (s.station_name ?? '') + (s.availability_status ?? ''))}
+								<div
+									class="display-footer__chip inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-700/80 text-surface-100 shrink-0"
+									title="{s.name} — {availabilityLabel(s.availability_status)}"
+								>
+									<UserAvatar user={s} size="sm" />
+									<span
+										class="w-2 h-2 rounded-full shrink-0 {availabilityDotClass(s.availability_status)}"
+										aria-label="{availabilityLabel(s.availability_status)}"
+									></span>
+									<span class="text-sm max-w-[6rem] truncate">{s.name}</span>
+								</div>
+							{/each}
+						</div>
+						<span class="display-footer__marquee-gap shrink-0 w-8" aria-hidden="true"></span>
+						<div class="flex items-center gap-3 shrink-0">
+							{#each staffForBar as s ((s.name ?? '') + (s.station_name ?? '') + (s.availability_status ?? ''))}
+								<div
+									class="display-footer__chip inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-700/80 text-surface-100 shrink-0"
+									title="{s.name} — {availabilityLabel(s.availability_status)}"
+								>
+									<UserAvatar user={s} size="sm" />
+									<span
+										class="w-2 h-2 rounded-full shrink-0 {availabilityDotClass(s.availability_status)}"
+										aria-label="{availabilityLabel(s.availability_status)}"
+									></span>
+									<span class="text-sm max-w-[6rem] truncate">{s.name}</span>
+								</div>
+							{/each}
+						</div>
+						<span class="display-footer__marquee-gap shrink-0 w-8" aria-hidden="true"></span>
 					</div>
 				</div>
 			{:else}

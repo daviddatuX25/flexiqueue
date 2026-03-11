@@ -18,6 +18,9 @@ class QueueWorkerIdleCheck
         }
 
         $connection = config('queue.connections.database.connection') ?? config('database.default');
+        if (! is_string($connection) || trim($connection) === '') {
+            $connection = (string) config('database.default');
+        }
         $table = config('queue.connections.database.table', 'jobs');
         $queue = config('queue.connections.database.queue', 'default');
         $cutoff = now()->subMinutes(2)->timestamp;
@@ -25,7 +28,6 @@ class QueueWorkerIdleCheck
         return DB::connection($connection)->table($table)
             ->where('queue', $queue)
             ->whereNull('reserved_at')
-            ->where('available_at', '<=', time())
             ->where('created_at', '<', $cutoff)
             ->exists();
     }

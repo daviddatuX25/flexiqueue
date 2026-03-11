@@ -502,8 +502,10 @@
                     err.errors?.label?.[0] ??
                     err.message ??
                     "Failed to save account.";
+                toaster.error({ title: accountFormError });
                 return;
             }
+            toaster.success({ title: "Account saved." });
             accountFormOpen = false;
             await fetchElevenLabsStatus();
         } catch (e) {
@@ -544,12 +546,17 @@
                 return;
             }
             if (res.ok) {
+                toaster.success({ title: "Account removed." });
                 deleteAccountTarget = null;
                 await fetchElevenLabsStatus();
+            } else {
+                const errBody = (await res.json().catch(() => ({}))) as { message?: string };
+                toaster.error({ title: errBody.message ?? "Failed to remove account." });
             }
         } catch (e) {
             const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
             if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
+            else toaster.error({ title: "Failed to remove account." });
         } finally {
             deleteAccountLoading = false;
         }
@@ -574,11 +581,16 @@
                 return;
             }
             if (res.ok) {
+                toaster.success({ title: "Account set as active." });
                 await fetchElevenLabsStatus();
+            } else {
+                const json = (await res.json().catch(() => ({}))) as { message?: string };
+                toaster.error({ title: json.message ?? "Failed to activate account." });
             }
         } catch (e) {
             const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
             if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
+            else toaster.error({ title: "Failed to activate account." });
         }
     }
 

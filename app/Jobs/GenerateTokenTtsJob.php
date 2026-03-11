@@ -4,7 +4,7 @@ namespace App\Jobs;
 
 use App\Events\TokenTtsStatusUpdated;
 use App\Models\Token;
-use App\Models\TokenTtsSetting;
+use App\Repositories\TokenTtsSettingRepository;
 use App\Services\TtsService;
 use App\Support\TtsPhrase;
 use Illuminate\Bus\Queueable;
@@ -36,10 +36,10 @@ class GenerateTokenTtsJob implements ShouldQueue
         public array $tokenIds
     ) {}
 
-    public function handle(TtsService $ttsService): void
+    public function handle(TtsService $ttsService, TokenTtsSettingRepository $tokenTtsSettingRepository): void
     {
         try {
-            $this->runHandle($ttsService);
+            $this->runHandle($ttsService, $tokenTtsSettingRepository);
         } catch (\Throwable $e) {
             $this->markGeneratingTokensAsFailed();
             Log::warning('GenerateTokenTtsJob failed: {message}', ['message' => $e->getMessage()]);
@@ -47,13 +47,13 @@ class GenerateTokenTtsJob implements ShouldQueue
         }
     }
 
-    private function runHandle(TtsService $ttsService): void
+    private function runHandle(TtsService $ttsService, TokenTtsSettingRepository $tokenTtsSettingRepository): void
     {
         if (! $ttsService->isEnabled()) {
             return;
         }
 
-        $settings = TokenTtsSetting::instance();
+        $settings = $tokenTtsSettingRepository->getInstance();
         $defaultVoiceId = $settings->getEffectiveVoiceId();
         $defaultRate = $settings->getEffectiveRate();
         $defaultLanguages = $settings->getDefaultLanguages();

@@ -180,15 +180,15 @@ class ProgramPageController extends Controller
                     'display_scan_timeout_seconds' => array_key_exists('display_scan_timeout_seconds', $settings)
                         ? (int) $settings['display_scan_timeout_seconds']
                         : 20,
-                    'display_audio_muted' => $program->getDisplayAudioMuted(),
-                    'display_audio_volume' => $program->getDisplayAudioVolume(),
-                    'display_tts_repeat_count' => $program->getDisplayTtsRepeatCount(),
-                    'display_tts_repeat_delay_ms' => $program->getDisplayTtsRepeatDelayMs(),
-                    'allow_public_triage' => $program->getAllowPublicTriage(),
-                    'enable_display_hid_barcode' => $program->getEnableDisplayHidBarcode(),
-                    'enable_public_triage_hid_barcode' => $program->getEnablePublicTriageHidBarcode(),
+                    'display_audio_muted' => $program->settings()->getDisplayAudioMuted(),
+                    'display_audio_volume' => $program->settings()->getDisplayAudioVolume(),
+                    'display_tts_repeat_count' => $program->settings()->getDisplayTtsRepeatCount(),
+                    'display_tts_repeat_delay_ms' => $program->settings()->getDisplayTtsRepeatDelayMs(),
+                    'allow_public_triage' => $program->settings()->getAllowPublicTriage(),
+                    'enable_display_hid_barcode' => $program->settings()->getEnableDisplayHidBarcode(),
+                    'enable_public_triage_hid_barcode' => $program->settings()->getEnablePublicTriageHidBarcode(),
                     'tts' => [
-                        'active_language' => $program->getTtsActiveLanguage(),
+                        'active_language' => $program->settings()->getTtsActiveLanguage(),
                         'connector' => [
                             'languages' => $connectorLanguages,
                         ],

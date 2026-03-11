@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\TtsStreamRequest;
 use App\Models\Token;
-use App\Models\TokenTtsSetting;
+use App\Repositories\TokenTtsSettingRepository;
 use App\Services\TtsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
@@ -19,7 +19,8 @@ use Symfony\Component\HttpFoundation\Response;
 class TtsController extends Controller
 {
     public function __construct(
-        private readonly TtsService $ttsService
+        private readonly TtsService $ttsService,
+        private readonly TokenTtsSettingRepository $tokenTtsSettingRepository
     ) {}
 
     /**
@@ -32,7 +33,7 @@ class TtsController extends Controller
         $explicitRate = $request->validated('rate');
         $explicitVoice = $request->validated('voice');
 
-        $settings = TokenTtsSetting::instance();
+        $settings = $this->tokenTtsSettingRepository->getInstance();
         $voiceId = $explicitVoice !== null && $explicitVoice !== ''
             ? (string) $explicitVoice
             : $settings->getEffectiveVoiceId();

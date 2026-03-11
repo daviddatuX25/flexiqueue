@@ -5,7 +5,7 @@ namespace Tests\Feature\Api\Admin;
 use App\Models\Token;
 use App\Models\User;
 use App\Jobs\GenerateTokenTtsJob;
-use App\Models\TokenTtsSetting;
+use App\Repositories\TokenTtsSettingRepository;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -415,7 +415,7 @@ class TokenControllerTest extends TestCase
         $this->app['config']->set('tts.allow_sync_when_queue_unavailable', false);
         $this->app['config']->set('tts.driver', 'elevenlabs');
         $this->app['config']->set('tts.elevenlabs.api_key', 'fake-key');
-        TokenTtsSetting::instance()->update(['voice_id' => 'voice-1', 'rate' => 1.0]);
+        $this->app->make(TokenTtsSettingRepository::class)->getInstance()->update(['voice_id' => 'voice-1', 'rate' => 1.0]);
 
         $cutoff = now()->subMinutes(3)->timestamp;
         DB::table('jobs')->insert([
@@ -446,7 +446,7 @@ class TokenControllerTest extends TestCase
         $this->app['config']->set('tts.allow_sync_when_queue_unavailable', true);
         $this->app['config']->set('tts.driver', 'elevenlabs');
         $this->app['config']->set('tts.elevenlabs.api_key', 'fake-key');
-        TokenTtsSetting::instance()->update(['voice_id' => 'voice-1', 'rate' => 1.0]);
+        $this->app->make(TokenTtsSettingRepository::class)->getInstance()->update(['voice_id' => 'voice-1', 'rate' => 1.0]);
 
         $ttsService = $this->createMock(\App\Services\TtsService::class);
         $ttsService->method('isEnabled')->willReturn(true);
@@ -484,7 +484,7 @@ class TokenControllerTest extends TestCase
         $this->app['config']->set('tts.max_sync_tokens', 5);
         $this->app['config']->set('tts.driver', 'elevenlabs');
         $this->app['config']->set('tts.elevenlabs.api_key', 'fake-key');
-        TokenTtsSetting::instance()->update(['voice_id' => 'voice-1', 'rate' => 1.0]);
+        $this->app->make(TokenTtsSettingRepository::class)->getInstance()->update(['voice_id' => 'voice-1', 'rate' => 1.0]);
 
         $cutoff = now()->subMinutes(3)->timestamp;
         DB::table('jobs')->insert([

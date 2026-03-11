@@ -47,27 +47,17 @@ class DisplayBoardService
                 'tts_active_language' => 'en',
                 'tts_connector_phrase' => null,
                 'station_tts_by_name' => [],
+                'balance_mode' => null,
+                'station_selection_mode' => null,
+                'queueing_method_label' => null,
+                'queue_mode_display' => null,
+                'alternate_ratio' => null,
+                'priority_first' => null,
             ];
         }
 
-        $activeLanguage = $program->getTtsActiveLanguage();
-        $programSettings = $program->settings ?? [];
-        $connectorPhrase = null;
-        if (
-            isset($programSettings['tts']) &&
-            is_array($programSettings['tts']) &&
-            isset($programSettings['tts']['connector']) &&
-            is_array($programSettings['tts']['connector']) &&
-            isset($programSettings['tts']['connector']['languages']) &&
-            is_array($programSettings['tts']['connector']['languages'])
-        ) {
-            $connectorLanguages = $programSettings['tts']['connector']['languages'];
-            $connectorConfig = $connectorLanguages[$activeLanguage] ?? [];
-            if (is_array($connectorConfig) && isset($connectorConfig['connector_phrase'])) {
-                $raw = $connectorConfig['connector_phrase'];
-                $connectorPhrase = is_string($raw) && trim($raw) !== '' ? trim($raw) : null;
-            }
-        }
+        $activeLanguage = $program->settings()->getTtsActiveLanguage();
+        $connectorPhrase = $this->getConnectorPhraseForLang($program, $activeLanguage);
 
         $servingAndCalled = Session::query()
             ->where('program_id', $program->id)
@@ -161,6 +151,14 @@ class DisplayBoardService
             })
             ->all();
 
+        $settings = $program->settings ?? [];
+        $balanceMode = $program->settings()->getBalanceMode();
+        $stationSelectionMode = $program->settings()->getStationSelectionMode();
+        [$queueModeDisplay, $alternateRatio] = $this->buildQueueModeDisplay($program);
+        $alternatePriorityFirst = array_key_exists('alternate_priority_first', $settings)
+            ? (bool) $settings['alternate_priority_first']
+            : (bool) ($settings['priority_first'] ?? true);
+
         return [
             'program_name' => $program->name,
             'date' => now()->format('F j, Y'),
@@ -170,17 +168,69 @@ class DisplayBoardService
             'station_activity' => $stationActivity,
             'staff_at_stations' => $staffAtStations,
             'staff_online' => $staffOnline,
-            'display_scan_timeout_seconds' => $program->getDisplayScanTimeoutSeconds(),
+            'display_scan_timeout_seconds' => $program->settings()->getDisplayScanTimeoutSeconds(),
             'program_is_paused' => (bool) $program->is_paused,
-            'display_audio_muted' => $program->getDisplayAudioMuted(),
-            'display_audio_volume' => $program->getDisplayAudioVolume(),
-            'display_tts_repeat_count' => $program->getDisplayTtsRepeatCount(),
-            'display_tts_repeat_delay_ms' => $program->getDisplayTtsRepeatDelayMs(),
-            'enable_display_hid_barcode' => $program->getEnableDisplayHidBarcode(),
+            'display_audio_muted' => $program->settings()->getDisplayAudioMuted(),
+            'display_audio_volume' => $program->settings()->getDisplayAudioVolume(),
+            'display_tts_repeat_count' => $program->settings()->getDisplayTtsRepeatCount(),
+            'display_tts_repeat_delay_ms' => $program->settings()->getDisplayTtsRepeatDelayMs(),
+            'enable_display_hid_barcode' => $program->settings()->getEnableDisplayHidBarcode(),
             'tts_active_language' => $activeLanguage,
             'tts_connector_phrase' => $connectorPhrase,
             'station_tts_by_name' => $stationTtsByName,
+            'balance_mode' => $balanceMode,
+            'station_selection_mode' => $stationSelectionMode,
+            'queueing_method_label' => $this->queueingMethodLabel($program),
+            'queue_mode_display' => $queueModeDisplay,
+            'alternate_ratio' => $alternateRatio,
+            'priority_first' => $program->settings()->getPriorityFirst(),
+            'alternate_priority_first' => $alternatePriorityFirst,
         ];
+    }
+
+    /**
+     * Build queue mode display string and alternate ratio for display (per flexiqueue-syam).
+     *
+     * @return array{0: string, 1: array{0: int, 1: int}|null}
+     */
+    private function buildQueueModeDisplay(Program $program): array
+    {
+        $balanceMode = $program->settings()->getBalanceMode();
+
+        if ($balanceMode === 'alternate') {
+            [$p, $r] = $program->settings()->getAlternateRatio();
+
+            return ['Alternate ('.$p.' : '.$r.')', [$p, $r]];
+        }
+
+        return ['FIFO', null];
+    }
+
+    /**
+     * Human-readable queueing/assignment method label for display (per flexiqueue-syam).
+     * Balance mode describes how the queue is served; station selection describes how station is chosen when multiple serve a process.
+     */
+    private function queueingMethodLabel(Program $program): string
+    {
+        $balanceMode = $program->settings()->getBalanceMode();
+        $stationSelectionMode = $program->settings()->getStationSelectionMode();
+
+        $balanceLabel = $balanceMode === 'alternate' ? 'Balanced (alternate)' : 'FIFO';
+
+        $selectionLabels = [
+            'fixed' => null,
+            'shortest_queue' => 'Shortest queue',
+            'least_busy' => 'Least busy',
+            'round_robin' => 'Round robin',
+            'least_recently_served' => 'Least recently served',
+        ];
+        $selectionLabel = $selectionLabels[$stationSelectionMode] ?? null;
+
+        if ($selectionLabel !== null && $stationSelectionMode !== 'fixed') {
+            return $balanceLabel.' · '.$selectionLabel;
+        }
+
+        return $balanceLabel;
     }
 
     /**
@@ -236,25 +286,22 @@ class DisplayBoardService
 
         $stationActivity = $this->getStationActivity([$station->id], 20);
 
-        $activeLanguage = $program?->getTtsActiveLanguage() ?? 'en';
-        $programSettings = $program?->settings ?? [];
-        $connectorPhrase = null;
-        if (
-            isset($programSettings['tts']) &&
-            is_array($programSettings['tts']) &&
-            isset($programSettings['tts']['connector']) &&
-            is_array($programSettings['tts']['connector']) &&
-            isset($programSettings['tts']['connector']['languages']) &&
-            is_array($programSettings['tts']['connector']['languages'])
-        ) {
-            $connectorLanguages = $programSettings['tts']['connector']['languages'];
-            $connectorConfig = $connectorLanguages[$activeLanguage] ?? [];
-            if (is_array($connectorConfig) && isset($connectorConfig['connector_phrase'])) {
-                $raw = $connectorConfig['connector_phrase'];
-                $connectorPhrase = is_string($raw) && trim($raw) !== '' ? trim($raw) : null;
-            }
-        }
+        $activeLanguage = $program ? $program->settings()->getTtsActiveLanguage() : 'en';
+        $connectorPhrase = $program ? $this->getConnectorPhraseForLang($program, $activeLanguage) : null;
         $stationPhrase = $program ? $this->getStationTtsPhrase($station, $activeLanguage) : null;
+
+        $balanceMode = $program ? $program->settings()->getBalanceMode() : null;
+        $stationSelectionMode = $program ? $program->settings()->getStationSelectionMode() : null;
+        $queueingMethodLabel = $program ? $this->queueingMethodLabel($program) : null;
+        [$queueModeDisplay, $alternateRatio] = $program ? $this->buildQueueModeDisplay($program) : [null, null];
+        $priorityFirst = $program ? $program->settings()->getPriorityFirst() : null;
+        $alternatePriorityFirst = null;
+        if ($program) {
+            $settings = $program->settings ?? [];
+            $alternatePriorityFirst = array_key_exists('alternate_priority_first', $settings)
+                ? (bool) $settings['alternate_priority_first']
+                : (bool) ($settings['priority_first'] ?? true);
+        }
 
         return [
             'program_name' => $programName,
@@ -269,6 +316,13 @@ class DisplayBoardService
             'tts_active_language' => $activeLanguage,
             'tts_connector_phrase' => $connectorPhrase,
             'station_tts_phrase' => $stationPhrase,
+            'balance_mode' => $balanceMode,
+            'station_selection_mode' => $stationSelectionMode,
+            'queueing_method_label' => $queueingMethodLabel,
+            'queue_mode_display' => $queueModeDisplay,
+            'alternate_ratio' => $alternateRatio,
+            'priority_first' => $priorityFirst,
+            'alternate_priority_first' => $alternatePriorityFirst,
         ];
     }
 

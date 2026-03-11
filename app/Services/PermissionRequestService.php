@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Events\PermissionRequestResponded;
+use App\Http\Resources\SessionResource;
 use App\Models\PermissionRequest;
 use App\Models\Session;
 
@@ -70,39 +71,16 @@ class PermissionRequestService
             $customSteps = $approveCustomSteps ?? $pr->custom_steps;
 
             if ($customSteps !== null && count($customSteps) > 0) {
-                $result = $this->sessionService->overrideByTrack(
-                    $session,
-                    0, // not used for custom
-                    $pr->reason,
-                    $responderUserId,
-                    $pr->requester_user_id,
-                    $customSteps
-                );
-            } elseif ($targetTrackId !== null) {
-                $result = $this->sessionService->overrideByTrack(
-                    $session,
-                    (int) $targetTrackId,
-                    $pr->reason,
-                    $responderUserId,
-                    $pr->requester_user_id,
-                    null
-                );
-            } elseif ($pr->target_station_id !== null) {
-                $result = $this->sessionService->override(
-                    $session,
-                    (int) $pr->target_station_id,
-                    $pr->reason,
-                    $responderUserId,
-                    $pr->requester_user_id
-                );
-            } else {
-                throw new \InvalidArgumentException('Override requires target track or custom path. Define path on Track Overrides page.', 422);
+                return $this->approveViaCustomPath($session, $customSteps, $pr->reason, $responderUserId, $pr->requester_user_id);
+            }
+            if ($targetTrackId !== null) {
+                return $this->approveViaTrack($session, (int) $targetTrackId, $pr->reason, $responderUserId, $pr->requester_user_id);
+            }
+            if ($pr->target_station_id !== null) {
+                return $this->approveViaLegacyStation($session, (int) $pr->target_station_id, $pr->reason, $responderUserId, $pr->requester_user_id);
             }
 
-            $resultData = [
-                'session' => $this->formatSession($result['session']),
-                'override' => $result['override'] ?? null,
-            ];
+            throw new \InvalidArgumentException('Override requires target track or custom path. Define path on Track Overrides page.', 422);
         } else {
             $result = $this->sessionService->forceComplete(
                 $session,
@@ -112,12 +90,78 @@ class PermissionRequestService
             );
 
             $resultData = [
-                'session' => $this->formatSession($result['session']),
+                'session' => SessionResource::make($result['session'])->resolve(),
                 'token' => $result['token'],
             ];
         }
 
         return $resultData;
+    }
+
+    /**
+     * Execute override via custom steps path (station IDs array).
+     *
+     * @return array{session: array, override: array|null}
+     */
+    private function approveViaCustomPath(Session $session, array $customSteps, string $reason, int $responderUserId, int $requesterUserId): array
+    {
+        $result = $this->sessionService->overrideByTrack(
+            $session,
+            0,
+            $reason,
+            $responderUserId,
+            $requesterUserId,
+            $customSteps
+        );
+
+        return [
+            'session' => SessionResource::make($result['session'])->resolve(),
+            'override' => $result['override'] ?? null,
+        ];
+    }
+
+    /**
+     * Execute override via target track (track ID).
+     *
+     * @return array{session: array, override: array|null}
+     */
+    private function approveViaTrack(Session $session, int $targetTrackId, string $reason, int $responderUserId, int $requesterUserId): array
+    {
+        $result = $this->sessionService->overrideByTrack(
+            $session,
+            $targetTrackId,
+            $reason,
+            $responderUserId,
+            $requesterUserId,
+            null
+        );
+
+        return [
+            'session' => SessionResource::make($result['session'])->resolve(),
+            'override' => $result['override'] ?? null,
+        ];
+    }
+
+    /**
+     * Execute override via legacy target_station_id (single station).
+     *
+     * @return array{session: array, override: array|null}
+     */
+    private function approveViaLegacyStation(Session $session, int $targetStationId, string $reason, int $responderUserId, int $requesterUserId): array
+    {
+        $result = $this->sessionService->overrideByTrack(
+            $session,
+            0,
+            $reason,
+            $responderUserId,
+            $requesterUserId,
+            [$targetStationId]
+        );
+
+        return [
+            'session' => SessionResource::make($result['session'])->resolve(),
+            'override' => $result['override'] ?? null,
+        ];
     }
 
     /**
@@ -157,27 +201,4 @@ class PermissionRequestService
         return null;
     }
 
-    public function formatSessionForResponse($session): array
-    {
-        return $this->formatSession($session);
-    }
-
-    private function formatSession($session): array
-    {
-        $session->loadMissing(['currentStation', 'serviceTrack']);
-
-        return [
-            'id' => $session->id,
-            'alias' => $session->alias,
-            'status' => $session->status,
-            'current_station' => $session->currentStation ? [
-                'id' => $session->currentStation->id,
-                'name' => $session->currentStation->name,
-            ] : null,
-            'track' => $session->serviceTrack ? [
-                'id' => $session->serviceTrack->id,
-                'name' => $session->serviceTrack->name,
-            ] : null,
-        ];
-    }
 }

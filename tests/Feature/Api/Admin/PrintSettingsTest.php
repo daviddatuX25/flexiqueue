@@ -2,7 +2,7 @@
 
 namespace Tests\Feature\Api\Admin;
 
-use App\Models\PrintSetting;
+use App\Repositories\PrintSettingRepository;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -31,7 +31,7 @@ class PrintSettingsTest extends TestCase
     public function test_update_saves_settings(): void
     {
         $admin = User::factory()->admin()->create();
-        PrintSetting::instance();
+        $this->app->make(PrintSettingRepository::class)->getInstance();
 
         $this->actingAs($admin);
         Session::start();
@@ -75,7 +75,7 @@ class PrintSettingsTest extends TestCase
     {
         Storage::fake('public');
         $admin = User::factory()->admin()->create();
-        PrintSetting::instance();
+        $this->app->make(PrintSettingRepository::class)->getInstance();
 
         $this->actingAs($admin);
         Session::start();
@@ -90,7 +90,7 @@ class PrintSettingsTest extends TestCase
         $response->assertJsonPath('type', 'logo');
         $this->assertNotEmpty($response->json('url'));
 
-        $settings = PrintSetting::instance();
+        $settings = $this->app->make(PrintSettingRepository::class)->getInstance();
         $this->assertNotNull($settings->logo_url);
     }
 
@@ -98,7 +98,7 @@ class PrintSettingsTest extends TestCase
     {
         Storage::fake('public');
         $admin = User::factory()->admin()->create();
-        PrintSetting::instance();
+        $this->app->make(PrintSettingRepository::class)->getInstance();
 
         $this->actingAs($admin);
         Session::start();
@@ -113,7 +113,7 @@ class PrintSettingsTest extends TestCase
         $response->assertJsonPath('type', 'background');
         $this->assertNotEmpty($response->json('url'));
 
-        $settings = PrintSetting::instance();
+        $settings = $this->app->make(PrintSettingRepository::class)->getInstance();
         $this->assertNotNull($settings->bg_image_url);
     }
 }

@@ -32,6 +32,10 @@ Concise checklist so we don’t repeat the same failures. Add new items here whe
 
 ## Build & environment
 
+- **"Open dev server" = full stack**  
+  User wants Sail + Vite + Reverb + queue in one go.  
+  → Use `./vendor/bin/sail npm run dev:sail` or `./scripts/dev-start-sail.sh` (not just `sail npm run dev`).
+
 - **Build fails with "Could not resolve entry module index.html" or UNC path errors**  
   Frontend build ran in wrong environment (e.g. Windows CMD, UNC path).  
   → Run npm via Sail: `./vendor/bin/sail npm run build` or `./vendor/bin/sail npm run dev`. Don’t use host `npm run build` for this project.

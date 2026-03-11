@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\PrintSetting;
 use App\Models\Token;
+use App\Repositories\PrintSettingRepository;
 use App\Services\TokenPrintService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -18,7 +18,8 @@ use Inertia\Response;
 class TokenPrintController extends Controller
 {
     public function __construct(
-        private TokenPrintService $tokenPrintService
+        private TokenPrintService $tokenPrintService,
+        private PrintSettingRepository $printSettingRepository
     ) {}
 
     /**
@@ -28,7 +29,7 @@ class TokenPrintController extends Controller
     public function __invoke(Request $request): Response
     {
         $tokens = $this->resolveTokens($request);
-        $saved = PrintSetting::instance();
+        $saved = $this->printSettingRepository->getInstance();
 
         $cardsPerPage = $request->has('cards_per_page')
             ? max(4, min(8, (int) $request->query('cards_per_page', 6)))

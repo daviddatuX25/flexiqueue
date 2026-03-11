@@ -179,6 +179,92 @@ class StationSelectionServiceTest extends TestCase
         $this->assertSame($station2->id, $result);
     }
 
+    public function test_select_station_least_busy_prefers_station_with_fewer_serving_sessions(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+            'settings' => ['station_selection_mode' => 'least_busy'],
+        ]);
+        $station1 = Station::create([
+            'program_id' => $program->id,
+            'name' => 'A',
+            'capacity' => 10,
+            'is_active' => true,
+        ]);
+        $station2 = Station::create([
+            'program_id' => $program->id,
+            'name' => 'B',
+            'capacity' => 10,
+            'is_active' => true,
+        ]);
+        $process = Process::create([
+            'program_id' => $program->id,
+            'name' => 'Verification',
+            'description' => null,
+        ]);
+        DB::table('station_process')->insert([
+            ['station_id' => $station1->id, 'process_id' => $process->id],
+            ['station_id' => $station2->id, 'process_id' => $process->id],
+        ]);
+
+        $track = ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'Default',
+            'is_default' => true,
+        ]);
+
+        $token1 = new Token;
+        $token1->qr_code_hash = hash('sha256', Str::random(32).'T1');
+        $token1->physical_id = 'T1';
+        $token1->status = 'in_use';
+        $token1->save();
+
+        $token2 = new Token;
+        $token2->qr_code_hash = hash('sha256', Str::random(32).'T2');
+        $token2->physical_id = 'T2';
+        $token2->status = 'in_use';
+        $token2->save();
+
+        // Station 1: one serving session (heavier load).
+        Session::create([
+            'token_id' => $token1->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'T1',
+            'current_station_id' => $station1->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+        ]);
+
+        // Station 2: one waiting + one called (same count, lighter weighted load).
+        Session::create([
+            'token_id' => $token2->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'T2',
+            'current_station_id' => $station2->id,
+            'current_step_order' => 1,
+            'status' => 'waiting',
+        ]);
+        Session::create([
+            'token_id' => $token2->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'T2',
+            'current_station_id' => $station2->id,
+            'current_step_order' => 1,
+            'status' => 'called',
+        ]);
+
+        $result = $this->service->selectStationForProcess($process->id, $program->id);
+
+        $this->assertSame($station2->id, $result);
+    }
+
     public function test_select_station_round_robin_rotates_to_next_station(): void
     {
         $user = User::factory()->create();

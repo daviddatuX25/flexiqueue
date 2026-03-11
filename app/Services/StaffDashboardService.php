@@ -13,6 +13,10 @@ use Illuminate\Support\Facades\DB;
  */
 class StaffDashboardService
 {
+    public function __construct(
+        private StaffAssignmentService $staffAssignmentService
+    ) {}
+
     public function getMetricsForUser(User $user): array
     {
         $today = Carbon::today();
@@ -43,7 +47,7 @@ class StaffDashboardService
             return null;
         }
 
-        $station = $user->assignedStationForProgram($program->id);
+        $station = $this->staffAssignmentService->getStationForUser($user, $program->id);
         if (! $station) {
             return [
                 'name' => null,

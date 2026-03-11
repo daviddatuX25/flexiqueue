@@ -42,6 +42,8 @@ export WWWGROUP="${WWWGROUP:-$(id -g)}"
 # Load Reverb keys so Vite inlines them (Echo/Pusher need VITE_REVERB_APP_KEY).
 # For deploy builds, .env.prod is the ONLY source; unset any inherited dev vars so
 # the bundle never gets your local REVERB_APP_KEY (e.g. fwa0z3...).
+# VITE_REVERB_VIA_PROXY=true for prod: Echo uses same-origin (nginx proxies /app to Reverb).
+# Dev uses VITE_REVERB_VIA_PROXY=false so Echo connects directly to localhost:6001.
 unset REVERB_APP_ID REVERB_APP_KEY REVERB_APP_SECRET REVERB_HOST REVERB_PORT REVERB_SCHEME
 unset VITE_REVERB_APP_KEY VITE_REVERB_HOST VITE_REVERB_PORT VITE_REVERB_SCHEME VITE_REVERB_VIA_PROXY
 [ -f "$MAIN_REPO_ROOT/.env.prod" ] && set -a && source "$MAIN_REPO_ROOT/.env.prod" 2>/dev/null && set +a
@@ -52,7 +54,7 @@ export VITE_REVERB_SCHEME="${REVERB_SCHEME:-http}"
 export VITE_REVERB_VIA_PROXY="${VITE_REVERB_VIA_PROXY:-true}"
 
 echo "Building inside container (prod worktree at $PROD_WORKTREE)..."
-echo "  Reverb key for bundle: ${VITE_REVERB_APP_KEY:0:8}... (from .env.prod only)"
+echo "  Reverb key: ${VITE_REVERB_APP_KEY:0:8}... | via-proxy: ${VITE_REVERB_VIA_PROXY} (from .env.prod)"
 (cd "$MAIN_REPO_ROOT" && $COMPOSE_CMD run --rm \
   -e WWWUSER \
   -e WWWGROUP \

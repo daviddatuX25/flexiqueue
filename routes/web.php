@@ -171,9 +171,10 @@ Route::middleware('auth')->prefix('api/profile')->group(function (): void {
 });
 
 // Per PIN-QR-AUTHORIZATION-SYSTEM AUTH-3, AUTH-4: Temporary PIN/QR generation (supervisor/admin only)
-// Per TRACK-OVERRIDES-REFACTOR §1.4: List generated authorizations
+// Per TRACK-OVERRIDES-REFACTOR §1.4: List and manage generated authorizations
 Route::middleware(['auth', 'role:admin,supervisor'])->group(function (): void {
     Route::get('/api/auth/authorizations', [AuthorizationsController::class, 'index'])->name('api.auth.authorizations');
+    Route::delete('/api/auth/authorizations/{authorization}', [AuthorizationsController::class, 'destroy'])->name('api.auth.authorizations.destroy');
     Route::post('/api/auth/temporary-pin', TemporaryPinController::class)->name('api.auth.temporary-pin');
     Route::post('/api/auth/temporary-qr', TemporaryQrController::class)->name('api.auth.temporary-qr');
 });
@@ -194,6 +195,9 @@ Route::middleware(['auth', 'role:admin,supervisor,staff'])->prefix('api')->group
     Route::post('/sessions/{session}/transfer', [ApiSessionController::class, 'transfer']);
     Route::post('/sessions/{session}/complete', [ApiSessionController::class, 'complete']);
     Route::post('/sessions/{session}/cancel', [ApiSessionController::class, 'cancel']);
+    Route::post('/sessions/{session}/hold', [ApiSessionController::class, 'hold']);
+    Route::post('/sessions/{session}/resume-from-hold', [ApiSessionController::class, 'resumeFromHold']);
+    Route::post('/sessions/{session}/enqueue-back', [ApiSessionController::class, 'enqueueBack']);
     Route::post('/sessions/{session}/no-show', [ApiSessionController::class, 'noShow']);
     Route::post('/sessions/{session}/force-complete', [ApiSessionController::class, 'forceComplete']);
     Route::post('/sessions/{session}/override', [ApiSessionController::class, 'override']);

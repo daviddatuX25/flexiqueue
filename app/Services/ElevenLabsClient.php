@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Exceptions\TtsQuotaExceededException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 /**
  * ElevenLabs API client. Uses xi-api-key header per ElevenLabs documentation.
@@ -117,6 +119,44 @@ class ElevenLabsClient
             'time' => is_array($time) ? array_map('intval', $time) : [],
             'usage' => is_array($usage) ? $usage : [],
         ];
+    }
+
+    /**
+     * Generate speech via POST /v1/text-to-speech/{voiceId}.
+     * Per REFACTORING-ISSUE-LIST Issue 16 / flexiqueue-g693.
+     *
+     * @return string|null Raw audio bytes (e.g. MP3) or null on failure
+     */
+    public function generateSpeech(string $text, string $voiceId, string $modelId, ?array $voiceSettings = null): ?string
+    {
+        $url = self::BASE_URL.'/text-to-speech/'.urlencode($voiceId);
+        $body = [
+            'text' => $text,
+            'model_id' => $modelId,
+        ];
+        if ($voiceSettings !== null) {
+            $body['voice_settings'] = $voiceSettings;
+        }
+        $headers = array_merge($this->headers(), ['Accept' => 'audio/mpeg']);
+        $response = Http::withHeaders($headers)->timeout(30)->post($url, $body);
+
+        if (! $response->successful()) {
+            $status = $response->status();
+            $body = $response->json() ?? [];
+            $detail = $body['detail'] ?? [];
+            if (is_array($detail) && ($detail['status'] ?? '') === 'quota_exceeded') {
+                throw TtsQuotaExceededException::fromApiResponse($status, $body);
+            }
+            Log::warning('ElevenLabs TTS request failed', [
+                'status' => $status,
+                'body' => $body ?: substr((string) $response->body(), 0, 500),
+                'text_length' => strlen($text),
+            ]);
+
+            return null;
+        }
+
+        return $response->body();
     }
 
     /**

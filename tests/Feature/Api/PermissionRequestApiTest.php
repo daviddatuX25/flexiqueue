@@ -93,6 +93,28 @@ class PermissionRequestApiTest extends TestCase
         $token->update(['current_session_id' => $this->session->id]);
     }
 
+    public function test_store_override_with_target_track_id_without_reason_creates_request(): void
+    {
+        $response = $this->actingAs($this->staff)->postJson('/api/permission-requests', [
+            'session_id' => $this->session->id,
+            'action_type' => 'override',
+            'target_track_id' => $this->trackToStation2->id,
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('status', 'pending');
+
+        $pr = PermissionRequest::where('session_id', $this->session->id)->first();
+        $this->assertNotNull($pr);
+        $this->assertSame($this->trackToStation2->id, $pr->target_track_id);
+        $this->assertSame('override', $pr->action_type);
+        $this->assertSame('', $pr->reason);
+
+        $this->session->refresh();
+        $this->assertSame('awaiting_approval', $this->session->status);
+        $this->assertNull($this->session->current_station_id);
+    }
+
     public function test_store_override_with_target_track_id_creates_request_and_sets_awaiting_approval(): void
     {
         $response = $this->actingAs($this->staff)->postJson('/api/permission-requests', [
@@ -169,6 +191,18 @@ class PermissionRequestApiTest extends TestCase
         $this->assertSame('waiting', $this->session->status);
         $this->assertSame($this->trackToStation2->id, $this->session->track_id);
         $this->assertSame($this->station2->id, $this->session->current_station_id);
+    }
+
+    public function test_store_override_with_is_custom_without_reason_returns_422(): void
+    {
+        $response = $this->actingAs($this->staff)->postJson('/api/permission-requests', [
+            'session_id' => $this->session->id,
+            'action_type' => 'override',
+            'is_custom' => true,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['reason']);
     }
 
     public function test_store_override_with_is_custom_creates_request_without_target_track(): void

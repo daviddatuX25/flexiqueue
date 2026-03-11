@@ -4,6 +4,7 @@
 	 * Header: FlexiQueue, program name, date, and live time. Main: full-screen content.
 	 */
 	import { Link } from '@inertiajs/svelte';
+	import Marquee from '../Components/Marquee.svelte';
 	import FlexiQueueToaster from '../Components/FlexiQueueToaster.svelte';
 	import FlashToToast from '../Components/FlashToToast.svelte';
 
@@ -32,16 +33,14 @@
 		<div class="shrink-0">
 			<Link href="/" class="text-lg font-bold text-inherit no-underline hover:opacity-90 transition-opacity">FlexiQueue</Link>
 		</div>
-		<div class="flex-1 flex justify-center min-w-0">
+		<div class="flex-1 flex flex-col justify-center items-center min-w-0 gap-0.5">
 			{#if programName}
-				<div class="fq-header-marquee min-w-0">
-					<div class="fq-header-marquee__inner">
-						<span class="text-base font-semibold whitespace-nowrap">{programName}</span>
-						<span class="text-base font-semibold whitespace-nowrap fq-header-marquee__dup" aria-hidden="true"
-							>{programName}</span
-						>
-					</div>
+				<div class="fq-header-marquee fq-header-marquee--mobile min-w-0">
+					<Marquee overflowOnly={false} duration={12} gapEm={2} class="fq-header-marquee__inner w-full">
+						{#snippet children()}<span class="text-base font-semibold whitespace-nowrap">{programName}</span>{/snippet}
+					</Marquee>
 				</div>
+				<span class="fq-header-marquee--desktop text-base font-semibold">{programName}</span>
 			{:else}
 				<span class="text-primary-contrast-500/70">No active program</span>
 			{/if}
@@ -60,54 +59,22 @@
 </div>
 
 <style>
-	/* Mobile-only marquee for long program names; desktop keeps static (truncate via layout). */
-	.fq-header-marquee {
-		overflow: hidden;
+	/* Mobile: marquee (global fq-marquee-track). Desktop: static centered text. */
+	.fq-header-marquee--mobile {
 		width: 100%;
 	}
-
-	.fq-header-marquee__inner {
-		display: inline-flex;
-		align-items: center;
-		gap: 2rem;
-		width: max-content;
-		animation: fq-header-marquee 12s linear infinite;
-	}
-
-	/* Duplicate text for seamless scroll; add left padding via gap. */
-	.fq-header-marquee__dup {
-		opacity: 0.9;
-	}
-
 	@media (min-width: 640px) {
-		.fq-header-marquee {
-			overflow: visible;
-			display: flex;
-			justify-content: center;
-		}
-		.fq-header-marquee__inner {
-			animation: none;
-		}
-		.fq-header-marquee__dup {
+		.fq-header-marquee--mobile {
 			display: none;
 		}
 	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.fq-header-marquee__inner {
-			animation: none;
-		}
-		.fq-header-marquee__dup {
-			display: none;
-		}
+	.fq-header-marquee--desktop {
+		display: none;
 	}
-
-	@keyframes fq-header-marquee {
-		0% {
-			transform: translateX(0);
-		}
-		100% {
-			transform: translateX(-50%);
+	@media (min-width: 640px) {
+		.fq-header-marquee--desktop {
+			display: block;
+			text-align: center;
 		}
 	}
 </style>

@@ -93,23 +93,26 @@ class TemporaryPinTest extends TestCase
     public function test_temporary_pin_generate_returns_6_digit_code(): void
     {
         $response = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', [
+            'expiry_mode' => 'time_only',
             'expires_in_seconds' => 300,
         ]);
 
         $response->assertStatus(201);
-        $response->assertJsonStructure(['code', 'expires_at', 'expires_in_seconds']);
+        $response->assertJsonStructure(['code', 'expiry_mode', 'expires_at', 'expires_in_seconds', 'max_uses']);
         $code = $response->json('code');
         $this->assertMatchesRegularExpression('/^\d{6}$/', $code);
         $this->assertDatabaseCount('temporary_authorizations', 1);
         $this->assertDatabaseHas('temporary_authorizations', [
             'user_id' => $this->supervisor->id,
             'type' => 'pin',
+            'expiry_mode' => 'time_only',
         ]);
     }
 
     public function test_override_with_temp_pin_returns_200(): void
     {
         $genResponse = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', [
+            'expiry_mode' => 'time_only',
             'expires_in_seconds' => 300,
         ]);
         $genResponse->assertStatus(201);
@@ -127,33 +130,38 @@ class TemporaryPinTest extends TestCase
         $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'override']);
     }
 
-    public function test_override_with_used_temp_pin_returns_401(): void
+    public function test_time_only_temp_pin_can_be_reused_within_ttl(): void
     {
-        $genResponse = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', ['expires_in_seconds' => 300]);
+        $genResponse = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', [
+            'expiry_mode' => 'time_only',
+            'expires_in_seconds' => 300,
+        ]);
         $code = $genResponse->json('code');
 
         $staff = User::factory()->create(['role' => 'staff']);
         $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
             'target_track_id' => $this->trackToStation2->id,
-            'reason' => 'First use',
+            'reason' => 'Use 1',
             'auth_type' => 'temp_pin',
             'temp_code' => $code,
         ])->assertStatus(200);
 
         $response = $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
             'target_track_id' => $this->track->id,
-            'reason' => 'Replay',
+            'reason' => 'Use 2',
             'auth_type' => 'temp_pin',
             'temp_code' => $code,
         ]);
 
-        $response->assertStatus(401);
-        $response->assertJsonPath('message', 'Authorization expired. Request a new one.');
+        $response->assertStatus(200);
     }
 
     public function test_force_complete_with_temp_pin_returns_200(): void
     {
-        $genResponse = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', ['expires_in_seconds' => 300]);
+        $genResponse = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', [
+            'expiry_mode' => 'time_only',
+            'expires_in_seconds' => 300,
+        ]);
         $genResponse->assertStatus(201);
         $code = $genResponse->json('code');
 
@@ -167,6 +175,68 @@ class TemporaryPinTest extends TestCase
         $response->assertStatus(200);
         $response->assertJsonPath('session.status', 'completed');
         $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'force_complete']);
+    }
+
+    public function test_usage_only_temp_pin_expires_after_max_uses(): void
+    {
+        $genResponse = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', [
+            'expiry_mode' => 'usage_only',
+            'max_uses' => 2,
+        ]);
+        $genResponse->assertStatus(201);
+        $code = $genResponse->json('code');
+
+        $staff = User::factory()->create(['role' => 'staff']);
+        $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
+            'target_track_id' => $this->trackToStation2->id,
+            'reason' => 'Use 1',
+            'auth_type' => 'temp_pin',
+            'temp_code' => $code,
+        ])->assertStatus(200);
+
+        $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
+            'target_track_id' => $this->track->id,
+            'reason' => 'Use 2',
+            'auth_type' => 'temp_pin',
+            'temp_code' => $code,
+        ])->assertStatus(200);
+
+        $res3 = $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
+            'target_track_id' => $this->trackToStation2->id,
+            'reason' => 'Use 3',
+            'auth_type' => 'temp_pin',
+            'temp_code' => $code,
+        ]);
+        $res3->assertStatus(401);
+        $res3->assertJsonPath('message', 'Authorization expired. Request a new one.');
+    }
+
+    public function test_time_or_usage_temp_pin_expires_when_either_limit_is_hit(): void
+    {
+        $genResponse = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', [
+            'expiry_mode' => 'time_or_usage',
+            'expires_in_seconds' => 300,
+            'max_uses' => 1,
+        ]);
+        $genResponse->assertStatus(201);
+        $code = $genResponse->json('code');
+
+        $staff = User::factory()->create(['role' => 'staff']);
+        $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
+            'target_track_id' => $this->trackToStation2->id,
+            'reason' => 'Use 1',
+            'auth_type' => 'temp_pin',
+            'temp_code' => $code,
+        ])->assertStatus(200);
+
+        $res2 = $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
+            'target_track_id' => $this->track->id,
+            'reason' => 'Use 2',
+            'auth_type' => 'temp_pin',
+            'temp_code' => $code,
+        ]);
+        $res2->assertStatus(401);
+        $res2->assertJsonPath('message', 'Authorization expired. Request a new one.');
     }
 
     public function test_temporary_pin_staff_cannot_generate(): void

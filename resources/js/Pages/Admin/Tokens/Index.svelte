@@ -415,6 +415,7 @@
         );
         submitting = false;
         if (ok) {
+            toaster.success({ title: "Tokens created." });
             closeBatchModal();
             await fetchTokens();
         } else {
@@ -437,6 +438,7 @@
         );
         submitting = false;
         if (ok && data?.token) {
+            toaster.success({ title: "Status updated." });
             tokens = tokens.map((t) =>
                 t.id === token.id ? { ...t, status: data.token.status } : t,
             );
@@ -802,6 +804,7 @@
         );
         submitting = false;
         if (ok) {
+            toaster.success({ title: "Tokens deleted." });
             selectedIds = new Set();
             await fetchTokens();
         } else {
@@ -827,6 +830,7 @@
         );
         submitting = false;
         if (ok) {
+            toaster.success({ title: "Token deleted." });
             tokens = tokens.filter((t) => t.id !== token.id);
         } else {
             toaster.error({ title: message ?? "Failed to delete token." });
@@ -2076,11 +2080,6 @@
                 Regeneration happens in the background via the queue worker. You can continue using the system;
                 TTS status badges will update as tokens finish.
             </p>
-            {#if ttsRegenerateError}
-                <div class="rounded-container bg-error-50 border border-error-200 text-error-800 p-3 text-sm" role="alert">
-                    {ttsRegenerateError}
-                </div>
-            {/if}
             <div class="flex justify-end gap-3 mt-2 pt-3 border-t border-surface-200">
                 <button
                     type="button"

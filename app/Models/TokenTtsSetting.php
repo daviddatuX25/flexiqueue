@@ -18,22 +18,6 @@ class TokenTtsSetting extends Model
     ];
 
     /**
-     * Get the singleton token TTS settings. Creates default row if none exists.
-     */
-    public static function instance(): self
-    {
-        $settings = self::first();
-        if (! $settings) {
-            $settings = self::create([
-                'voice_id' => null,
-                'rate' => (float) config('tts.default_rate', 0.84),
-            ]);
-        }
-
-        return $settings;
-    }
-
-    /**
      * Resolve effective voice ID: row value or config default.
      */
     public function getEffectiveVoiceId(): ?string

@@ -4,6 +4,7 @@ namespace App\Policies;
 
 use App\Models\Station;
 use App\Models\User;
+use App\Services\StaffAssignmentService;
 use Illuminate\Auth\Access\Response;
 
 /**
@@ -11,6 +12,10 @@ use Illuminate\Auth\Access\Response;
  */
 class StationPolicy
 {
+    public function __construct(
+        private StaffAssignmentService $staffAssignmentService
+    ) {}
+
     /**
      * Staff can view a station's queue only if assigned to that station. Admin/supervisor can view any.
      * Per 08-API-SPEC-PHASE1 §4.1: 403 message "You are not assigned to this station."
@@ -21,7 +26,7 @@ class StationPolicy
             return Response::allow();
         }
 
-        $assigned = $user->assignedStationForProgram($station->program_id);
+        $assigned = $this->staffAssignmentService->getStationForUser($user, $station->program_id);
         if ($assigned && $assigned->id === $station->id) {
             return Response::allow();
         }

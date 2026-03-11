@@ -662,16 +662,37 @@
 	color: #64748b !important;
 }
 
-/* Marquee animation — smooth horizontal scroll for staff chips (duplicated list, loop at 50%) */
-@keyframes display-footer-marquee {
-	0% { transform: translateX(0); }
-	100% { transform: translateX(-50%); }
+/* Global marquee — content+gap+content+gap, -50% loop, no flicker. Duration set inline by Marquee.svelte. */
+@keyframes fq-marquee-scroll {
+	0% { transform: translate3d(0, 0, 0); }
+	100% { transform: translate3d(-50%, 0, 0); }
+}
+.fq-marquee-track {
+	display: inline-flex;
+	align-items: center;
+	white-space: nowrap;
+	will-change: transform;
+	user-select: none;
+	animation-name: fq-marquee-scroll;
+	animation-timing-function: linear;
+	animation-iteration-count: infinite;
+}
+.fq-marquee-track:hover {
+	animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+	.fq-marquee-track {
+		animation: none;
+	}
+}
+
+/* Display footer staff bar only: custom track to avoid loop flicker. Do not reuse for other marquees. */
+.display-footer__marquee {
+	transform: translateZ(0);
 }
 .display-footer__marquee-inner {
-	animation: display-footer-marquee 25s linear infinite;
-}
-.display-footer__marquee-inner:hover {
-	animation-play-state: paused;
+	backface-visibility: hidden;
+	contain: layout style paint;
 }
 
 /* White text on green — subtle shadow for legibility, separates text from brand green */

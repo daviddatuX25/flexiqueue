@@ -472,6 +472,39 @@ class SessionActionsTest extends TestCase
         $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'override']);
     }
 
+    /** Per flexiqueue-eiju: predefined track override without reason succeeds. */
+    public function test_override_predefined_track_without_reason_returns_200(): void
+    {
+        $this->program->update(['settings' => ['require_permission_before_override' => false]]);
+        $this->session->update(['status' => 'serving']);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/override", [
+            'target_track_id' => $this->trackToStation2->id,
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session.status', 'waiting');
+        $response->assertJsonPath('session.current_station.id', $this->station2->id);
+        $response->assertJsonStructure(['override' => ['authorized_by', 'reason']]);
+        $response->assertJsonPath('override.reason', '');
+        $this->assertDatabaseHas('transaction_logs', ['session_id' => $this->session->id, 'action_type' => 'override']);
+    }
+
+    /** Per flexiqueue-eiju: custom path override without reason returns 422. */
+    public function test_override_custom_steps_without_reason_returns_422(): void
+    {
+        $this->program->update(['settings' => ['require_permission_before_override' => false]]);
+        $this->session->update(['status' => 'serving']);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/override", [
+            'target_track_id' => $this->trackToStation2->id,
+            'custom_steps' => [$this->station2->id, $this->station1->id],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['reason']);
+    }
+
     /** When require_permission_before_override is ON (default), staff without PIN gets 401. */
     public function test_force_complete_without_auth_when_require_permission_on_returns_401(): void
     {

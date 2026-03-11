@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\SessionResource;
 use App\Models\PermissionRequest;
 use App\Models\Session;
 use App\Services\PermissionRequestService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 /**
  * Permission requests: staff creates; supervisor/admin approves or rejects.
@@ -27,7 +29,17 @@ class PermissionRequestController extends Controller
         $validated = $request->validate([
             'session_id' => ['required', 'integer', 'exists:queue_sessions,id'],
             'action_type' => ['required', 'string', 'in:override,force_complete'],
-            'reason' => ['required', 'string', 'min:1'],
+            'reason' => [
+                Rule::when(
+                    $request->input('action_type') === 'force_complete'
+                    || ($request->input('action_type') === 'override' && (
+                        $request->boolean('is_custom')
+                        || (is_array($request->input('custom_steps')) && count($request->input('custom_steps') ?? []) > 0)
+                    )),
+                    ['required', 'string', 'min:1'],
+                    ['nullable', 'string']
+                ),
+            ],
             'target_track_id' => ['nullable', 'integer', 'exists:service_tracks,id'],
             'is_custom' => ['nullable', 'boolean'],
             'custom_steps' => ['nullable', 'array'],
@@ -48,7 +60,7 @@ class PermissionRequestController extends Controller
             $session,
             $validated['action_type'],
             $user->id,
-            $validated['reason'],
+            $validated['reason'] ?? '',
             null,
             $targetTrackId,
             $customSteps
@@ -140,7 +152,7 @@ class PermissionRequestController extends Controller
         if ($result !== null) {
             return response()->json([
                 'message' => 'Request rejected. Session reassigned.',
-                'session' => $this->permissionRequestService->formatSessionForResponse($result['session']),
+                'session' => SessionResource::make($result['session'])->resolve(),
             ]);
         }
 

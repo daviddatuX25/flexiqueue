@@ -12,6 +12,7 @@
     import ThemeToggle from "../Components/ThemeToggle.svelte";
     import OfflineBanner from "../Components/OfflineBanner.svelte";
     import UserAvatar from "../Components/UserAvatar.svelte";
+    import Marquee from "../Components/Marquee.svelte";
 
     let {
         children,
@@ -41,18 +42,14 @@
         class="flex items-center justify-between gap-2 bg-surface-50 border-b border-surface-200 px-3 min-h-0 h-14 shrink-0"
     >
         <div class="min-w-0 flex-1 flex items-center gap-2">
-            <div class="fq-mobile-header-marquee min-w-0">
-                <div class="fq-mobile-header-marquee__inner">
-                    <span class="text-base font-semibold text-surface-950 whitespace-nowrap"
-                        >{headerTitle}</span
-                    >
-                    <span
-                        class="text-base font-semibold text-surface-950 whitespace-nowrap fq-mobile-header-marquee__dup"
-                        aria-hidden="true"
-                        >{headerTitle}</span
-                    >
-                </div>
+            <div class="fq-mobile-header-marquee fq-mobile-header-marquee--mobile min-w-0">
+                <Marquee overflowOnly={false} duration={5.5} gapEm={1.5} class="fq-mobile-header-marquee__inner w-full">
+                    {#snippet children()}
+                        <span class="text-base font-semibold text-surface-950 whitespace-nowrap">{headerTitle}</span>
+                    {/snippet}
+                </Marquee>
             </div>
+            <span class="fq-mobile-header-marquee--desktop text-base font-semibold text-surface-950">{headerTitle}</span>
         </div>
         <div class="flex items-center gap-1.5 shrink-0">
             <ThemeToggle />
@@ -194,53 +191,22 @@
 </div>
 
 <style>
-    /* Mobile-only marquee for long header titles; reduces truncation pain. */
-    .fq-mobile-header-marquee {
-        overflow: hidden;
+    /* Mobile: marquee (global fq-marquee-track). Desktop: static title. */
+    .fq-mobile-header-marquee--mobile {
         width: 100%;
     }
-
-    .fq-mobile-header-marquee__inner {
-        display: inline-flex;
-        align-items: center;
-        gap: 1.5rem;
-        width: max-content;
-        animation: fq-mobile-header-marquee 5.5s linear infinite;
-    }
-
-    .fq-mobile-header-marquee__dup {
-        opacity: 0.85;
-    }
-
     @media (min-width: 768px) {
-        .fq-mobile-header-marquee {
-            overflow: visible;
-            display: flex;
-            justify-content: center;
-        }
-        .fq-mobile-header-marquee__inner {
-            animation: none;
-        }
-        .fq-mobile-header-marquee__dup {
+        .fq-mobile-header-marquee--mobile {
             display: none;
         }
     }
-
-    @media (prefers-reduced-motion: reduce) {
-        .fq-mobile-header-marquee__inner {
-            animation: none;
-        }
-        .fq-mobile-header-marquee__dup {
-            display: none;
-        }
+    .fq-mobile-header-marquee--desktop {
+        display: none;
     }
-
-    @keyframes fq-mobile-header-marquee {
-        0% {
-            transform: translateX(0);
-        }
-        100% {
-            transform: translateX(-50%);
+    @media (min-width: 768px) {
+        .fq-mobile-header-marquee--desktop {
+            display: block;
+            text-align: center;
         }
     }
 </style>

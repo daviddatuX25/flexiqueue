@@ -10,20 +10,25 @@ use App\Http\Requests\BindSessionRequest;
 use App\Http\Requests\CallSessionRequest;
 use App\Http\Requests\CancelSessionRequest;
 use App\Http\Requests\ForceCompleteSessionRequest;
+use App\Http\Requests\HoldSessionRequest;
 use App\Http\Requests\OverrideSessionRequest;
+use App\Http\Requests\EnqueueBackSessionRequest;
+use App\Http\Requests\ResumeFromHoldSessionRequest;
 use App\Http\Requests\ServeSessionRequest;
 use App\Http\Requests\TransferSessionRequest;
+use App\Http\Resources\SessionResource;
 use App\Models\Session;
-use App\Models\Station;
 use App\Models\User;
 use App\Services\PinService;
 use App\Services\SessionService;
+use App\Services\SupervisorAuthService;
+use App\Services\TokenService;
+use App\Services\TriageScanLogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Support\Facades\Schema;
-use App\Support\ClientCategory;
+use App\Support\SupervisorAuthResult;
 
 /**
  * Per 08-API-SPEC-PHASE1 §3: Session endpoints (bind, etc.). Auth: any staff.
@@ -36,9 +41,13 @@ class SessionController extends Controller
     private const PIN_FAIL_MAX_ATTEMPTS = 5;
 
     private const PIN_FAIL_DECAY_MINUTES = 15;
+
     public function __construct(
         private SessionService $sessionService,
-        private PinService $pinService
+        private PinService $pinService,
+        private SupervisorAuthService $supervisorAuthService,
+        private TokenService $tokenService,
+        private TriageScanLogService $triageScanLogService,
     ) {}
 
     /**
@@ -127,51 +136,16 @@ class SessionController extends Controller
     public function call(CallSessionRequest $request, Session $session): JsonResponse
     {
         $user = $request->user();
-        if ($this->callRequiresOverrideAuth($session) && ! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
-            $validated = $request->validated();
-            $authType = $validated['auth_type'] ?? null;
-            if (! $authType || ! in_array($authType, ['preset_pin', 'preset_qr', 'temp_pin', 'temp_qr', 'pin', 'qr'], true)) {
-                return response()->json([
-                    'message' => 'Calling this client would skip priority clients. Supervisor authorization required.',
-                ], 401);
-            }
-            $authType = $authType === 'pin' ? 'temp_pin' : ($authType === 'qr' ? 'temp_qr' : $authType);
-
-            $staffUserId = $request->user()->id;
-            if ($authType === 'preset_pin') {
-                $key = self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId;
-                if (RateLimiter::tooManyAttempts($key, self::PIN_FAIL_MAX_ATTEMPTS)) {
-                    return response()->json(['message' => 'Too many attempts. Try again in 15 minutes.'], 429);
-                }
-            }
-
-            $verified = match ($authType) {
-                'temp_pin' => $this->pinService->validateTemporaryPin($validated['temp_code'] ?? ''),
-                'temp_qr' => $this->pinService->validateTemporaryQr($validated['qr_scan_token'] ?? ''),
-                'preset_qr' => $this->pinService->validatePresetQr($validated['qr_scan_token'] ?? ''),
-                default => $this->pinService->validate((int) ($validated['supervisor_user_id'] ?? 0), $validated['supervisor_pin'] ?? ''),
-            };
-
-            if (! $verified) {
-                if ($authType === 'preset_pin') {
-                    RateLimiter::hit(self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId, self::PIN_FAIL_DECAY_MINUTES * 60);
-                }
-                $message = in_array($authType, ['temp_pin', 'temp_qr'], true)
-                    ? 'Authorization expired. Request a new one.'
-                    : 'Invalid supervisor PIN.';
-
-                return response()->json(['message' => $message], 401);
-            }
-
-            if ($authType === 'preset_pin') {
-                RateLimiter::clear(self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId);
-            }
-
-            if (in_array($authType, ['preset_pin', 'preset_qr'], true)) {
-                $authorizer = User::find($verified['user_id']);
-                if (! $authorizer || ! ($authorizer->isAdmin() || $authorizer->isSupervisorForProgram($session->program_id))) {
-                    return response()->json(['message' => 'You are not a supervisor for this program. Preset authorization cannot be used here.'], 403);
-                }
+        // Per docs/REFACTORING-ISSUE-LIST.md Issue 1: supervisor auth via SupervisorAuthService::verifyForAction.
+        if ($this->sessionService->callRequiresOverrideAuth($session) && ! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
+            $result = $this->supervisorAuthService->verifyForAction(
+                $request->validated(),
+                $user,
+                $session,
+                'call'
+            );
+            if (! $result->isOk()) {
+                return $this->respondSupervisorAuthFailure($result, 'Calling this client would skip priority clients. Supervisor authorization required.');
             }
         }
 
@@ -190,67 +164,20 @@ class SessionController extends Controller
     }
 
     /**
-     * Whether calling this session would require supervisor auth (skipping priority when require_permission_before_override).
+     * Map SupervisorAuthResult failure to HTTP JSON. Optional message for missing/invalid auth type (e.g. call-specific).
      */
-    private function callRequiresOverrideAuth(Session $session): bool
+    private function respondSupervisorAuthFailure(SupervisorAuthResult $result, ?string $requiredAuthMessage = null): JsonResponse
     {
-        if ($session->status !== 'waiting') {
-            return false;
-        }
+        $defaultRequiredMessage = 'Supervisor authorization required.';
+        $requiredMessage = $requiredAuthMessage ?? $defaultRequiredMessage;
 
-        $station = Station::find($session->current_station_id);
-        if (! $station) {
-            return false;
-        }
-
-        $station->loadMissing('program');
-        $program = $station->program;
-        if (! $program || ! $program->getRequirePermissionBeforeOverride()) {
-            return false;
-        }
-
-        $priorityFirst = $station->priority_first_override !== null
-            ? (bool) $station->priority_first_override
-            : $program->getPriorityFirst();
-        if ($priorityFirst) {
-            return false;
-        }
-
-        if (ClientCategory::isPriority($session->client_category)) {
-            return false;
-        }
-
-        $priorityWaitingCount = Session::query()
-            ->where('current_station_id', $station->id)
-            ->where('status', 'waiting')
-            ->where('id', '!=', $session->id)
-            ->get()
-            ->filter(fn (Session $s) => $s->isPriorityCategory())
-            ->count();
-
-        return $priorityWaitingCount > 0;
-    }
-
-    /**
-     * Infer auth_type from request when not explicitly sent (e.g. legacy tests send supervisor_user_id + supervisor_pin).
-     */
-    private function resolveAuthType(array $validated): ?string
-    {
-        $authType = $validated['auth_type'] ?? null;
-        if ($authType && in_array($authType, ['preset_pin', 'preset_qr', 'temp_pin', 'temp_qr', 'pin', 'qr'], true)) {
-            return $authType === 'pin' ? 'temp_pin' : ($authType === 'qr' ? 'temp_qr' : $authType);
-        }
-        if (! empty($validated['supervisor_user_id']) && ! empty($validated['supervisor_pin'])) {
-            return 'preset_pin';
-        }
-        if (! empty($validated['temp_code'])) {
-            return 'temp_pin';
-        }
-        if (! empty($validated['qr_scan_token'])) {
-            return 'temp_qr';
-        }
-
-        return null;
+        return match ($result->code()) {
+            'missing_auth_type', 'invalid_auth_type' => response()->json(['message' => $requiredMessage], 401),
+            'rate_limited' => response()->json(['message' => 'Too many attempts. Try again in 15 minutes.'], 429),
+            'expired_temp' => response()->json(['message' => 'Authorization expired. Request a new one.'], 401),
+            'unauthorized_program' => response()->json(['message' => 'You are not a supervisor for this program. Preset authorization cannot be used here.'], 403),
+            default => response()->json(['message' => 'Invalid supervisor PIN.'], 401),
+        };
     }
 
     /**
@@ -280,7 +207,7 @@ class SessionController extends Controller
         }
 
         return response()->json([
-            'session' => $this->formatSession($result['session']),
+            'session' => SessionResource::make($result['session'])->resolve(),
         ]);
     }
 
@@ -305,13 +232,13 @@ class SessionController extends Controller
         if (isset($result['action_required'])) {
             return response()->json([
                 'message' => $result['message'],
-                'session' => $this->formatSession($result['session']),
+                'session' => SessionResource::make($result['session'])->resolve(),
                 'action_required' => $result['action_required'],
             ]);
         }
 
         return response()->json([
-            'session' => $this->formatSession($result['session']),
+            'session' => SessionResource::make($result['session'])->resolve(),
             'previous_station' => $result['previous_station'] ?? null,
         ]);
     }
@@ -333,7 +260,7 @@ class SessionController extends Controller
         }
 
         return response()->json([
-            'session' => $this->formatSession($result['session']),
+            'session' => SessionResource::make($result['session'])->resolve(),
             'token' => $result['token'],
         ]);
     }
@@ -350,8 +277,105 @@ class SessionController extends Controller
         }
 
         return response()->json([
-            'session' => $this->formatSession($result['session']),
+            'session' => SessionResource::make($result['session'])->resolve(),
             'token' => $result['token'],
+        ]);
+    }
+
+    /**
+     * Per station-holding-area plan: move session to station holding area.
+     */
+    public function hold(HoldSessionRequest $request, Session $session): JsonResponse
+    {
+        Gate::authorize('update', $session);
+
+        $station = $session->currentStation;
+        if (! $station || $session->current_station_id !== $station->id) {
+            return response()->json(['message' => 'Session is not at a station.', 'error_code' => 'invalid_state'], 422);
+        }
+
+        try {
+            $this->sessionService->moveToHolding(
+                $session,
+                $station,
+                $request->user()->id,
+                $request->validated('remarks')
+            );
+        } catch (\InvalidArgumentException $e) {
+            $msg = $e->getMessage();
+            $code = (int) $e->getCode();
+            $status = $code === 422 ? 422 : 409;
+            $body = ['message' => $msg];
+            if (str_contains($msg, 'Holding area is full') || str_contains($msg, 'full')) {
+                $body['error_code'] = 'holding_full';
+                $status = 422;
+            } else {
+                $body['error_code'] = 'invalid_state';
+            }
+
+            return response()->json($body, $status);
+        }
+
+        return response()->json([
+            'message' => 'Session moved to holding',
+            'session_id' => $session->id,
+        ]);
+    }
+
+    /**
+     * Per station-holding-area plan: resume session from station holding area.
+     */
+    public function resumeFromHold(ResumeFromHoldSessionRequest $request, Session $session): JsonResponse
+    {
+        Gate::authorize('update', $session);
+
+        $station = $session->holdingStation;
+        if (! $station || ! $session->isOnHold() || $session->holding_station_id !== $station->id) {
+            return response()->json(['message' => 'Session is not on hold at this station.', 'error_code' => 'invalid_state'], 422);
+        }
+
+        try {
+            $this->sessionService->resumeFromHolding(
+                $session,
+                $station,
+                $request->user()->id,
+                $request->validated('remarks')
+            );
+        } catch (\InvalidArgumentException $e) {
+            $msg = $e->getMessage();
+            $body = ['message' => $msg];
+            if (str_contains($msg, 'at capacity') || str_contains($msg, 'Station at capacity')) {
+                $body['error_code'] = 'at_capacity';
+
+                return response()->json($body, 422);
+            }
+            $body['error_code'] = 'invalid_state';
+
+            return response()->json($body, 409);
+        }
+
+        return response()->json([
+            'message' => 'Session resumed',
+            'session_id' => $session->id,
+        ]);
+    }
+
+    /**
+     * Per flexiqueue-a3wh: Enqueue session back to same station at end of queue.
+     */
+    public function enqueueBack(EnqueueBackSessionRequest $request, Session $session): JsonResponse
+    {
+        Gate::authorize('update', $session);
+
+        try {
+            $result = $this->sessionService->enqueueBack($session, $request->user()->id);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 409);
+        }
+
+        return response()->json([
+            'session' => SessionResource::make($result['session'])->resolve(),
+            'back_to_waiting' => $result['back_to_waiting'],
         ]);
     }
 
@@ -368,7 +392,7 @@ class SessionController extends Controller
         }
 
         $response = [
-            'session' => $this->formatSession($result['session']),
+            'session' => SessionResource::make($result['session'])->resolve(),
         ];
         if (isset($result['token'])) {
             $response['token'] = $result['token'];
@@ -393,7 +417,7 @@ class SessionController extends Controller
             try {
                 $result = $this->sessionService->forceComplete(
                     $session,
-                    $request->validated('reason'),
+                    $request->validated('reason') ?? '',
                     $staffUserId,
                     $staffUserId
                 );
@@ -403,7 +427,7 @@ class SessionController extends Controller
             }
 
             return response()->json([
-                'session' => $this->formatSession($result['session']),
+                'session' => SessionResource::make($result['session'])->resolve(),
                 'token' => $result['token'],
             ]);
         }
@@ -411,11 +435,11 @@ class SessionController extends Controller
         // Per flexiqueue-i87: When program has require_permission_before_override OFF, accept reason only (no PIN/QR).
         $session->loadMissing('program');
         $program = $session->program;
-        if ($program && ! $program->getRequirePermissionBeforeOverride()) {
+        if ($program && ! $program->settings()->getRequirePermissionBeforeOverride()) {
             try {
                 $result = $this->sessionService->forceComplete(
                     $session,
-                    $request->validated('reason'),
+                    $request->validated('reason') ?? '',
                     $staffUserId,
                     $staffUserId
                 );
@@ -426,57 +450,26 @@ class SessionController extends Controller
             }
 
             return response()->json([
-                'session' => $this->formatSession($result['session']),
+                'session' => SessionResource::make($result['session'])->resolve(),
                 'token' => $result['token'],
             ]);
         }
 
-        $validated = $request->validated();
-        $authType = $this->resolveAuthType($validated);
-        if (! $authType || ! in_array($authType, ['preset_pin', 'preset_qr', 'temp_pin', 'temp_qr'], true)) {
-            return response()->json(['message' => 'Supervisor authorization required.'], 401);
-        }
-
-        if ($authType === 'preset_pin') {
-            $key = self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId;
-            if (RateLimiter::tooManyAttempts($key, self::PIN_FAIL_MAX_ATTEMPTS)) {
-                return response()->json(['message' => 'Too many attempts. Try again in 15 minutes.'], 429);
-            }
-        }
-
-        $verified = match ($authType) {
-            'temp_pin' => $this->pinService->validateTemporaryPin($validated['temp_code'] ?? ''),
-            'temp_qr' => $this->pinService->validateTemporaryQr($validated['qr_scan_token'] ?? ''),
-            'preset_qr' => $this->pinService->validatePresetQr($validated['qr_scan_token'] ?? ''),
-            default => $this->pinService->validate((int) ($validated['supervisor_user_id'] ?? 0), $validated['supervisor_pin'] ?? ''),
-        };
-
-        if (! $verified) {
-            if ($authType === 'preset_pin') {
-                RateLimiter::hit(self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId, self::PIN_FAIL_DECAY_MINUTES * 60);
-            }
-            $message = in_array($authType, ['temp_pin', 'temp_qr'], true)
-                ? 'Authorization expired. Request a new one.'
-                : 'Invalid supervisor PIN.';
-            return response()->json(['message' => $message], 401);
-        }
-
-        if ($authType === 'preset_pin') {
-            RateLimiter::clear(self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId);
-        }
-
-        if (in_array($authType, ['preset_pin', 'preset_qr'], true)) {
-            $authorizer = User::find($verified['user_id']);
-            if (! $authorizer || ! ($authorizer->isAdmin() || $authorizer->isSupervisorForProgram($session->program_id))) {
-                return response()->json(['message' => 'You are not a supervisor for this program. Preset authorization cannot be used here.'], 403);
-            }
+        $result = $this->supervisorAuthService->verifyForAction(
+            $request->validated(),
+            $user,
+            $session,
+            'force_complete'
+        );
+        if (! $result->isOk()) {
+            return $this->respondSupervisorAuthFailure($result);
         }
 
         try {
             $result = $this->sessionService->forceComplete(
                 $session,
-                $request->validated('reason'),
-                $verified['user_id'],
+                $request->validated('reason') ?? '',
+                $result->authorizerUserId,
                 $request->user()->id
             );
         } catch (\InvalidArgumentException $e) {
@@ -489,7 +482,7 @@ class SessionController extends Controller
         }
 
         return response()->json([
-            'session' => $this->formatSession($result['session']),
+            'session' => SessionResource::make($result['session'])->resolve(),
             'token' => $result['token'],
         ]);
     }
@@ -507,7 +500,7 @@ class SessionController extends Controller
                 $result = $this->sessionService->overrideByTrack(
                     $session,
                     (int) $request->validated('target_track_id'),
-                    $request->validated('reason'),
+                    $request->validated('reason') ?? '',
                     $staffUserId,
                     $staffUserId,
                     $this->sanitizeCustomSteps($request->validated('custom_steps'))
@@ -518,7 +511,7 @@ class SessionController extends Controller
             }
 
             return response()->json([
-                'session' => $this->formatSession($result['session']),
+                'session' => SessionResource::make($result['session'])->resolve(),
                 'override' => $result['override'] ?? null,
             ]);
         }
@@ -526,12 +519,12 @@ class SessionController extends Controller
         // Per flexiqueue-i87: When program has require_permission_before_override OFF, accept reason only (no PIN/QR).
         $session->loadMissing('program');
         $program = $session->program;
-        if ($program && ! $program->getRequirePermissionBeforeOverride()) {
+        if ($program && ! $program->settings()->getRequirePermissionBeforeOverride()) {
             try {
                 $result = $this->sessionService->overrideByTrack(
                     $session,
                     (int) $request->validated('target_track_id'),
-                    $request->validated('reason'),
+                    $request->validated('reason') ?? '',
                     $staffUserId,
                     $staffUserId,
                     $this->sanitizeCustomSteps($request->validated('custom_steps'))
@@ -543,58 +536,27 @@ class SessionController extends Controller
             }
 
             return response()->json([
-                'session' => $this->formatSession($result['session']),
+                'session' => SessionResource::make($result['session'])->resolve(),
                 'override' => $result['override'],
             ]);
         }
 
-        $validated = $request->validated();
-        $authType = $this->resolveAuthType($validated);
-        if (! $authType || ! in_array($authType, ['preset_pin', 'preset_qr', 'temp_pin', 'temp_qr'], true)) {
-            return response()->json(['message' => 'Supervisor authorization required.'], 401);
-        }
-
-        if ($authType === 'preset_pin') {
-            $key = self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId;
-            if (RateLimiter::tooManyAttempts($key, self::PIN_FAIL_MAX_ATTEMPTS)) {
-                return response()->json(['message' => 'Too many attempts. Try again in 15 minutes.'], 429);
-            }
-        }
-
-        $verified = match ($authType) {
-            'temp_pin' => $this->pinService->validateTemporaryPin($validated['temp_code'] ?? ''),
-            'temp_qr' => $this->pinService->validateTemporaryQr($validated['qr_scan_token'] ?? ''),
-            'preset_qr' => $this->pinService->validatePresetQr($validated['qr_scan_token'] ?? ''),
-            default => $this->pinService->validate((int) ($validated['supervisor_user_id'] ?? 0), $validated['supervisor_pin'] ?? ''),
-        };
-
-        if (! $verified) {
-            if ($authType === 'preset_pin') {
-                RateLimiter::hit(self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId, self::PIN_FAIL_DECAY_MINUTES * 60);
-            }
-            $message = in_array($authType, ['temp_pin', 'temp_qr'], true)
-                ? 'Authorization expired. Request a new one.'
-                : 'Invalid supervisor PIN.';
-            return response()->json(['message' => $message], 401);
-        }
-
-        if ($authType === 'preset_pin') {
-            RateLimiter::clear(self::PIN_FAIL_THROTTLE_PREFIX.$staffUserId);
-        }
-
-        if (in_array($authType, ['preset_pin', 'preset_qr'], true)) {
-            $authorizer = User::find($verified['user_id']);
-            if (! $authorizer || ! ($authorizer->isAdmin() || $authorizer->isSupervisorForProgram($session->program_id))) {
-                return response()->json(['message' => 'You are not a supervisor for this program. Preset authorization cannot be used here.'], 403);
-            }
+        $result = $this->supervisorAuthService->verifyForAction(
+            $request->validated(),
+            $user,
+            $session,
+            'override'
+        );
+        if (! $result->isOk()) {
+            return $this->respondSupervisorAuthFailure($result);
         }
 
         try {
             $result = $this->sessionService->overrideByTrack(
                 $session,
                 (int) $request->validated('target_track_id'),
-                $request->validated('reason'),
-                $verified['user_id'],
+                $request->validated('reason') ?? '',
+                $result->authorizerUserId,
                 $request->user()->id,
                 $this->sanitizeCustomSteps($request->validated('custom_steps'))
             );
@@ -608,36 +570,9 @@ class SessionController extends Controller
         }
 
         return response()->json([
-            'session' => $this->formatSession($result['session']),
+            'session' => SessionResource::make($result['session'])->resolve(),
             'override' => $result['override'],
         ]);
-    }
-
-    /**
-     * Format session for JSON response.
-     *
-     * @return array<string, mixed>
-     */
-    private function formatSession(Session $session): array
-    {
-        $session->loadMissing(['currentStation', 'serviceTrack']);
-        $data = [
-            'id' => $session->id,
-            'alias' => $session->alias,
-            'status' => $session->status,
-            'current_step_order' => $session->current_step_order,
-            'started_at' => $session->started_at?->toIso8601String(),
-            'completed_at' => $session->completed_at?->toIso8601String(),
-            'no_show_attempts' => $session->no_show_attempts ?? 0,
-        ];
-        if ($session->relationLoaded('currentStation') && $session->currentStation) {
-            $data['current_station'] = ['id' => $session->currentStation->id, 'name' => $session->currentStation->name];
-        }
-        if ($session->relationLoaded('serviceTrack') && $session->serviceTrack) {
-            $data['track'] = ['id' => $session->serviceTrack->id, 'name' => $session->serviceTrack->name];
-        }
-
-        return $data;
     }
 
     private function user(): \App\Models\User
@@ -668,12 +603,7 @@ class SessionController extends Controller
         $physicalId = $request->query('physical_id');
         $qrHash = $request->query('qr_hash');
 
-        $token = null;
-        if (is_string($qrHash) && $qrHash !== '') {
-            $token = \App\Models\Token::where('qr_code_hash', $qrHash)->first();
-        } elseif (is_string($physicalId) && $physicalId !== '') {
-            $token = \App\Models\Token::where('physical_id', $physicalId)->first();
-        }
+        $token = $this->tokenService->lookupByPhysicalOrHash($physicalId, $qrHash);
 
         $shouldLog = (is_string($physicalId) && $physicalId !== '') || (is_string($qrHash) && $qrHash !== '');
 
@@ -681,33 +611,16 @@ class SessionController extends Controller
             if (! $shouldLog) {
                 return response()->json(['message' => 'physical_id or qr_hash is required.'], 422);
             }
-            $this->logTriageScan($request, null, 'not_found', null, null);
+            $this->triageScanLogService->log($request, null, 'not_found', null, null);
             return response()->json(['message' => 'Token not found.'], 404);
         }
 
-        $this->logTriageScan($request, $token->id, $token->status, $token->physical_id, $token->qr_code_hash);
+        $this->triageScanLogService->log($request, $token->id, $token->status, $token->physical_id, $token->qr_code_hash);
 
         return response()->json([
             'physical_id' => $token->physical_id,
             'qr_hash' => $token->qr_code_hash,
             'status' => $token->status,
-        ]);
-    }
-
-    private function logTriageScan(Request $request, ?int $tokenId, string $result, ?string $physicalId, ?string $qrHash): void
-    {
-        if (! Schema::hasTable('triage_scan_log')) {
-            return;
-        }
-        DB::table('triage_scan_log')->insert([
-            'physical_id' => $physicalId ?? $request->query('physical_id'),
-            'qr_hash' => $qrHash ?? $request->query('qr_hash'),
-            'result' => $result,
-            'token_id' => $tokenId,
-            'user_id' => $request->user()?->id,
-            'ip' => $request->ip(),
-            'created_at' => now(),
-            'updated_at' => now(),
         ]);
     }
 }

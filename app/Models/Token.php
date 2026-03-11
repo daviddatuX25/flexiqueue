@@ -2,11 +2,11 @@
 
 namespace App\Models;
 
+use App\Events\TokenDeleted;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Support\Facades\Storage;
 
 class Token extends Model
 {
@@ -98,33 +98,7 @@ class Token extends Model
 
     protected static function booted(): void
     {
-        static::deleted(function (self $token): void {
-            // Remove any stored TTS audio under tts/tokens/{id} and legacy single-file path.
-            $baseDir = 'tts/tokens/'.$token->id;
-            if (Storage::exists($baseDir)) {
-                Storage::deleteDirectory($baseDir);
-            }
-
-            if ($token->tts_audio_path && Storage::exists($token->tts_audio_path)) {
-                Storage::delete($token->tts_audio_path);
-            }
-
-            if ($token->tts_settings) {
-                $settings = $token->tts_settings;
-                if (is_array($settings) && isset($settings['languages']) && is_array($settings['languages'])) {
-                    foreach ($settings['languages'] as $lang => $config) {
-                        if (! empty($config['audio_path']) && Storage::exists($config['audio_path'])) {
-                            Storage::delete($config['audio_path']);
-                        }
-                        if (is_array($config)) {
-                            $settings['languages'][$lang]['audio_path'] = null;
-                            $settings['languages'][$lang]['status'] = null;
-                        }
-                    }
-                    $token->tts_settings = $settings;
-                }
-            }
-        });
+        static::deleted(fn (self $token) => event(new TokenDeleted($token)));
     }
 }
 

@@ -75,32 +75,6 @@ class User extends Authenticatable
         return $this->hasMany(ProgramStationAssignment::class);
     }
 
-    /**
-     * Resolve assigned station for a program. Uses program_station_assignments, with fallback to
-     * assigned_station_id when that station belongs to the given program.
-     */
-    public function assignedStationForProgram(int $programId): ?Station
-    {
-        $assignment = ProgramStationAssignment::query()
-            ->where('program_id', $programId)
-            ->where('user_id', $this->id)
-            ->with('station')
-            ->first();
-
-        if ($assignment) {
-            return $assignment->station;
-        }
-
-        if ($this->assigned_station_id) {
-            $station = Station::find($this->assigned_station_id);
-            if ($station && (int) $station->program_id === $programId) {
-                return $station;
-            }
-        }
-
-        return null;
-    }
-
     public function isAdmin(): bool
     {
         return $this->role === UserRole::Admin;

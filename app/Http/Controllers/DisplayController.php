@@ -55,7 +55,7 @@ class DisplayController extends Controller
     {
         $program = Program::query()->where('is_active', true)->with('serviceTracks:id,program_id,name,is_default')->first();
 
-        if (! $program || ! $program->getAllowPublicTriage()) {
+        if (! $program || ! $program->settings()->getAllowPublicTriage()) {
             return Inertia::render('Triage/PublicStart', [
                 'allowed' => false,
                 'program_name' => null,
@@ -77,8 +77,8 @@ class DisplayController extends Controller
             'program_name' => $program->name,
             'tracks' => $tracks,
             'date' => now()->format('F j, Y'),
-            'display_scan_timeout_seconds' => $program->getDisplayScanTimeoutSeconds(),
-            'enable_public_triage_hid_barcode' => $program->getEnablePublicTriageHidBarcode(),
+            'display_scan_timeout_seconds' => $program->settings()->getDisplayScanTimeoutSeconds(),
+            'enable_public_triage_hid_barcode' => $program->settings()->getEnablePublicTriageHidBarcode(),
         ]);
     }
 
@@ -94,10 +94,10 @@ class DisplayController extends Controller
         $inertiaProps = $this->checkStatusResultToInertiaProps($data);
 
         $program = Program::query()->where('is_active', true)->first();
-        $inertiaProps['display_scan_timeout_seconds'] = $program ? $program->getDisplayScanTimeoutSeconds() : 20;
+        $inertiaProps['display_scan_timeout_seconds'] = $program ? $program->settings()->getDisplayScanTimeoutSeconds() : 20;
         $inertiaProps['program_name'] = $program?->name;
         $inertiaProps['date'] = now()->format('F j, Y');
-        $inertiaProps['enable_display_hid_barcode'] = $program ? $program->getEnableDisplayHidBarcode() : true;
+        $inertiaProps['enable_display_hid_barcode'] = $program ? $program->settings()->getEnableDisplayHidBarcode() : true;
 
         if ($data['result'] === 'in_use' && ! empty($data['program_id']) && ! empty($data['track_id'])) {
             $this->addDiagramProps($inertiaProps, (int) $data['program_id'], (int) $data['track_id']);

@@ -682,7 +682,7 @@ class ProgramControllerTest extends TestCase
         $response = $this->actingAs($this->admin)->deleteJson("/api/admin/stations/{$station->id}");
 
         $response->assertStatus(204);
-        $this->assertSoftDeleted('stations', ['id' => $station->id]);
+        $this->assertDatabaseMissing('stations', ['id' => $station->id]);
         \Illuminate\Support\Facades\Storage::assertMissing('tts/stations/'.$station->id.'/en.mp3');
     }
 

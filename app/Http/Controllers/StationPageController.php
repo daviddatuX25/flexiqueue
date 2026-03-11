@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Program;
 use App\Models\Station;
+use App\Services\StaffAssignmentService;
 use App\Services\StationQueueService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -15,6 +16,7 @@ use Inertia\Response;
 class StationPageController extends Controller
 {
     public function __construct(
+        private StaffAssignmentService $staffAssignmentService,
         private StationQueueService $stationQueueService
     ) {}
 
@@ -29,7 +31,7 @@ class StationPageController extends Controller
 
         $resolvedStation = $station;
         if (! $resolvedStation && $program) {
-            $assigned = $user->assignedStationForProgram($program->id);
+            $assigned = $this->staffAssignmentService->getStationForUser($user, $program->id);
             if ($assigned) {
                 $resolvedStation = $assigned;
             }
@@ -52,7 +54,7 @@ class StationPageController extends Controller
                 ->map(fn ($t) => ['id' => $t->id, 'name' => $t->name])
                 ->values()
                 ->all();
-            $displayScanTimeoutSeconds = $program->getDisplayScanTimeoutSeconds();
+            $displayScanTimeoutSeconds = $program->settings()->getDisplayScanTimeoutSeconds();
         }
 
         return Inertia::render('Station/Index', [

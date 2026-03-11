@@ -22,6 +22,11 @@ let {
 	tts_active_language = 'en',
 	tts_connector_phrase = null,
 	station_tts_phrase = null,
+	queueing_method_label = null,
+	queue_mode_display = null,
+	alternate_ratio = null,
+	priority_first = null,
+	alternate_priority_first = null,
 } = $props();
 
 let muted = $state(false);
@@ -55,7 +60,18 @@ let connectorPhrase = $state(null);
 
 	function refreshStationData() {
 		router.reload({
-			only: ['now_serving', 'waiting', 'station_activity', 'display_audio_muted', 'display_audio_volume'],
+			only: [
+				'now_serving',
+				'waiting',
+				'station_activity',
+				'display_audio_muted',
+				'display_audio_volume',
+				'queueing_method_label',
+				'queue_mode_display',
+				'alternate_ratio',
+				'priority_first',
+				'alternate_priority_first'
+			],
 		});
 	}
 
@@ -115,6 +131,57 @@ let connectorPhrase = $state(null);
 		<header>
 			<h1 class="text-2xl font-bold text-surface-950">{station_name}</h1>
 		</header>
+
+		<!-- Balance mode: how queue is served at this station (per flexiqueue-syam). -->
+		{#if queue_mode_display && String(queue_mode_display).trim() !== ''}
+			<section
+				class="rounded-container border border-surface-200 bg-surface-50 p-4"
+				aria-label="How queue is served at this station"
+			>
+				<h2 class="text-base font-bold text-surface-950 mb-1">Queue mode</h2>
+				<p class="text-lg font-semibold text-surface-900">{queue_mode_display}</p>
+				{#if alternate_ratio && Array.isArray(alternate_ratio) && alternate_ratio.length >= 2}
+					<p class="text-sm text-surface-700 mt-1">
+						Priority {alternate_ratio[0]} : Regular {alternate_ratio[1]}
+						{#if queue_mode_display && queue_mode_display.startsWith('Alternate')}
+							{#if alternate_priority_first === true}
+								— Priority clients are called first in each cycle.
+							{:else if alternate_priority_first === false}
+								— Regular clients are called first in each cycle.
+							{/if}
+						{:else}
+							{#if priority_first === true}
+								— Priority clients are called first.
+							{:else if priority_first === false}
+								— Regular clients are called first.
+							{/if}
+						{/if}
+					</p>
+				{/if}
+				<p class="text-sm text-surface-600 mt-1">
+					{#if queue_mode_display.startsWith('FIFO')}
+						Clients are served in the order they arrived (first-come, first-served).
+					{:else if alternate_ratio && Array.isArray(alternate_ratio) && alternate_ratio.length >= 2}
+						Priority and regular clients alternate. For every {alternate_ratio[0]} priority clients, {alternate_ratio[1]} regular client is served.
+						{#if queue_mode_display && queue_mode_display.startsWith('Alternate')}
+							{#if alternate_priority_first === true}
+								&nbsp;Priority clients are called first in each cycle.
+							{:else if alternate_priority_first === false}
+								&nbsp;Regular clients are called first in each cycle.
+							{/if}
+						{:else}
+							{#if priority_first === true}
+								&nbsp;Priority clients are called first.
+							{:else if priority_first === false}
+								&nbsp;Regular clients are called first.
+							{/if}
+						{/if}
+					{:else}
+						Priority and regular clients alternate.
+					{/if}
+				</p>
+			</section>
+		{/if}
 
 		{#if now_serving?.length > 0}
 			<section>

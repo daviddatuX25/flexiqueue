@@ -30,6 +30,8 @@ trap cleanup_prod_worktree_temporary EXIT
 
 # Load Reverb keys so Vite inlines them (Echo needs VITE_REVERB_APP_KEY).
 # For deploy builds, .env.prod is the ONLY source; unset any inherited dev vars.
+# VITE_REVERB_VIA_PROXY=true for prod: Echo uses same-origin (nginx proxies /app to Reverb).
+# Dev uses VITE_REVERB_VIA_PROXY=false so Echo connects directly to localhost:6001.
 unset REVERB_APP_ID REVERB_APP_KEY REVERB_APP_SECRET REVERB_HOST REVERB_PORT REVERB_SCHEME
 unset VITE_REVERB_APP_KEY VITE_REVERB_HOST VITE_REVERB_PORT VITE_REVERB_SCHEME VITE_REVERB_VIA_PROXY
 [ -f "$REPO_ROOT/.env.prod" ] && set -a && source "$REPO_ROOT/.env.prod" 2>/dev/null && set +a
@@ -40,7 +42,7 @@ export VITE_REVERB_SCHEME="${REVERB_SCHEME:-http}"
 export VITE_REVERB_VIA_PROXY="${VITE_REVERB_VIA_PROXY:-true}"
 
 echo "Building in prod worktree at $PROD_WORKTREE..."
-echo "  Reverb key for bundle: ${VITE_REVERB_APP_KEY:0:8}... (from .env.prod only)"
+echo "  Reverb key: ${VITE_REVERB_APP_KEY:0:8}... | via-proxy: ${VITE_REVERB_VIA_PROXY} (from .env.prod)"
 cd "$PROD_WORKTREE"
 
 echo "Installing Composer dependencies (--no-dev, platform PHP 8.3 for Orange Pi prod)..."

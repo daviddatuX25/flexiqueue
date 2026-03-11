@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Models\Program;
 use App\Models\TemporaryAuthorization;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 
 /**
@@ -15,37 +16,25 @@ use Illuminate\Support\Facades\Hash;
 class PinService
 {
     /**
-     * Validate temporary PIN (single-use, expires after TTL).
-     * Per PIN-QR-AUTHORIZATION-SYSTEM §3.1: Used twice → reject; Expired → 401.
+     * Validate temporary PIN (configurable expiry mode: time-only, usage-only, or time-or-usage).
      *
      * @return array{verified: true, user_id: int, role: string}|null
      */
     public function validateTemporaryPin(string $tempCode): ?array
     {
-        $auths = TemporaryAuthorization::where('type', 'pin')
-            ->whereNull('used_at')
-            ->where(function ($q) {
-                $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
-            })
-            ->get();
+        $auths = $this->candidateTemporaryAuthorizations('pin');
 
         foreach ($auths as $auth) {
             if (Hash::check($tempCode, $auth->token_hash)) {
-                $auth->update(['used_at' => now()]);
+                if (! $this->consumeTemporaryAuthorization($auth)) {
+                    return null;
+                }
                 $user = $auth->user;
                 return [
                     'verified' => true,
                     'user_id' => $user->id,
                     'role' => $user->role->value,
                 ];
-            }
-        }
-
-        // Check if it was used or expired (for error message)
-        $authsAll = TemporaryAuthorization::where('type', 'pin')->get();
-        foreach ($authsAll as $auth) {
-            if (Hash::check($tempCode, $auth->token_hash)) {
-                return null; // Used or expired
             }
         }
 
@@ -53,23 +42,19 @@ class PinService
     }
 
     /**
-     * Validate temporary QR scan token (single-use, expires after TTL).
-     * Per PIN-QR-AUTHORIZATION-SYSTEM §3.1: Used twice → reject; Expired → 401.
+     * Validate temporary QR scan token (configurable expiry mode: time-only, usage-only, or time-or-usage).
      *
      * @return array{verified: true, user_id: int, role: string}|null
      */
     public function validateTemporaryQr(string $qrScanToken): ?array
     {
-        $auths = TemporaryAuthorization::where('type', 'qr')
-            ->whereNull('used_at')
-            ->where(function ($q) {
-                $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
-            })
-            ->get();
+        $auths = $this->candidateTemporaryAuthorizations('qr');
 
         foreach ($auths as $auth) {
             if (Hash::check($qrScanToken, $auth->token_hash)) {
-                $auth->update(['used_at' => now()]);
+                if (! $this->consumeTemporaryAuthorization($auth)) {
+                    return null;
+                }
                 $user = $auth->user;
 
                 return [
@@ -81,6 +66,71 @@ class PinService
         }
 
         return null;
+    }
+
+    /**
+     * Pull a bounded set of candidate temporary authorizations to check via Hash::check().
+     * We can't look up by hash directly, so we filter by type and likely-not-expired conditions.
+     *
+     * @return \Illuminate\Support\Collection<int, TemporaryAuthorization>
+     */
+    private function candidateTemporaryAuthorizations(string $type)
+    {
+        $now = now();
+
+        return TemporaryAuthorization::query()
+            ->where('type', $type)
+            ->whereNull('used_at') // Legacy single-use: consumed rows had used_at set; exclude them so they cannot be reused
+            ->where(function ($q) use ($now) {
+                // Keep usage-only rows even if expires_at is null/old; time gating is not relevant there.
+                $q->where('expiry_mode', 'usage_only')
+                    ->orWhereNull('expires_at')
+                    ->orWhere('expires_at', '>', $now);
+            })
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get();
+    }
+
+    /**
+     * Consume one use of a temporary authorization, atomically when usage-limited.
+     * Returns false if it is expired/consumed at the time of use.
+     */
+    private function consumeTemporaryAuthorization(TemporaryAuthorization $auth): bool
+    {
+        $mode = $auth->expiry_mode ?: 'time_or_usage';
+        $now = now();
+
+        if ($mode === 'time_only') {
+            // Unlimited uses until TTL; record usage telemetry but don't gate.
+            if ($auth->expires_at !== null && $auth->expires_at->isPast()) {
+                return false;
+            }
+
+            TemporaryAuthorization::whereKey($auth->id)->update([
+                'used_count' => DB::raw('used_count + 1'),
+                'last_used_at' => $now,
+            ]);
+
+            return true;
+        }
+
+        $query = TemporaryAuthorization::query()->whereKey($auth->id);
+
+        if ($mode !== 'usage_only') {
+            $query->where(function ($q) use ($now) {
+                $q->whereNull('expires_at')->orWhere('expires_at', '>', $now);
+            });
+        }
+
+        $query->whereNotNull('max_uses')->whereColumn('used_count', '<', 'max_uses');
+
+        $updated = $query->update([
+            'used_count' => DB::raw('used_count + 1'),
+            'last_used_at' => $now,
+        ]);
+
+        return $updated === 1;
     }
 
     /**

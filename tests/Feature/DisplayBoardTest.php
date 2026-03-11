@@ -36,6 +36,10 @@ class DisplayBoardTest extends TestCase
             ->has('staff_online')
             ->has('display_scan_timeout_seconds')
             ->has('program_is_paused')
+            ->has('queueing_method_label')
+            ->has('queue_mode_display')
+            ->has('alternate_ratio')
+            ->has('priority_first')
         );
         $props = $response->viewData('page')['props'];
         $this->assertFalse($props['program_is_paused']);
@@ -109,6 +113,10 @@ class DisplayBoardTest extends TestCase
         // Per flexiqueue-87p: display_scan_timeout_seconds from program settings (default 20)
         $this->assertSame(20, $data['display_scan_timeout_seconds']);
         $this->assertFalse($data['program_is_paused']);
+        // Per flexiqueue-syam: queue mode display (default fifo)
+        $this->assertSame('FIFO', $data['queue_mode_display']);
+        $this->assertNull($data['alternate_ratio']);
+        $this->assertTrue($data['priority_first']);
     }
 
     /** Display board returns program_is_paused true when active program is paused. */

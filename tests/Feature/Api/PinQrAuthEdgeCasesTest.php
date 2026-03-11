@@ -100,6 +100,7 @@ class PinQrAuthEdgeCasesTest extends TestCase
             'user_id' => $this->supervisor->id,
             'token_hash' => Hash::make('111111'),
             'type' => 'pin',
+            'expiry_mode' => 'time_only',
             'expires_at' => now()->subMinutes(1),
         ]);
 
@@ -121,6 +122,7 @@ class PinQrAuthEdgeCasesTest extends TestCase
             'user_id' => $this->supervisor->id,
             'token_hash' => Hash::make($scanToken),
             'type' => 'qr',
+            'expiry_mode' => 'time_only',
             'expires_at' => now()->subMinutes(1),
         ]);
 
@@ -226,7 +228,10 @@ class PinQrAuthEdgeCasesTest extends TestCase
         $regularToken->update(['current_session_id' => $regularSession->id]);
         $this->session->update(['status' => 'waiting', 'queued_at_station' => now()->subMinutes(2)]);
 
-        $genRes = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', ['expires_in_seconds' => 300]);
+        $genRes = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', [
+            'expiry_mode' => 'time_only',
+            'expires_in_seconds' => 300,
+        ]);
         $genRes->assertStatus(201);
         $code = $genRes->json('code');
 
