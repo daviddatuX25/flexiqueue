@@ -164,15 +164,45 @@
 			<p class="p-4 text-error-600">{loadError}</p>
 		{:else}
 			{#if !readOnly}
-			<aside class="w-full sm:w-52 border-surface-200 border-b sm:border-b-0 sm:border-r p-3 bg-surface-100 shrink-0 overflow-y-auto max-h-[70vh] sm:max-h-none" aria-label="Diagram entities">
-				<p class="text-xs font-semibold text-surface-700 mb-1.5">Stations</p>
-				<ul class="space-y-1 mb-4">
+			<aside
+				class="w-full sm:w-52 border-surface-200 border-b sm:border-b-0 sm:border-r px-2 py-2 sm:p-3 bg-surface-100 shrink-0 overflow-y-auto max-h-[160px] sm:max-h-none"
+				aria-label="Diagram entities"
+			>
+				<p class="text-[11px] sm:text-xs font-semibold text-surface-700 mb-1">Stations</p>
+				<ul class="space-y-1 mb-3 sm:mb-4">
 					{#each stations as station (station.id)}
 						<li>
 							<div
-								class="cursor-grab active:cursor-grabbing rounded-lg border border-surface-300 bg-surface-50 px-2 py-1.5 text-sm text-surface-950 hover:bg-surface-200/80"
+								class="cursor-grab active:cursor-grabbing rounded-lg border border-surface-300 bg-surface-50 px-2 py-1 text-xs sm:text-sm text-surface-950 hover:bg-surface-200/80"
 								role="button"
 								tabindex="0"
+								onclick={() => {
+									if (typeof window === 'undefined') return;
+									window.dispatchEvent(
+										new CustomEvent('diagram-add-from-sidebar', {
+											detail: {
+												type: 'station',
+												entityId: station.id,
+												label: station.name,
+											},
+										})
+									);
+								}}
+								onkeydown={(event) => {
+									if (event.key === 'Enter' || event.key === ' ') {
+										event.preventDefault();
+										if (typeof window === 'undefined') return;
+										window.dispatchEvent(
+											new CustomEvent('diagram-add-from-sidebar', {
+												detail: {
+													type: 'station',
+													entityId: station.id,
+													label: station.name,
+												},
+											})
+										);
+									}
+								}}
 								draggable="true"
 								ondragstart={(e) => {
 									const dt = e.dataTransfer;
@@ -188,14 +218,39 @@
 					{/each}
 				</ul>
 				{#if stations.length === 0}
-					<p class="text-xs text-surface-500 mb-4">Add stations in the Stations tab first.</p>
+					<p class="text-[11px] sm:text-xs text-surface-500 mb-3 sm:mb-4">Add stations in the Stations tab first.</p>
 				{/if}
-				<p class="text-xs font-semibold text-surface-700 mb-1.5">Decorations</p>
+				<p class="text-[11px] sm:text-xs font-semibold text-surface-700 mb-1">Decorations</p>
 				<div class="space-y-1">
 					<div
 						class="cursor-grab active:cursor-grabbing rounded-lg border border-dashed border-surface-400 bg-surface-50 px-2 py-1.5 text-xs text-surface-700 hover:bg-surface-200/80"
 						role="button"
 						tabindex="0"
+						onclick={() => {
+							if (typeof window === 'undefined') return;
+							window.dispatchEvent(
+								new CustomEvent('diagram-add-from-sidebar', {
+									detail: {
+										type: 'shape',
+										label: 'Room',
+									},
+								})
+							);
+						}}
+						onkeydown={(event) => {
+							if (event.key === 'Enter' || event.key === ' ') {
+								event.preventDefault();
+								if (typeof window === 'undefined') return;
+								window.dispatchEvent(
+									new CustomEvent('diagram-add-from-sidebar', {
+										detail: {
+											type: 'shape',
+											label: 'Room',
+										},
+									})
+								);
+							}
+						}}
 						draggable="true"
 						ondragstart={(e) => {
 							const dt = e.dataTransfer;
@@ -211,6 +266,31 @@
 						class="cursor-grab active:cursor-grabbing rounded-lg border border-surface-400 bg-surface-100 px-2 py-1.5 text-xs text-surface-700 hover:bg-surface-200/80"
 						role="button"
 						tabindex="0"
+						onclick={() => {
+							if (typeof window === 'undefined') return;
+							window.dispatchEvent(
+								new CustomEvent('diagram-add-from-sidebar', {
+									detail: {
+										type: 'text',
+										text: 'Text',
+									},
+								})
+							);
+						}}
+						onkeydown={(event) => {
+							if (event.key === 'Enter' || event.key === ' ') {
+								event.preventDefault();
+								if (typeof window === 'undefined') return;
+								window.dispatchEvent(
+									new CustomEvent('diagram-add-from-sidebar', {
+										detail: {
+											type: 'text',
+											text: 'Text',
+										},
+									})
+								);
+							}
+						}}
 						draggable="true"
 						ondragstart={(e) => {
 							const dt = e.dataTransfer;

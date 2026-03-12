@@ -238,10 +238,12 @@
 <MobileLayout headerTitle="Track Overrides" {queueCount} {processedToday}>
 	<div class="flex flex-col gap-4 md:gap-6 text-surface-950 w-full max-w-2xl mx-auto px-4 md:px-6 py-4 md:py-6">
 		{#if canApprove}
-			<!-- Generate PIN/QR for staff -->
+			<!-- Generate PIN/QR for staff actions -->
 			<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-6">
-				<p class="text-sm font-medium text-surface-950/80 mb-3">Generate for staff</p>
-				<p class="text-xs text-surface-950/60 mb-4">Create temporary PIN or QR for staff to authorize override or force-complete.</p>
+				<p class="text-sm font-medium text-surface-950/80 mb-3">Staff override tools</p>
+				<p class="text-xs text-surface-950/60 mb-4">
+					Generate a temporary PIN or QR for staff to authorize overrides, force-complete sessions, or quickly tweak display and public triage settings.
+				</p>
 				<div class="form-control w-full max-w-xs mb-4">
 					<label class="label"><span class="label-text">Expiry</span></label>
 					<select

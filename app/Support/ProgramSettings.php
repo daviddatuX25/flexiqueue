@@ -131,6 +131,12 @@ final class ProgramSettings
         return (bool) ($this->settings['enable_display_camera_scanner'] ?? true);
     }
 
+    /** Per plan: enable camera/QR scanner on Public triage. Default true. */
+    public function getEnablePublicTriageCameraScanner(): bool
+    {
+        return (bool) ($this->settings['enable_public_triage_camera_scanner'] ?? true);
+    }
+
     public function getIdentityBindingMode(): string
     {
         $mode = $this->settings['identity_binding_mode'] ?? 'disabled';
@@ -170,6 +176,12 @@ final class ProgramSettings
         }
 
         return $this->isBindingRequired();
+    }
+
+    /** Per plan: when true, public triage can create a session with identity registration (unverified). When false, only registration is created, no session. */
+    public function getAllowUnverifiedEntry(): bool
+    {
+        return (bool) ($this->settings['allow_unverified_entry'] ?? false);
     }
 
     /**

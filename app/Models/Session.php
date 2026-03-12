@@ -18,6 +18,7 @@ class Session extends Model
     protected $fillable = [
         'token_id',
         'client_id',
+        'identity_registration_id',
         'program_id',
         'track_id',
         'alias',
@@ -56,6 +57,11 @@ class Session extends Model
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class);
+    }
+
+    public function identityRegistration(): BelongsTo
+    {
+        return $this->belongsTo(IdentityRegistration::class, 'identity_registration_id');
     }
 
     public function program(): BelongsTo

@@ -1,6 +1,7 @@
 <script lang="ts">
     import AdminLayout from "../../../Layouts/AdminLayout.svelte";
     import Modal from "../../../Components/Modal.svelte";
+    import AdminTable from "../../../Components/AdminTable.svelte";
     import ConfirmModal from "../../../Components/ConfirmModal.svelte";
     import { get } from "svelte/store";
     import { router, usePage } from "@inertiajs/svelte";
@@ -321,125 +322,123 @@
         </div>
     {:else}
     <!-- Desktop Table View -->
-    <div class="table-container mt-6 hidden md:block">
-        <table class="table table-zebra relative w-full">
-            <thead>
+    <AdminTable class="mt-6 hidden md:block" compact={true}>
+        {#snippet head()}
+            <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Availability</th>
+                <th>Assigned to</th>
+                <th class="text-center">Actions</th>
+            </tr>
+        {/snippet}
+        {#snippet body()}
+            {#each users as user (user.id)}
                 <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Role</th>
-                    <th>Status</th>
-                    <th>Availability</th>
-                    <th>Assigned to</th>
-                    <th class="text-right">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {#each users as user (user.id)}
-                    <tr>
-                        <td>
-                            <div class="flex items-center gap-2">
-                                <UserAvatar {user} size="sm" />
-                                <span class="font-medium text-surface-900"
-                                    >{user.name}</span
-                                >
-                            </div>
-                        </td>
-                        <td class="text-surface-700">{user.email}</td>
-                        <td>
+                    <td>
+                        <div class="flex items-center gap-2">
+                            <UserAvatar {user} size="sm" />
+                            <span class="font-medium text-surface-900"
+                                >{user.name}</span
+                            >
+                        </div>
+                    </td>
+                    <td class="text-surface-700">{user.email}</td>
+                    <td>
+                        <span
+                            class="badge {user.role === 'admin'
+                                ? 'preset-filled-primary-500'
+                                : 'preset-tonal'} shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
+                            >{user.role}</span
+                        >
+                    </td>
+                    <td>
+                        {#if user.is_active}
                             <span
-                                class="badge {user.role === 'admin'
-                                    ? 'preset-filled-primary-500'
-                                    : 'preset-tonal'} shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
-                                >{user.role}</span
+                                class="badge preset-filled-success-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 w-max"
+                                ><CheckCircle2 class="w-3.5 h-3.5" /> Active</span
                             >
-                        </td>
-                        <td>
+                        {:else}
+                            <span
+                                class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 w-max"
+                                ><XCircle class="w-3.5 h-3.5" /> Inactive</span
+                            >
+                        {/if}
+                    </td>
+                    <td>
+                        {#if user.availability_status === "available"}
+                            <span
+                                class="badge preset-filled-success-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
+                                >Available</span
+                            >
+                        {:else if user.availability_status === "on_break"}
+                            <span
+                                class="badge preset-filled-warning-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
+                                >On break</span
+                            >
+                        {:else if user.availability_status === "away"}
+                            <span
+                                class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
+                                >Away</span
+                            >
+                        {:else}
+                            <span
+                                class="badge preset-tonal text-surface-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full border border-surface-200"
+                                >Offline</span
+                            >
+                        {/if}
+                    </td>
+                    <td class="text-surface-700">
+                        <span class="text-surface-950/70"
+                            >{user.assigned_station?.name ?? "—"}</span
+                        >
+                    </td>
+                    <td class="text-center">
+                        <div class="flex items-center justify-center gap-2">
                             {#if user.is_active}
-                                <span
-                                    class="badge preset-filled-success-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 w-max"
-                                    ><CheckCircle2 class="w-3.5 h-3.5" /> Active</span
+                                <button
+                                    type="button"
+                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
+                                    onclick={() => openEdit(user)}
+                                    disabled={submitting}
                                 >
+                                    <Edit2 class="w-3.5 h-3.5" /> Edit
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
+                                    onclick={() => openReset(user)}
+                                    disabled={submitting}
+                                >
+                                    <Key class="w-3.5 h-3.5" /> PW
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-sm preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
+                                    onclick={() =>
+                                        openDeactivateConfirm(user)}
+                                    disabled={submitting}
+                                >
+                                    <Ban class="w-3.5 h-3.5" /> Disable
+                                </button>
                             {:else}
-                                <span
-                                    class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 w-max"
-                                    ><XCircle class="w-3.5 h-3.5" /> Inactive</span
+                                <button
+                                    type="button"
+                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
+                                    onclick={() => openEdit(user)}
+                                    disabled={submitting}
                                 >
+                                    <Edit2 class="w-3.5 h-3.5" /> Edit
+                                </button>
                             {/if}
-                        </td>
-                        <td>
-                            {#if user.availability_status === "available"}
-                                <span
-                                    class="badge preset-filled-success-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
-                                    >Available</span
-                                >
-                            {:else if user.availability_status === "on_break"}
-                                <span
-                                    class="badge preset-filled-warning-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
-                                    >On break</span
-                                >
-                            {:else if user.availability_status === "away"}
-                                <span
-                                    class="badge preset-tonal shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
-                                    >Away</span
-                                >
-                            {:else}
-                                <span
-                                    class="badge preset-tonal text-surface-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full border border-surface-200"
-                                    >Offline</span
-                                >
-                            {/if}
-                        </td>
-                        <td class="text-surface-700">
-                            <span class="text-surface-950/70"
-                                >{user.assigned_station?.name ?? "—"}</span
-                            >
-                        </td>
-                        <td class="text-right">
-                            <div class="flex items-center justify-end gap-2">
-                                {#if user.is_active}
-                                    <button
-                                        type="button"
-                                        class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
-                                        onclick={() => openEdit(user)}
-                                        disabled={submitting}
-                                    >
-                                        <Edit2 class="w-3.5 h-3.5" /> Edit
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
-                                        onclick={() => openReset(user)}
-                                        disabled={submitting}
-                                    >
-                                        <Key class="w-3.5 h-3.5" /> PW
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="btn btn-sm preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
-                                        onclick={() =>
-                                            openDeactivateConfirm(user)}
-                                        disabled={submitting}
-                                    >
-                                        <Ban class="w-3.5 h-3.5" /> Disable
-                                    </button>
-                                {:else}
-                                    <button
-                                        type="button"
-                                        class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
-                                        onclick={() => openEdit(user)}
-                                        disabled={submitting}
-                                    >
-                                        <Edit2 class="w-3.5 h-3.5" /> Edit
-                                    </button>
-                                {/if}
-                            </div>
-                        </td>
-                    </tr>
-                {/each}
-            </tbody>
-        </table>
-    </div>
+                        </div>
+                    </td>
+                </tr>
+            {/each}
+        {/snippet}
+    </AdminTable>
 
     <!-- Mobile Card View -->
     <div class="grid grid-cols-1 gap-4 mt-4 md:hidden">

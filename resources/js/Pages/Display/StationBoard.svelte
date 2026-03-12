@@ -16,6 +16,7 @@ let {
 	station_id = 0,
 	now_serving = [],
 	waiting = [],
+	holding = [],
 	station_activity = [],
 	display_audio_muted = false,
 	display_audio_volume = 1,
@@ -27,6 +28,7 @@ let {
 	alternate_ratio = null,
 	priority_first = null,
 	alternate_priority_first = null,
+	max_no_show_attempts = 3,
 } = $props();
 
 let muted = $state(false);
@@ -210,6 +212,11 @@ let connectorPhrase = $state(null);
 							{#if item.track}
 								<p class="text-xs text-surface-500 mt-1">{item.track}</p>
 							{/if}
+							{#if item.no_show_attempts && item.no_show_attempts > 0}
+								<p class="text-xs text-surface-500 mt-2">
+									No-shows: {item.no_show_attempts}/{max_no_show_attempts}
+								</p>
+							{/if}
 						</li>
 					{/each}
 				</ul>
@@ -219,12 +226,66 @@ let connectorPhrase = $state(null);
 		{#if waiting?.length > 0}
 			<section>
 				<h2 class="text-xl font-bold text-surface-950 mb-3">WAITING</h2>
-				<ul class="space-y-2">
+				<ul class="space-y-3">
 					{#each waiting as item}
-						<li class="flex items-center gap-3 p-3 rounded-container bg-surface-100 border border-surface-200">
-							<span class="font-mono font-semibold text-surface-900">{item.alias}</span>
-							{#if item.process_name}
-								<span class="text-sm text-surface-600">{item.process_name}</span>
+						<li class="card rounded-container border border-surface-200 bg-surface-50 p-4">
+							<div class="flex flex-wrap items-center justify-between gap-2">
+								<div class="flex flex-col gap-1">
+									<span class="font-mono font-semibold text-lg text-surface-900">{item.alias}</span>
+									{#if item.process_name}
+										<span class="text-xs text-surface-600">{item.process_name}</span>
+									{/if}
+									{#if typeof item.position === 'number'}
+										<span class="text-xs text-surface-500">#{item.position} in line</span>
+									{/if}
+								</div>
+							</div>
+							{#if item.no_show_attempts && item.no_show_attempts > 0}
+								<p class="text-xs text-surface-500 mt-2">
+									No-shows: {item.no_show_attempts}/{max_no_show_attempts}
+								</p>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
+
+		{#if holding?.length > 0}
+			<section>
+				<h2 class="text-xl font-bold text-surface-950 mb-3">ON HOLD</h2>
+				<ul class="space-y-3">
+					{#each holding as item}
+						<li class="card rounded-container border border-surface-200 bg-surface-50 p-4">
+							<div class="flex flex-wrap items-center justify-between gap-2">
+								<div class="flex flex-col gap-1">
+									<span class="font-mono font-semibold text-lg text-surface-900">{item.alias}</span>
+									{#if item.process_name}
+										<span class="text-xs text-surface-600">{item.process_name}</span>
+									{/if}
+									{#if item.track}
+										<span class="text-xs text-surface-500">{item.track}</span>
+									{/if}
+								</div>
+								<div class="flex flex-col items-end gap-1">
+									{#if item.status === 'awaiting_approval'}
+										<span class="text-[11px] px-2 py-1 rounded preset-filled-warning-500/80 text-warning-900 font-semibold uppercase tracking-wide">
+											Awaiting approval
+										</span>
+									{:else}
+										<span class="text-xs text-surface-600 capitalize">{item.status}</span>
+									{/if}
+								</div>
+							</div>
+							{#if item.held_at}
+								<p class="text-xs text-surface-500 mt-2">
+									Held since {new Date(item.held_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+								</p>
+							{/if}
+							{#if item.no_show_attempts && item.no_show_attempts > 0}
+								<p class="text-xs text-surface-500 mt-1">
+									No-shows: {item.no_show_attempts}/{max_no_show_attempts}
+								</p>
 							{/if}
 						</li>
 					{/each}
@@ -250,7 +311,7 @@ let connectorPhrase = $state(null);
 			{/if}
 		</section>
 
-		{#if (!now_serving?.length && !waiting?.length && activityFeed.length === 0)}
+		{#if (!now_serving?.length && !waiting?.length && !holding?.length && activityFeed.length === 0)}
 			<div class="card bg-surface-50 border border-surface-200 rounded-container p-8 text-center">
 				<p class="text-surface-600 text-lg">No activity at this station.</p>
 			</div>

@@ -7,8 +7,10 @@ use App\Events\NowServing;
 use App\Events\QueueLengthUpdated;
 use App\Events\StationActivity;
 use App\Events\StatusUpdate;
+use App\Exceptions\ClientAlreadyQueuedException;
 use App\Exceptions\StepsRemainingException;
 use App\Exceptions\TokenInUseException;
+use App\Models\IdentityRegistration;
 use App\Models\Program;
 use App\Models\ServiceTrack;
 use App\Models\Session;
@@ -34,10 +36,11 @@ class SessionService
     /**
      * Bind token to a new session. Throws domain exceptions for 400/409 cases.
      * When $staffUserId is null (public self-serve), transaction_log records null for audit.
+     * When $identityRegistrationId is set (public flow with "request identification registration"), client_id is null and session is linked to the registration.
      *
      * @return array{session: \App\Models\Session, token: array}
      */
-    public function bind(string $qrHash, int $trackId, ?string $clientCategory, ?int $staffUserId = null, ?array $clientBindingPayload = null, ?string $bindingSource = null): array
+    public function bind(string $qrHash, int $trackId, ?string $clientCategory, ?int $staffUserId = null, ?array $clientBindingPayload = null, ?string $bindingSource = null, ?int $identityRegistrationId = null): array
     {
         $program = Program::where('is_active', true)->first();
         if (! $program) {
@@ -82,18 +85,36 @@ class SessionService
         if ($firstStationId === null) {
             throw new \InvalidArgumentException('Track first step has no stations.', 422);
         }
-        $bindingResult = $this->identityBindingService->resolve(
-            $clientBindingPayload,
-            $bindingAllowed,
-            $bindingRequired,
-            $bindingSource,
-            $bindingMode
-        );
 
-        return DB::transaction(function () use ($token, $program, $track, $firstStep, $firstStationId, $clientCategory, $staffUserId, $bindingResult) {
-            $clientCategory = ClientCategory::normalize($clientCategory) ?? $clientCategory;
+        if ($identityRegistrationId !== null) {
+            $bindingResult = ['client_id' => null, 'metadata' => null];
+        } else {
+            $bindingResult = $this->identityBindingService->resolve(
+                $clientBindingPayload,
+                $bindingAllowed,
+                $bindingRequired,
+                $bindingSource,
+                $bindingMode
+            );
+
+            if ($bindingResult['client_id'] !== null) {
+                $clientId = (int) $bindingResult['client_id'];
+                $existing = Session::query()
+                    ->where('program_id', $program->id)
+                    ->where('client_id', $clientId)
+                    ->active()
+                    ->first();
+
+                if ($existing) {
+                    throw new ClientAlreadyQueuedException($existing);
+                }
+            }
+        }
+
+        return DB::transaction(function () use ($token, $program, $track, $firstStep, $firstStationId, $clientCategory, $staffUserId, $bindingResult, $identityRegistrationId) {
+            $clientCategory = ClientCategory::normalize($clientCategory) ?? $clientCategory ?? 'Regular';
             $nextPos = $this->getNextQueuePositionAtStation($firstStationId);
-            $session = \App\Models\Session::create([
+            $sessionPayload = [
                 'token_id' => $token->id,
                 'client_id' => $bindingResult['client_id'],
                 'program_id' => $program->id,
@@ -105,7 +126,15 @@ class SessionService
                 'station_queue_position' => $nextPos,
                 'status' => 'waiting',
                 'queued_at_station' => now(),
-            ]);
+            ];
+            if ($identityRegistrationId !== null) {
+                $sessionPayload['identity_registration_id'] = $identityRegistrationId;
+            }
+            $session = \App\Models\Session::create($sessionPayload);
+
+            if ($identityRegistrationId !== null) {
+                IdentityRegistration::where('id', $identityRegistrationId)->update(['session_id' => $session->id]);
+            }
 
             $token->update([
                 'status' => 'in_use',

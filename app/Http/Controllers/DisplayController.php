@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Program;
+use App\Support\ClientIdTypes;
 use App\Models\ProgramStationAssignment;
 use App\Models\ServiceTrack;
 use App\Models\Station;
@@ -63,6 +64,9 @@ class DisplayController extends Controller
                 'date' => now()->format('F j, Y'),
                 'display_scan_timeout_seconds' => 20,
                 'enable_public_triage_hid_barcode' => true,
+                'enable_public_triage_camera_scanner' => true,
+                'id_types' => ClientIdTypes::all(),
+                'allow_unverified_entry' => false,
             ]);
         }
 
@@ -80,6 +84,9 @@ class DisplayController extends Controller
             'date' => now()->format('F j, Y'),
             'display_scan_timeout_seconds' => $program->settings()->getDisplayScanTimeoutSeconds(),
             'enable_public_triage_hid_barcode' => $program->settings()->getEnablePublicTriageHidBarcode(),
+            'enable_public_triage_camera_scanner' => $program->settings()->getEnablePublicTriageCameraScanner(),
+            'id_types' => ClientIdTypes::all(),
+            'allow_unverified_entry' => $program->settings()->getAllowUnverifiedEntry(),
         ]);
     }
 

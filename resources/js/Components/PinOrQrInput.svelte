@@ -72,7 +72,7 @@
 	<label class="flex flex-col gap-1">
 		<span class="text-sm font-medium text-surface-950">PIN (6 digits)</span>
 		<input
-			type="text"
+			type="password"
 			inputmode="numeric"
 			autocomplete="off"
 			maxlength="6"

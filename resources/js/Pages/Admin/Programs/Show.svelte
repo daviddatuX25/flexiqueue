@@ -69,6 +69,8 @@
             display_tts_repeat_delay_ms?: number;
             /** Per plan: allow public self-serve triage at /triage/start. */
             allow_public_triage?: boolean;
+            /** Per identity-registration plan: when true, public triage may create a session alongside an identity registration (unverified). Default false. */
+            allow_unverified_entry?: boolean;
             /** Per flexiqueue-xm2o: per-program identity binding mode. */
             identity_binding_mode?: "disabled" | "optional" | "required";
             /** Per barcode-hid: enable HID barcode on Display board. Default true. */
@@ -348,7 +350,16 @@
     let stationRegeneratingId = $state<number | null>(null);
     /** Per plan: allow public self-serve triage at /triage/start. */
     let allowPublicTriage = $state(false);
-    /** Per flexiqueue-xm2o: identity binding mode knob (Disabled / Optional / Required). */
+    /**
+     * Identity policy at triage (derived from identity_binding_mode + allow_unverified_entry).
+     * - "none"               => no ID at triage
+     * - "required"           => ID or registration required before starting visit
+     * - "optional_unverified"=> identity optional; unverified registrations may start visits (public triage)
+     */
+    let identityPolicy = $state<"none" | "required" | "optional_unverified">(
+        "none",
+    );
+    /** Underlying identity binding mode enum used by backend (disabled | optional | required). */
     let identityBindingMode = $state<"disabled" | "optional" | "required">(
         "disabled",
     );
@@ -400,13 +411,26 @@
                 ),
             );
             allowPublicTriage = s.allow_public_triage === true;
-            if (
-                s.identity_binding_mode === "optional" ||
-                s.identity_binding_mode === "required"
-            ) {
-                identityBindingMode = s.identity_binding_mode;
-            } else {
+            const rawMode = s.identity_binding_mode;
+            const allowUnverified =
+                (s as { allow_unverified_entry?: boolean })
+                    .allow_unverified_entry === true;
+            if (rawMode === "disabled" || !rawMode) {
+                identityPolicy = "none";
                 identityBindingMode = "disabled";
+            } else if (rawMode === "required") {
+                identityPolicy = "required";
+                identityBindingMode = "required";
+            } else {
+                // rawMode === "optional"
+                if (allowUnverified) {
+                    identityPolicy = "optional_unverified";
+                    identityBindingMode = "optional";
+                } else {
+                    // Legacy optional + allow_unverified_entry=false; treat as stricter required policy.
+                    identityPolicy = "required";
+                    identityBindingMode = "required";
+                }
             }
             enableDisplayHidBarcode = (s.enable_display_hid_barcode ?? true) === true;
             enablePublicTriageHidBarcode = (s.enable_public_triage_hid_barcode ?? true) === true;
@@ -1576,6 +1600,16 @@
 
     async function handleSaveSettings() {
         submitting = true;
+        let effectiveIdentityMode: "disabled" | "optional" | "required" =
+            "disabled";
+        let effectiveAllowUnverified = false;
+        if (identityPolicy === "required") {
+            effectiveIdentityMode = "required";
+            effectiveAllowUnverified = false;
+        } else if (identityPolicy === "optional_unverified" && allowPublicTriage) {
+            effectiveIdentityMode = "optional";
+            effectiveAllowUnverified = true;
+        }
         const { ok, data, message } = await api(
             "PUT",
             `/api/admin/programs/${program.id}`,
@@ -1613,7 +1647,8 @@
                         settingsDisplayTtsRepeatDelaySec * 1000,
                     ),
                     allow_public_triage: allowPublicTriage,
-                    identity_binding_mode: identityBindingMode,
+                    allow_unverified_entry: effectiveAllowUnverified,
+                    identity_binding_mode: effectiveIdentityMode,
                     enable_display_hid_barcode: enableDisplayHidBarcode,
                     enable_public_triage_hid_barcode:
                         enablePublicTriageHidBarcode,
@@ -1672,6 +1707,66 @@
         settingsAlternatePriorityFirst = (s.alternate_priority_first as boolean | undefined) !== false;
         displayScanTimeoutSeconds = Math.min(300, Math.max(0, Number((s as { display_scan_timeout_seconds?: number }).display_scan_timeout_seconds ?? 20)));
         maxNoShowAttempts = Math.max(1, Math.min(10, Number((s as { max_no_show_attempts?: number }).max_no_show_attempts ?? 3)));
+        displayAudioMuted = (s as { display_audio_muted?: boolean }).display_audio_muted === true;
+        displayAudioVolume = Math.max(
+            0,
+            Math.min(
+                1,
+                Number((s as { display_audio_volume?: number }).display_audio_volume ?? 1),
+            ),
+        );
+        settingsDisplayTtsRepeatCount = Math.max(
+            1,
+            Math.min(
+                3,
+                Math.floor(
+                    Number(
+                        (s as { display_tts_repeat_count?: number }).display_tts_repeat_count ??
+                            1,
+                    ),
+                ),
+            ),
+        );
+        settingsDisplayTtsRepeatDelaySec = Math.max(
+            0.5,
+            Math.min(
+                10,
+                (Number(
+                    (s as { display_tts_repeat_delay_ms?: number })
+                        .display_tts_repeat_delay_ms ?? 2000,
+                ) /
+                    1000),
+            ),
+        );
+        allowPublicTriage = (s as { allow_public_triage?: boolean }).allow_public_triage === true;
+        const rawMode = (s as { identity_binding_mode?: string }).identity_binding_mode;
+        const allowUnverified =
+            (s as { allow_unverified_entry?: boolean }).allow_unverified_entry === true;
+        if (rawMode === "disabled" || !rawMode) {
+            identityPolicy = "none";
+            identityBindingMode = "disabled";
+        } else if (rawMode === "required") {
+            identityPolicy = "required";
+            identityBindingMode = "required";
+        } else {
+            if (allowUnverified) {
+                identityPolicy = "optional_unverified";
+                identityBindingMode = "optional";
+            } else {
+                identityPolicy = "required";
+                identityBindingMode = "required";
+            }
+        }
+        enableDisplayHidBarcode = (s as { enable_display_hid_barcode?: boolean })
+            .enable_display_hid_barcode !== false;
+        enablePublicTriageHidBarcode = (
+            s as { enable_public_triage_hid_barcode?: boolean }
+        ).enable_public_triage_hid_barcode !== false;
+        enableDisplayCameraScanner = (s as { enable_display_camera_scanner?: boolean })
+            .enable_display_camera_scanner !== false;
+        const tts = (s as { tts?: { active_language?: string } }).tts;
+        const lang = (tts?.active_language as string | undefined) ?? "en";
+        ttsActiveLanguage = (["en", "fil", "ilo"].includes(lang) ? lang : "en") as TtsLangKey;
     }
 
     async function handleAssignStaff(userId: number, stationId: number | null) {
@@ -1983,42 +2078,42 @@
         <!-- Tab navigation: no scrollbar; pulsating arrows when more to scroll (per sketch) -->
         <nav
             aria-label="Program sections"
-            class="sticky top-0 z-20 -mx-4 px-4 py-2 bg-surface-50 border-y border-surface-200 shadow-sm sm:relative sm:mx-0 sm:px-0 sm:py-0 sm:border-0 sm:shadow-none sm:rounded-container sm:border sm:border-surface-200 sm:bg-surface-100/80 sm:mt-4"
+            class="sticky top-0 z-20 -mx-4 px-4 py-0.5 bg-surface-50 border border-surface-200 shadow-sm rounded-container sm:relative sm:mx-0 sm:px-0 sm:py-0 sm:border sm:border-surface-200 sm:bg-surface-100/80 sm:mt-4"
         >
             <div class="relative flex items-center gap-0 w-full">
                 {#if canScrollLeft}
                     <button
                         type="button"
                         aria-label="Scroll tabs left"
-                        class="absolute left-0 z-10 flex items-center justify-center w-10 h-full min-h-[52px] bg-surface-100/95 hover:bg-surface-200/95 rounded-l-lg text-surface-600 animate-pulse shrink-0"
+                        class="absolute left-0 z-10 flex items-center justify-center w-10 h-full min-h-[40px] rounded-l-lg text-primary-100 animate-pulse shrink-0"
                         onclick={() => scrollTabList("left")}
                     >
-                        <ChevronLeft class="w-5 h-5" />
+                        <ChevronLeft class="w-5 h-5 drop-shadow-[0_0_6px_rgba(0,0,0,0.9)]" />
                     </button>
                 {/if}
                 <div
                     role="tablist"
                     tabindex="-1"
                     bind:this={tabListEl}
-                    class="flex gap-1 overflow-x-auto overflow-y-hidden flex-nowrap w-full max-w-full py-1 sm:py-2 sm:px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    class="flex gap-1 overflow-x-auto overflow-y-hidden flex-nowrap w-full max-w-full py-0 sm:py-0.5 sm:px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                     onkeydown={handleTabKeydown}
                 >
-                    <button type="button" role="tab" id="tab-overview" tabindex={activeTab === 'overview' ? 0 : -1} aria-selected={activeTab === 'overview'} aria-controls="tabpanel-overview" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'overview' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "overview")}>Overview</button>
-                    <button type="button" role="tab" id="tab-processes" tabindex={activeTab === 'processes' ? 0 : -1} aria-selected={activeTab === 'processes'} aria-controls="tabpanel-processes" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'processes' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "processes")}>Processes</button>
-                    <button type="button" role="tab" id="tab-stations" tabindex={activeTab === 'stations' ? 0 : -1} aria-selected={activeTab === 'stations'} aria-controls="tabpanel-stations" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'stations' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "stations")}>Stations</button>
-                    <button type="button" role="tab" id="tab-staff" tabindex={activeTab === 'staff' ? 0 : -1} aria-selected={activeTab === 'staff'} aria-controls="tabpanel-staff" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'staff' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "staff")}>Staff</button>
-                    <button type="button" role="tab" id="tab-tracks" tabindex={activeTab === 'tracks' ? 0 : -1} aria-selected={activeTab === 'tracks'} aria-controls="tabpanel-tracks" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'tracks' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "tracks")}>Track</button>
-                    <button type="button" role="tab" id="tab-diagram" tabindex={activeTab === 'diagram' ? 0 : -1} aria-selected={activeTab === 'diagram'} aria-controls="tabpanel-diagram" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'diagram' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "diagram")}>Diagram</button>
-                    <button type="button" role="tab" id="tab-settings" tabindex={activeTab === 'settings' ? 0 : -1} aria-selected={activeTab === 'settings'} aria-controls="tabpanel-settings" class="tab flex-shrink-0 whitespace-nowrap px-4 py-2.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'settings' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "settings")}>Settings</button>
+                    <button type="button" role="tab" id="tab-overview" tabindex={activeTab === 'overview' ? 0 : -1} aria-selected={activeTab === 'overview'} aria-controls="tabpanel-overview" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'overview' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "overview")}>Overview</button>
+                    <button type="button" role="tab" id="tab-processes" tabindex={activeTab === 'processes' ? 0 : -1} aria-selected={activeTab === 'processes'} aria-controls="tabpanel-processes" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'processes' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "processes")}>Processes</button>
+                    <button type="button" role="tab" id="tab-stations" tabindex={activeTab === 'stations' ? 0 : -1} aria-selected={activeTab === 'stations'} aria-controls="tabpanel-stations" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'stations' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "stations")}>Stations</button>
+                    <button type="button" role="tab" id="tab-staff" tabindex={activeTab === 'staff' ? 0 : -1} aria-selected={activeTab === 'staff'} aria-controls="tabpanel-staff" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'staff' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "staff")}>Staff</button>
+                    <button type="button" role="tab" id="tab-tracks" tabindex={activeTab === 'tracks' ? 0 : -1} aria-selected={activeTab === 'tracks'} aria-controls="tabpanel-tracks" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'tracks' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "tracks")}>Track</button>
+                    <button type="button" role="tab" id="tab-diagram" tabindex={activeTab === 'diagram' ? 0 : -1} aria-selected={activeTab === 'diagram'} aria-controls="tabpanel-diagram" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'diagram' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "diagram")}>Diagram</button>
+                    <button type="button" role="tab" id="tab-settings" tabindex={activeTab === 'settings' ? 0 : -1} aria-selected={activeTab === 'settings'} aria-controls="tabpanel-settings" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'settings' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "settings")}>Settings</button>
                 </div>
                 {#if canScrollRight}
                     <button
                         type="button"
                         aria-label="Scroll tabs right"
-                        class="absolute right-0 z-10 flex items-center justify-center w-10 h-full min-h-[52px] bg-surface-100/95 hover:bg-surface-200/95 rounded-r-lg text-surface-600 animate-pulse shrink-0"
+                        class="absolute right-0 z-10 flex items-center justify-center w-10 h-full min-h-[40px] rounded-r-lg text-primary-100 animate-pulse shrink-0"
                         onclick={() => scrollTabList("right")}
                     >
-                        <ChevronRight class="w-5 h-5" />
+                        <ChevronRight class="w-5 h-5 drop-shadow-[0_0_6px_rgba(0,0,0,0.9)]" />
                     </button>
                 {/if}
             </div>
@@ -3075,75 +3170,112 @@
                             </div>
                         </div>
 
-                        <!-- Identity binding mode (flexiqueue-xm2o) -->
+                        <!-- Identity at triage (flexiqueue-xm2o + identity-registration plan) -->
                         <div
                             class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
                         >
                             <div class="sm:w-1/3 shrink-0">
                                 <h3 class="font-medium text-surface-950 flex items-center gap-2">
-                                    Identity binding
+                                    Identity at triage
                                 </h3>
-                                <p class="text-xs text-surface-500 mt-1">
-                                    Control whether this program requires binding a real-world client identity to each session.
-                                </p>
-                                <p class="text-[11px] text-surface-500 mt-2 space-y-1">
+                                <p class="text-xs text-surface-500 mt-1 space-y-1">
                                     <span class="block">
-                                        <strong>Disabled</strong>: triage works as today; no identity UI is shown.
+                                        Turn this on to show ID / registration tools on staff and public triage.
                                     </span>
                                     <span class="block">
-                                        <strong>Optional</strong>: staff/public triage may bind an ID, but can skip.
-                                    </span>
-                                    <span class="block">
-                                        <strong>Required</strong>: staff triage must bind; public triage (when allowed) requires a recognized ID to proceed.
+                                        You can then choose whether ID or registration is <strong>required before starting a visit</strong>, and whether visits may <strong>start with unverified ID</strong> (public triage only).
                                     </span>
                                 </p>
                                 {#if !allowPublicTriage}
                                     <p class="text-[11px] text-surface-500 mt-2">
-                                        Public triage is currently disabled; identity binding will only affect staff triage until public triage is enabled.
+                                        Public triage is currently disabled; identity settings apply to staff triage only until public triage is enabled.
                                     </p>
                                 {:else}
                                     <p class="text-[11px] text-surface-500 mt-2">
-                                        When public triage is enabled, <strong>Optional</strong> and <strong>Required</strong> also apply to the public triage page.
+                                        When public triage is enabled, these settings also apply to the public triage page.
                                     </p>
                                 {/if}
                             </div>
                             <div class="sm:w-2/3 form-control pt-1 space-y-2">
-                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
+                                <label
+                                    class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors items-center"
+                                >
                                     <input
-                                        type="radio"
-                                        class="radio radio-sm"
-                                        name="identity-binding-mode"
-                                        value="disabled"
-                                        bind:group={identityBindingMode}
+                                        type="checkbox"
+                                        class="checkbox"
+                                        checked={identityPolicy !== "none"}
+                                        onclick={() => {
+                                            if (identityPolicy === "none") {
+                                                identityPolicy = "required";
+                                            } else {
+                                                identityPolicy = "none";
+                                            }
+                                        }}
                                     />
                                     <span class="label-text text-surface-950 font-medium">
-                                        Disabled
+                                        Use ID / registration at triage
                                     </span>
                                 </label>
-                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
-                                    <input
-                                        type="radio"
-                                        class="radio radio-sm"
-                                        name="identity-binding-mode"
-                                        value="optional"
-                                        bind:group={identityBindingMode}
-                                    />
-                                    <span class="label-text text-surface-950 font-medium">
-                                        Optional
-                                    </span>
-                                </label>
-                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
-                                    <input
-                                        type="radio"
-                                        class="radio radio-sm"
-                                        name="identity-binding-mode"
-                                        value="required"
-                                        bind:group={identityBindingMode}
-                                    />
-                                    <span class="label-text text-surface-950 font-medium">
-                                        Required
-                                    </span>
-                                </label>
+                                {#if identityPolicy !== "none"}
+                                    <div class="ml-7 space-y-3">
+                                        <label
+                                            class="flex items-start gap-3 cursor-pointer hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors"
+                                        >
+                                            <input
+                                                type="radio"
+                                                class="radio radio-sm mt-0.5"
+                                                name="identity-policy"
+                                                value="required"
+                                                checked={identityPolicy === "required"}
+                                                onclick={() => {
+                                                    identityPolicy = "required";
+                                                }}
+                                            />
+                                            <span class="text-sm text-surface-950">
+                                                <span class="font-medium text-surface-950"
+                                                    >Require ID or registration before starting
+                                                    visit</span
+                                                >
+                                                <span class="block text-surface-500 text-xs">
+                                                    When selected, staff and public triage cannot complete
+                                                    until an ID is linked or a registration request is
+                                                    submitted.
+                                                </span>
+                                            </span>
+                                        </label>
+                                        <label
+                                            class="flex items-start gap-3 cursor-pointer hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors"
+                                        >
+                                            <input
+                                                type="radio"
+                                                class="radio radio-sm mt-0.5"
+                                                name="identity-policy"
+                                                value="optional_unverified"
+                                                checked={identityPolicy === "optional_unverified"}
+                                                onclick={() => {
+                                                    identityPolicy = "optional_unverified";
+                                                }}
+                                                disabled={!allowPublicTriage}
+                                            />
+                                            <span class="text-sm text-surface-950">
+                                                <span class="font-medium text-surface-950"
+                                                    >Don't require; allow unverified visits to
+                                                    start</span
+                                                >
+                                                <span class="block text-surface-500 text-xs">
+                                                    When selected, identity is optional and public triage
+                                                    can create a
+                                                    <span class="font-semibold">queue session</span> from an
+                                                    identity registration that has not been verified yet;
+                                                    the session is marked unverified until staff accept it.
+                                                    When off, public triage only records the registration
+                                                    and does <span class="font-semibold">not</span> start a
+                                                    session.
+                                                </span>
+                                            </span>
+                                        </label>
+                                    </div>
+                                {/if}
                             </div>
                         </div>
 

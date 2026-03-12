@@ -240,7 +240,17 @@ class DisplayBoardService
      * Get board data for a single station's display. Caller must ensure station belongs to active program.
      * Per plan: station-specific informant display (calling, queue, activity for one station).
      *
-     * @return array{program_name: string|null, date: string, station_name: string, station_id: int, now_serving: array, waiting: array, station_activity: array}
+     * @return array{
+     *     program_name: string|null,
+     *     date: string,
+     *     station_name: string,
+     *     station_id: int,
+     *     now_serving: array,
+     *     waiting: array,
+     *     holding: array,
+     *     station_activity: array,
+     *     max_no_show_attempts?: int
+     * }
      */
     public function getStationBoardData(Station $station): array
     {
@@ -248,6 +258,7 @@ class DisplayBoardService
         $program = $station->program;
         $programName = $program?->name;
         $date = now()->format('F j, Y');
+        $maxNoShowAttempts = $program?->settings()->getMaxNoShowAttempts() ?? 3;
 
         $servingAndCalled = Session::query()
             ->where('program_id', $station->program_id)
@@ -265,6 +276,14 @@ class DisplayBoardService
             ->orderBy('station_queue_position')
             ->orderBy('started_at')
             ->get();
+        $holding = Session::query()
+            ->where('program_id', $station->program_id)
+            ->where('holding_station_id', $station->id)
+            ->where('is_on_hold', true)
+            ->with(['serviceTrack.trackSteps.process'])
+            ->orderBy('held_order')
+            ->orderBy('held_at')
+            ->get();
 
         $nowServing = $servingAndCalled->map(function (Session $s) {
             $process = $this->currentProcessForSession($s);
@@ -274,6 +293,7 @@ class DisplayBoardService
                 'status' => $s->status,
                 'track' => $s->serviceTrack?->name ?? '—',
                 'process_name' => $process ? $process['process_name'] : null,
+                'no_show_attempts' => $s->no_show_attempts ?? 0,
             ];
         })->values()->all();
 
@@ -284,6 +304,29 @@ class DisplayBoardService
                 'alias' => $s->alias,
                 'process_name' => $process ? $process['process_name'] : null,
                 'position' => $index + 1,
+                'status' => $s->status,
+                'no_show_attempts' => $s->no_show_attempts ?? 0,
+            ];
+        })->values()->all();
+
+        $holdingList = $holding->map(function (Session $s) {
+            $process = $this->currentProcessForSession($s);
+
+            $track = $s->serviceTrack;
+            $overrideSteps = $s->override_steps ?? [];
+            $totalSteps = count($overrideSteps) > 0
+                ? count($overrideSteps)
+                : ($track ? $track->trackSteps()->count() : 1);
+
+            return [
+                'alias' => $s->alias,
+                'status' => $s->status,
+                'track' => $track?->name ?? '—',
+                'process_name' => $process ? $process['process_name'] : null,
+                'held_at' => $s->held_at?->toIso8601String(),
+                'current_step_order' => $s->current_step_order ?? 1,
+                'total_steps' => $totalSteps,
+                'no_show_attempts' => $s->no_show_attempts ?? 0,
             ];
         })->values()->all();
 
@@ -313,6 +356,7 @@ class DisplayBoardService
             'station_id' => $station->id,
             'now_serving' => $nowServing,
             'waiting' => $waitingList,
+            'holding' => $holdingList,
             'station_activity' => $stationActivity,
             'display_audio_muted' => $station->getDisplayAudioMuted(),
             'display_audio_volume' => $station->getDisplayAudioVolume(),
@@ -326,6 +370,7 @@ class DisplayBoardService
             'alternate_ratio' => $alternateRatio,
             'priority_first' => $priorityFirst,
             'alternate_priority_first' => $alternatePriorityFirst,
+            'max_no_show_attempts' => $maxNoShowAttempts,
         ];
     }
 

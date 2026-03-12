@@ -47,6 +47,7 @@ class UpdatePublicDisplaySettingsRequest extends FormRequest
             'enable_display_hid_barcode' => ['sometimes', 'boolean'],
             'enable_public_triage_hid_barcode' => ['sometimes', 'boolean'],
             'enable_display_camera_scanner' => ['sometimes', 'boolean'],
+            'enable_public_triage_camera_scanner' => ['sometimes', 'boolean'],
         ];
     }
 }

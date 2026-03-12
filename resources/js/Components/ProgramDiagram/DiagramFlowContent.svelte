@@ -9,6 +9,7 @@ import { setContext } from 'svelte';
 	import type { Node, Edge } from '@xyflow/svelte';
 	import { useViewport, useSvelteFlow } from '@xyflow/svelte';
 	import { toaster } from '../../lib/toaster.js';
+	import { CheckCircle2, CircleAlert, Eraser, Image as ImageIcon, Maximize2, Minimize2 } from 'lucide-svelte';
 	import StationNode from './nodes/StationNode.svelte';
 	import TrackNode from './nodes/TrackNode.svelte';
 	import ProcessNode from './nodes/ProcessNode.svelte';
@@ -449,6 +450,133 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		ownEdges = baseEdges as unknown as Edge[];
 	});
 
+	const ALLOWED_SIDEBAR_TYPES = ['station', 'track', 'process', 'staff', 'client_seat', 'shape', 'text', 'image'] as const;
+
+	type SidebarPayload = {
+		type?: (typeof ALLOWED_SIDEBAR_TYPES)[number] | string;
+		entityId?: number;
+		label?: string;
+		text?: string;
+		url?: string;
+		backgroundColor?: string;
+	};
+
+	function addNodeFromPayload(payload: SidebarPayload, position?: { x: number; y: number }) {
+		if (readOnly) return;
+		if (!payload) return;
+		const type = (payload.type ?? 'station') as string;
+		if (!(ALLOWED_SIDEBAR_TYPES as readonly string[]).includes(type)) return;
+
+		let pos = position;
+		if (!pos) {
+			const viewport = svelteFlow.getViewport() as { x?: number; y?: number; zoom?: number } | undefined;
+			if (viewport && typeof viewport.x === 'number' && typeof viewport.y === 'number') {
+				const zoom = typeof viewport.zoom === 'number' && !Number.isNaN(viewport.zoom) && viewport.zoom > 0 ? viewport.zoom : 1;
+				const baseWidth = 800;
+				const baseHeight = 600;
+				pos = {
+					x: viewport.x + baseWidth / 2 / zoom,
+					y: viewport.y + baseHeight / 2 / zoom,
+				};
+			} else {
+				pos = { x: 0, y: 0 };
+			}
+		}
+
+		if (type === 'station' && payload.entityId != null && stations.length > 0) {
+			const station = stations.find((s) => s.id === payload.entityId);
+			if (!station) return;
+			const processIds = station.process_ids ?? [];
+			const parentId = crypto.randomUUID();
+			const parentWidth = 280;
+			/** Top and bottom dotted zones for process boxes (match StationGroupNode h-12 = 48px). */
+			const TOP_ZONE_HEIGHT = 48;
+			const BOTTOM_ZONE_HEIGHT = 48;
+			const parentHeight = 280;
+			const parentNode = {
+				id: parentId,
+				type: 'station_group',
+				position: pos,
+				width: parentWidth,
+				height: parentHeight,
+				zIndex: 10,
+				data: {
+					label: station.name,
+					stationId: station.id,
+					capacity: station.capacity ?? 1,
+					clientCapacity: station.client_capacity ?? 1,
+				},
+				entityId: station.id,
+			};
+			const processHandleNodes: Array<Record<string, unknown>> = [];
+			const n = processIds.length;
+			const handleWidth = 80;
+			const handleHeight = 28;
+			/** Process boxes pre-placed only in top zone (above staff) or bottom zone (below clients); draggable within that zone. */
+			const sides = ['top', 'bottom'] as const;
+			const topZoneYMax = TOP_ZONE_HEIGHT - handleHeight;
+			const bottomZoneYMin = parentHeight - BOTTOM_ZONE_HEIGHT - handleHeight;
+			const bottomZoneYMax = parentHeight - handleHeight;
+			for (let i = 0; i < n; i++) {
+				const processId = processIds[i];
+				const proc = processes.find((p) => p.id === processId);
+				const label = proc?.name ?? `Process ${processId}`;
+				const side = sides[i % 2];
+				const indexOnSide = Math.floor(i / 2);
+				const countOnSide = Math.ceil((n - (i % 2)) / 2);
+				let x: number;
+				let y: number;
+				if (side === 'top') {
+					x = countOnSide <= 1 ? parentWidth / 2 - handleWidth / 2 : (parentWidth / (countOnSide + 1)) * (indexOnSide + 1) - handleWidth / 2;
+					y = Math.min(4, topZoneYMax);
+				} else {
+					x = countOnSide <= 1 ? parentWidth / 2 - handleWidth / 2 : (parentWidth / (countOnSide + 1)) * (indexOnSide + 1) - handleWidth / 2;
+					y = Math.max(bottomZoneYMin, bottomZoneYMax - 4);
+				}
+				x = Math.max(0, Math.min(parentWidth - handleWidth, x));
+				y = side === 'top' ? Math.max(0, Math.min(topZoneYMax, y)) : Math.max(bottomZoneYMin, Math.min(bottomZoneYMax, y));
+				processHandleNodes.push({
+					id: crypto.randomUUID(),
+					type: 'process_handle',
+					position: { x, y },
+					parentId,
+					extent: 'parent',
+					data: { stationId: station.id, processId, label, side, indexOnSide },
+				});
+			}
+			ownNodes = [...ownNodes, parentNode as unknown as Node, ...(processHandleNodes as unknown as Node[])];
+			scheduleAutoSave('drop-station-group');
+			return;
+		}
+
+		let data: Record<string, unknown>;
+		if (type === 'text') {
+			data = { text: payload.text ?? 'Text' };
+		} else if (type === 'shape') {
+			data = {
+				shape: 'rectangle',
+				label: payload.label ?? 'Room',
+				backgroundColor: payload.backgroundColor ?? 'rgba(248,250,252,0.9)',
+			};
+		} else if (type === 'image') {
+			data = { url: payload.url ?? '' };
+		} else {
+			const label = payload.label ?? (type === 'client_seat' ? 'Waiting' : type);
+			data = { label };
+			if (payload.entityId != null) data.entityId = payload.entityId;
+		}
+		const newNode: Record<string, unknown> = {
+			id: crypto.randomUUID(),
+			type,
+			position: pos,
+			data,
+		};
+		if (type === 'shape') (newNode as { zIndex?: number }).zIndex = 0;
+		if (type === 'station_group') (newNode as { zIndex?: number }).zIndex = 10;
+		ownNodes = [...ownNodes, newNode as unknown as Node];
+		scheduleAutoSave('drop-node');
+	}
+
 	function handleDrop(e: DragEvent) {
 		e.preventDefault();
 		e.stopPropagation();
@@ -456,117 +584,24 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		const raw = e.dataTransfer?.getData('application/json');
 		if (!raw) return;
 		try {
-			const payload = JSON.parse(raw) as {
-				type?: string;
-				entityId?: number;
-				label?: string;
-				text?: string;
-				url?: string;
-				backgroundColor?: string;
-			};
-			const type = payload.type ?? 'station';
-			const allowed = ['station', 'track', 'process', 'staff', 'client_seat', 'shape', 'text', 'image'];
-			if (!allowed.includes(type)) return;
+			const payload = JSON.parse(raw) as SidebarPayload;
 			let position = svelteFlow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
 			if (!position || typeof position.x !== 'number' || typeof position.y !== 'number' || Number.isNaN(position.x) || Number.isNaN(position.y)) {
 				position = { x: 0, y: 0 };
 			}
-
-			if (type === 'station' && payload.entityId != null && stations.length > 0) {
-				const station = stations.find((s) => s.id === payload.entityId);
-				if (!station) return;
-				const processIds = station.process_ids ?? [];
-				const parentId = crypto.randomUUID();
-				const parentWidth = 280;
-				/** Top and bottom dotted zones for process boxes (match StationGroupNode h-12 = 48px). */
-				const TOP_ZONE_HEIGHT = 48;
-				const BOTTOM_ZONE_HEIGHT = 48;
-				const parentHeight = 280;
-				const parentNode = {
-					id: parentId,
-					type: 'station_group',
-					position,
-					width: parentWidth,
-					height: parentHeight,
-					zIndex: 10,
-					data: {
-						label: station.name,
-						stationId: station.id,
-						capacity: station.capacity ?? 1,
-						clientCapacity: station.client_capacity ?? 1,
-					},
-					entityId: station.id,
-				};
-				const processHandleNodes: Array<Record<string, unknown>> = [];
-				const n = processIds.length;
-				const handleWidth = 80;
-				const handleHeight = 28;
-				/** Process boxes pre-placed only in top zone (above staff) or bottom zone (below clients); draggable within that zone. */
-				const sides = ['top', 'bottom'] as const;
-				const topZoneYMax = TOP_ZONE_HEIGHT - handleHeight;
-				const bottomZoneYMin = parentHeight - BOTTOM_ZONE_HEIGHT - handleHeight;
-				const bottomZoneYMax = parentHeight - handleHeight;
-				for (let i = 0; i < n; i++) {
-					const processId = processIds[i];
-					const proc = processes.find((p) => p.id === processId);
-					const label = proc?.name ?? `Process ${processId}`;
-					const side = sides[i % 2];
-					const indexOnSide = Math.floor(i / 2);
-					const countOnSide = Math.ceil((n - (i % 2)) / 2);
-					let x: number;
-					let y: number;
-					if (side === 'top') {
-						x = countOnSide <= 1 ? parentWidth / 2 - handleWidth / 2 : (parentWidth / (countOnSide + 1)) * (indexOnSide + 1) - handleWidth / 2;
-						y = Math.min(4, topZoneYMax);
-					} else {
-						x = countOnSide <= 1 ? parentWidth / 2 - handleWidth / 2 : (parentWidth / (countOnSide + 1)) * (indexOnSide + 1) - handleWidth / 2;
-						y = Math.max(bottomZoneYMin, bottomZoneYMax - 4);
-					}
-					x = Math.max(0, Math.min(parentWidth - handleWidth, x));
-					y = side === 'top' ? Math.max(0, Math.min(topZoneYMax, y)) : Math.max(bottomZoneYMin, Math.min(bottomZoneYMax, y));
-					processHandleNodes.push({
-						id: crypto.randomUUID(),
-						type: 'process_handle',
-						position: { x, y },
-						parentId,
-						extent: 'parent',
-						data: { stationId: station.id, processId, label, side, indexOnSide },
-					});
-				}
-			ownNodes = [...ownNodes, parentNode as unknown as Node, ...(processHandleNodes as unknown as Node[])];
-			scheduleAutoSave('drop-station-group');
-				return;
-			}
-
-			let data: Record<string, unknown>;
-			if (type === 'text') {
-				data = { text: payload.text ?? 'Text' };
-			} else if (type === 'shape') {
-				data = {
-					shape: 'rectangle',
-					label: payload.label ?? 'Room',
-					backgroundColor: payload.backgroundColor ?? 'rgba(248,250,252,0.9)',
-				};
-			} else if (type === 'image') {
-				data = { url: payload.url ?? '' };
-			} else {
-				const label = payload.label ?? (type === 'client_seat' ? 'Waiting' : type);
-				data = { label };
-				if (payload.entityId != null) data.entityId = payload.entityId;
-			}
-			const newNode: Record<string, unknown> = {
-				id: crypto.randomUUID(),
-				type,
-				position,
-				data,
-			};
-			if (type === 'shape') (newNode as { zIndex?: number }).zIndex = 0;
-			if (type === 'station_group') (newNode as { zIndex?: number }).zIndex = 10;
-			ownNodes = [...ownNodes, newNode as unknown as Node];
-			scheduleAutoSave('drop-node');
+			addNodeFromPayload(payload, position);
 		} catch {
 			// ignore invalid JSON
 		}
+	}
+
+	if (typeof window !== 'undefined') {
+		window.addEventListener('diagram-add-from-sidebar', (event: Event) => {
+			if (readOnly) return;
+			const custom = event as CustomEvent<SidebarPayload>;
+			if (!custom.detail) return;
+			addNodeFromPayload(custom.detail);
+		});
 	}
 
 	function handleDragOver(e: DragEvent) {
@@ -812,6 +847,58 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		return keys;
 	}
 
+	function validateTrackForDiagram(
+		track: TrackWithSteps,
+		handleKeys: Set<string>,
+		handleProcessIds: Set<number>
+	): { ok: boolean; errors: string[] } {
+		const errors: string[] = [];
+		const steps = track.steps ?? [];
+		if (!Array.isArray(steps) || steps.length === 0) {
+			errors.push(`Track "${track.name}" has no steps configured.`);
+			return { ok: false, errors };
+		}
+		let missingPidCount = 0;
+		let missingOnCanvasCount = 0;
+		let sidNullCount = 0;
+		for (const step of steps) {
+			const s = step as Record<string, unknown>;
+			const sidRaw =
+				(s.station_id as unknown) ??
+				(s.stationId as unknown);
+			const sid =
+				typeof sidRaw === 'number'
+					? sidRaw
+					: typeof sidRaw === 'string'
+						? parseInt(sidRaw, 10)
+						: undefined;
+			const pid =
+				(s.process_id as number | undefined) ??
+				(typeof s.processId === 'number' ? (s.processId as number) : undefined) ??
+				(typeof s.processId === 'string' ? parseInt(s.processId as string, 10) : undefined);
+			if (pid == null) {
+				missingPidCount++;
+				errors.push(`Track "${track.name}" has a step with missing process. Check track configuration.`);
+				continue;
+			}
+			// If station_id is missing/null in steps, fall back to validating by process_id only.
+			if (sid == null || Number.isNaN(sid)) {
+				sidNullCount++;
+				if (!handleProcessIds.has(pid)) {
+					missingOnCanvasCount++;
+					errors.push(`Track "${track.name}": process ${pid} is missing from the diagram.`);
+				}
+				continue;
+			}
+			const key = `${sid},${pid}`;
+			if (!handleKeys.has(key)) {
+				missingOnCanvasCount++;
+				errors.push(`Track "${track.name}": step for station ${sid} / process ${pid} is missing from the diagram.`);
+			}
+		}
+		return { ok: errors.length === 0, errors };
+	}
+
 	function validateDiagramForPublish(): { ok: boolean; errors: string[] } {
 		const errorSet = new Set<string>();
 		const nodes = ownNodes as Array<{ type?: string; data?: Record<string, unknown> }>;
@@ -830,49 +917,34 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 				errorSet.add(`Track "${track.name}" has no steps configured.`);
 				continue;
 			}
-			let missingPidCount = 0;
-			let missingOnCanvasCount = 0;
-			let sidNullCount = 0;
-			for (const step of steps) {
-				const s = step as Record<string, unknown>;
-				const sidRaw =
-					(s.station_id as unknown) ??
-					(s.stationId as unknown);
-				const sid =
-					typeof sidRaw === 'number'
-						? sidRaw
-						: typeof sidRaw === 'string'
-							? parseInt(sidRaw, 10)
-							: undefined;
-				const pid =
-					(s.process_id as number | undefined) ??
-					(typeof s.processId === 'number' ? (s.processId as number) : undefined) ??
-					(typeof s.processId === 'string' ? parseInt(s.processId as string, 10) : undefined);
-				if (pid == null) {
-					missingPidCount++;
-					errorSet.add(`Track "${track.name}" has a step with missing process. Check track configuration.`);
-					continue;
-				}
-				// If station_id is missing/null in steps, fall back to validating by process_id only.
-				if (sid == null || Number.isNaN(sid)) {
-					sidNullCount++;
-					if (!handleProcessIds.has(pid)) {
-						missingOnCanvasCount++;
-						errorSet.add(`Track "${track.name}": process ${pid} is missing from the diagram.`);
-					}
-					continue;
-				}
-				const key = `${sid},${pid}`;
-				if (!handleKeys.has(key)) {
-					missingOnCanvasCount++;
-					errorSet.add(`Track "${track.name}": step for station ${sid} / process ${pid} is missing from the diagram.`);
-				}
+			const result = validateTrackForDiagram(track, handleKeys, handleProcessIds);
+			for (const err of result.errors) {
+				errorSet.add(err);
 			}
 		}
 
 		const errors = Array.from(errorSet);
 		return { ok: errors.length === 0, errors };
 	}
+
+	const trackValidationById = $derived.by(() => {
+		const nodes = ownNodes as Array<{ type?: string; data?: Record<string, unknown> }>;
+		if (!tracks || tracks.length === 0 || !nodes) return new Map<number, { ok: boolean }>();
+		const handleKeys = buildHandleKeySet(nodes);
+		const handleProcessIds = new Set<number>();
+		for (const node of nodes) {
+			if (node.type !== 'process_handle' || !node.data) continue;
+			const pidRaw = node.data.processId as unknown;
+			const pid = typeof pidRaw === 'number' ? pidRaw : parseInt(String(pidRaw ?? ''), 10);
+			if (!Number.isNaN(pid)) handleProcessIds.add(pid);
+		}
+		const map = new Map<number, { ok: boolean }>();
+		for (const track of tracks) {
+			const result = validateTrackForDiagram(track, handleKeys, handleProcessIds);
+			map.set(track.id, { ok: result.ok });
+		}
+		return map;
+	});
 
 	async function handlePublish() {
 		if (!programId) return;
@@ -924,7 +996,11 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 	}
 </style>
 
-<svelte:window onkeydown={(e) => { if (fullscreen && e.key === 'Escape') fullscreen = false; }} />
+<svelte:window
+	onkeydown={(e) => {
+		if (fullscreen && e.key === 'Escape') fullscreen = false;
+	}}
+/>
 {#if !fullscreen}
 <div
 	class="min-h-[360px] w-full"
@@ -989,7 +1065,7 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 	{/if}
 	{#if !readOnly}
 	<Panel position="top-left" class="flex flex-col gap-2 max-w-[200px] opacity-70 hover:opacity-100 transition-opacity">
-		<p class="text-xs font-semibold text-surface-700">Flow (track)</p>
+			<p class="text-xs font-semibold text-surface-700">Flow (track)</p>
 		<div class="flex flex-wrap gap-1">
 			<button
 				type="button"
@@ -1001,32 +1077,49 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 			{#each tracks as track (track.id)}
 				<button
 					type="button"
-					class="btn preset-tonal text-xs touch-target-h px-2 {selectedTrackId === track.id ? 'ring-2 ring-primary-500' : ''}"
+						class="btn preset-tonal text-xs touch-target-h px-2 flex items-center gap-1 {selectedTrackId === track.id ? 'ring-2 ring-primary-500' : ''}"
 					onclick={() => onTrackSelect(track.id)}
 				>
-					{track.name}
+						<span class="truncate max-w-[6rem] sm:max-w-[8rem]">{track.name}</span>
+						{#if trackValidationById.get(track.id)?.ok}
+							<CheckCircle2
+								class="w-3.5 h-3.5 text-success-500 shrink-0"
+								aria-label="Track is complete on diagram"
+							/>
+						{:else}
+							<CircleAlert
+								class="w-3.5 h-3.5 text-warning-500 shrink-0"
+								aria-label="Track has missing steps on diagram"
+							/>
+						{/if}
 				</button>
 			{/each}
 		</div>
 		<button
 			type="button"
-			class="btn preset-filled-primary-500 touch-target-h"
+			class="btn preset-filled-primary-500 touch-target-h flex items-center gap-1.5"
 			disabled={saving || publishing}
 			onclick={handlePublish}
+			aria-label="Check whether diagram is complete for all tracks"
 		>
-			{#if publishing}
-				Checking…
-			{:else}
-				Publish diagram
-			{/if}
+			<CheckCircle2 class="w-4 h-4" />
+			<span class="hidden sm:inline">
+				{#if publishing}
+					Checking…
+				{:else}
+					Publish diagram
+				{/if}
+			</span>
 		</button>
 		<button
 			type="button"
-			class="btn preset-tonal touch-target-h"
+			class="btn preset-tonal touch-target-h flex items-center gap-1.5"
 			disabled={saving}
 			onclick={handleClearDiagram}
+			aria-label="Clear diagram"
 		>
-			Clear diagram
+			<Eraser class="w-4 h-4" />
+			<span class="hidden sm:inline">Clear diagram</span>
 		</button>
 		<input
 			type="file"
@@ -1037,23 +1130,29 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		/>
 		<button
 			type="button"
-			class="btn preset-tonal touch-target-h"
+			class="btn preset-tonal touch-target-h flex items-center gap-1.5"
 			disabled={imageUploading}
 			onclick={() => imageInputEl?.click()}
+			aria-label="Add background image"
 		>
-			{#if imageUploading}
-				Uploading...
-			{:else}
-				Add image
-			{/if}
+			<ImageIcon class="w-4 h-4" />
+			<span class="hidden sm:inline">
+				{#if imageUploading}
+					Uploading...
+				{:else}
+					Add image
+				{/if}
+			</span>
 		</button>
 		<button
 			type="button"
-			class="btn preset-tonal touch-target-h"
+			class="btn preset-tonal touch-target-h flex items-center gap-1.5"
 			title="Fullscreen canvas"
+			aria-label="Open fullscreen canvas"
 			onclick={() => (fullscreen = true)}
 		>
-			Fullscreen
+			<Maximize2 class="w-4 h-4" />
+			<span class="hidden sm:inline">Fullscreen</span>
 		</button>
 	</Panel>
 	{/if}
@@ -1082,16 +1181,16 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 		<div class="flex items-center justify-end shrink-0 px-2 py-2 border-b border-surface-200 bg-surface-100">
 			<button
 				type="button"
-				class="btn preset-tonal touch-target rounded-full"
+				class="btn preset-tonal touch-target rounded-full flex items-center justify-center"
 				title="Exit fullscreen"
 				aria-label="Exit fullscreen"
 				onclick={() => (fullscreen = false)}
 			>
-				✕
+				<Minimize2 class="w-4 h-4" />
 			</button>
 		</div>
 		<div class="flex-1 min-h-0 flex flex-row overflow-hidden">
-			<aside class="w-52 border-r border-surface-200 p-3 bg-surface-100 shrink-0 overflow-y-auto" aria-label="Diagram entities">
+			<aside class="w-40 md:w-52 border-r border-surface-200 px-2 py-2 md:p-3 bg-surface-100 shrink-0 overflow-y-auto" aria-label="Diagram entities">
 				<p class="text-xs font-semibold text-surface-700 mb-1.5">Stations</p>
 				<ul class="space-y-1 mb-4">
 					{#each stations as station (station.id)}
@@ -1123,6 +1222,20 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 						class="cursor-grab active:cursor-grabbing rounded-lg border border-dashed border-surface-400 bg-surface-50 px-2 py-1.5 text-xs text-surface-700 hover:bg-surface-200/80"
 						role="button"
 						tabindex="0"
+						onclick={() =>
+							addNodeFromPayload({
+								type: 'shape',
+								label: 'Room',
+							})}
+						onkeydown={(event) => {
+							if (event.key === 'Enter' || event.key === ' ') {
+								event.preventDefault();
+								addNodeFromPayload({
+									type: 'shape',
+									label: 'Room',
+								});
+							}
+						}}
 						draggable="true"
 						ondragstart={(e) => {
 							const dt = e.dataTransfer;
@@ -1138,6 +1251,20 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 						class="cursor-grab active:cursor-grabbing rounded-lg border border-surface-400 bg-surface-100 px-2 py-1.5 text-xs text-surface-700 hover:bg-surface-200/80"
 						role="button"
 						tabindex="0"
+						onclick={() =>
+							addNodeFromPayload({
+								type: 'text',
+								text: 'Text',
+							})}
+						onkeydown={(event) => {
+							if (event.key === 'Enter' || event.key === ' ') {
+								event.preventDefault();
+								addNodeFromPayload({
+									type: 'text',
+									text: 'Text',
+								});
+							}
+						}}
 						draggable="true"
 						ondragstart={(e) => {
 							const dt = e.dataTransfer;

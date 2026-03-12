@@ -27,6 +27,8 @@ class User extends Authenticatable
         'is_active',
         'availability_status',
         'avatar_path',
+        'staff_triage_allow_hid_barcode',
+        'staff_triage_allow_camera_scanner',
     ];
 
     protected $appends = ['avatar_url'];
@@ -46,6 +48,8 @@ class User extends Authenticatable
             'role' => UserRole::class,
             'is_active' => 'boolean',
             'availability_updated_at' => 'datetime',
+            'staff_triage_allow_hid_barcode' => 'boolean',
+            'staff_triage_allow_camera_scanner' => 'boolean',
         ];
     }
 

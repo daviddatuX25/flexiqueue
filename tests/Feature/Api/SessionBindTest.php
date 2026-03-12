@@ -3,6 +3,8 @@
 namespace Tests\Feature\Api;
 
 use App\Events\StationActivity;
+use App\Models\Client;
+use App\Models\ClientIdDocument;
 use App\Models\Process;
 use App\Models\Program;
 use App\Models\ServiceTrack;
@@ -184,6 +186,62 @@ class SessionBindTest extends TestCase
         $response->assertStatus(409);
         $response->assertJsonPath('message', 'Token is already in use.');
         $response->assertJsonPath('active_session.alias', 'A1');
+    }
+
+    public function test_bind_returns_409_when_client_already_has_active_session(): void
+    {
+        $client = Client::factory()->create();
+        $idDocument = ClientIdDocument::create([
+            'client_id' => $client->id,
+            'id_type' => 'PhilHealth',
+            'id_number_encrypted' => encrypt('1234567890'),
+            'id_number_hash' => 'hash',
+        ]);
+
+        $firstToken = new Token;
+        $firstToken->qr_code_hash = hash('sha256', Str::random(32).'B1');
+        $firstToken->physical_id = 'B1';
+        $firstToken->status = 'in_use';
+        $firstToken->save();
+
+        $existingSession = \App\Models\Session::create([
+            'token_id' => $firstToken->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'B1',
+            'client_id' => $client->id,
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station->id,
+            'current_step_order' => 1,
+            'station_queue_position' => 1,
+            'status' => 'waiting',
+            'queued_at_station' => now(),
+        ]);
+
+        $secondToken = new Token;
+        $secondToken->qr_code_hash = hash('sha256', Str::random(32).'C1');
+        $secondToken->physical_id = 'C1';
+        $secondToken->status = 'available';
+        $secondToken->save();
+
+        $response = $this->actingAs($this->staff)->postJson('/api/sessions/bind', [
+            'qr_hash' => $secondToken->qr_code_hash,
+            'track_id' => $this->track->id,
+            'client_category' => 'Regular',
+            'client_binding' => [
+                'client_id' => $client->id,
+                'source' => 'existing_id_document',
+                'id_document_id' => $idDocument->id,
+            ],
+        ]);
+
+        $response->assertStatus(409);
+        $response->assertJsonPath('error_code', 'client_already_queued');
+        $response->assertJsonPath('active_session.id', $existingSession->id);
+        $response->assertJsonPath('active_session.alias', 'B1');
+        $this->assertDatabaseMissing('queue_sessions', [
+            'token_id' => $secondToken->id,
+        ]);
     }
 
     public function test_bind_token_soft_deleted_returns_422(): void

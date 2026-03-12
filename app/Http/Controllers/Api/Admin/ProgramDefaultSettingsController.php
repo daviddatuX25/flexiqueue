@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\UpdateProgramDefaultSettingsRequest;
+use App\Support\ProgramSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -64,17 +65,77 @@ class ProgramDefaultSettingsController extends Controller
 
     private function normalizeSettings(array $settings): array
     {
-        return [
-            'no_show_timer_seconds' => (int) ($settings['no_show_timer_seconds'] ?? 10),
-            'max_no_show_attempts' => (int) max(1, min(10, $settings['max_no_show_attempts'] ?? 3)),
-            'require_permission_before_override' => (bool) ($settings['require_permission_before_override'] ?? true),
-            'priority_first' => (bool) ($settings['priority_first'] ?? true),
-            'balance_mode' => $settings['balance_mode'] ?? 'fifo',
-            'station_selection_mode' => $settings['station_selection_mode'] ?? 'fixed',
-            'alternate_ratio' => [
-                (int) (($settings['alternate_ratio'] ?? [2, 1])[0] ?? 2),
-                (int) (($settings['alternate_ratio'] ?? [2, 1])[1] ?? 1),
-            ],
+        $programSettings = ProgramSettings::fromArray($settings);
+
+        $normalized = [
+            'no_show_timer_seconds' => $programSettings->getNoShowTimerSeconds(),
+            'max_no_show_attempts' => $programSettings->getMaxNoShowAttempts(),
+            'require_permission_before_override' => $programSettings->getRequirePermissionBeforeOverride(),
+            'priority_first' => $programSettings->getPriorityFirst(),
+            'balance_mode' => $programSettings->getBalanceMode(),
+            'station_selection_mode' => $programSettings->getStationSelectionMode(),
+            'alternate_ratio' => $programSettings->getAlternateRatio(),
+            // When not explicitly set, default to true so alternate mode starts with priority lane first.
+            'alternate_priority_first' => array_key_exists('alternate_priority_first', $settings)
+                ? (bool) $settings['alternate_priority_first']
+                : true,
+            'display_scan_timeout_seconds' => $programSettings->getDisplayScanTimeoutSeconds(),
+            'display_audio_muted' => $programSettings->getDisplayAudioMuted(),
+            'display_audio_volume' => $programSettings->getDisplayAudioVolume(),
+            'display_tts_repeat_count' => $programSettings->getDisplayTtsRepeatCount(),
+            'display_tts_repeat_delay_ms' => $programSettings->getDisplayTtsRepeatDelayMs(),
+            'allow_public_triage' => $programSettings->getAllowPublicTriage(),
+            'allow_unverified_entry' => $programSettings->getAllowUnverifiedEntry(),
+            'identity_binding_mode' => $programSettings->getIdentityBindingMode(),
+            'enable_display_hid_barcode' => $programSettings->getEnableDisplayHidBarcode(),
+            'enable_public_triage_hid_barcode' => $programSettings->getEnablePublicTriageHidBarcode(),
+            'enable_display_camera_scanner' => $programSettings->getEnableDisplayCameraScanner(),
+            'enable_public_triage_camera_scanner' => $programSettings->getEnablePublicTriageCameraScanner(),
+            'tts' => $this->normalizeTtsSettings($settings['tts'] ?? null, $programSettings),
         ];
+
+        return $normalized;
+    }
+
+    private function normalizeTtsSettings($rawTts, ProgramSettings $programSettings): array
+    {
+        $tts = is_array($rawTts) ? $rawTts : [];
+
+        $normalized = [
+            'active_language' => $programSettings->getTtsActiveLanguage(),
+        ];
+
+        if (array_key_exists('auto_generate_station_tts', $tts)) {
+            $normalized['auto_generate_station_tts'] = (bool) $tts['auto_generate_station_tts'];
+        }
+
+        if (isset($tts['connector']) && is_array($tts['connector'])) {
+            $connector = $tts['connector'];
+            $languages = $connector['languages'] ?? null;
+
+            if (is_array($languages)) {
+                $normalizedLanguages = [];
+
+                foreach (['en', 'fil', 'ilo'] as $lang) {
+                    if (! isset($languages[$lang]) || ! is_array($languages[$lang])) {
+                        continue;
+                    }
+
+                    $langConfig = $languages[$lang];
+                    $normalizedLanguages[$lang] = array_intersect_key(
+                        $langConfig,
+                        array_flip(['voice_id', 'rate', 'connector_phrase']),
+                    );
+                }
+
+                if ($normalizedLanguages !== []) {
+                    $normalized['connector'] = [
+                        'languages' => $normalizedLanguages,
+                    ];
+                }
+            }
+        }
+
+        return $normalized;
     }
 }

@@ -248,6 +248,27 @@
 	--color-surface-950: #ffffff;
 }
 
+/* Temporary highlight for Triage identity registration row when opened from Station via highlight_session_id */
+.triage-row-highlight {
+	position: relative;
+	border-radius: var(--radius-container);
+	background-color: color-mix(in srgb, var(--color-primary-100) 60%, transparent);
+	animation: triage-row-flash 2s ease-out forwards;
+}
+
+@keyframes triage-row-flash {
+	0% {
+		box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+	}
+	60% {
+		box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+	}
+	100% {
+		box-shadow: none;
+		background-color: transparent;
+	}
+}
+
 /* Light mode: form controls — soft, low-contrast (avoid harsh dark-on-light) */
 [data-theme='flexiqueue']:not([data-mode='dark']) .input,
 [data-theme='flexiqueue']:not([data-mode='dark']) .select,
@@ -260,8 +281,13 @@
 [data-theme='flexiqueue']:not([data-mode='dark']) select,
 [data-theme='flexiqueue']:not([data-mode='dark']) textarea {
 	background-color: #ffffff !important;
-	color: #0f172a;
+	color: #0f172a !important;
 	border-color: #e2e8f0;
+}
+/* Light mode: dropdown options — explicit so open list is readable (browser-dependent) */
+[data-theme='flexiqueue']:not([data-mode='dark']) select option {
+	background-color: #ffffff;
+	color: #0f172a;
 }
 [data-theme='flexiqueue']:not([data-mode='dark']) .input::placeholder,
 [data-theme='flexiqueue']:not([data-mode='dark']) input::placeholder,
@@ -305,8 +331,35 @@
 [data-theme='flexiqueue'][data-mode='dark'] select,
 [data-theme='flexiqueue'][data-mode='dark'] textarea {
 	background-color: rgba(255, 255, 255, 0.08) !important;
-	color: var(--color-surface-950);
+	color: var(--color-surface-950) !important;
 	border-color: rgba(255, 255, 255, 0.12);
+}
+/* Dark mode: dropdown options — explicit for open list readability */
+[data-theme='flexiqueue'][data-mode='dark'] select option {
+	background-color: var(--color-surface-100);
+	color: var(--color-surface-950);
+}
+
+/* Themed select — guaranteed readable dropdown regardless of parent (use on every <select>) */
+[data-theme='flexiqueue']:not([data-mode='dark']) .select-theme,
+[data-theme='flexiqueue']:not([data-mode='dark']) select.select-theme {
+	background-color: #ffffff !important;
+	color: #0f172a !important;
+}
+[data-theme='flexiqueue']:not([data-mode='dark']) .select-theme option,
+[data-theme='flexiqueue']:not([data-mode='dark']) select.select-theme option {
+	background-color: #ffffff;
+	color: #0f172a;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .select-theme,
+[data-theme='flexiqueue'][data-mode='dark'] select.select-theme {
+	background-color: rgba(255, 255, 255, 0.08) !important;
+	color: var(--color-surface-950) !important;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .select-theme option,
+[data-theme='flexiqueue'][data-mode='dark'] select.select-theme option {
+	background-color: var(--color-surface-100);
+	color: var(--color-surface-950);
 }
 
 [data-theme='flexiqueue'][data-mode='dark'] .input::placeholder,
@@ -832,39 +885,61 @@
 
 /* Table container — consistent wrapper for data tables (rounded, elevation, bg) */
 [data-theme='flexiqueue'] .table-container {
-	background-color: var(--color-surface-50);
+	background-color: transparent !important;
 	border-radius: var(--radius-container);
-	box-shadow: var(--shadow-card);
 	overflow-x: auto;
+	box-shadow: none !important;
 }
 [data-theme='flexiqueue'] .table-container .table {
-	width: 100%;
+	background-color: transparent !important;
 }
-[data-theme='flexiqueue'] .table-container .table th,
-[data-theme='flexiqueue'] .table-container .table td {
-	padding: 0.75rem 1rem;
-}
+
+/* Header — opaque band so it clearly separates from frosted rows */
 [data-theme='flexiqueue'] .table-container .table thead th {
-	background-color: var(--color-surface-100);
-	color: var(--color-surface-700);
+	background-color: #ffffff !important;
+	color: var(--color-surface-950);
 	font-weight: 600;
 	font-size: 0.8125rem;
 	text-transform: none;
 	letter-spacing: 0;
 	white-space: nowrap;
+	border-bottom: 1px solid rgba(15, 23, 42, 0.08) !important;
 }
-[data-theme='flexiqueue'] .table-container .table thead {
-	position: sticky;
-	top: 0;
-	z-index: 10;
-}
-[data-theme='flexiqueue'] .table-container .table tbody tr:hover {
-	background-color: var(--color-surface-100);
+[data-theme='flexiqueue'][data-mode='dark'] .table-container .table thead th {
+	background-color: #0f172a !important;
+	border-bottom-color: rgba(255, 255, 255, 0.06) !important;
 }
 
-/* Table zebra — striped rows per Skeleton theme */
-.table-zebra tbody tr:nth-child(even) {
-	background-color: var(--color-surface-100);
+/* Translucent data rows — allow AppBackground to show through.
+ * Targeting `td` to ensure we override any framework cell backgrounds. */
+[data-theme='flexiqueue'] .fq-admin-table tbody tr td {
+	background-color: rgba(255, 255, 255, 0.03); /* very light frosting */
+	transition: background-color 0.12s ease-out;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .fq-admin-table tbody tr td {
+	background-color: rgba(15, 23, 42, 0.16);
+}
+
+/* Zebra stripping — slightly more opaque for even rows */
+[data-theme='flexiqueue']:not([data-mode='dark']) .fq-admin-table tbody tr:nth-child(even) td {
+	background-color: rgba(255, 255, 255, 0.07);
+}
+[data-theme='flexiqueue'][data-mode='dark'] .fq-admin-table tbody tr:nth-child(even) td {
+	background-color: rgba(255, 255, 255, 0.03);
+}
+
+/* Hover feedback */
+[data-theme='flexiqueue'] .fq-admin-table tbody tr:hover td {
+	background-color: rgba(255, 255, 255, 0.13) !important;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .fq-admin-table tbody tr:hover td {
+	background-color: rgba(255, 255, 255, 0.07) !important;
+}
+
+/* Ensure the trailing Actions column header is visually centered in admin tables,
+ * even when Skeleton's table defaults try to left-align headers. */
+[data-theme='flexiqueue'] .fq-admin-table thead tr th:last-child {
+	text-align: center !important;
 }
 
 /* Form labels and help text — ensure dark text in main content and dialogs */

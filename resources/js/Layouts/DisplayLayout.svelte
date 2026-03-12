@@ -32,14 +32,20 @@
     <FlexiQueueToaster />
     <FlashToToast />
     <header
-        class="flex items-center justify-between gap-4 bg-primary-600/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-primary-700/50 text-white px-4 py-2.5 shrink-0 z-10"
+        class="flex items-center justify-between gap-4 bg-primary-600/80 dark:bg-slate-900/80 backdrop-blur-xl md:backdrop-blur-none md:bg-primary-600/95 md:dark:bg-slate-900/95 border-b border-primary-700/50 text-white px-4 py-2.5 shrink-0 z-10"
     >
         <div class="shrink-0">
             <Link
                 href="/"
-                class="text-lg font-bold text-inherit no-underline hover:opacity-90 transition-opacity"
-                >FlexiQueue</Link
+                class="text-lg font-bold text-inherit no-underline hover:opacity-90 transition-opacity flex items-center gap-2"
             >
+                <img
+                    src="/images/logo.png"
+                    alt="FlexiQueue logo"
+                    class="h-8 w-auto"
+                />
+                <span class="hidden sm:inline">FlexiQueue</span>
+            </Link>
         </div>
         <div
             class="flex-1 flex flex-col justify-center items-center min-w-0 gap-0.5"

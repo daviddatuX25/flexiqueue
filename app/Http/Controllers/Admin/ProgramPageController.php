@@ -7,6 +7,7 @@ use App\Models\Program;
 use App\Models\Session;
 use App\Models\ServiceTrack;
 use App\Models\Station;
+use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -15,10 +16,21 @@ use Inertia\Response;
  */
 class ProgramPageController extends Controller
 {
-    public function index(): Response
+    public function index(Request $request): Response
     {
-        $programs = Program::query()
-            ->orderBy('name')
+        $search = trim((string) $request->query('search', ''));
+        $search = mb_strlen($search) > 100 ? mb_substr($search, 0, 100) : $search;
+
+        $query = Program::query()->orderBy('name');
+
+        if ($search !== '') {
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', '%'.$search.'%')
+                    ->orWhere('description', 'like', '%'.$search.'%');
+            });
+        }
+
+        $programs = $query
             ->get()
             ->map(fn (Program $p) => [
                 'id' => $p->id,
@@ -31,6 +43,7 @@ class ProgramPageController extends Controller
 
         return Inertia::render('Admin/Programs/Index', [
             'programs' => $programs,
+            'search' => $search !== '' ? $search : null,
         ]);
     }
 

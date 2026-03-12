@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api;
 
+use App\Models\IdentityRegistration;
 use App\Models\Program;
 use App\Models\ProgramStationAssignment;
 use App\Models\ServiceTrack;
@@ -110,6 +111,45 @@ class StationQueueApiTest extends TestCase
         $response->assertJsonPath('serving', []);
         $response->assertJsonPath('stats.total_waiting', 0);
         $response->assertJsonPath('stats.total_served_today', 0);
+    }
+
+    public function test_queue_includes_unverified_flag_when_session_has_pending_identity_registration(): void
+    {
+        $token = $this->createToken('U1');
+        $reg = IdentityRegistration::create([
+            'program_id' => $this->program->id,
+            'session_id' => null,
+            'name' => 'Unverified Person',
+            'birth_year' => 1990,
+            'client_category' => 'Regular',
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]);
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'U1',
+            'client_id' => null,
+            'identity_registration_id' => $reg->id,
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'station_queue_position' => 1,
+            'status' => 'waiting',
+            'queued_at_station' => now(),
+        ]);
+        $reg->update(['session_id' => $session->id]);
+        $token->update(['status' => 'in_use', 'current_session_id' => $session->id]);
+
+        $response = $this->actingAs($this->staff)->getJson("/api/stations/{$this->station1->id}/queue");
+
+        $response->assertStatus(200);
+        $waiting = $response->json('waiting');
+        $this->assertIsArray($waiting);
+        $found = collect($waiting)->firstWhere('session_id', $session->id);
+        $this->assertNotNull($found);
+        $this->assertTrue($found['unverified'] ?? false);
     }
 
     public function test_staff_assigned_sees_serving_when_one_session_serving(): void
@@ -661,6 +701,7 @@ class StationQueueApiTest extends TestCase
         $response->assertJsonPath('status', 'waiting');
         $response->assertJsonPath('current_station_id', $this->station1->id);
         $response->assertJsonPath('at_this_station', true);
+        $response->assertJsonPath('unverified', false);
     }
 
     public function test_session_by_token_when_session_at_other_station_returns_at_this_station_false(): void
@@ -689,6 +730,48 @@ class StationQueueApiTest extends TestCase
         $response->assertStatus(200);
         $response->assertJsonPath('at_this_station', false);
         $response->assertJsonPath('current_station_id', $this->station2->id);
+    }
+
+    public function test_session_by_token_includes_unverified_flag_when_session_has_pending_identity_registration(): void
+    {
+        $token = new Token;
+        $token->qr_code_hash = hash('sha256', Str::random(32).'U1');
+        $token->physical_id = 'U1';
+        $token->status = 'in_use';
+        $token->save();
+
+        $registration = IdentityRegistration::create([
+            'program_id' => $this->program->id,
+            'session_id' => null,
+            'name' => 'Unverified Person',
+            'birth_year' => 1990,
+            'client_category' => 'Regular',
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]);
+
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'U1',
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'status' => 'waiting',
+            'identity_registration_id' => $registration->id,
+        ]);
+
+        $registration->update(['session_id' => $session->id]);
+        $token->update(['current_session_id' => $session->id]);
+
+        $response = $this->actingAs($this->staff)->getJson(
+            "/api/stations/{$this->station1->id}/session-by-token?qr_hash=".urlencode($token->qr_code_hash)
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session_id', $session->id);
+        $response->assertJsonPath('unverified', true);
     }
 
     public function test_session_by_token_not_found_returns_404(): void

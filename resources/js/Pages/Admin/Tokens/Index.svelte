@@ -1,6 +1,7 @@
 <script lang="ts">
     import AdminLayout from "../../../Layouts/AdminLayout.svelte";
     import Modal from "../../../Components/Modal.svelte";
+    import AdminTable from "../../../Components/AdminTable.svelte";
     import { get } from "svelte/store";
     import { Link, usePage } from "@inertiajs/svelte";
     import { toaster } from "../../../lib/toaster.js";
@@ -1019,10 +1020,6 @@
                         <span class="text-sm font-semibold text-surface-900">
                             token{selectedIds.size > 1 ? "s" : ""} selected
                         </span>
-                    {:else}
-                        <span class="text-sm text-surface-600">
-                            Select tokens below for bulk print, deactivate, or delete.
-                        </span>
                     {/if}
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
@@ -1183,206 +1180,210 @@
             </div>
         {:else}
             <!-- Desktop Table View: compact, touch-friendly; row actions always visible, disabled when selection active -->
-            <div class="table-container mt-2 hidden md:block overflow-x-auto rounded-container border border-surface-200 shadow-sm w-max max-w-full">
-                <table class="table table-zebra relative w-max text-sm">
-                    <thead>
-                        <tr class="border-b border-surface-200">
-                            <th class="w-10 py-2 px-2 text-center text-surface-600 font-medium">
-                                <label class="flex items-center justify-center gap-1.5 cursor-pointer">
+            <AdminTable class="mt-2 hidden md:block" tableClass="text-sm">
+                {#snippet head()}
+                    <tr>
+                        <th class="w-10 py-2 px-2 text-center text-surface-600 font-medium">
+                            <label class="flex items-center justify-center gap-1.5 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    class="checkbox checkbox-sm"
+                                    bind:this={selectAllCheckbox}
+                                    checked={allSelected}
+                                    onchange={toggleSelectAll}
+                                    disabled={selectableForDelete.length === 0}
+                                    aria-label="Select all"
+                                />
+                                <span class="text-xs font-medium">All</span>
+                            </label>
+                        </th>
+                        <th class="w-36 py-2 px-3 text-center text-surface-600 font-medium">Physical ID</th>
+                        <th class="w-32 py-2 px-3 text-center text-surface-600 font-medium">Status</th>
+                        <th class="w-40 py-2 px-3 text-center text-surface-600 font-medium">TTS status</th>
+                        <th class="py-2 px-3 text-center text-surface-600 font-medium whitespace-nowrap">Actions</th>
+                    </tr>
+                {/snippet}
+                {#snippet body()}
+                    {#each tokens as token (token.id)}
+                        <tr>
+                            <td class="py-2 px-2 text-center align-middle">
+                                {#if token.status === "available" || token.status === "deactivated"}
                                     <input
                                         type="checkbox"
                                         class="checkbox checkbox-sm"
-                                        bind:this={selectAllCheckbox}
-                                        checked={allSelected}
-                                        onchange={toggleSelectAll}
-                                        disabled={selectableForDelete.length === 0}
-                                        aria-label="Select all"
+                                        checked={selectedIds.has(token.id)}
+                                        onchange={() =>
+                                            toggleSelect(token.id)}
+                                        aria-label="Select {token.physical_id}"
                                     />
-                                    <span class="text-xs font-medium">All</span>
-                                </label>
-                            </th>
-                            <th class="w-36 py-2 px-3 text-left text-surface-600 font-medium">Physical ID</th>
-                            <th class="w-32 py-2 px-3 text-surface-600 font-medium">Status</th>
-                            <th class="w-40 py-2 px-3 text-surface-600 font-medium">TTS status</th>
-                            <th class="py-2 px-3 text-right text-surface-600 font-medium whitespace-nowrap">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {#each tokens as token (token.id)}
-                            <tr class="border-b border-surface-100 hover:bg-surface-50/80 transition-colors">
-                                <td class="py-2 px-2 text-center align-middle">
-                                    {#if token.status === "available" || token.status === "deactivated"}
-                                        <input
-                                            type="checkbox"
-                                            class="checkbox checkbox-sm"
-                                            checked={selectedIds.has(token.id)}
-                                            onchange={() =>
-                                                toggleSelect(token.id)}
-                                            aria-label="Select {token.physical_id}"
-                                        />
-                                    {:else}
-                                        <div
-                                            class="flex justify-center"
-                                            aria-label="In-use tokens cannot be selected for bulk actions"
-                                            title="In-use tokens cannot be selected for bulk actions"
-                                        >
-                                            <Ban
-                                                class="w-4 h-4 text-surface-300"
-                                            />
-                                        </div>
-                                    {/if}
-                                </td>
-                                <td class="py-2 px-3 align-middle">
-                                    <span
-                                        class="font-mono font-semibold text-surface-900"
+                                {:else}
+                                    <div
+                                        class="flex justify-center"
+                                        aria-label="In-use tokens cannot be selected for bulk actions"
+                                        title="In-use tokens cannot be selected for bulk actions"
                                     >
-                                        {token.physical_id}
-                                    </span>
-                                </td>
-                                <td class="py-2 px-3 align-middle">
-                                    {#if token.status === "available"}
-                                        <span
-                                            class="badge preset-filled-success-500 text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 w-max font-medium"
-                                        >
-                                            <CheckCircle2 class="w-3 h-3" />
-                                            Available
-                                        </span>
-                                    {:else if token.status === "in_use"}
-                                        <span
-                                            class="badge preset-filled-primary-500 text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 w-max font-medium"
-                                        >
-                                            <PlayCircle class="w-3 h-3" /> In use
-                                        </span>
-                                    {:else if token.status === "deactivated"}
-                                        <span
-                                            class="badge preset-tonal text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 w-max font-medium text-surface-600"
-                                        >
-                                            <Ban class="w-3 h-3" /> Deactivated
-                                        </span>
-                                    {:else}
-                                        <span
-                                            class="badge preset-tonal text-[10px] px-2 py-0.5 rounded-full font-medium"
-                                        >
-                                            {token.status}
-                                        </span>
-                                    {/if}
-                                </td>
-                                <td class="py-2 px-3 align-middle">
-                                    {#if token.tts_status === "generating"}
-                                        <span
-                                            class="inline-flex items-center gap-1.5 rounded-full bg-primary-50 border border-primary-200 text-primary-700 text-[10px] px-2 py-0.5 font-medium"
-                                        >
-                                            <span class="loading-spinner loading-xs"></span>
-                                            Generating…
-                                        </span>
-                                    {:else if token.tts_status === "pre_generated"}
-                                        <span
-                                            class="inline-flex items-center gap-1.5 rounded-full bg-success-50 border border-success-200 text-success-700 text-[10px] px-2 py-0.5 font-medium"
-                                        >
-                                            <CheckCircle2 class="w-3 h-3" />
-                                            Pre-generated
-                                        </span>
-                                    {:else if token.tts_status === "failed"}
-                                        <span
-                                            class="inline-flex items-center gap-1.5 rounded-full bg-error-50 border border-error-200 text-error-700 text-[10px] px-2 py-0.5 font-medium"
-                                            title={token.tts_failure_reason || "Generation failed. Display will fall back to live TTS."}
-                                        >
-                                            <XCircle class="w-3 h-3" />
-                                            Failed
-                                        </span>
-                                    {:else}
-                                        <span
-                                            class="inline-flex items-center gap-1.5 rounded-full bg-surface-100 border border-surface-200 text-surface-600 text-[10px] px-2 py-0.5 font-medium"
-                                        >
-                                            Not generated
-                                        </span>
-                                    {/if}
-                                </td>
-                                <td class="py-2 px-3 text-right align-middle">
-                                    <div class="flex items-center justify-end gap-1.5 flex-wrap {someSelected ? 'opacity-60 pointer-events-none' : ''}">
-                                        <button
-                                            type="button"
-                                            class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onclick={() => openEditModal(token)}
-                                            disabled={someSelected || submitting}
-                                            title="Edit token"
-                                        >
-                                            <Pencil class="w-3.5 h-3.5" /> Edit
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onclick={() => openTtsPhrasesModal(token)}
-                                            disabled={someSelected || submitting}
-                                            title="TTS phrases"
-                                        >
-                                            TTS
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onclick={() => generateTtsForTokens([token.id])}
-                                            disabled={someSelected || submitting || token.tts_status === "pre_generated" || token.tts_status === "generating"}
-                                            title={token.tts_status === "failed" ? "Regenerate TTS (generation failed)" : !token.tts_status ? "Generate TTS (not generated)" : token.tts_status === "pre_generated" ? "TTS already generated" : "Generating…"}
-                                        >
-                                            <Volume2 class="w-3.5 h-3.5" /> Generate TTS
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onclick={() => openPrintModal([token.id])}
-                                            disabled={someSelected || submitting}
-                                            title="Print token"
-                                        >
-                                            <Printer class="w-3.5 h-3.5" />
-                                        </button>
-                                        {#if token.status === "in_use"}
-                                            <button
-                                                type="button"
-                                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                onclick={() => setTokenStatus(token, "available")}
-                                                disabled={someSelected || submitting}
-                                                title="Mark available"
-                                            >
-                                                <CheckCircle2 class="w-3.5 h-3.5" />
-                                            </button>
-                                        {:else if token.status === "available"}
-                                            <button
-                                                type="button"
-                                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                onclick={() => setTokenStatus(token, "deactivated")}
-                                                disabled={someSelected || submitting}
-                                                title="Deactivate"
-                                            >
-                                                <Ban class="w-3.5 h-3.5" />
-                                            </button>
-                                        {:else if token.status === "deactivated"}
-                                            <button
-                                                type="button"
-                                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                onclick={() => setTokenStatus(token, "available")}
-                                                disabled={someSelected || submitting}
-                                                title="Activate"
-                                            >
-                                                <CheckCircle2 class="w-3.5 h-3.5" />
-                                            </button>
-                                        {/if}
-                                        <button
-                                            type="button"
-                                            class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onclick={() => handleDeleteToken(token)}
-                                            disabled={someSelected || submitting || token.status === "in_use"}
-                                            title="Delete token"
-                                        >
-                                            <Trash2 class="w-3.5 h-3.5" />
-                                        </button>
+                                        <Ban
+                                            class="w-4 h-4 text-surface-300"
+                                        />
                                     </div>
-                                </td>
-                            </tr>
-                        {/each}
-                    </tbody>
-                </table>
-            </div>
+                                {/if}
+                            </td>
+                            <td class="py-2 px-3 align-middle">
+                                <span
+                                    class="font-mono font-semibold text-surface-900"
+                                >
+                                    {token.physical_id}
+                                </span>
+                            </td>
+                            <td class="py-2 px-3 align-middle">
+                                {#if token.status === "available"}
+                                    <span
+                                        class="badge preset-filled-success-500 text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 w-max font-medium"
+                                    >
+                                        <CheckCircle2 class="w-3 h-3" />
+                                        Available
+                                    </span>
+                                {:else if token.status === "in_use"}
+                                    <span
+                                        class="badge preset-filled-primary-500 text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 w-max font-medium"
+                                    >
+                                        <PlayCircle class="w-3 h-3" /> In use
+                                    </span>
+                                {:else if token.status === "deactivated"}
+                                    <span
+                                        class="badge preset-tonal text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 w-max font-medium text-surface-600"
+                                    >
+                                        <Ban class="w-3 h-3" /> Deactivated
+                                    </span>
+                                {:else}
+                                    <span
+                                        class="badge preset-tonal text-[10px] px-2 py-0.5 rounded-full font-medium"
+                                    >
+                                        {token.status}
+                                    </span>
+                                {/if}
+                            </td>
+                            <td class="py-2 px-3 align-middle">
+                                {#if token.tts_status === "generating"}
+                                    <span
+                                        class="inline-flex items-center gap-1.5 rounded-full bg-primary-50 border border-primary-200 text-primary-700 text-[10px] px-2 py-0.5 font-medium"
+                                    >
+                                        <span class="loading-spinner loading-xs"></span>
+                                        Generating…
+                                    </span>
+                                {:else if token.tts_status === "pre_generated"}
+                                    <span
+                                        class="inline-flex items-center gap-1.5 rounded-full bg-success-50 border border-success-200 text-success-700 text-[10px] px-2 py-0.5 font-medium"
+                                    >
+                                        <CheckCircle2 class="w-3 h-3" />
+                                        Pre-generated
+                                    </span>
+                                {:else if token.tts_status === "failed"}
+                                    <span
+                                        class="inline-flex items-center gap-1.5 rounded-full bg-error-50 border border-error-200 text-error-700 text-[10px] px-2 py-0.5 font-medium"
+                                        title={token.tts_failure_reason || "Generation failed. Display will fall back to live TTS."}
+                                    >
+                                        <XCircle class="w-3 h-3" />
+                                        Failed
+                                    </span>
+                                {:else}
+                                    <span
+                                        class="inline-flex items-center gap-1.5 rounded-full bg-surface-100 border border-surface-200 text-surface-600 text-[10px] px-2 py-0.5 font-medium"
+                                    >
+                                        Not generated
+                                    </span>
+                                {/if}
+                            </td>
+                            <td class="py-2 px-3 text-center align-middle">
+                                <div class="flex items-center justify-center gap-1.5 flex-wrap {someSelected ? 'opacity-60 pointer-events-none' : ''}">
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        onclick={() => openEditModal(token)}
+                                        disabled={someSelected || submitting}
+                                        title="Edit token"
+                                    >
+                                        <Pencil class="w-3.5 h-3.5" /> Edit
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        onclick={() => openTtsPhrasesModal(token)}
+                                        disabled={someSelected || submitting}
+                                        title="TTS phrases"
+                                    >
+                                        TTS
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        onclick={() => generateTtsForTokens([token.id])}
+                                        disabled={someSelected || submitting || token.tts_status === "pre_generated" || token.tts_status === "generating"}
+                                        title={token.tts_status === "failed"
+                                            ? "Regenerate TTS (generation failed)"
+                                            : !token.tts_status
+                                                ? "Generate TTS (not generated)"
+                                                : token.tts_status === "pre_generated"
+                                                    ? "TTS already generated"
+                                                    : "Generating…"}
+                                    >
+                                        <Volume2 class="w-3.5 h-3.5" /> Generate TTS
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        onclick={() => openPrintModal([token.id])}
+                                        disabled={someSelected || submitting}
+                                        title="Print token"
+                                    >
+                                        <Printer class="w-3.5 h-3.5" />
+                                    </button>
+                                    {#if token.status === "in_use"}
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onclick={() => setTokenStatus(token, "available")}
+                                            disabled={someSelected || submitting}
+                                            title="Mark available"
+                                        >
+                                            <CheckCircle2 class="w-3.5 h-3.5" />
+                                        </button>
+                                    {:else if token.status === "available"}
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onclick={() => setTokenStatus(token, "deactivated")}
+                                            disabled={someSelected || submitting}
+                                            title="Deactivate"
+                                        >
+                                            <Ban class="w-3.5 h-3.5" />
+                                        </button>
+                                    {:else if token.status === "deactivated"}
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onclick={() => setTokenStatus(token, "available")}
+                                            disabled={someSelected || submitting}
+                                            title="Activate"
+                                        >
+                                            <CheckCircle2 class="w-3.5 h-3.5" />
+                                        </button>
+                                    {/if}
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        onclick={() => handleDeleteToken(token)}
+                                        disabled={someSelected || submitting || token.status === "in_use"}
+                                        title="Delete token"
+                                    >
+                                        <Trash2 class="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    {/each}
+                {/snippet}
+            </AdminTable>
 
             <!-- Mobile Card View: compact, actions always visible, disabled when selection active -->
             <div

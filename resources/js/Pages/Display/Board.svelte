@@ -21,6 +21,7 @@
 	import AuthChoiceButtons from '../../Components/AuthChoiceButtons.svelte';
 	import PinOrQrInput from '../../Components/PinOrQrInput.svelte';
 	import UserAvatar from '../../Components/UserAvatar.svelte';
+	import ThemeToggle from '../../Components/ThemeToggle.svelte';
 	import { Camera, Settings } from 'lucide-svelte';
 	import {
 		prepareDisplayTts,
@@ -165,7 +166,7 @@ let stationTtsByName = $state({});
 	let displayBarcodeInputEl = $state(null);
 	/** Activity feed: synced from props (and after reload), prepended by real-time events */
 	let activityFeed = $state([]);
-	/** Display settings modal (PIN + program HID/volume + device-local). */
+	/** Display settings modal (PIN/QR auth first, then program + device-local). */
 	let showDisplaySettingsModal = $state(false);
 	let displaySettingsAuthMode = $state('pin');
 	let displaySettingsPin = $state('');
@@ -173,6 +174,9 @@ let stationTtsByName = $state({});
 	let displayPinOrQrRef = $state(null);
 	let displaySettingsError = $state('');
 	let displaySettingsSaving = $state(false);
+	/** 'auth' = PIN/QR step; 'settings' = program + device toggles. */
+	let displaySettingsStep = $state('auth');
+	let displaySettingsAuthPayload = $state(null);
 	let displaySettingsProgramHid = $state(true);
 	let displaySettingsCameraScanner = $state(true);
 	let displaySettingsMuted = $state(false);
@@ -207,10 +211,12 @@ let stationTtsByName = $state({});
 
 	async function saveDisplaySettings() {
 		displaySettingsError = '';
-		const authBody = displayPinOrQrRef?.buildPinOrQrPayload?.() ?? null;
-		if (!authBody) return (displaySettingsError = displaySettingsAuthMode === 'pin'
-			? 'Enter a 6-digit PIN.'
-			: 'Scan QR first.');
+		const authBody = displaySettingsAuthPayload;
+		if (!authBody) {
+			displaySettingsError = 'Authorize with PIN or QR first.';
+			displaySettingsStep = 'auth';
+			return;
+		}
 		displaySettingsSaving = true;
 		try {
 			const body = {
@@ -235,21 +241,29 @@ let stationTtsByName = $state({});
 			if (res.status === 401) {
 				displaySettingsError = data.message || 'Authorization failed.';
 				toaster.error({ title: data.message || 'Authorization failed.' });
+				displaySettingsStep = 'auth';
+				displaySettingsAuthPayload = null;
 				return;
 			}
 			if (res.status === 403) {
 				displaySettingsError = data.message || 'Not authorized for this program.';
 				toaster.error({ title: data.message || 'Not authorized for this program.' });
+				displaySettingsStep = 'auth';
+				displaySettingsAuthPayload = null;
 				return;
 			}
 			if (res.status === 429) {
 				displaySettingsError = data.message || 'Too many attempts. Try again later.';
 				toaster.error({ title: data.message || 'Too many attempts. Try again later.' });
+				displaySettingsStep = 'auth';
+				displaySettingsAuthPayload = null;
 				return;
 			}
 			if (!res.ok) {
 				displaySettingsError = data.message || 'Failed to save.';
 				toaster.error({ title: data.message || 'Failed to save.' });
+				displaySettingsStep = 'auth';
+				displaySettingsAuthPayload = null;
 				return;
 			}
 			toaster.success({ title: 'Display settings saved.' });
@@ -257,8 +271,14 @@ let stationTtsByName = $state({});
 			displayAudioVolume = Math.max(0, Math.min(1, Number(data.display_audio_volume ?? 1)));
 			enableDisplayHidBarcode = !!data.enable_display_hid_barcode;
 			if (typeof data.enable_display_camera_scanner === 'boolean') enableDisplayCameraScanner = data.enable_display_camera_scanner;
+			// Apply device-local settings only after successful, authenticated save.
+			setLocalAllowHidOnThisDevice('display', displaySettingsLocalAllowHid);
+			setLocalAllowCameraOnThisDevice('display', displaySettingsLocalAllowCamera);
+			localAllowCameraScanner = displaySettingsLocalAllowCamera;
 			displaySettingsPin = '';
 			displaySettingsQrScanToken = '';
+			displaySettingsAuthPayload = null;
+			displaySettingsStep = 'auth';
 			showDisplaySettingsModal = false;
 		} finally {
 			displaySettingsSaving = false;
@@ -276,6 +296,8 @@ let stationTtsByName = $state({});
 		displaySettingsPin = '';
 		displaySettingsQrScanToken = '';
 		displaySettingsError = '';
+		displaySettingsStep = 'auth';
+		displaySettingsAuthPayload = null;
 		showDisplaySettingsModal = true;
 		try {
 			const res = await fetch('/api/public/tts/voices', { credentials: 'same-origin' });
@@ -645,6 +667,30 @@ let stationTtsByName = $state({});
 							<p id="display-settings-pin-error" class="text-sm text-error-600">{displaySettingsError}</p>
 						{/if}
 					</div>
+					{#if displaySettingsStep === 'auth'}
+						<div class="flex flex-wrap gap-2 justify-end pt-1">
+							<button
+								type="button"
+								class="btn preset-filled-primary-500"
+								onclick={() => {
+									displaySettingsError = '';
+									const authBody = displayPinOrQrRef?.buildPinOrQrPayload?.() ?? null;
+									if (!authBody) {
+										displaySettingsError =
+											displaySettingsAuthMode === 'pin'
+												? 'Enter a 6-digit PIN.'
+												: 'Scan QR first.';
+										return;
+									}
+									displaySettingsAuthPayload = authBody;
+									displaySettingsStep = 'settings';
+								}}
+								disabled={displaySettingsSaving}
+							>
+								Continue
+							</button>
+						</div>
+					{:else}
 					<div class="flex flex-col gap-4">
 						<h3 class="text-sm font-semibold text-surface-950">Program settings</h3>
 						<p class="text-xs text-surface-950/60">Apply to all displays.</p>
@@ -697,22 +743,24 @@ let stationTtsByName = $state({});
 								type="checkbox"
 								class="checkbox"
 								bind:checked={displaySettingsLocalAllowHid}
-								onchange={() => setLocalAllowHidOnThisDevice('display', displaySettingsLocalAllowHid)}
 							/>
 							<span class="text-sm text-surface-950">Allow HID scanner on this device</span>
 						</label>
-					<label class="flex items-center gap-2 cursor-pointer">
-						<input
-							type="checkbox"
-							class="checkbox"
-							bind:checked={displaySettingsLocalAllowCamera}
-							onchange={() => {
-								setLocalAllowCameraOnThisDevice('display', displaySettingsLocalAllowCamera);
-								localAllowCameraScanner = displaySettingsLocalAllowCamera;
-							}}
-						/>
-						<span class="text-sm text-surface-950">Allow camera/QR scanner on this device</span>
-					</label>
+						<label class="flex items-center gap-2 cursor-pointer">
+							<input
+								type="checkbox"
+								class="checkbox"
+								bind:checked={displaySettingsLocalAllowCamera}
+							/>
+							<span class="text-sm text-surface-950">Allow camera/QR scanner on this device</span>
+						</label>
+						<div class="flex items-center justify-between gap-3 pt-2">
+							<div>
+								<h4 class="text-sm font-semibold text-surface-950">Theme</h4>
+								<p class="text-xs text-surface-950/60">Light or dark mode on this device.</p>
+							</div>
+							<ThemeToggle />
+						</div>
 					</div>
 					<div class="flex flex-wrap gap-2 justify-end pt-2">
 						<button
@@ -732,6 +780,7 @@ let stationTtsByName = $state({});
 							{displaySettingsSaving ? 'Saving…' : 'Save'}
 						</button>
 					</div>
+					{/if}
 				</div>
 			{/snippet}
 		</Modal>

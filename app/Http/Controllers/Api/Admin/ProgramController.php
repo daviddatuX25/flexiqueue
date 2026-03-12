@@ -85,7 +85,7 @@ class ProgramController extends Controller
         $program->update($validated);
 
         $program = $program->fresh();
-        if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('enable_display_hid_barcode', $settings) || array_key_exists('enable_public_triage_hid_barcode', $settings) || array_key_exists('enable_display_camera_scanner', $settings) || array_key_exists('display_tts_repeat_count', $settings) || array_key_exists('display_tts_repeat_delay_ms', $settings))) {
+        if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('enable_display_hid_barcode', $settings) || array_key_exists('enable_public_triage_hid_barcode', $settings) || array_key_exists('enable_display_camera_scanner', $settings) || array_key_exists('enable_public_triage_camera_scanner', $settings) || array_key_exists('display_tts_repeat_count', $settings) || array_key_exists('display_tts_repeat_delay_ms', $settings))) {
             event(new DisplaySettingsUpdated(
                 $program->settings()->getDisplayAudioMuted(),
                 $program->settings()->getDisplayAudioVolume(),
@@ -94,6 +94,7 @@ class ProgramController extends Controller
                 $program->settings()->getEnableDisplayCameraScanner(),
                 $program->settings()->getDisplayTtsRepeatCount(),
                 $program->settings()->getDisplayTtsRepeatDelayMs(),
+                $program->settings()->getEnablePublicTriageCameraScanner(),
             ));
         }
         $requiresRegeneration = false;
@@ -268,6 +269,7 @@ class ProgramController extends Controller
                 'display_tts_repeat_count' => $programSettings->getDisplayTtsRepeatCount(),
                 'display_tts_repeat_delay_ms' => $programSettings->getDisplayTtsRepeatDelayMs(),
                 'allow_public_triage' => $programSettings->getAllowPublicTriage(),
+                'allow_unverified_entry' => $programSettings->getAllowUnverifiedEntry(),
                 'identity_binding_mode' => $programSettings->getIdentityBindingMode(),
                 'tts' => [
                     'active_language' => $programSettings->getTtsActiveLanguage(),

@@ -1,15 +1,16 @@
 /**
- * Per plan: device-local HID barcode settings for public display and public triage.
- * Used only on /display and /triage/start. Not persisted to DB; localStorage per device.
+ * Per plan: device-local HID barcode settings for public display, public triage, and staff triage binder.
+ * Used on /display, /triage/start, and staff triage lookup-by-ID. Not persisted to DB; localStorage per device.
  */
 
 const STORAGE_KEYS = {
 	display: 'flexiqueue_display_hid_allow_on_this_device',
 	triage: 'flexiqueue_triage_hid_allow_on_this_device',
+	staff_binder: 'flexiqueue_staff_binder_hid_allow_on_this_device',
 };
 
 /**
- * @param {'display' | 'triage'} context
+ * @param {'display' | 'triage' | 'staff_binder'} context
  * @returns {boolean|null} true/false when set, null when not set
  */
 export function getLocalAllowHidOnThisDevice(context) {
@@ -26,7 +27,7 @@ export function getLocalAllowHidOnThisDevice(context) {
 }
 
 /**
- * @param {'display' | 'triage'} context
+ * @param {'display' | 'triage' | 'staff_binder'} context
  * @param {boolean} value
  */
 export function setLocalAllowHidOnThisDevice(context, value) {
@@ -51,7 +52,7 @@ export function isMobileTouch() {
  * When local not set: default true on non-mobile, false on mobile.
  *
  * @param {boolean} programHidEnabled
- * @param {'display' | 'triage'} context
+ * @param {'display' | 'triage' | 'staff_binder'} context
  * @returns {boolean}
  */
 export function shouldFocusHidInput(programHidEnabled, context) {
@@ -65,7 +66,7 @@ export function shouldFocusHidInput(programHidEnabled, context) {
  * When true, set hidden barcode input to inputmode="none" to suppress keyboard (mobile HID mode).
  *
  * @param {boolean} programHidEnabled
- * @param {'display' | 'triage'} context
+ * @param {'display' | 'triage' | 'staff_binder'} context
  * @returns {boolean}
  */
 export function shouldUseInputModeNone(programHidEnabled, context) {

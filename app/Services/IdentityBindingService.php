@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\IdentityBindingException;
 use App\Models\Client;
 use App\Models\ClientIdDocument;
+use App\Support\ClientBindingSource;
 
 class IdentityBindingService
 {
@@ -33,7 +34,7 @@ class IdentityBindingService
         $source = $clientBinding['source'] ?? null;
         $idDocumentId = isset($clientBinding['id_document_id']) ? (int) $clientBinding['id_document_id'] : null;
 
-        if (! $clientId || ! is_string($source) || $source === '' || ! $idDocumentId) {
+        if (! $clientId || ! is_string($source) || $source === '') {
             if ($bindingRequired) {
                 throw new IdentityBindingException();
             }
@@ -42,9 +43,7 @@ class IdentityBindingService
         }
 
         $client = Client::find($clientId);
-        $idDocument = ClientIdDocument::find($idDocumentId);
-
-        if (! $client || ! $idDocument || $idDocument->client_id !== $client->id) {
+        if (! $client) {
             if ($bindingRequired) {
                 throw new IdentityBindingException();
             }
@@ -52,14 +51,51 @@ class IdentityBindingService
             return ['client_id' => null, 'metadata' => null];
         }
 
-        $idLast4 = $this->clientIdDocumentService->getIdLast4FromDocument($idDocument);
+        $idDocumentBased = ClientBindingSource::requiresIdDocument($source);
 
+        if ($idDocumentBased) {
+            if (! $idDocumentId) {
+                if ($bindingRequired) {
+                    throw new IdentityBindingException();
+                }
+
+                return ['client_id' => null, 'metadata' => null];
+            }
+
+            $idDocument = ClientIdDocument::find($idDocumentId);
+            if (! $idDocument || $idDocument->client_id !== $client->id) {
+                if ($bindingRequired) {
+                    throw new IdentityBindingException();
+                }
+
+                return ['client_id' => null, 'metadata' => null];
+            }
+
+            $idLast4 = $this->clientIdDocumentService->getIdLast4FromDocument($idDocument);
+
+            $metadata = [
+                'client_id' => $client->id,
+                'binding_mode' => $bindingMode,
+                'binding_source' => $bindingSource,
+                'binding_request_source' => $source,
+                'id_type' => $idDocument->id_type,
+                'id_last4' => $idLast4,
+                'matched_existing_client' => true,
+                'previous_client_id' => null,
+            ];
+
+            return [
+                'client_id' => $client->id,
+                'metadata' => $metadata,
+            ];
+        }
+
+        // name_search or manual: binding by client only, no ID document required
         $metadata = [
             'client_id' => $client->id,
             'binding_mode' => $bindingMode,
             'binding_source' => $bindingSource,
-            'id_type' => $idDocument->id_type,
-            'id_last4' => $idLast4,
+            'binding_request_source' => $source,
             'matched_existing_client' => true,
             'previous_client_id' => null,
         ];

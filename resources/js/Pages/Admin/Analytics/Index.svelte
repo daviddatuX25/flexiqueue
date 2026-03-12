@@ -306,7 +306,7 @@
         <!-- Zone 2 — Filter Bar (Sticky): date range, program, track; debounced re-fetch; all charts react -->
         <div
             id="analytics-filter-bar"
-            class="sticky top-0 z-10 rounded-container border border-surface-200 bg-white shadow-sm p-4 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-4"
+            class="sticky top-0 z-10 rounded-container border border-surface-200 bg-surface-50 shadow-sm p-4 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-4"
         >
             <div class="flex flex-wrap items-center gap-3">
                 <span class="text-sm font-medium text-surface-700">Date range</span>
@@ -509,7 +509,7 @@
         <!-- Zone 4 — Chart Grid -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <!-- Chart 1 — Throughput (full width) -->
-            <div class="lg:col-span-2 rounded-container border border-surface-200 bg-white shadow-sm p-5">
+            <div class="lg:col-span-2 rounded-container border border-surface-200 bg-surface-50 shadow-sm p-5">
                 <h3 class="text-sm font-semibold text-surface-950 mb-4">Throughput Over Time</h3>
                 {#if loadingCharts}
                     <div class="h-[320px] rounded-container bg-surface-100 animate-pulse flex items-center justify-center">
@@ -546,7 +546,7 @@
             </div>
 
             <!-- Chart 2 — Wait Time Distribution -->
-            <div class="rounded-container border border-surface-200 bg-white shadow-sm p-5">
+            <div class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-5">
                 <h3 class="text-sm font-semibold text-surface-950 mb-4">Wait Time Distribution</h3>
                 {#if loadingCharts}
                     <div class="h-[280px] rounded-container bg-surface-100 animate-pulse"></div>
@@ -573,7 +573,7 @@
             </div>
 
             <!-- Chart 3 — Station Utilization -->
-            <div class="rounded-container border border-surface-200 bg-white shadow-sm p-5">
+            <div class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-5">
                 <h3 class="text-sm font-semibold text-surface-950 mb-4">Station Utilization</h3>
                 {#if loadingCharts}
                     <div class="h-[280px] rounded-container bg-surface-100 animate-pulse"></div>
@@ -604,7 +604,7 @@
             </div>
 
             <!-- Chart 4 — Track Performance -->
-            <div class="rounded-container border border-surface-200 bg-white shadow-sm p-5">
+            <div class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-5">
                 <h3 class="text-sm font-semibold text-surface-950 mb-4">Track Performance Comparison</h3>
                 {#if loadingCharts}
                     <div class="h-[280px] rounded-container bg-surface-100 animate-pulse"></div>
@@ -639,7 +639,7 @@
             </div>
 
             <!-- Chart 5 — Busiest Hours Heatmap (7 rows = days of week, 24 cols = hours; white → deep blue) -->
-            <div class="rounded-container border border-surface-200 bg-white shadow-sm p-5">
+            <div class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-5">
                 <h3 class="text-sm font-semibold text-surface-950 mb-4">Busiest Hours</h3>
                 {#if loadingCharts}
                     <div class="h-[280px] rounded-container bg-surface-100 animate-pulse"></div>
@@ -709,7 +709,7 @@
             </div>
 
             <!-- Chart 6 — Drop-off Funnel -->
-            <div class="lg:col-span-2 rounded-container border border-surface-200 bg-white shadow-sm p-5">
+            <div class="lg:col-span-2 rounded-container border border-surface-200 bg-surface-50 shadow-sm p-5">
                 <h3 class="text-sm font-semibold text-surface-950 mb-4">Drop-off Funnel</h3>
                 {#if loadingCharts}
                     <div class="h-[240px] rounded-container bg-surface-100 animate-pulse"></div>
@@ -734,7 +734,7 @@
             </div>
 
             <!-- Chart 7 — TTS & Token Health -->
-            <div class="rounded-container border border-surface-200 bg-white shadow-sm p-5 lg:col-span-2">
+            <div class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-5 lg:col-span-2">
                 <h3 class="text-sm font-semibold text-surface-950 mb-4">TTS & Token Health</h3>
                 {#if loadingCharts}
                     <div class="h-[220px] rounded-container bg-surface-100 animate-pulse"></div>

@@ -24,6 +24,7 @@ class DisplaySettingsUpdated implements ShouldBroadcastNow
         public bool $enableDisplayCameraScanner = true,
         public int $displayTtsRepeatCount = 1,
         public int $displayTtsRepeatDelayMs = 2000,
+        public bool $enablePublicTriageCameraScanner = true,
     ) {}
 
     /**
@@ -52,6 +53,7 @@ class DisplaySettingsUpdated implements ShouldBroadcastNow
             'enable_display_hid_barcode' => $this->enableDisplayHidBarcode,
             'enable_public_triage_hid_barcode' => $this->enablePublicTriageHidBarcode,
             'enable_display_camera_scanner' => $this->enableDisplayCameraScanner,
+            'enable_public_triage_camera_scanner' => $this->enablePublicTriageCameraScanner,
             'display_tts_repeat_count' => $this->displayTtsRepeatCount,
             'display_tts_repeat_delay_ms' => $this->displayTtsRepeatDelayMs,
         ];

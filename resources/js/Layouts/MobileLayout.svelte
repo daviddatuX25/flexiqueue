@@ -44,6 +44,20 @@
         class="flex items-center justify-between gap-2 bg-surface-50/70 dark:bg-slate-900/80 backdrop-blur-xl border-b border-surface-200 px-3 min-h-0 h-14 shrink-0 z-10"
     >
         <div class="min-w-0 flex-1 flex items-center gap-2">
+            <Link
+                href="/"
+                class="shrink-0 no-underline hover:opacity-90 transition-opacity flex items-center gap-2"
+            >
+                <img
+                    src="/images/logo.png"
+                    alt="FlexiQueue logo"
+                    class="h-7 w-auto"
+                />
+                <span
+                    class="hidden sm:inline text-surface-950 text-sm font-bold tracking-tight"
+                    >FlexiQueue</span
+                >
+            </Link>
             <div
                 class="fq-mobile-header-marquee fq-mobile-header-marquee--mobile min-w-0"
             >

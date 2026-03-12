@@ -753,18 +753,18 @@
             <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <!-- TTS audio focus card -->
                 <div
-                    class="rounded-container border border-primary-200 bg-primary-50/80 shadow-sm p-6 flex flex-col gap-4 lg:col-span-2"
+                    class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6 flex flex-col gap-4 lg:col-span-2"
                 >
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center gap-3">
                             <AudioLines class="w-6 h-6 text-primary-600" />
                             <div>
                                 <h2
-                                    class="text-sm font-semibold text-primary-900"
+                                    class="text-sm font-semibold text-surface-950"
                                 >
                                     TTS audio cache
                                 </h2>
-                                <p class="text-xs text-primary-900/70">
+                                <p class="text-xs text-surface-600">
                                     Total size of generated TTS voices and
                                     per-token audio on disk.
                                 </p>
@@ -785,42 +785,42 @@
                     <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
                         <div>
                             <p
-                                class="text-[11px] uppercase tracking-wide text-primary-900/70 font-semibold"
+                                class="text-[11px] uppercase tracking-wide text-surface-600 font-semibold"
                             >
                                 TTS size
                             </p>
                             <p
-                                class="text-lg font-semibold text-primary-950 mt-0.5"
+                                class="text-lg font-semibold text-surface-950 mt-0.5"
                             >
                                 {formatBytes(ttsCategory.bytes)}
                             </p>
-                            <p class="text-[11px] text-primary-900/70 mt-1">
+                            <p class="text-[11px] text-surface-500 mt-1">
                                 {ttsCategory.file_count} file{ttsCategory
                                 .file_count === 1 ? "" : "s"}
                             </p>
                         </div>
                         <div>
                             <p
-                                class="text-[11px] uppercase tracking-wide text-primary-900/70 font-semibold"
+                                class="text-[11px] uppercase tracking-wide text-surface-600 font-semibold"
                             >
                                 Share of disk
                             </p>
                             <p
-                                class="text-lg font-semibold text-primary-950 mt-0.5"
+                                class="text-lg font-semibold text-surface-950 mt-0.5"
                             >
                                 {formatPercent(ttsShareOfDisk)}
                             </p>
-                            <p class="text-[11px] text-primary-900/70 mt-1">
+                            <p class="text-[11px] text-surface-500 mt-1">
                                 Includes cache and token audio.
                             </p>
                         </div>
                         <div>
                             <p
-                                class="text-[11px] uppercase tracking-wide text-primary-900/70 font-semibold"
+                                class="text-[11px] uppercase tracking-wide text-surface-600 font-semibold"
                             >
                                 Guidance
                             </p>
-                            <p class="text-[11px] text-primary-900/80 mt-0.5">
+                            <p class="text-[11px] text-surface-600 mt-0.5">
                                 If this grows too large, consider trimming old
                                 tokens or regenerating only for active sets.
                             </p>
@@ -875,7 +875,7 @@
                         </button>
                     </div>
                     {#if hasOrphanedTts}
-                        <p class="text-[11px] text-primary-900/70 -mt-1">
+                        <p class="text-[11px] text-surface-500 -mt-1">
                             Remove unused: only deletes files not referenced by any token or station. Clear TTS cache: deletes all TTS files and clears references.
                         </p>
                     {/if}

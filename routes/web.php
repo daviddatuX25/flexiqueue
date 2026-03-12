@@ -19,12 +19,15 @@ use App\Http\Controllers\Api\Admin\AnalyticsController as AdminAnalyticsControll
 use App\Http\Controllers\Api\Admin\ElevenLabsIntegrationController;
 use App\Http\Controllers\Api\Admin\SystemController as AdminSystemController;
 use App\Http\Controllers\Api\Admin\ClientIdDocumentRevealController;
+use App\Http\Controllers\Api\Admin\ClientAdminController;
+use App\Http\Controllers\Api\Admin\ClientIdDocumentAdminController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\CheckStatusController;
 use App\Http\Controllers\Api\PublicDisplaySettingsController;
 use App\Http\Controllers\Api\PublicTriageController;
 use App\Http\Controllers\Api\SessionController as ApiSessionController;
 use App\Http\Controllers\Api\ClientController as ApiClientController;
+use App\Http\Controllers\Api\IdentityRegistrationController;
 use App\Http\Controllers\Api\TtsController;
 use App\Http\Controllers\Api\PermissionRequestController;
 use App\Http\Controllers\Api\StationController as ApiStationController;
@@ -120,6 +123,10 @@ Route::middleware(['auth', 'role:admin'])->prefix('api/admin')->group(function (
     Route::post('/users/{user}/reset-password', [AdminUserController::class, 'resetPassword']);
     Route::post('/users/{user}/assign-station', [AdminUserController::class, 'assignStation']);
     Route::post('/users/{user}/unassign-station', [AdminUserController::class, 'unassignStation']);
+    // Clients: destructive actions (admin only)
+    Route::delete('/clients/{client}', [ClientAdminController::class, 'destroy']);
+    Route::delete('/client-id-documents/{client_id_document}', [ClientIdDocumentAdminController::class, 'destroy']);
+    Route::post('/client-id-documents/{client_id_document}/reassign', [ClientIdDocumentAdminController::class, 'reassign']);
     // Integrations (ElevenLabs TTS)
     Route::get('/integrations/elevenlabs', [ElevenLabsIntegrationController::class, 'show']);
     Route::get('/integrations/elevenlabs/usage', [ElevenLabsIntegrationController::class, 'usage']);
@@ -173,6 +180,8 @@ Route::middleware('auth')->prefix('api/profile')->group(function (): void {
     Route::post('/override-qr/regenerate', [ProfileController::class, 'regenerateOverrideQr'])->name('api.profile.override-qr.regenerate');
     Route::put('/password', [ProfileController::class, 'updatePassword'])->name('api.profile.password');
     Route::post('/avatar', [ProfileController::class, 'updateAvatar'])->name('api.profile.avatar');
+    Route::get('/triage-settings', [ProfileController::class, 'triageSettings'])->name('api.profile.triage-settings');
+    Route::put('/triage-settings', [ProfileController::class, 'updateTriageSettings'])->name('api.profile.triage-settings.update');
 });
 
 // Per PIN-QR-AUTHORIZATION-SYSTEM AUTH-3, AUTH-4: Temporary PIN/QR generation (supervisor/admin only)
@@ -193,10 +202,18 @@ Route::middleware(['auth', 'role:admin,supervisor,staff'])->prefix('api')->group
 
 // Per 08-API-SPEC-PHASE1 §3–4: Session and station endpoints (any staff)
 Route::middleware(['auth', 'role:admin,supervisor,staff'])->prefix('api')->group(function (): void {
+    Route::get('/clients/search', [ApiClientController::class, 'search'])
+        ->middleware('throttle:60,1');
     Route::post('/clients/lookup-by-id', [ApiClientController::class, 'lookupById'])
         ->middleware('throttle:60,1');
     Route::post('/clients', [ApiClientController::class, 'store']);
     Route::post('/clients/{client}/id-documents', [ApiClientController::class, 'attachIdDocument']);
+    Route::get('/identity-registrations', [IdentityRegistrationController::class, 'index']);
+    Route::post('/identity-registrations/direct', [IdentityRegistrationController::class, 'direct']);
+    Route::get('/identity-registrations/{identityRegistration}/possible-matches', [IdentityRegistrationController::class, 'possibleMatches']);
+    Route::post('/identity-registrations/{identityRegistration}/verify-id', [IdentityRegistrationController::class, 'verifyId']);
+    Route::post('/identity-registrations/{identityRegistration}/accept', [IdentityRegistrationController::class, 'accept']);
+    Route::post('/identity-registrations/{identityRegistration}/reject', [IdentityRegistrationController::class, 'reject']);
     Route::post('/sessions/bind', [ApiSessionController::class, 'bind']);
     Route::get('/sessions/token-lookup', [ApiSessionController::class, 'tokenLookup']);
     Route::post('/sessions/{session}/call', [ApiSessionController::class, 'call']);

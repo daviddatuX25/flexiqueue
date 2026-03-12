@@ -4,9 +4,10 @@ namespace App\Services;
 
 use App\Exceptions\DuplicateClientIdDocumentException;
 use App\Models\Client;
+use App\Models\ClientIdAuditLog;
 use App\Models\ClientIdDocument;
 use App\Support\ClientIdNumberHasher;
-use App\Models\ClientIdAuditLog;
+use App\Support\ClientIdTypes;
 use App\Models\User;
 use Illuminate\Support\Facades\Crypt;
 
@@ -31,6 +32,51 @@ class ClientIdDocumentService
         return ['client' => $doc->client, 'id_document' => $doc];
     }
 
+    /**
+     * Lookup by id_number only across all id types. Per plan: 0 → not_found, 1 → single match, 2+ → ambiguous.
+     *
+     * @return array{match_status: 'not_found'|'single'|'ambiguous', client: \App\Models\Client|null, id_document: \App\Models\ClientIdDocument|null, id_types: string[]}
+     */
+    public function lookupByIdNumberOnly(string $idNumber): array
+    {
+        $docs = [];
+        foreach (ClientIdTypes::all() as $idType) {
+            try {
+                $hash = ClientIdNumberHasher::hash($idType, $idNumber);
+            } catch (\Throwable) {
+                continue;
+            }
+            $doc = ClientIdDocument::with('client')
+                ->where('id_type', $idType)
+                ->where('id_number_hash', $hash)
+                ->first();
+            if ($doc) {
+                $docs[] = $doc;
+            }
+        }
+
+        if (count($docs) === 0) {
+            return ['match_status' => 'not_found', 'client' => null, 'id_document' => null, 'id_types' => []];
+        }
+        if (count($docs) === 1) {
+            $doc = $docs[0];
+
+            return [
+                'match_status' => 'single',
+                'client' => $doc->client,
+                'id_document' => $doc,
+                'id_types' => [$doc->id_type],
+            ];
+        }
+
+        return [
+            'match_status' => 'ambiguous',
+            'client' => null,
+            'id_document' => null,
+            'id_types' => array_values(array_unique(array_map(fn ($d) => $d->id_type, $docs))),
+        ];
+    }
+
     public function createForClient(Client $client, string $idType, string $idNumber): ClientIdDocument
     {
         $hash = ClientIdNumberHasher::hash($idType, $idNumber);
@@ -51,12 +97,61 @@ class ClientIdDocumentService
         ]);
     }
 
+    public function deleteDocument(ClientIdDocument $document): void
+    {
+        $hasAuditLog = ClientIdAuditLog::query()
+            ->where('client_id_document_id', $document->id)
+            ->exists();
+
+        if ($hasAuditLog) {
+            throw new \InvalidArgumentException('Cannot delete ID document: audit log exists for this document.');
+        }
+
+        $document->delete();
+    }
+
+    public function reassignDocument(ClientIdDocument $document, Client $target): ClientIdDocument
+    {
+        if ((int) $document->client_id === (int) $target->id) {
+            return $document;
+        }
+
+        $document->client_id = $target->id;
+        $document->save();
+
+        return $document;
+    }
+
     public function getIdLast4FromDocument(ClientIdDocument $document): string
     {
         $raw = Crypt::decryptString($document->id_number_encrypted);
         $normalized = $this->normalizeNumber($raw);
 
         return mb_substr($normalized, -4);
+    }
+
+    /**
+     * Last 4 characters of normalized ID number (same normalization as ID documents).
+     * Use when storing last4 at create time (e.g. identity registration) so display is consistent.
+     */
+    public function getLast4FromRawNumber(string $idNumber): string
+    {
+        $normalized = $this->normalizeNumber($idNumber);
+
+        return mb_substr($normalized, -4);
+    }
+
+    /**
+     * Whether a scanned raw ID number matches the stored encrypted value (e.g. for identity registration verify).
+     * Uses same normalization as ID documents; does not leak decrypted value.
+     */
+    public function scannedNumberMatchesStored(string $scannedRaw, string $encryptedStored): bool
+    {
+        $storedRaw = Crypt::decryptString($encryptedStored);
+        $normalizedScanned = $this->normalizeNumber($scannedRaw);
+        $normalizedStored = $this->normalizeNumber($storedRaw);
+
+        return $normalizedScanned === $normalizedStored;
     }
 
     /**

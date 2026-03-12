@@ -1,16 +1,17 @@
 /**
- * Per plan: device-local camera/QR scanner settings for public display and public triage.
- * Used only on /display and /triage/start. Not persisted to DB; localStorage per device.
+ * Per plan: device-local camera/QR scanner settings for public display, public triage, and staff triage binder.
+ * Not persisted to DB; localStorage per device.
  *
  * Default behavior: allowed (true) when not explicitly set.
  */
 const STORAGE_KEYS = {
 	display: 'flexiqueue_display_camera_allow_on_this_device',
 	triage: 'flexiqueue_triage_camera_allow_on_this_device',
+	staff_binder: 'flexiqueue_staff_binder_camera_allow_on_this_device',
 };
 
 /**
- * @param {'display' | 'triage'} context
+ * @param {'display' | 'triage' | 'staff_binder'} context
  * @returns {boolean|null} true/false when set, null when not set
  */
 export function getLocalAllowCameraOnThisDevice(context) {
@@ -27,7 +28,7 @@ export function getLocalAllowCameraOnThisDevice(context) {
 }
 
 /**
- * @param {'display' | 'triage'} context
+ * @param {'display' | 'triage' | 'staff_binder'} context
  * @param {boolean} value
  */
 export function setLocalAllowCameraOnThisDevice(context, value) {
@@ -42,7 +43,7 @@ export function setLocalAllowCameraOnThisDevice(context, value) {
 /**
  * Default ON when not set.
  *
- * @param {'display' | 'triage'} context
+ * @param {'display' | 'triage' | 'staff_binder'} context
  * @returns {boolean}
  */
 export function shouldAllowCameraScanner(context) {

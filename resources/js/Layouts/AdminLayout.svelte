@@ -76,7 +76,7 @@
                 aria-label="Close sidebar"
             ></label>
             <aside
-                class="relative z-40 w-72 min-h-full flex flex-col bg-surface-50/70 dark:bg-slate-900/80 backdrop-blur-xl border-r border-surface-200 shadow-sm"
+                class="relative z-40 w-72 min-h-full flex flex-col bg-surface-50/70 dark:bg-slate-900/80 backdrop-blur-xl md:backdrop-blur-none md:bg-surface-50/95 md:dark:bg-slate-900/95 border-r border-surface-200 shadow-sm"
             >
                 <!-- Brand header -->
                 <div
@@ -86,12 +86,11 @@
                         href="/"
                         class="flex items-center gap-3 no-underline text-inherit hover:opacity-90 transition-opacity"
                     >
-                        <div
-                            class="w-10 h-10 rounded-xl bg-primary-500 flex items-center justify-center text-white shadow-md shrink-0"
-                            aria-hidden="true"
-                        >
-                            <Zap class="w-5 h-5" />
-                        </div>
+                        <img
+                            src="/images/logo.png"
+                            alt="FlexiQueue logo"
+                            class="h-10 w-auto shadow-md shrink-0"
+                        />
                         <span
                             class="text-xl font-bold tracking-tight text-surface-950"
                             >FlexiQueue</span
@@ -184,7 +183,7 @@
         <!-- Main content -->
         <div class="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden">
             <header
-                class="flex shrink-0 items-center justify-between bg-surface-50/70 dark:bg-slate-900/80 backdrop-blur-xl z-10 border-b border-surface-200 px-4 h-14 lg:px-6"
+                class="flex shrink-0 items-center justify-between bg-surface-50/70 dark:bg-slate-900/80 backdrop-blur-xl md:backdrop-blur-none md:bg-surface-50/95 md:dark:bg-slate-900/95 z-10 border-b border-surface-200 px-4 h-14 lg:px-6"
             >
                 <label
                     for="admin-drawer"
@@ -196,8 +195,13 @@
                 <Link
                     href="/"
                     class="font-semibold text-surface-950 lg:invisible lg:w-0 lg:overflow-hidden no-underline hover:opacity-90"
-                    >FlexiQueue</Link
                 >
+                    <img
+                        src="/images/logo.png"
+                        alt="FlexiQueue"
+                        class="h-7 w-auto"
+                    />
+                </Link>
                 <div class="flex items-center gap-2 ml-auto">
                     <ThemeToggle />
                     <span

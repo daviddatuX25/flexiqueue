@@ -2,17 +2,20 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\ClientAlreadyQueuedException;
 use App\Exceptions\IdentityBindingException;
 use App\Exceptions\TokenInUseException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ClientLookupByIdRequest;
 use App\Http\Requests\BindSessionRequest;
+use App\Models\IdentityRegistration;
 use App\Models\Program;
 use App\Models\Token;
 use App\Services\ClientIdDocumentService;
 use App\Services\SessionService;
 use App\Services\TriageScanLogService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 
@@ -86,7 +89,8 @@ class PublicTriageController extends Controller
 
     /**
      * POST /api/public/sessions/bind — qr_hash, track_id, optional client_category (default Regular).
-     * 403 when public triage disabled. 201 on success.
+     * Optional identity_registration_request (name?, birth_year?, client_category?) when ID not found; mutually exclusive with client_binding.
+     * 403 when public triage disabled. 201 on success. When identity_registration_request and allow_unverified_entry false, returns request_submitted (no session).
      */
     public function bind(BindSessionRequest $request): JsonResponse
     {
@@ -98,6 +102,166 @@ class PublicTriageController extends Controller
         $program = Program::where('is_active', true)->first();
         if (! $program || ! $program->settings()->getAllowPublicTriage()) {
             return response()->json(['message' => 'Public self-serve triage is not available.'], 403);
+        }
+
+        $identityRegistrationRequest = $request->validated('identity_registration_request');
+
+        if (is_array($identityRegistrationRequest) && ! empty($identityRegistrationRequest)) {
+            $idNumberRaw = isset($identityRegistrationRequest['id_number']) ? trim((string) $identityRegistrationRequest['id_number']) : '';
+            $idType = $identityRegistrationRequest['id_type'] ?? null;
+            $idNumberEncrypted = null;
+            $idNumberLast4 = null;
+            if ($idNumberRaw !== '') {
+                $idNumberEncrypted = Crypt::encryptString($idNumberRaw);
+                $idNumberLast4 = $this->clientIdDocumentService->getLast4FromRawNumber($idNumberRaw);
+            }
+
+            $normalizedIdType = $idType !== '' && $idType !== null ? $idType : null;
+
+            $registration = null;
+            if ($idNumberRaw !== '' && $idNumberLast4 !== null) {
+                $candidates = IdentityRegistration::query()
+                    ->forProgram($program->id)
+                    ->pending()
+                    ->where('id_type', $normalizedIdType)
+                    ->where('id_number_last4', $idNumberLast4)
+                    ->whereNotNull('id_number_encrypted')
+                    ->orderByDesc('id')
+                    ->limit(10)
+                    ->get();
+
+                foreach ($candidates as $candidate) {
+                    try {
+                        $candidateRaw = Crypt::decryptString((string) $candidate->id_number_encrypted);
+                        if (hash_equals($idNumberRaw, $candidateRaw)) {
+                            $registration = $candidate;
+                            break;
+                        }
+                    } catch (\Throwable) {
+                        // Ignore decrypt errors and continue scanning candidates.
+                    }
+                }
+            }
+
+            if (! $registration) {
+                $registration = IdentityRegistration::create([
+                    'program_id' => $program->id,
+                    'session_id' => null,
+                    'name' => $identityRegistrationRequest['name'] ?? null,
+                    'birth_year' => isset($identityRegistrationRequest['birth_year']) ? (int) $identityRegistrationRequest['birth_year'] : null,
+                    'client_category' => $identityRegistrationRequest['client_category'] ?? null,
+                    'id_type' => $normalizedIdType,
+                    'id_number_encrypted' => $idNumberEncrypted,
+                    'id_number_last4' => $idNumberLast4,
+                    'status' => 'pending',
+                    'requested_at' => now(),
+                ]);
+            }
+
+            // If unverified entry is not allowed, or if no token was provided, we only submit the request.
+            // This supports a "no token yet" registration request flow.
+            if (! $program->settings()->getAllowUnverifiedEntry() || ! $request->filled('qr_hash')) {
+                RateLimiter::hit($key);
+
+                return response()->json([
+                    'request_submitted' => true,
+                    'message' => 'Your request has been submitted. Staff will verify your identity. You can try again after verification.',
+                ], 200);
+            }
+
+            $qrHash = $request->validated('qr_hash');
+            $trackId = (int) $request->validated('track_id');
+            $clientCategory = $registration->client_category ?? 'Regular';
+
+            try {
+                $result = $this->sessionService->bind(
+                    $qrHash,
+                    $trackId,
+                    $clientCategory,
+                    null,
+                    null,
+                    'public_triage',
+                    $registration->id
+                );
+            } catch (\InvalidArgumentException $e) {
+                $code = $e->getCode() === 422 ? 422 : 400;
+                if (str_contains($e->getMessage(), 'Token not found')) {
+                    return response()->json([
+                        'message' => 'Validation failed.',
+                        'errors' => ['qr_hash' => ['Token not found.']],
+                    ], 422);
+                }
+                if (str_contains($e->getMessage(), 'Track does not belong')) {
+                    return response()->json([
+                        'message' => 'Validation failed.',
+                        'errors' => ['track_id' => ['Track does not belong to the active program.']],
+                    ], 422);
+                }
+                if (str_contains($e->getMessage(), 'no steps')) {
+                    return response()->json([
+                        'message' => 'Validation failed.',
+                        'errors' => ['track_id' => ['Track has no steps defined.']],
+                    ], 422);
+                }
+                if (str_contains($e->getMessage(), 'deactivated')) {
+                    return response()->json(['message' => $e->getMessage()], 422);
+                }
+
+                return response()->json(['message' => $e->getMessage()], $code);
+            } catch (TokenInUseException $e) {
+                $s = $e->activeSession;
+                $s->load('currentStation');
+
+                return response()->json([
+                    'message' => 'Token is already in use.',
+                    'active_session' => [
+                        'alias' => $s->alias,
+                        'status' => $s->status,
+                        'current_station' => $s->currentStation?->name,
+                        'started_at' => $s->started_at?->toIso8601String(),
+                    ],
+                ], 409);
+            } catch (ClientAlreadyQueuedException $e) {
+                $s = $e->activeSession;
+                $s->load('currentStation');
+
+                return response()->json([
+                    'message' => 'You already have an active visit in the queue.',
+                    'error_code' => 'client_already_queued',
+                    'active_session' => [
+                        'alias' => $s->alias,
+                        'status' => $s->status,
+                        'current_station' => $s->currentStation?->name,
+                        'started_at' => $s->started_at?->toIso8601String(),
+                    ],
+                ], 409);
+            }
+
+            RateLimiter::hit($key);
+
+            $session = $result['session'];
+            $session->load('currentStation', 'serviceTrack');
+
+            return response()->json([
+                'session' => [
+                    'id' => $session->id,
+                    'alias' => $session->alias,
+                    'track' => [
+                        'id' => $session->serviceTrack->id,
+                        'name' => $session->serviceTrack->name,
+                    ],
+                    'client_category' => $session->client_category,
+                    'status' => $session->status,
+                    'current_station' => [
+                        'id' => $session->currentStation->id,
+                        'name' => $session->currentStation->name,
+                    ],
+                    'current_step_order' => $session->current_step_order,
+                    'started_at' => $session->started_at?->toIso8601String(),
+                ],
+                'token' => $result['token'],
+                'unverified' => true,
+            ], 201);
         }
 
         $qrHash = $request->validated('qr_hash');
@@ -150,6 +314,20 @@ class PublicTriageController extends Controller
 
             return response()->json([
                 'message' => 'Token is already in use.',
+                'active_session' => [
+                    'alias' => $s->alias,
+                    'status' => $s->status,
+                    'current_station' => $s->currentStation?->name,
+                    'started_at' => $s->started_at?->toIso8601String(),
+                ],
+            ], 409);
+        } catch (ClientAlreadyQueuedException $e) {
+            $s = $e->activeSession;
+            $s->load('currentStation');
+
+            return response()->json([
+                'message' => 'You already have an active visit in the queue.',
+                'error_code' => 'client_already_queued',
                 'active_session' => [
                     'alias' => $s->alias,
                     'status' => $s->status,
@@ -210,13 +388,32 @@ class PublicTriageController extends Controller
         }
 
         $data = $request->validated();
+        $idType = isset($data['id_type']) && $data['id_type'] !== '' && $data['id_type'] !== null
+            ? $data['id_type']
+            : null;
+        $idNumber = $data['id_number'];
 
-        $result = $this->clientIdDocumentService->lookupById(
-            $data['id_type'],
-            $data['id_number'],
-        );
+        if ($idType !== null) {
+            $result = $this->clientIdDocumentService->lookupById($idType, $idNumber);
+        } else {
+            $result = $this->clientIdDocumentService->lookupByIdNumberOnly($idNumber);
+            $result = [
+                'client' => $result['client'],
+                'id_document' => $result['id_document'],
+                'match_status' => $result['match_status'],
+                'id_types' => $result['id_types'] ?? [],
+            ];
+        }
 
         RateLimiter::hit($ipKey);
+
+        if (isset($result['match_status']) && $result['match_status'] === 'ambiguous') {
+            return response()->json([
+                'match_status' => 'ambiguous',
+                'message' => 'Can\'t auto-detect. Please select ID type first.',
+                'id_types' => $result['id_types'],
+            ]);
+        }
 
         if (! $result['client'] || ! $result['id_document']) {
             return response()->json([

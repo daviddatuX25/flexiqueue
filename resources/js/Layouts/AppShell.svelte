@@ -25,7 +25,13 @@
 
 	<header class="flex shrink-0 items-center justify-between bg-surface-50 border-b border-surface-200 px-4 h-14">
 		<div>
-			<a href="/" class="text-lg font-semibold text-surface-950">FlexiQueue</a>
+			<a
+				href="/"
+				class="text-lg font-semibold text-surface-950 flex items-center gap-2 no-underline hover:opacity-90 transition-opacity"
+			>
+				<img src="/images/logo.png" alt="FlexiQueue logo" class="h-7 w-auto" />
+				<span class="hidden sm:inline">FlexiQueue</span>
+			</a>
 		</div>
 		<div class="flex items-center gap-2">
 			<ThemeToggle />

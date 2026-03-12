@@ -172,5 +172,67 @@ class PermissionRequestServiceOverrideTest extends TestCase
 
         $service->approve($permissionRequest, $supervisor->id);
     }
+
+    public function test_create_override_for_serving_session_moves_to_holding_and_marks_awaiting_approval(): void
+    {
+        Event::fake();
+
+        $requester = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Queue Program',
+            'is_active' => true,
+            'created_by' => $requester->id,
+        ]);
+
+        $track = ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'Main',
+            'is_default' => true,
+        ]);
+
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Desk 1',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+
+        $token = new Token();
+        $token->qr_code_hash = hash('sha256', Str::random(32) . 'H1');
+        $token->physical_id = 'H1';
+        $token->status = 'in_use';
+        $token->save();
+
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => $token->physical_id,
+            'client_category' => 'Regular',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+        ]);
+
+        /** @var PermissionRequestService $service */
+        $service = app(PermissionRequestService::class);
+
+        $pr = $service->create(
+            $session->fresh(),
+            PermissionRequest::ACTION_OVERRIDE,
+            $requester->id,
+            'Needs different path',
+            null,
+            $track->id,
+            null
+        );
+
+        $this->assertInstanceOf(PermissionRequest::class, $pr);
+        $session->refresh();
+        $this->assertTrue($session->is_on_hold);
+        $this->assertSame($station->id, $session->holding_station_id);
+        $this->assertSame('awaiting_approval', $session->status);
+        $this->assertNull($session->current_station_id);
+    }
 }
 

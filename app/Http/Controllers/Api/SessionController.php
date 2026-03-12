@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\ClientAlreadyQueuedException;
 use App\Exceptions\StepsRemainingException;
 use App\Exceptions\TokenInUseException;
 use App\Exceptions\TokenUnavailableException;
@@ -100,6 +101,21 @@ class SessionController extends Controller
 
             return response()->json([
                 'message' => 'Token is already in use.',
+                'active_session' => [
+                    'id' => $s->id,
+                    'alias' => $s->alias,
+                    'status' => $s->status,
+                    'current_station' => $s->currentStation ? $s->currentStation->name : null,
+                    'started_at' => $s->started_at?->toIso8601String(),
+                ],
+            ], 409);
+        } catch (ClientAlreadyQueuedException $e) {
+            $s = $e->activeSession;
+            $s->load('currentStation');
+
+            return response()->json([
+                'message' => 'Client already has an active visit.',
+                'error_code' => 'client_already_queued',
                 'active_session' => [
                     'id' => $s->id,
                     'alias' => $s->alias,

@@ -280,6 +280,30 @@ class ProgramControllerTest extends TestCase
         $this->assertSame(3000, $program->getDisplayTtsRepeatDelayMs());
     }
 
+    public function test_update_persists_allow_unverified_entry_setting(): void
+    {
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/programs/{$program->id}", [
+            'name' => 'P',
+            'description' => null,
+            'settings' => [
+                'allow_unverified_entry' => true,
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('program.settings.allow_unverified_entry', true);
+        $program->refresh();
+        $settings = $program->settings ?? [];
+        $this->assertTrue($settings['allow_unverified_entry'] ?? false);
+    }
+
     /** Per plan: display_tts_repeat_count rejects values outside 1–3. */
     public function test_update_rejects_display_tts_repeat_count_out_of_range(): void
     {

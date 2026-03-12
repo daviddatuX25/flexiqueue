@@ -1,8 +1,17 @@
 <script lang="ts">
     import AdminLayout from "../../../Layouts/AdminLayout.svelte";
     import Modal from "../../../Components/Modal.svelte";
-    import { ArrowLeft, IdCard, Info, Lock, Eye } from "lucide-svelte";
-    import { Link, usePage } from "@inertiajs/svelte";
+    import {
+        ArrowLeft,
+        IdCard,
+        Info,
+        Lock,
+        Eye,
+        Trash2,
+        ArrowRightLeft,
+        Search,
+    } from "lucide-svelte";
+    import { Link, router, usePage } from "@inertiajs/svelte";
     import { get } from "svelte/store";
     import { toaster } from "../../../lib/toaster.js";
 
@@ -35,6 +44,27 @@
     );
     const isAdmin = $derived(userRole === "admin");
     const isSupervisor = $derived(userRole === "supervisor");
+
+    let showDeleteClientModal = $state(false);
+    let deletingClient = $state(false);
+    let deleteClientError = $state<string | null>(null);
+
+    let showDeleteIdModal = $state(false);
+    let deletingId = $state(false);
+    let deleteIdError = $state<string | null>(null);
+    let deleteIdTarget = $state<IdDocumentItem | null>(null);
+
+    let showReassignModal = $state(false);
+    let reassigning = $state(false);
+    let reassignError = $state<string | null>(null);
+    let reassignDocTarget = $state<IdDocumentItem | null>(null);
+    let targetSearchName = $state("");
+    let targetSearchBirthYear = $state("");
+    let searchingTargets = $state(false);
+    let targetResults = $state<
+        { id: number; name: string; birth_year: number | null }[]
+    >([]);
+    let chosenTargetClientId = $state<number | null>(null);
 
     let showRevealModal = $state(false);
     let activeDocument = $state<IdDocumentItem | null>(null);
@@ -80,6 +110,222 @@
                   )?.content
                 : "";
         return meta ?? "";
+    }
+
+    function openDeleteClient() {
+        if (!isAdmin) return;
+        showDeleteClientModal = true;
+        deletingClient = false;
+        deleteClientError = null;
+    }
+
+    function closeDeleteClientModal() {
+        showDeleteClientModal = false;
+        deletingClient = false;
+        deleteClientError = null;
+    }
+
+    async function confirmDeleteClient() {
+        if (!isAdmin || deletingClient) return;
+        deletingClient = true;
+        deleteClientError = null;
+        try {
+            const res = await fetch(`/api/admin/clients/${client.id}`, {
+                method: "DELETE",
+                headers: {
+                    Accept: "application/json",
+                    "X-CSRF-TOKEN": getCsrfToken(),
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+                credentials: "same-origin",
+            });
+            const data = (await res.json().catch(() => ({}))) as {
+                message?: string;
+            };
+            if (res.ok) {
+                toaster.success({ title: "Client deleted." });
+                router.visit("/admin/clients");
+                return;
+            }
+            const msg =
+                data.message ??
+                (res.status === 409
+                    ? "Cannot delete client due to audit log."
+                    : "Failed to delete client.");
+            deleteClientError = msg;
+            toaster.error({ title: msg });
+        } catch {
+            const msg = "Network error. Please try again.";
+            deleteClientError = msg;
+            toaster.error({ title: msg });
+        } finally {
+            deletingClient = false;
+        }
+    }
+
+    function openDeleteId(doc: IdDocumentItem) {
+        if (!isAdmin) return;
+        deleteIdTarget = doc;
+        showDeleteIdModal = true;
+        deletingId = false;
+        deleteIdError = null;
+    }
+
+    function closeDeleteIdModal() {
+        showDeleteIdModal = false;
+        deletingId = false;
+        deleteIdError = null;
+        deleteIdTarget = null;
+    }
+
+    async function confirmDeleteId() {
+        if (!isAdmin || !deleteIdTarget || deletingId) return;
+        deletingId = true;
+        deleteIdError = null;
+        try {
+            const res = await fetch(
+                `/api/admin/client-id-documents/${deleteIdTarget.id}`,
+                {
+                    method: "DELETE",
+                    headers: {
+                        Accept: "application/json",
+                        "X-CSRF-TOKEN": getCsrfToken(),
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
+                    credentials: "same-origin",
+                },
+            );
+            const data = (await res.json().catch(() => ({}))) as {
+                message?: string;
+            };
+            if (res.ok) {
+                toaster.success({ title: "ID document deleted." });
+                closeDeleteIdModal();
+                router.reload();
+                return;
+            }
+            const msg =
+                data.message ??
+                (res.status === 409
+                    ? "Cannot delete ID document due to audit log."
+                    : "Failed to delete ID document.");
+            deleteIdError = msg;
+            toaster.error({ title: msg });
+        } catch {
+            const msg = "Network error. Please try again.";
+            deleteIdError = msg;
+            toaster.error({ title: msg });
+        } finally {
+            deletingId = false;
+        }
+    }
+
+    function openReassign(doc: IdDocumentItem) {
+        if (!isAdmin) return;
+        reassignDocTarget = doc;
+        showReassignModal = true;
+        reassigning = false;
+        reassignError = null;
+        targetSearchName = "";
+        targetSearchBirthYear = "";
+        targetResults = [];
+        chosenTargetClientId = null;
+    }
+
+    function closeReassignModal() {
+        showReassignModal = false;
+        reassigning = false;
+        reassignError = null;
+        reassignDocTarget = null;
+        targetResults = [];
+        chosenTargetClientId = null;
+    }
+
+    const BIRTH_YEAR_MIN = 1900;
+    const BIRTH_YEAR_MAX = 2100;
+
+    async function runTargetSearch(e?: SubmitEvent) {
+        e?.preventDefault();
+        const name = targetSearchName.trim();
+        if (!name) return;
+        searchingTargets = true;
+        reassignError = null;
+        try {
+            const birthYearVal = targetSearchBirthYear.trim();
+            const birthYearNum = birthYearVal ? Number(birthYearVal) : NaN;
+            const birthYear =
+                Number.isInteger(birthYearNum) &&
+                birthYearNum >= BIRTH_YEAR_MIN &&
+                birthYearNum <= BIRTH_YEAR_MAX
+                    ? birthYearNum
+                    : null;
+            const params = new URLSearchParams({
+                name,
+                per_page: "10",
+                page: "1",
+            });
+            if (birthYear != null) {
+                params.set("birth_year", String(birthYear));
+            }
+            const res = await fetch(`/api/clients/search?${params.toString()}`, {
+                headers: { Accept: "application/json" },
+                credentials: "same-origin",
+            });
+            const data = (await res.json().catch(() => ({}))) as {
+                data?: { id: number; name: string; birth_year: number | null }[];
+            };
+            if (res.ok) {
+                targetResults = data.data ?? [];
+            } else {
+                targetResults = [];
+            }
+        } finally {
+            searchingTargets = false;
+        }
+    }
+
+    async function confirmReassign() {
+        if (!isAdmin || !reassignDocTarget || chosenTargetClientId == null)
+            return;
+        if (reassigning) return;
+        reassigning = true;
+        reassignError = null;
+        try {
+            const res = await fetch(
+                `/api/admin/client-id-documents/${reassignDocTarget.id}/reassign`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Accept: "application/json",
+                        "X-CSRF-TOKEN": getCsrfToken(),
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
+                    credentials: "same-origin",
+                    body: JSON.stringify({
+                        target_client_id: chosenTargetClientId,
+                    }),
+                },
+            );
+            const data = (await res.json().catch(() => ({}))) as {
+                message?: string;
+            };
+            if (res.ok) {
+                toaster.success({ title: "ID document reassigned." });
+                closeReassignModal();
+                router.reload();
+                return;
+            }
+            const msg = data.message ?? "Failed to reassign ID document.";
+            reassignError = msg;
+            toaster.error({ title: msg });
+        } catch {
+            const msg = "Network error. Please try again.";
+            reassignError = msg;
+            toaster.error({ title: msg });
+        } finally {
+            reassigning = false;
+        }
     }
 
     function openReveal(doc: IdDocumentItem) {
@@ -194,6 +440,25 @@
                     <ArrowLeft class="w-3 h-3" />
                     Back to clients
                 </Link>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+                <Link
+                    href={`/triage?from_client_id=${client.id}`}
+                    class="btn btn-sm preset-filled-primary-500 flex items-center gap-1.5 shadow-sm"
+                >
+                    Create registration
+                </Link>
+                {#if isAdmin}
+                    <button
+                        type="button"
+                        class="btn btn-sm preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1.5 shadow-sm"
+                        onclick={openDeleteClient}
+                        data-testid="admin-client-delete-button"
+                    >
+                        <Trash2 class="w-3.5 h-3.5" />
+                        Delete client
+                    </button>
+                {/if}
             </div>
         </div>
 
@@ -315,15 +580,37 @@
                                     </td>
                                     <td class="text-right">
                                         {#if isAdmin}
-                                            <button
-                                                type="button"
-                                                class="btn btn-xs preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1.5 shadow-sm px-3 py-1.5 transition-colors"
-                                                onclick={() => openReveal(doc)}
-                                                disabled={submitting}
-                                            >
-                                                <Eye class="w-3.5 h-3.5" />
-                                                Reveal ID
-                                            </button>
+                                            <div class="flex justify-end gap-2">
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-xs preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1.5 shadow-sm px-3 py-1.5 transition-colors"
+                                                    onclick={() => openReveal(doc)}
+                                                    disabled={submitting}
+                                                >
+                                                    <Eye class="w-3.5 h-3.5" />
+                                                    Reveal
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-xs preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1.5 shadow-sm px-3 py-1.5 transition-colors"
+                                                    onclick={() => openReassign(doc)}
+                                                    disabled={submitting}
+                                                    data-testid="admin-id-doc-reassign-{doc.id}"
+                                                >
+                                                    <ArrowRightLeft class="w-3.5 h-3.5" />
+                                                    Migrate
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-xs preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1.5 shadow-sm px-3 py-1.5 transition-colors"
+                                                    onclick={() => openDeleteId(doc)}
+                                                    disabled={submitting}
+                                                    data-testid="admin-id-doc-delete-{doc.id}"
+                                                >
+                                                    <Trash2 class="w-3.5 h-3.5" />
+                                                    Delete
+                                                </button>
+                                            </div>
                                         {:else if isSupervisor}
                                             <button
                                                 type="button"
@@ -367,15 +654,35 @@
                             </div>
                             <div class="pt-1 border-t border-surface-200">
                                 {#if isAdmin}
-                                    <button
-                                        type="button"
-                                        class="btn btn-xs preset-outlined bg-surface-50 text-surface-700 flex items-center justify-center gap-1.5 shadow-sm w-full"
-                                        onclick={() => openReveal(doc)}
-                                        disabled={submitting}
-                                    >
-                                        <Eye class="w-3.5 h-3.5" />
-                                        Reveal ID
-                                    </button>
+                                    <div class="grid grid-cols-1 gap-2">
+                                        <button
+                                            type="button"
+                                            class="btn btn-xs preset-outlined bg-surface-50 text-surface-700 flex items-center justify-center gap-1.5 shadow-sm w-full"
+                                            onclick={() => openReveal(doc)}
+                                            disabled={submitting}
+                                        >
+                                            <Eye class="w-3.5 h-3.5" />
+                                            Reveal ID
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn btn-xs preset-outlined bg-surface-50 text-surface-700 flex items-center justify-center gap-1.5 shadow-sm w-full"
+                                            onclick={() => openReassign(doc)}
+                                            disabled={submitting}
+                                        >
+                                            <ArrowRightLeft class="w-3.5 h-3.5" />
+                                            Migrate ID to another client
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn btn-xs preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center justify-center gap-1.5 shadow-sm w-full"
+                                            onclick={() => openDeleteId(doc)}
+                                            disabled={submitting}
+                                        >
+                                            <Trash2 class="w-3.5 h-3.5" />
+                                            Delete ID document
+                                        </button>
+                                    </div>
                                 {:else if isSupervisor}
                                     <button
                                         type="button"
@@ -502,6 +809,111 @@
                 </div>
             </div>
         {/if}
+    </Modal>
+
+    <Modal open={showDeleteClientModal} title="Delete client" onClose={closeDeleteClientModal}>
+        {#snippet children()}
+            <div class="space-y-3">
+                <p class="text-sm text-surface-700">
+                    Delete client <span class="font-semibold">{client.name}</span>? This cannot be undone.
+                </p>
+                {#if deleteClientError}
+                    <p class="text-sm text-error-700">{deleteClientError}</p>
+                {/if}
+                <div class="flex gap-2 pt-1">
+                    <button type="button" class="btn preset-tonal flex-1" onclick={closeDeleteClientModal} disabled={deletingClient}>Cancel</button>
+                    <button type="button" class="btn preset-filled-primary-500 flex-1 bg-error-600 hover:bg-error-700" onclick={confirmDeleteClient} disabled={deletingClient}>
+                        {deletingClient ? "Deleting…" : "Delete"}
+                    </button>
+                </div>
+            </div>
+        {/snippet}
+    </Modal>
+
+    <Modal open={showDeleteIdModal} title="Delete ID document" onClose={closeDeleteIdModal}>
+        {#snippet children()}
+            {#if deleteIdTarget}
+                <div class="space-y-3">
+                    <p class="text-sm text-surface-700">
+                        Delete <span class="font-semibold">{deleteIdTarget.id_type}</span> (•••• {deleteIdTarget.id_last4}) from this client?
+                    </p>
+                    {#if deleteIdError}
+                        <p class="text-sm text-error-700">{deleteIdError}</p>
+                    {/if}
+                    <div class="flex gap-2 pt-1">
+                        <button type="button" class="btn preset-tonal flex-1" onclick={closeDeleteIdModal} disabled={deletingId}>Cancel</button>
+                        <button type="button" class="btn preset-filled-primary-500 flex-1 bg-error-600 hover:bg-error-700" onclick={confirmDeleteId} disabled={deletingId}>
+                            {deletingId ? "Deleting…" : "Delete"}
+                        </button>
+                    </div>
+                </div>
+            {/if}
+        {/snippet}
+    </Modal>
+
+    <Modal open={showReassignModal} title="Migrate ID document" onClose={closeReassignModal} wide={true}>
+        {#snippet children()}
+            {#if reassignDocTarget}
+                <div class="space-y-4">
+                    <p class="text-sm text-surface-700">
+                        Move <span class="font-semibold">{reassignDocTarget.id_type}</span> (•••• {reassignDocTarget.id_last4}) to another client.
+                    </p>
+                    <form class="space-y-2" onsubmit={runTargetSearch}>
+                        <label for="admin-reassign-search-name" class="label-text text-xs font-semibold uppercase tracking-wide text-surface-500 block">Search target client</label>
+                        <div class="join w-full">
+                            <div class="join-item flex items-center gap-2 px-3 py-1 border border-surface-300 rounded-l-container bg-surface-50 w-full">
+                                <Search class="w-4 h-4 my-2 text-surface-400 shrink-0" />
+                                <input
+                                    type="text"
+                                    id="admin-reassign-search-name"
+                                    class="input input-ghost !bg-transparent px-0 py-0 h-auto text-sm w-full focus:!outline-none focus:!ring-0 focus:!border-transparent"
+                                    bind:value={targetSearchName}
+                                    placeholder="e.g. Maria Santos"
+                                    data-testid="admin-reassign-search-name"
+                                />
+                            </div>
+                            <button type="submit" class="join-item btn preset-filled-primary-500 px-4 text-sm shadow-sm !rounded-none !rounded-tr-lg !rounded-br-lg" disabled={searchingTargets || !targetSearchName.trim()}>
+                                {searchingTargets ? "Searching…" : "Search"}
+                            </button>
+                        </div>
+                        <label class="flex flex-col gap-1 text-xs">
+                            <span class="text-surface-700">Birth year (optional)</span>
+                            <input type="number" class="input rounded-container border border-surface-200 px-3 py-2 text-sm w-full" bind:value={targetSearchBirthYear} placeholder="e.g. 1985" min={BIRTH_YEAR_MIN} max={BIRTH_YEAR_MAX} />
+                        </label>
+                    </form>
+
+                    {#if targetResults.length > 0}
+                        <p class="text-xs text-surface-600">Select a client</p>
+                        <ul class="space-y-2">
+                            {#each targetResults as c (c.id)}
+                                <li>
+                                    <button
+                                        type="button"
+                                        class="btn preset-tonal w-full justify-start text-left text-sm touch-target-h {chosenTargetClientId === c.id ? 'ring-2 ring-primary-500' : ''}"
+                                        onclick={() => (chosenTargetClientId = c.id)}
+                                    >
+                                        {c.name}{#if c.birth_year != null}<span class="text-surface-600"> ({c.birth_year})</span>{/if}
+                                    </button>
+                                </li>
+                            {/each}
+                        </ul>
+                    {:else if targetSearchName.trim() !== "" && !searchingTargets}
+                        <p class="text-xs text-surface-600">No matches found.</p>
+                    {/if}
+
+                    {#if reassignError}
+                        <p class="text-sm text-error-700">{reassignError}</p>
+                    {/if}
+
+                    <div class="flex gap-2 pt-1">
+                        <button type="button" class="btn preset-tonal flex-1" onclick={closeReassignModal} disabled={reassigning}>Cancel</button>
+                        <button type="button" class="btn preset-filled-primary-500 flex-1" onclick={confirmReassign} disabled={reassigning || chosenTargetClientId == null}>
+                            {reassigning ? "Migrating…" : "Migrate"}
+                        </button>
+                    </div>
+                </div>
+            {/if}
+        {/snippet}
     </Modal>
 </AdminLayout>
 

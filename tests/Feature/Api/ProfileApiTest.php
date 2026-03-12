@@ -182,4 +182,49 @@ class ProfileApiTest extends TestCase
         $file = UploadedFile::fake()->image('avatar.jpg', 100, 100);
         $this->post('/api/profile/avatar', ['avatar' => $file], ['Accept' => 'application/json'])->assertStatus(401);
     }
+
+    public function test_triage_settings_get_returns_preferences(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'staff',
+            'staff_triage_allow_hid_barcode' => true,
+            'staff_triage_allow_camera_scanner' => false,
+        ]);
+
+        $response = $this->actingAs($user)->getJson('/api/profile/triage-settings');
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('allow_hid_barcode', true);
+        $response->assertJsonPath('allow_camera_scanner', false);
+    }
+
+    public function test_triage_settings_put_updates_preferences(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'staff',
+            'staff_triage_allow_hid_barcode' => true,
+            'staff_triage_allow_camera_scanner' => true,
+        ]);
+
+        $response = $this->actingAs($user)->putJson('/api/profile/triage-settings', [
+            'allow_hid_barcode' => false,
+            'allow_camera_scanner' => false,
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('allow_hid_barcode', false);
+        $response->assertJsonPath('allow_camera_scanner', false);
+
+        $user->refresh();
+        $this->assertFalse($user->staff_triage_allow_hid_barcode);
+        $this->assertFalse($user->staff_triage_allow_camera_scanner);
+    }
+
+    public function test_triage_settings_requires_auth(): void
+    {
+        $this->getJson('/api/profile/triage-settings')->assertStatus(401);
+        $this->putJson('/api/profile/triage-settings', [
+            'allow_hid_barcode' => false,
+        ])->assertStatus(401);
+    }
 }

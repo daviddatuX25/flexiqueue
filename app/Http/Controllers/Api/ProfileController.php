@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\UpdateAvatarRequest;
 use App\Http\Requests\UpdateOverridePinRequest;
 use App\Http\Requests\UpdatePasswordRequest;
+use App\Http\Requests\UpdateTriageSettingsRequest;
 use App\Services\TokenPrintService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -109,6 +110,44 @@ class ProfileController extends Controller
         return response()->json([
             'avatar_url' => $avatarUrl,
             'message' => 'Avatar updated.',
+        ]);
+    }
+
+    /**
+     * GET /api/profile/triage-settings — Staff triage HID/camera preferences ("on this account").
+     */
+    public function triageSettings(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        return response()->json([
+            'allow_hid_barcode' => $user->staff_triage_allow_hid_barcode ?? true,
+            'allow_camera_scanner' => $user->staff_triage_allow_camera_scanner ?? true,
+        ]);
+    }
+
+    /**
+     * PUT /api/profile/triage-settings — Update staff triage HID/camera preferences.
+     */
+    public function updateTriageSettings(UpdateTriageSettingsRequest $request): JsonResponse
+    {
+        $user = $request->user();
+        $payload = [];
+
+        if ($request->has('allow_hid_barcode')) {
+            $payload['staff_triage_allow_hid_barcode'] = $request->boolean('allow_hid_barcode');
+        }
+        if ($request->has('allow_camera_scanner')) {
+            $payload['staff_triage_allow_camera_scanner'] = $request->boolean('allow_camera_scanner');
+        }
+
+        if ($payload !== []) {
+            $user->update($payload);
+        }
+
+        return response()->json([
+            'allow_hid_barcode' => $user->fresh()->staff_triage_allow_hid_barcode ?? true,
+            'allow_camera_scanner' => $user->fresh()->staff_triage_allow_camera_scanner ?? true,
         ]);
     }
 }

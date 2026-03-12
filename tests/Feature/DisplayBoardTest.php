@@ -669,7 +669,9 @@ class DisplayBoardTest extends TestCase
             ->has('station_id')
             ->has('now_serving')
             ->has('waiting')
+            ->has('holding')
             ->has('station_activity')
+            ->has('max_no_show_attempts')
         );
         $props = $response->viewData('page')['props'];
         $this->assertSame('Cash Assistance', $props['program_name']);
@@ -677,7 +679,9 @@ class DisplayBoardTest extends TestCase
         $this->assertSame($station->id, $props['station_id']);
         $this->assertIsArray($props['now_serving']);
         $this->assertIsArray($props['waiting']);
+        $this->assertIsArray($props['holding']);
         $this->assertIsArray($props['station_activity']);
+        $this->assertIsInt($props['max_no_show_attempts']);
     }
 
     /** Per plan: station display includes now_serving and waiting shape when sessions at station. */
@@ -748,9 +752,13 @@ class DisplayBoardTest extends TestCase
         $this->assertCount(1, $props['now_serving']);
         $this->assertSame('A1', $props['now_serving'][0]['alias']);
         $this->assertSame('called', $props['now_serving'][0]['status']);
+        $this->assertArrayHasKey('no_show_attempts', $props['now_serving'][0]);
         $this->assertCount(1, $props['waiting']);
         $this->assertSame('A2', $props['waiting'][0]['alias']);
         $this->assertSame(1, $props['waiting'][0]['position']);
+        $this->assertArrayHasKey('no_show_attempts', $props['waiting'][0]);
+        $this->assertIsArray($props['holding']);
+        $this->assertSame([], $props['holding']);
     }
 
     /** Per plan: general display returns display_audio_muted and display_audio_volume from program settings. */

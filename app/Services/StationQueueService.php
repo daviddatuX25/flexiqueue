@@ -63,13 +63,13 @@ class StationQueueService
             ->where('current_station_id', $station->id)
             ->whereIn('status', ['waiting', 'called', 'serving'])
             ->where(fn ($q) => $q->whereNull('is_on_hold')->orWhere('is_on_hold', false))
-            ->with(['serviceTrack.trackSteps.process', 'token'])
+            ->with(['serviceTrack.trackSteps.process', 'token', 'identityRegistration'])
             ->get();
 
         $heldSessions = Session::query()
             ->where('holding_station_id', $station->id)
             ->where('is_on_hold', true)
-            ->with(['serviceTrack.trackSteps.process', 'token'])
+            ->with(['serviceTrack.trackSteps.process', 'token', 'identityRegistration'])
             ->orderBy('held_order')
             ->orderBy('held_at')
             ->get();
@@ -305,6 +305,9 @@ class StationQueueService
 
         $process = $this->currentProcessForSession($s);
 
+        $unverified = $s->identity_registration_id && $s->relationLoaded('identityRegistration')
+            && $s->identityRegistration && $s->identityRegistration->status === 'pending';
+
         return [
             'session_id' => $s->id,
             'alias' => $s->alias,
@@ -317,6 +320,7 @@ class StationQueueService
             'no_show_attempts' => $s->no_show_attempts ?? 0,
             'process_id' => $process ? $process['process_id'] : null,
             'process_name' => $process ? $process['process_name'] : null,
+            'unverified' => $unverified,
         ];
     }
 
@@ -325,6 +329,9 @@ class StationQueueService
         $track = $s->serviceTrack;
         $queuedAt = $s->queued_at_station ?? $s->started_at;
         $process = $this->currentProcessForSession($s);
+
+        $unverified = $s->identity_registration_id && $s->relationLoaded('identityRegistration')
+            && $s->identityRegistration && $s->identityRegistration->status === 'pending';
 
         return [
             'session_id' => $s->id,
@@ -336,6 +343,7 @@ class StationQueueService
             'queued_at' => $queuedAt?->toIso8601String(),
             'process_id' => $process ? $process['process_id'] : null,
             'process_name' => $process ? $process['process_name'] : null,
+            'unverified' => $unverified,
         ];
     }
 

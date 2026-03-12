@@ -18,8 +18,9 @@
 
 <!-- 2. The Adaptive Wash -->
 <!-- Light mode gets a bright frosty wash, Dark mode gets a deep dark-blue wash -->
+<!-- No backdrop-blur on desktop (md+) to avoid ~500ms+ presentation delay on large viewports -->
 <div
-    class="fixed inset-0 z-[-2] bg-slate-50/85 dark:bg-slate-900/85 backdrop-blur-[2px] transition-colors duration-700"
+    class="fixed inset-0 z-[-2] bg-slate-50/85 dark:bg-slate-900/85 backdrop-blur-[2px] md:backdrop-blur-none transition-colors duration-700"
 ></div>
 
 <!-- 3. The Subtle Vibrant Gradient Overlay -->

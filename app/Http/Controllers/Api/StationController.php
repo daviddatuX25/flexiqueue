@@ -107,10 +107,21 @@ class StationController extends Controller
         }
 
         $session = $token->currentSession;
-        $session->load(['serviceTrack.trackSteps.process', 'serviceTrack.trackSteps.station', 'currentStation', 'token']);
+        $session->load([
+            'serviceTrack.trackSteps.process',
+            'serviceTrack.trackSteps.station',
+            'currentStation',
+            'token',
+            'identityRegistration',
+        ]);
         $track = $session->serviceTrack;
         $totalSteps = $track ? $track->trackSteps()->count() : 1;
         $currentOrder = (int) ($session->current_step_order ?? 1);
+
+        $unverified = $session->identity_registration_id
+            && $session->relationLoaded('identityRegistration')
+            && $session->identityRegistration
+            && $session->identityRegistration->status === 'pending';
 
         return response()->json([
             'session_id' => $session->id,
@@ -123,6 +134,7 @@ class StationController extends Controller
             'current_step_order' => $currentOrder,
             'total_steps' => $totalSteps,
             'at_this_station' => $session->current_station_id === $station->id,
+            'unverified' => $unverified,
         ]);
     }
 

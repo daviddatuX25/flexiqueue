@@ -45,6 +45,8 @@
 		{ label: '10 uses', value: 10 },
 	];
 
+	const STAFF_OVERRIDE_PREFS_KEY = 'flexiqueue-staff-override-prefs';
+
 	let {
 		canApprove = false,
 		stations = [],
@@ -78,6 +80,12 @@
 	let approveCustomAddStationId = $state<number | ''>('');
 	let deletingAuthorizationId = $state<number | null>(null);
 
+	type StaffOverridePrefs = {
+		mode: 'time_only' | 'usage_only' | 'time_or_usage';
+		ttlSeconds: number;
+		maxUses: number;
+	};
+
 	/** Real-time tick for live expiry countdowns (client-side, no polling). */
 	let nowMs = $state(Date.now());
 	$effect(() => {
@@ -93,8 +101,32 @@
 	onMount(() => {
 		const user = (get(page)?.props as { auth?: { user?: { id: number } } })?.auth?.user;
 		const userId = user?.id;
-		const w = window as unknown as { Echo?: { private: (ch: string) => { listen: (ev: string, cb: () => void) => void }; leave: (ch: string) => void } };
+		const w = window as unknown as {
+			Echo?: { private: (ch: string) => { listen: (ev: string, cb: () => void) => void }; leave: (ch: string) => void };
+		};
 		if (!userId || typeof window === 'undefined' || !w.Echo) return;
+
+		// Load locally persisted Staff override defaults (per device).
+		try {
+			const raw = window.localStorage.getItem(STAFF_OVERRIDE_PREFS_KEY);
+			if (raw) {
+				const parsed = JSON.parse(raw) as Partial<StaffOverridePrefs>;
+				const ttlValues = new Set(TTL_OPTIONS.map((t) => t.value));
+				const maxUseValues = new Set(MAX_USES_OPTIONS.map((m) => m.value));
+
+				if (parsed.mode === 'time_only' || parsed.mode === 'usage_only' || parsed.mode === 'time_or_usage') {
+					selectedExpiryMode = parsed.mode;
+				}
+				if (typeof parsed.ttlSeconds === 'number' && ttlValues.has(parsed.ttlSeconds)) {
+					selectedTtlSeconds = parsed.ttlSeconds;
+				}
+				if (typeof parsed.maxUses === 'number' && maxUseValues.has(parsed.maxUses)) {
+					selectedMaxUses = parsed.maxUses;
+				}
+			}
+		} catch {
+			// Ignore parse/storage errors; fall back to defaults.
+		}
 
 		const Echo = w.Echo;
 		const ch = `App.Models.User.${userId}`;
@@ -105,6 +137,21 @@
 		return () => {
 			Echo.leave(`private-${ch}`);
 		};
+	});
+
+	// Persist Staff override preferences per device whenever the controls change.
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		const prefs: StaffOverridePrefs = {
+			mode: selectedExpiryMode,
+			ttlSeconds: selectedTtlSeconds,
+			maxUses: selectedMaxUses,
+		};
+		try {
+			window.localStorage.setItem(STAFF_OVERRIDE_PREFS_KEY, JSON.stringify(prefs));
+		} catch {
+			// Ignore storage failures (e.g. private mode).
+		}
 	});
 
 	function getCsrfToken(): string {
@@ -298,10 +345,12 @@
 <MobileLayout headerTitle="Program Overrides" {queueCount} {processedToday}>
 	<div class="flex flex-col gap-4 md:gap-6 text-surface-950 w-full max-w-2xl mx-auto px-4 md:px-6 py-4 md:py-6">
 		{#if canApprove}
-			<!-- Generate PIN/QR for staff -->
+			<!-- Generate PIN/QR for staff actions -->
 			<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-6">
-				<p class="text-sm font-medium text-surface-950/80 mb-3">Generate for staff</p>
-				<p class="text-xs text-surface-950/60 mb-4">Create temporary PIN or QR for staff to authorize override or force-complete.</p>
+				<p class="text-sm font-medium text-surface-950/80 mb-3">Staff override tools</p>
+				<p class="text-xs text-surface-950/60 mb-4">
+					Generate a temporary PIN or QR for staff to authorize overrides, force-complete sessions, or quickly tweak display and public triage settings.
+				</p>
 				<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
 					<div class="form-control w-full">
 						<label class="label" for="expiryMode"><span class="label-text">Mode</span></label>

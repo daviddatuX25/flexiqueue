@@ -2,9 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Models\Client;
+use App\Models\ClientIdDocument;
+use App\Models\IdentityRegistration;
 use App\Models\Process;
 use App\Models\Program;
 use App\Models\ServiceTrack;
+use App\Models\Session;
 use App\Models\Station;
 use App\Models\Token;
 use App\Models\TrackStep;
@@ -12,6 +16,7 @@ use App\Models\TransactionLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Crypt;
 use Tests\TestCase;
 
 /**
@@ -22,15 +27,16 @@ class PublicTriageTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function createProgramWithTracks(bool $allowPublicTriage = true): array
+    private function createProgramWithTracks(bool $allowPublicTriage = true, array $extraSettings = []): array
     {
         $user = User::factory()->create();
+        $settings = array_merge(['allow_public_triage' => $allowPublicTriage], $extraSettings);
         $program = Program::create([
             'name' => 'Test Program',
             'description' => null,
             'is_active' => true,
             'created_by' => $user->id,
-            'settings' => ['allow_public_triage' => $allowPublicTriage],
+            'settings' => $settings,
         ]);
         $station = Station::create([
             'program_id' => $program->id,
@@ -72,7 +78,7 @@ class PublicTriageTest extends TestCase
 
     public function test_triage_start_returns_200_with_allowed_true_when_program_allows_public_triage(): void
     {
-        $this->createProgramWithTracks(true);
+        ['program' => $program] = $this->createProgramWithTracks(true, ['allow_unverified_entry' => true]);
 
         $response = $this->get('/triage/start');
 
@@ -89,6 +95,7 @@ class PublicTriageTest extends TestCase
         $this->assertIsArray($props['tracks']);
         $this->assertCount(1, $props['tracks']);
         $this->assertSame('Default', $props['tracks'][0]['name']);
+        $this->assertTrue($props['allow_unverified_entry']);
     }
 
     public function test_triage_start_returns_200_with_allowed_false_when_no_program(): void
@@ -229,5 +236,210 @@ class PublicTriageTest extends TestCase
         $log = TransactionLog::where('action_type', 'bind')->latest('id')->first();
         $this->assertNotNull($log);
         $this->assertNull($log->staff_user_id);
+    }
+
+    public function test_public_bind_identity_registration_request_mutually_exclusive_with_client_binding_returns_422(): void
+    {
+        ['track' => $track] = $this->createProgramWithTracks(true);
+        $token = $this->createToken('A1');
+
+        $response = $this->postJson('/api/public/sessions/bind', [
+            'qr_hash' => $token->qr_code_hash,
+            'track_id' => $track->id,
+            'client_binding' => ['client_id' => 1, 'source' => 'test', 'id_document_id' => 1],
+            'identity_registration_request' => ['name' => 'Jane'],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['identity_registration_request']);
+    }
+
+    public function test_public_bind_identity_registration_request_allow_unverified_false_creates_registration_no_session(): void
+    {
+        ['track' => $track, 'program' => $program] = $this->createProgramWithTracks(true, ['allow_unverified_entry' => false]);
+        $token = $this->createToken('A1');
+
+        $response = $this->postJson('/api/public/sessions/bind', [
+            'qr_hash' => $token->qr_code_hash,
+            'track_id' => $track->id,
+            'identity_registration_request' => [
+                'name' => 'Jane Doe',
+                'birth_year' => 1990,
+                'client_category' => 'Regular',
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('request_submitted', true);
+        $this->assertDatabaseHas('identity_registrations', [
+            'program_id' => $program->id,
+            'name' => 'Jane Doe',
+            'birth_year' => 1990,
+            'client_category' => 'Regular',
+            'status' => 'pending',
+        ]);
+        $this->assertDatabaseMissing('queue_sessions', ['token_id' => $token->id]);
+        $token->refresh();
+        $this->assertSame('available', $token->status);
+    }
+
+    public function test_public_bind_identity_registration_request_without_token_creates_registration_no_session(): void
+    {
+        ['program' => $program] = $this->createProgramWithTracks(true, ['allow_unverified_entry' => true]);
+
+        $response = $this->postJson('/api/public/sessions/bind', [
+            'identity_registration_request' => [
+                'name' => 'Jane Doe',
+                'birth_year' => 1990,
+                'client_category' => 'Regular',
+                'id_type' => 'PhilHealth',
+                'id_number' => '1234567890',
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('request_submitted', true);
+        $this->assertDatabaseHas('identity_registrations', [
+            'program_id' => $program->id,
+            'name' => 'Jane Doe',
+            'birth_year' => 1990,
+            'client_category' => 'Regular',
+            'id_type' => 'PhilHealth',
+            'status' => 'pending',
+            'session_id' => null,
+        ]);
+    }
+
+    public function test_public_bind_identity_registration_request_allow_unverified_true_creates_session_and_registration(): void
+    {
+        ['track' => $track, 'program' => $program, 'station' => $station] = $this->createProgramWithTracks(true, ['allow_unverified_entry' => true]);
+        $token = $this->createToken('A1');
+
+        $response = $this->postJson('/api/public/sessions/bind', [
+            'qr_hash' => $token->qr_code_hash,
+            'track_id' => $track->id,
+            'identity_registration_request' => [
+                'name' => 'Jane Doe',
+                'birth_year' => 1990,
+                'client_category' => 'PWD / Senior / Pregnant',
+            ],
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('session.alias', 'A1');
+        $response->assertJsonPath('session.client_category', 'PWD / Senior / Pregnant');
+        $response->assertJsonPath('unverified', true);
+        $sessionId = $response->json('session.id');
+        $this->assertDatabaseHas('queue_sessions', [
+            'id' => $sessionId,
+            'token_id' => $token->id,
+            'client_id' => null,
+            'client_category' => 'PWD / Senior / Pregnant',
+        ]);
+        $reg = IdentityRegistration::where('program_id', $program->id)->where('status', 'pending')->first();
+        $this->assertNotNull($reg);
+        $this->assertSame($sessionId, $reg->session_id);
+        $this->assertSame('Jane Doe', $reg->name);
+        $token->refresh();
+        $this->assertSame('in_use', $token->status);
+    }
+
+    public function test_public_bind_reuses_existing_pending_identity_registration_for_same_id_when_allow_unverified_true(): void
+    {
+        ['track' => $track, 'program' => $program] = $this->createProgramWithTracks(true, ['allow_unverified_entry' => true]);
+        $token = $this->createToken('A1');
+
+        $idType = 'PhilHealth';
+        $idNumber = '1234567890';
+        $last4 = '7890';
+
+        $existing = IdentityRegistration::create([
+            'program_id' => $program->id,
+            'session_id' => null,
+            'name' => 'Jane Doe',
+            'birth_year' => 1990,
+            'client_category' => 'Regular',
+            'id_type' => $idType,
+            'id_number_encrypted' => Crypt::encryptString($idNumber),
+            'id_number_last4' => $last4,
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]);
+
+        $response = $this->postJson('/api/public/sessions/bind', [
+            'qr_hash' => $token->qr_code_hash,
+            'track_id' => $track->id,
+            'identity_registration_request' => [
+                'name' => 'Jane Doe',
+                'birth_year' => 1990,
+                'client_category' => 'Regular',
+                'id_type' => $idType,
+                'id_number' => $idNumber,
+            ],
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('unverified', true);
+
+        $this->assertSame(1, IdentityRegistration::query()
+            ->where('program_id', $program->id)
+            ->where('status', 'pending')
+            ->where('id_type', $idType)
+            ->where('id_number_last4', $last4)
+            ->count());
+
+        $existing->refresh();
+        $this->assertNotNull($existing->session_id);
+    }
+
+    public function test_public_bind_returns_409_when_client_already_queued(): void
+    {
+        ['track' => $track, 'program' => $program, 'station' => $station] = $this->createProgramWithTracks(true, [
+            'identity_binding_mode' => 'optional',
+        ]);
+
+        $client = Client::factory()->create();
+        $idDocument = ClientIdDocument::create([
+            'client_id' => $client->id,
+            'id_type' => 'PhilHealth',
+            'id_number_encrypted' => encrypt('1234567890'),
+            'id_number_hash' => 'hash',
+        ]);
+
+        $firstToken = $this->createToken('A1');
+        $existingSession = Session::create([
+            'token_id' => $firstToken->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'A1',
+            'client_id' => $client->id,
+            'client_category' => 'Regular',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'station_queue_position' => 1,
+            'status' => 'waiting',
+            'queued_at_station' => now(),
+        ]);
+        $firstToken->update(['status' => 'in_use', 'current_session_id' => $existingSession->id]);
+
+        $secondToken = $this->createToken('B1');
+
+        $response = $this->postJson('/api/public/sessions/bind', [
+            'qr_hash' => $secondToken->qr_code_hash,
+            'track_id' => $track->id,
+            'client_category' => 'Regular',
+            'client_binding' => [
+                'client_id' => $client->id,
+                'source' => 'existing_id_document',
+                'id_document_id' => $idDocument->id,
+            ],
+        ]);
+
+        $response->assertStatus(409);
+        $response->assertJsonPath('error_code', 'client_already_queued');
+        $response->assertJsonPath('active_session.alias', 'A1');
+        $this->assertDatabaseMissing('queue_sessions', [
+            'token_id' => $secondToken->id,
+        ]);
     }
 }

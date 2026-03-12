@@ -14,9 +14,14 @@
         Square,
         Trash2,
         Edit2,
-        Eye,
         FolderOpen,
+        Search,
     } from "lucide-svelte";
+
+    interface ProgramSettingsSummary {
+        allow_public_triage?: boolean;
+        allow_unverified_entry?: boolean;
+    }
 
     interface ProgramItem {
         id: number;
@@ -25,9 +30,34 @@
         is_active: boolean;
         is_paused?: boolean;
         created_at: string | null;
+        settings?: ProgramSettingsSummary;
     }
 
-    let { programs = [] }: { programs: ProgramItem[] } = $props();
+    let {
+        programs = [],
+        search: initialSearch = "",
+    }: {
+        programs: ProgramItem[];
+        search?: string | null;
+    } = $props();
+
+    const appliedSearch = $derived(initialSearch ?? "");
+    let searchTerm = $state("");
+    $effect(() => {
+        searchTerm = appliedSearch;
+    });
+
+    function handleSearchSubmit(event: SubmitEvent) {
+        event.preventDefault();
+        router.visit("/admin/programs", {
+            method: "get",
+            data: {
+                search: searchTerm.trim() || undefined,
+            },
+            preserveState: true,
+            preserveScroll: true,
+        });
+    }
 
     let showCreateModal = $state(false);
     let editProgram = $state<ProgramItem | null>(null);
@@ -36,6 +66,8 @@
     let createDescription = $state("");
     let editName = $state("");
     let editDescription = $state("");
+    let editAllowPublicTriage = $state(false);
+    let editAllowUnverifiedEntry = $state(false);
     let submitting = $state(false);
 
     const page = usePage();
@@ -98,6 +130,8 @@
         editProgram = p;
         editName = p.name;
         editDescription = p.description ?? "";
+        editAllowPublicTriage = p.settings?.allow_public_triage ?? false;
+        editAllowUnverifiedEntry = p.settings?.allow_unverified_entry ?? false;
     }
 
     function closeModals() {
@@ -126,13 +160,25 @@
     async function handleUpdate() {
         if (!editProgram || !editName.trim()) return;
         submitting = true;
+        const payload: {
+            name: string;
+            description: string | null;
+            settings: {
+                allow_public_triage: boolean;
+                allow_unverified_entry: boolean;
+            };
+        } = {
+            name: editName.trim(),
+            description: editDescription.trim() || null,
+            settings: {
+                allow_public_triage: editAllowPublicTriage,
+                allow_unverified_entry: editAllowUnverifiedEntry,
+            },
+        };
         const { ok, message } = await api(
             "PUT",
             `/api/admin/programs/${editProgram.id}`,
-            {
-                name: editName.trim(),
-                description: editDescription.trim() || null,
-            },
+            payload,
         );
         submitting = false;
         if (ok) {
@@ -260,32 +306,77 @@
 
 <AdminLayout>
     <div class="flex flex-col gap-6">
-        <div class="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <div>
-                <h1 class="text-2xl font-bold text-surface-950">Programs</h1>
-                <p class="text-sm text-surface-600 mt-1">
-                    Manage your active queue sessions and programs.
-                </p>
+        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div class="flex-1 space-y-3">
+                <div>
+                    <h1 class="text-2xl font-bold text-surface-950 flex items-center gap-2">
+                        <FolderOpen class="w-6 h-6 text-primary-500" />
+                        Programs
+                    </h1>
+                    <p class="mt-2 text-surface-600 max-w-3xl leading-relaxed">
+                        Manage your active queue sessions and programs.
+                    </p>
+                </div>
+                <form
+                    class="w-full max-w-lg"
+                    onsubmit={handleSearchSubmit}
+                >
+                    <label
+                        for="program-search"
+                        class="label-text text-xs font-semibold uppercase tracking-wide text-surface-500 mb-1 block"
+                    >
+                        Search by name or description
+                    </label>
+                    <div class="join w-full">
+                        <div
+                            class="join-item flex items-center gap-2 px-3 py-1 border border-surface-300 rounded-l-container bg-surface-50 w-full"
+                        >
+                            <Search class="w-4 h-4 my-2 text-surface-400 shrink-0" />
+                            <input
+                                type="text"
+                                id="program-search"
+                                class="input input-ghost !bg-transparent px-0 py-0 h-auto text-sm w-full focus:!outline-none focus:!ring-0 focus:!border-transparent"
+                                placeholder="e.g. Cash Assistance"
+                                bind:value={searchTerm}
+                                aria-label="Search programs by name or description"
+                            />
+                        </div>
+                        <button
+                            type="submit"
+                            class="join-item btn preset-filled-primary-500 px-4 text-sm shadow-sm !rounded-none !rounded-tr-lg !rounded-br-lg"
+                        >
+                            Search
+                        </button>
+                    </div>
+                    {#if initialSearch}
+                        <p class="mt-1 text-[11px] text-surface-500">
+                            Showing results for
+                            <span class="font-semibold">"{initialSearch}"</span>.
+                        </p>
+                    {/if}
+                </form>
             </div>
-            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
-                <Link
-                    href="/admin/program-default-settings"
-                    class="btn preset-tonal flex items-center gap-2 w-full sm:w-auto justify-center"
-                >
-                    Default program settings
-                </Link>
-                <button
-                    type="button"
-                    class="btn preset-filled-primary-500 flex items-center gap-2 w-full sm:w-auto justify-center order-last sm:order-none"
-                    onclick={openCreate}
-                >
-                    <Plus class="w-4 h-4" />
-                    Create Program
-                </button>
+            <div class="flex flex-col gap-3 w-full sm:w-auto sm:min-w-[260px]">
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
+                    <Link
+                        href="/admin/program-default-settings"
+                        class="btn preset-tonal flex items-center gap-2 w-full sm:w-auto justify-center"
+                    >
+                        Default program settings
+                    </Link>
+                    <button
+                        type="button"
+                        class="btn preset-filled-primary-500 flex items-center gap-2 w-full sm:w-auto justify-center"
+                        onclick={openCreate}
+                    >
+                        <Plus class="w-4 h-4" />
+                        Create Program
+                    </button>
+                </div>
             </div>
         </div>
 
-        {#if programs.length === 0}
+        {#if programs.length === 0 && !initialSearch}
             <div
                 role="status"
                 class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
@@ -310,20 +401,55 @@
                     <Plus class="w-4 h-4" /> Create First Program
                 </button>
             </div>
+        {:else if programs.length === 0 && initialSearch}
+            <div
+                role="status"
+                class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
+                aria-label="No programs match search"
+            >
+                <div
+                    class="bg-surface-100 p-4 rounded-full text-surface-400 mb-4"
+                >
+                    <Search class="w-8 h-8" />
+                </div>
+                <h3 class="text-lg font-semibold text-surface-950">
+                    No programs match your search
+                </h3>
+                <p class="text-surface-600 max-w-sm mt-2 mb-6">
+                    No programs match "{initialSearch}". Try a different term or
+                    clear the search.
+                </p>
+                <button
+                    type="button"
+                    class="btn preset-tonal"
+                    onclick={() =>
+                        router.visit("/admin/programs", {
+                            method: "get",
+                            data: {},
+                            preserveState: true,
+                            preserveScroll: true,
+                        })}
+                >
+                    Clear search
+                </button>
+            </div>
         {:else}
             <div class="grid gap-5 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
                 {#each programs as program (program.id)}
                     <div
                         class="bg-surface-50 rounded-container elevation-card transition-all hover:shadow-[var(--shadow-raised)] flex flex-col h-full border border-surface-200/50"
                     >
-                        <div class="p-5 flex-grow flex flex-col gap-3">
+                        <Link
+                            href="/admin/programs/{program.id}"
+                            class="p-5 flex-grow flex flex-col gap-3 block hover:bg-surface-100/50 rounded-t-container transition-colors"
+                            aria-label="Manage {program.name}"
+                        >
                             <div class="flex items-start justify-between gap-3">
-                                <Link
-                                    href="/admin/programs/{program.id}"
-                                    class="text-lg font-bold text-surface-950 hover:text-primary-600 transition-colors line-clamp-1"
+                                <span
+                                    class="text-lg font-bold text-surface-950 transition-colors line-clamp-1"
                                 >
                                     {program.name}
-                                </Link>
+                                </span>
                                 <div class="shrink-0 mt-1">
                                     {#if program.is_active && !program.is_paused}
                                         <span
@@ -355,24 +481,12 @@
                                     No description provided.
                                 </p>
                             {/if}
-                        </div>
+                        </Link>
 
                         <div
                             class="px-5 py-3 border-t border-surface-100 flex flex-wrap items-center justify-between gap-2 bg-surface-50/50 rounded-b-container"
                         >
                             <div class="flex flex-wrap items-center gap-2">
-                                <Link
-                                    href="/admin/programs/{program.id}"
-                                    class="btn preset-tonal btn-sm flex items-center gap-1.5"
-                                    title="Manage Program"
-                                >
-                                    <Eye class="w-3.5 h-3.5" />
-                                    <span class="sr-only">Manage Program</span>
-                                    <span class="hidden sm:inline"
-                                        >Manage Program</span
-                                    >
-                                </Link>
-
                                 {#if program.is_active}
                                     {#if program.is_paused}
                                         <button
@@ -534,6 +648,50 @@
                     bind:value={editDescription}
                 ></textarea>
             </div>
+            <div class="divider my-1"></div>
+            <fieldset class="space-y-3">
+                <legend class="text-sm font-semibold text-surface-900">
+                    Public triage
+                </legend>
+                <label class="flex items-start gap-3 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        class="checkbox checkbox-sm mt-1"
+                        bind:checked={editAllowPublicTriage}
+                    />
+                    <span class="text-sm">
+                        <span class="font-medium">Allow public triage</span>
+                        <span class="block text-surface-500 text-xs">
+                            When enabled, clients can start at the public triage
+                            entry page for this program.
+                        </span>
+                    </span>
+                </label>
+                <label class="flex items-start gap-3 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        class="checkbox checkbox-sm mt-1"
+                        bind:checked={editAllowUnverifiedEntry}
+                        disabled={!editAllowPublicTriage}
+                    />
+                    <span class="text-sm">
+                        <span class="font-medium"
+                            >Allow visits to start with unverified ID (public triage)</span
+                        >
+                        <span class="block text-surface-500 text-xs">
+                            When enabled, public triage can create a
+                            <span class="font-semibold">queue session</span>
+                            together with an identity registration, even if the
+                            identification is not yet verified; the session is
+                            marked unverified until staff accept it. When
+                            disabled, public triage only records an identity
+                            registration and does
+                            <span class="font-semibold">not</span> start a
+                            session.
+                        </span>
+                    </span>
+                </label>
+            </fieldset>
             <div class="flex justify-end gap-3 pt-2">
                 <button
                     type="button"

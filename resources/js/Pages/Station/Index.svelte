@@ -2,14 +2,31 @@
 	import MobileLayout from '../../Layouts/MobileLayout.svelte';
 	import Modal from '../../Components/Modal.svelte';
 	import QrScanner from '../../Components/QrScanner.svelte';
-	import CategoryBadge from '../../Components/CategoryBadge.svelte';
-	import { Volume2 } from 'lucide-svelte';
+import CategoryBadge from '../../Components/CategoryBadge.svelte';
+import {
+	Volume2,
+	ChevronDown,
+	ChevronUp,
+	X,
+	ArrowRight,
+	CheckCircle,
+	PauseCircle,
+	UserX,
+	RotateCcw,
+	Shuffle,
+	AlertTriangle,
+	MoreHorizontal,
+	Monitor,
+	ArrowUpRight,
+	StickyNote,
+} from 'lucide-svelte';
 	import { get } from 'svelte/store';
 	import { tick, onMount } from 'svelte';
 	import { usePage } from '@inertiajs/svelte';
 	import { ensureVoicesLoaded, speakSample } from '../../lib/speechUtils.js';
 	import { router } from '@inertiajs/svelte';
 	import { toaster } from '../../lib/toaster.js';
+	import { shouldFocusHidInput, shouldUseInputModeNone } from '../../lib/displayHid.js';
 
 	type AuthType = 'pin' | 'qr' | 'request_approval';
 
@@ -30,18 +47,21 @@
 		no_show_attempts: number;
 		process_id?: number | null;
 		process_name?: string | null;
+		unverified?: boolean;
 	}
 
 	interface WaitingSession {
 		session_id: number;
 		alias: string;
 		track: string;
+		client_name?: string | null;
 		client_category: string;
 		status: string;
 		queued_at: string;
 		station_queue_position?: number;
 		process_id?: number | null;
 		process_name?: string | null;
+		unverified?: boolean;
 	}
 
 	/** Resolved session from station token scan (session-by-token API). */
@@ -56,6 +76,7 @@
 		current_step_order: number;
 		total_steps: number;
 		at_this_station: boolean;
+		unverified?: boolean;
 	}
 
 	interface HoldingSession {
@@ -125,8 +146,11 @@
 	let forceCompleteSession = $state<ServingSession | null>(null);
 	let forceCompleteReason = $state('');
 	let noShowModalSession = $state<ServingSession | null>(null);
+	let backModalSession = $state<ServingSession | null>(null);
 	let showCallNextOverrideModal = $state(false);
 	let callNextSession = $state<{ session_id: number; alias: string } | null>(null);
+	let cancelModalSession = $state<{ session_id: number; alias: string; status: string } | null>(null);
+	let showMoreFor = $state<number | null>(null);
 
 	/** Station token scan: identify client by QR, then show actions. Separate from override-auth scanner. */
 	let showStationTokenScanner = $state(false);
@@ -139,6 +163,11 @@
 	/** Scanner modal countdown (when showQrScanner): decrement scanCountdown so Extend works. */
 	let scanCountdown = $state(0);
 	let scanCountdownIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
+
+	// HID barcode input shared across Station token scanner and QR auth modals (override/force-complete/call-next).
+	let hidScanValue = $state('');
+	let hidGlobalInputEl = $state<HTMLInputElement | null>(null);
+	let hidModalInputEl = $state<HTMLInputElement | null>(null);
 
 	/** Station notes: shared note visible to staff at this station. Real-time via Reverb. */
 	let stationNote = $state<{ message: string; author_name?: string; updated_at?: string } | null>(null);
@@ -339,6 +368,36 @@
 
 	function extendScannerCountdown() {
 		scanCountdown += Math.max(0, Number(display_scan_timeout_seconds) || 20);
+	}
+
+	// Ensure HID input inside Scan token dialog receives focus when dialog opens.
+	$effect(() => {
+		if (!showStationTokenScanner || !hidModalInputEl) return;
+		queueMicrotask(() => {
+			hidModalInputEl?.focus();
+		});
+	});
+
+	// Ensure HID input inside QR auth modals receives focus when QR scanner is active.
+	$effect(() => {
+		if (!showQrScanner || authType !== 'qr' || !hidModalInputEl) return;
+		queueMicrotask(() => {
+			hidModalInputEl?.focus();
+		});
+	});
+
+	// HID keyboard-wedge handler: route scans from hidden inputs to the appropriate scanner flow.
+	function onHidKeydown(e: KeyboardEvent) {
+		if (e.key !== 'Enter') return;
+		e.preventDefault();
+		const raw = hidScanValue.trim();
+		if (!raw) return;
+		if (showStationTokenScanner) {
+			handleStationTokenScan(raw);
+		} else if (showQrScanner && authType === 'qr') {
+			handleQrScan(raw);
+		}
+		hidScanValue = '';
 	}
 
 	function formatDuration(iso: string): string {
@@ -654,15 +713,22 @@
 		}
 	}
 
-	async function cancel(s: ServingSession) {
+	function openCancelModal(s: { session_id: number; alias: string; status: string }) {
+		if (!s || actionLoading) return;
+		cancelModalSession = { session_id: s.session_id, alias: s.alias, status: s.status };
+	}
+
+	async function confirmCancel() {
+		const s = cancelModalSession;
 		if (!s || actionLoading) return;
 		actionLoading = `cancel-${s.session_id}`;
-		const { ok } = await api('POST', `/api/sessions/${s.session_id}/cancel`, { remarks: 'Cancelled by staff' });
+		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/cancel`, {});
+		actionLoading = null;
 		if (ok) {
-			await fetchQueue(true, () => { actionLoading = null; });
+			cancelModalSession = null;
+			await fetchQueue(true);
 		} else {
-			actionLoading = null;
-			toaster.error({ title: 'Cancel failed' });
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Cancel failed' });
 		}
 	}
 
@@ -949,6 +1015,58 @@
 		return s.no_show_attempts > 0 ? `No-Show (${s.no_show_attempts}/${maxNoShowAttempts})` : 'No-Show';
 	}
 
+	function toggleMore(s: ServingSession) {
+		showMoreFor = showMoreFor === s.session_id ? null : s.session_id;
+	}
+
+	function openBackModal(s: ServingSession) {
+		backModalSession = s;
+	}
+
+	function closeBackModal() {
+		backModalSession = null;
+	}
+
+	async function sendBackOnlyFromModal() {
+		const s = backModalSession;
+		if (!s || actionLoading) return;
+		actionLoading = `enqueue-back-${s.session_id}`;
+		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/enqueue-back`, {});
+		actionLoading = null;
+		if (ok) {
+			backModalSession = null;
+			await fetchQueue(true);
+		} else {
+			toaster.error({ title: (data as { message?: string })?.message ?? 'Enqueue back failed' });
+		}
+	}
+
+	async function noShowAndBackFromModal() {
+		const s = backModalSession;
+		if (!s || actionLoading) return;
+		if (!canNoShow(s)) {
+			toaster.error({ title: 'No-show not yet available for this client.' });
+			return;
+		}
+		const atMax = (s.no_show_attempts ?? 0) >= maxNoShowAttempts;
+		if (atMax) {
+			toaster.error({ title: 'Max no-show attempts reached for this client.' });
+			return;
+		}
+		actionLoading = 'noShowBack';
+		const body: { enqueue_back?: boolean; extend?: boolean; last_call?: boolean } = { enqueue_back: true };
+		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/no-show`, body);
+		if (ok) {
+			backModalSession = null;
+			await fetchQueue(true, () => {
+				actionLoading = null;
+			});
+		} else {
+			actionLoading = null;
+			toaster.error({ title: (data as { message?: string })?.message ?? 'No-show failed' });
+		}
+	}
+
 	async function enqueueBack(s: ServingSession) {
 		if (!s || actionLoading) return;
 		actionLoading = `enqueue-back-${s.session_id}`;
@@ -988,21 +1106,61 @@
 </svelte:head>
 
 <MobileLayout headerTitle={station?.name ?? 'Station'} {queueCount} {processedToday}>
+	<!-- Global HID barcode input (sr-only) to support Station token scanner and QR auth modals. Always enabled on this page. -->
+	<input
+		type="text"
+		autocomplete="off"
+		inputmode="none"
+		aria-label="Barcode scanner input"
+		class="sr-only"
+		bind:value={hidScanValue}
+		bind:this={hidGlobalInputEl}
+		onkeydown={onHidKeydown}
+	/>
 	<div class="flex flex-col gap-4 md:gap-6 text-surface-950 w-full max-w-2xl md:max-w-5xl lg:max-w-6xl mx-auto px-4 md:px-6 py-4 md:py-6">
 		{#if !station}
-			<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-6 md:p-8 text-center text-surface-950/80">
+			<div class="w-full max-w-4xl mx-auto space-y-8 py-8">
+				<div class="text-center space-y-3">
+					<div class="mx-auto w-16 h-16 rounded-2xl bg-primary-500/10 flex items-center justify-center text-primary-500 mb-2">
+						<Monitor class="w-8 h-8" />
+					</div>
+					<h1 class="text-3xl font-bold tracking-tight text-surface-950">Select your station</h1>
+					<p class="text-surface-950/60 max-w-md mx-auto">Choose a station to begin managing the queue and serving clients.</p>
+				</div>
+
 				{#if canSwitchStation && stations.length > 0}
-					<p class="font-medium mb-4">Select a station</p>
-					<div class="flex flex-col gap-3 max-w-xs mx-auto">
+					<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 auto-rows-fr">
 						{#each stations as s (s.id)}
-							<button type="button" class="btn preset-outlined touch-target-h w-full" onclick={() => switchStation(s)}>
-								{s.name}
+							<button 
+								type="button" 
+								class="group relative flex flex-col p-6 rounded-2xl border border-surface-200 bg-surface-50 hover:bg-white hover:border-primary-500/30 hover:shadow-xl hover:shadow-primary-500/5 transition-all duration-300 transform hover:-translate-y-1 text-left"
+								onclick={() => switchStation(s)}
+							>
+								<div class="flex justify-between items-start mb-4">
+									<div class="p-2.5 rounded-xl bg-surface-100 dark:bg-white/5 group-hover:bg-primary-500/10 transition-colors">
+										<Monitor class="w-6 h-6 text-surface-600 group-hover:text-primary-500 transition-colors" />
+									</div>
+									<ArrowUpRight class="w-5 h-5 text-surface-300 group-hover:text-primary-500 opacity-0 group-hover:opacity-100 transition-all transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+								</div>
+								
+								<div class="mt-auto">
+									<h3 class="font-bold text-lg text-surface-950 group-hover:text-primary-600 transition-colors">{s.name}</h3>
+									<p class="text-sm text-surface-500 mt-1">Click to select station</p>
+								</div>
+
+								<!-- Subtle interactive overlay -->
+								<div class="absolute inset-0 rounded-2xl ring-1 ring-inset ring-primary-500/0 group-hover:ring-primary-500/20 transition-all"></div>
 							</button>
 						{/each}
 					</div>
 				{:else}
-					<p class="font-medium">No station assigned</p>
-					<p class="mt-2 text-sm">Contact admin to assign you to a station.</p>
+					<div class="bg-surface-50 border border-surface-200 rounded-2xl p-12 text-center max-w-md mx-auto">
+						<div class="mx-auto w-12 h-12 rounded-full bg-surface-100 flex items-center justify-center text-surface-400 mb-4">
+							<AlertTriangle class="w-6 h-6" />
+						</div>
+						<p class="font-bold text-surface-950 text-lg">No station assigned</p>
+						<p class="mt-2 text-surface-950/60">Contact your administrator to assign you to a station or grant switching permissions.</p>
+					</div>
 				{/if}
 			</div>
 		{:else if loading}
@@ -1078,9 +1236,67 @@
 			<div class="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">
 				<!-- Left: Active (serving + call next) -->
 				<div class="lg:col-span-7 flex flex-col gap-4 md:gap-5">
+					{#if scannedSession}
+						<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5 space-y-2">
+							<div class="flex items-start justify-between gap-3">
+								<div class="space-y-1">
+									<p class="text-xs font-semibold text-surface-950/70 uppercase tracking-wide">Scanned session</p>
+									<p class="text-sm text-surface-950">
+										Token
+										<span class="font-mono font-semibold text-primary-500">{scannedSession.alias}</span>
+										<span class="text-surface-950/60">
+											· {scannedSession.track} · Step {scannedSession.current_step_order} of {scannedSession.total_steps}
+										</span>
+									</p>
+									<p class="text-xs text-surface-600">
+										Status: {scannedSession.status} · At {scannedSession.current_station}
+										{#if !scannedSession.at_this_station}
+											<span class="text-warning-700"> (not at this station)</span>
+										{/if}
+									</p>
+									{#if scannedSession.unverified}
+										<div class="flex flex-wrap items-center gap-2 mt-1">
+											<span
+												class="text-[11px] px-2 py-0.5 rounded preset-filled-warning-500/30 text-warning-800"
+												title="Identity not yet verified"
+											>
+												Unverified
+											</span>
+											<a
+												href="/triage?highlight_session_id={scannedSession.session_id}"
+												class="text-[11px] px-2 py-0.5 rounded preset-tonal text-surface-900 hover:underline touch-target-h"
+												title="Open triage and highlight this client"
+											>
+												View in triage
+											</a>
+										</div>
+									{/if}
+								</div>
+								<button
+									type="button"
+									class="btn btn-sm preset-tonal touch-target-h px-2"
+									onclick={closeScannedSessionPanel}
+									aria-label="Close scanned session summary"
+								>
+									<X class="w-4 h-4" />
+								</button>
+							</div>
+						</div>
+					{/if}
+
 					<!-- Serving / Called cards (one per client) -->
 					{#each queue.serving as s (s.session_id)}
-						<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5 space-y-3">
+						<div class="relative rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5 space-y-3">
+							<button
+								type="button"
+								class="btn btn-sm preset-tonal touch-target-h px-2 absolute top-3 right-3"
+								disabled={!!actionLoading}
+								aria-label="Cancel session"
+								title="Cancel"
+								onclick={() => openCancelModal(s)}
+							>
+								<X class="w-4 h-4" />
+							</button>
 							<p class="text-xs font-medium text-surface-950/70 uppercase tracking-wide">
 								{s.status === 'called' ? 'Calling' : 'Now Serving'}
 							</p>
@@ -1091,6 +1307,15 @@
 								{/if}
 								<span class="text-xs px-2 py-0.5 rounded preset-outlined text-surface-950">{s.track}</span>
 								<CategoryBadge category={s.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(s.client_category)} />
+								{#if s.unverified}
+									<a
+										href="/triage?highlight_session_id={s.session_id}"
+										class="text-xs px-2 py-0.5 rounded preset-filled-warning-500/30 text-warning-800 hover:preset-filled-warning-500/50 touch-target-h inline-block"
+										title="Identity not yet verified — go to triage"
+									>
+										Unverified
+									</a>
+								{/if}
 							</div>
 							<p class="text-sm text-surface-950/70">
 								Step {s.current_step_order} of {s.total_steps}
@@ -1098,7 +1323,7 @@
 									· Started {formatDuration(s.started_at)} ago
 								{/if}
 							</p>
-							<div class="flex flex-col gap-2 pt-2">
+							<div class="flex flex-col gap-3 pt-2">
 								{#if s.status === 'called'}
 									<button
 										type="button"
@@ -1106,24 +1331,24 @@
 										disabled={!!actionLoading}
 										onclick={() => serve(s)}
 									>
-										{actionLoading === `serve-${s.session_id}` ? 'Processing…' : 'Serve'}
+										<span class="inline-flex items-center justify-center gap-2">
+											<ArrowRight class="w-5 h-5" aria-hidden="true" />
+											<span>{actionLoading === `serve-${s.session_id}` ? 'Processing…' : 'Serve'}</span>
+										</span>
 									</button>
-									<button
-										type="button"
-										class="btn btn-sm touch-target-h {s.no_show_attempts >= (maxNoShowAttempts - 1) ? 'preset-filled-warning-500' : 'preset-tonal'}"
-										disabled={!!actionLoading || !canNoShow(s)}
-										onclick={() => openNoShowModal(s)}
-									>
-										{noShowButtonLabel(s)}
-									</button>
-									<button
-										type="button"
-										class="btn preset-outlined btn-sm touch-target-h"
-										disabled={!!actionLoading}
-										onclick={() => enqueueBack(s)}
-									>
-										{actionLoading === `enqueue-back-${s.session_id}` ? '…' : 'Enqueue back'}
-									</button>
+									<div class="flex flex-wrap gap-2 items-center mt-2">
+										<button
+											type="button"
+											class="btn preset-outlined btn-sm touch-target-h"
+											disabled={!!actionLoading}
+											onclick={() => openBackModal(s)}
+										>
+											<span class="inline-flex items-center justify-center gap-1.5">
+												<RotateCcw class="w-4 h-4" aria-hidden="true" />
+												<span>Back</span>
+											</span>
+										</button>
+									</div>
 								{:else}
 									{#if isLastStep(s)}
 										<button
@@ -1132,7 +1357,10 @@
 											disabled={!!actionLoading}
 											onclick={() => complete(s)}
 										>
-											{actionLoading === `complete-${s.session_id}` ? 'Completing…' : 'Complete Session'}
+											<span class="inline-flex items-center justify-center gap-2">
+												<CheckCircle class="w-5 h-5" aria-hidden="true" />
+												<span>{actionLoading === `complete-${s.session_id}` ? 'Completing…' : 'Complete session'}</span>
+											</span>
 										</button>
 									{:else}
 										<button
@@ -1141,39 +1369,124 @@
 											disabled={!!actionLoading}
 											onclick={() => transfer(s)}
 										>
-											{actionLoading === `transfer-${s.session_id}` ? 'Transferring…' : 'Send to next process'}
+											<span class="inline-flex items-center justify-center gap-2">
+												<ArrowRight class="w-5 h-5" aria-hidden="true" />
+												<span>{actionLoading === `transfer-${s.session_id}` ? 'Transferring…' : 'Send to next process'}</span>
+											</span>
 										</button>
 									{/if}
-									<div class="flex flex-wrap gap-2">
+									<!-- Actions row: Hold, Back, More (compact buttons) -->
+									<div class="flex flex-wrap gap-2 mt-2">
 										<button
 											type="button"
-											class="btn btn-sm touch-target-h {s.no_show_attempts >= (maxNoShowAttempts - 1) ? 'preset-filled-warning-500' : 'preset-tonal'}"
-											disabled={!!actionLoading}
-											onclick={() => openNoShowModal(s)}
-										>
-											{noShowButtonLabel(s)}
-										</button>
-										<button
-											type="button"
-											class="btn preset-outlined btn-sm touch-target-h"
-											disabled={!!actionLoading}
-											onclick={() => enqueueBack(s)}
-										>
-											{actionLoading === `enqueue-back-${s.session_id}` ? '…' : 'Enqueue back'}
-										</button>
-										<button
-											type="button"
-											class="btn preset-outlined btn-sm touch-target-h"
+											class="btn preset-tonal btn-sm touch-target-h"
 											disabled={!!actionLoading || (queue?.station?.holding_count ?? 0) >= (queue?.station?.holding_capacity ?? 3)}
-											title={(queue?.station?.holding_count ?? 0) >= (queue?.station?.holding_capacity ?? 3) ? 'Holding area full. Resume a client first.' : 'Move to holding'}
+											title={(queue?.station?.holding_count ?? 0) >= (queue?.station?.holding_capacity ?? 3)
+												? 'Holding area full. Resume a client first.'
+												: 'Move client to holding'}
 											onclick={() => hold(s)}
 										>
-											Move to holding
+											<span class="inline-flex items-center justify-center gap-1">
+												<PauseCircle class="w-4 h-4" aria-hidden="true" />
+												<span>Hold</span>
+											</span>
 										</button>
-										<button type="button" class="btn preset-outlined btn-sm touch-target-h" disabled={!!actionLoading} onclick={() => openOverrideModal(s)}>Override</button>
-										<button type="button" class="btn preset-filled-warning-500 btn-sm touch-target-h" disabled={!!actionLoading} onclick={() => openForceCompleteModal(s)}>Force Complete</button>
-										<button type="button" class="btn preset-tonal btn-sm touch-target-h" disabled={!!actionLoading} onclick={() => cancel(s)}>Cancel</button>
+										<button
+											type="button"
+											class="btn preset-outlined btn-sm touch-target-h"
+											disabled={!!actionLoading}
+											onclick={() => openBackModal(s)}
+										>
+											<span class="inline-flex items-center justify-center gap-1">
+												<RotateCcw class="w-4 h-4" aria-hidden="true" />
+												<span>Back</span>
+											</span>
+										</button>
+										<button
+											type="button"
+											class="btn btn-ghost btn-sm touch-target-h md:hidden"
+											disabled={!!actionLoading}
+											onclick={() => toggleMore(s)}
+											aria-expanded={showMoreFor === s.session_id}
+											aria-controls={`more-${s.session_id}`}
+											title="More actions"
+										>
+											<span class="inline-flex items-center justify-center gap-1">
+												<MoreHorizontal class="w-4 h-4" aria-hidden="true" />
+												<span>More</span>
+											</span>
+										</button>
 									</div>
+
+									<!-- Exceptions cluster (desktop) -->
+									<div class="mt-3 pt-3 border-t border-surface-100 hidden md:flex flex-wrap items-center justify-between gap-2">
+										<span class="text-xs text-surface-950/60">Exceptions</span>
+										<div class="flex flex-wrap gap-2">
+											<button
+												type="button"
+												class="btn preset-outlined btn-sm touch-target-h"
+												disabled={!!actionLoading}
+												onclick={() => openOverrideModal(s)}
+												title="Override standard track"
+											>
+												<span class="inline-flex items-center justify-center gap-1.5">
+													<Shuffle class="w-4 h-4" aria-hidden="true" />
+													<span>Override</span>
+												</span>
+											</button>
+											<button
+												type="button"
+												class="btn preset-outlined btn-sm touch-target-h text-warning-700 border-warning-300"
+												disabled={!!actionLoading}
+												onclick={() => openForceCompleteModal(s)}
+												title="End session outside the normal flow"
+											>
+												<span class="inline-flex items-center justify-center gap-1.5">
+													<AlertTriangle class="w-4 h-4" aria-hidden="true" />
+													<span>Force complete</span>
+												</span>
+											</button>
+										</div>
+									</div>
+									{#if showMoreFor === s.session_id}
+										<div
+											id={`more-${s.session_id}`}
+											class="mt-2 rounded-container border border-surface-200 bg-surface-50 shadow-sm p-2 md:hidden"
+										>
+											<div class="flex flex-col gap-1.5">
+												<button
+													type="button"
+													class="btn preset-outlined btn-sm w-full justify-between touch-target-h"
+													disabled={!!actionLoading}
+													onclick={() => {
+														openOverrideModal(s);
+														showMoreFor = null;
+													}}
+													title="Override standard track"
+												>
+													<span class="inline-flex items-center gap-1.5">
+														<Shuffle class="w-4 h-4" aria-hidden="true" />
+														<span>Override</span>
+													</span>
+												</button>
+												<button
+													type="button"
+													class="btn preset-outlined btn-sm w-full justify-between touch-target-h text-warning-700 border-warning-300"
+													disabled={!!actionLoading}
+													onclick={() => {
+														openForceCompleteModal(s);
+														showMoreFor = null;
+													}}
+													title="End session outside the normal flow"
+												>
+													<span class="inline-flex items-center gap-1.5">
+														<AlertTriangle class="w-4 h-4" aria-hidden="true" />
+														<span>Force complete</span>
+													</span>
+												</button>
+											</div>
+										</div>
+									{/if}
 								{/if}
 							</div>
 						</div>
@@ -1186,11 +1499,30 @@
 								{queue.serving.length > 0 ? 'Call another client' : 'No client active'}
 							</p>
 							{#if queue.waiting.length > 0 && !atCapacity}
-								{@const nextSession = queue.next_to_call ? queue.waiting.find((w) => w.session_id === queue.next_to_call!.session_id) ?? queue.waiting[0] : queue.waiting[0]}
-								<p class="text-sm text-surface-950/60 mb-3">
-									Next: <span class="font-mono font-semibold text-surface-950">{nextSession.alias}</span>
-									<span class="ml-1"><CategoryBadge category={nextSession.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(nextSession.client_category)} size="sm" /></span>
-									({nextSession.track}{#if nextSession.process_name}) — {nextSession.process_name}{/if})
+					{@const nextSession = queue.next_to_call ? queue.waiting.find((w) => w.session_id === queue.next_to_call!.session_id) ?? queue.waiting[0] : queue.waiting[0]}
+								<p class="text-sm text-surface-950/60 mb-3 flex flex-wrap items-center gap-1.5">
+									<span class="flex items-center gap-1.5">
+										<span>Next:</span>
+										<span class="font-mono font-semibold text-surface-950">{nextSession.alias}</span>
+										{#if nextSession.client_name}
+											<span class="text-surface-950/80">· {nextSession.client_name}</span>
+										{/if}
+									</span>
+									<span>
+										<CategoryBadge
+											category={nextSession.client_category ?? 'Regular'}
+											badgeClass={categoryBadgeClass(nextSession.client_category)}
+											size="sm"
+										/>
+									</span>
+									{#if nextSession.unverified}
+										<span
+											class="text-[11px] px-2 py-0.5 rounded preset-filled-warning-500/30 text-warning-800"
+											title="Identity not yet verified — see triage list"
+										>
+											Unverified
+										</span>
+									{/if}
 								</p>
 								<button
 									type="button"
@@ -1198,7 +1530,10 @@
 									disabled={!!actionLoading}
 									onclick={callNext}
 								>
-									{actionLoading === 'call' ? 'Calling…' : 'Call Next'}
+									<span class="inline-flex items-center justify-center gap-2">
+										<Volume2 class="w-5 h-5" aria-hidden="true" />
+										<span>{actionLoading === 'call' ? 'Calling…' : 'Call Next'}</span>
+									</span>
 								</button>
 							{:else if atCapacity}
 								<p class="text-sm text-surface-950/60">At capacity ({servingCount}/{clientCapacity}). Transfer or complete a client first.</p>
@@ -1251,16 +1586,25 @@
 							<h3 class="text-xs font-semibold text-surface-950/80 uppercase tracking-wide mb-3">Waiting — {queue.waiting.length}</h3>
 							<ul class="space-y-2 max-h-[280px] lg:max-h-[360px] overflow-y-auto">
 								{#each queue.waiting as w (w.session_id)}
-									<li class="grid gap-2 md:gap-3 items-center text-sm text-surface-950 py-1.5 border-b border-surface-100 last:border-0" style="grid-template-columns: minmax(0, 3ch) 1fr 1fr 1fr;">
+									<li class="grid gap-2 md:gap-3 items-center text-sm text-surface-950 py-1.5 border-b border-surface-100 last:border-0" style="grid-template-columns: minmax(0, 3ch) 1fr max-content auto;">
 										<span class="font-mono font-medium tabular-nums min-w-0 truncate">{w.alias}</span>
-										<div class="flex items-center gap-1.5 min-w-0 overflow-hidden">
+										<div class="flex items-center gap-1.5 min-w-0 overflow-hidden flex-wrap">
 											<CategoryBadge category={w.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(w.client_category)} size="sm" />
+											{#if w.unverified}
+												<a
+													href="/triage?highlight_session_id={w.session_id}"
+													class="text-xs px-2 py-0.5 rounded preset-filled-warning-500/30 text-warning-800 hover:preset-filled-warning-500/50 touch-target-h"
+													title="Identity not yet verified — go to triage"
+												>
+													Unverified
+												</a>
+											{/if}
 											{#if w.process_name}
 												<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80 truncate">{w.process_name}</span>
 											{/if}
 										</div>
 										<span class="text-surface-950/60 text-xs min-w-0 truncate" title="{w.track}">{formatDuration(w.queued_at)}</span>
-										<div class="flex justify-center min-w-0">
+										<div class="flex justify-center min-w-0 gap-2">
 											<button
 												type="button"
 												class="btn preset-filled-primary-500 btn-sm touch-target-h"
@@ -1269,6 +1613,16 @@
 												onclick={() => serveFromWaiting(w)}
 											>
 												{actionLoading === `serve-${w.session_id}` ? '…' : 'Start serving'}
+											</button>
+											<button
+												type="button"
+												class="btn preset-tonal btn-sm touch-target-h px-2"
+												disabled={!!actionLoading}
+												aria-label="Cancel session"
+												title="Cancel"
+												onclick={() => openCancelModal(w)}
+											>
+												<X class="w-4 h-4" />
 											</button>
 										</div>
 									</li>
@@ -1283,9 +1637,19 @@
 
 				<!-- Station notes: full width -->
 				<div class="lg:col-span-12">
-			<details class="rounded-box bg-surface-50 border border-surface-200 elevation-card overflow-hidden" open={notesExpanded}>
+			<details class="rounded-container bg-surface-50 border border-surface-200 elevation-card overflow-hidden" bind:open={notesExpanded}>
 				<summary class="cursor-pointer px-4 py-3 font-medium text-surface-950 select-none flex items-center justify-between gap-2 touch-target-h">
-					<span>Station notes</span>
+					<span class="flex items-center gap-2">
+						<span class="inline-flex items-center gap-1">
+							<StickyNote class="w-4 h-4 text-primary-500" aria-hidden="true" />
+							<span>Station notes</span>
+						</span>
+						{#if notesExpanded}
+							<ChevronUp class="size-5 shrink-0 text-surface-950/60" aria-hidden="true" />
+						{:else}
+							<ChevronDown class="size-5 shrink-0 text-surface-950/60" aria-hidden="true" />
+						{/if}
+					</span>
 					{#if stationNote?.author_name}
 						<span class="text-xs font-normal text-surface-950/60 truncate max-w-[50%]" title={stationNote.author_name}>
 							by {stationNote.author_name}
@@ -1371,17 +1735,117 @@
 		</dialog>
 	{/if}
 
+	{#if backModalSession}
+		{@const remaining = noShowCountdown[backModalSession.session_id] ?? 0}
+		{@const atMax = (backModalSession.no_show_attempts ?? 0) >= maxNoShowAttempts}
+		{@const canBackNoShow = canNoShow(backModalSession) && !atMax}
+		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
+			<div class="card bg-surface-50 rounded-container shadow-xl p-6 text-surface-950 max-w-md">
+				<h3 class="font-bold text-lg">Send back or mark no-show?</h3>
+				<p class="text-sm text-surface-950/70 py-2">
+					Choose what happens next for
+					<span class="font-mono font-semibold text-surface-950">{backModalSession.alias}</span>.
+				</p>
+				<div class="space-y-3 mt-2">
+					<button
+						type="button"
+						class="btn preset-outlined w-full justify-between touch-target-h"
+						disabled={!!actionLoading}
+						onclick={sendBackOnlyFromModal}
+					>
+						<span class="inline-flex items-center gap-2">
+							<RotateCcw class="w-4 h-4" aria-hidden="true" />
+							<span>Send back only</span>
+						</span>
+					</button>
+					<div class="space-y-1">
+						<button
+							type="button"
+							class="btn preset-filled-warning-500 w-full justify-between touch-target-h"
+							disabled={!canBackNoShow || !!actionLoading}
+							onclick={noShowAndBackFromModal}
+						>
+							<span class="inline-flex items-center gap-2">
+								<UserX class="w-4 h-4" aria-hidden="true" />
+								<span>Mark no-show &amp; send back</span>
+							</span>
+						</button>
+						{#if backModalSession.status === 'called' && remaining > 0}
+							<p class="text-xs text-surface-950/60">No-show available in {remaining}s.</p>
+						{:else if atMax}
+							<p class="text-xs text-surface-950/60">Max no-show attempts reached for this client.</p>
+						{/if}
+					</div>
+				</div>
+				<div class="flex justify-end gap-2 mt-4">
+					<button
+						type="button"
+						class="btn preset-tonal touch-target-h"
+						onclick={closeBackModal}
+						disabled={!!actionLoading}
+					>
+						Cancel
+					</button>
+				</div>
+			</div>
+			<div class="modal-backdrop" aria-hidden="true"></div>
+		</dialog>
+	{/if}
+
+	{#if cancelModalSession}
+		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
+			<div class="card bg-surface-50 rounded-container shadow-xl p-6 text-surface-950 max-w-md">
+				<h3 class="font-bold text-lg">Cancel session</h3>
+				<p class="py-2 text-sm text-surface-950/80">
+					Cancel token <span class="font-mono font-semibold text-surface-950">{cancelModalSession.alias}</span>?
+					This removes them from the active queue.
+				</p>
+				<div class="flex flex-wrap justify-end gap-2 mt-4">
+					<button type="button" class="btn preset-tonal touch-target-h" onclick={() => (cancelModalSession = null)} disabled={!!actionLoading}>
+						Back
+					</button>
+					<button
+						type="button"
+						class="btn preset-filled-warning-500 touch-target-h"
+						onclick={confirmCancel}
+						disabled={!!actionLoading}
+					>
+						{actionLoading === `cancel-${cancelModalSession.session_id}` ? 'Cancelling…' : 'Confirm cancel'}
+					</button>
+				</div>
+			</div>
+			<div class="modal-backdrop" aria-hidden="true"></div>
+		</dialog>
+	{/if}
+
 	{#if showStationTokenScanner}
 		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
 			<div class="card bg-surface-50 rounded-container shadow-xl p-6 text-surface-950 max-w-md">
 				<h3 class="font-bold text-lg mb-3">Scan client token</h3>
 				<p class="text-sm text-surface-950/70 mb-4">Scan the client's QR to identify their session and show actions.</p>
+				<!-- First focusable so dialog focuses it; same value/handler as global input. Always enabled for Station. -->
+				<input
+					type="text"
+					autocomplete="off"
+					inputmode="none"
+					aria-label="Barcode scanner input"
+					class="sr-only"
+					bind:value={hidScanValue}
+					bind:this={hidModalInputEl}
+					onkeydown={onHidKeydown}
+				/>
 				<QrScanner
 					active={showStationTokenScanner}
 					onScan={handleStationTokenScan}
 					soundOnScan={true}
 					cameraOnly={true}
 				/>
+				<p
+					class="text-sm text-surface-600 rounded-container border border-surface-200 bg-surface-50 px-3 py-2 mt-3"
+					aria-live="polite"
+				>
+					HID scanner turned on, waiting for scan.
+				</p>
 				<button
 					type="button"
 					class="btn preset-tonal btn-sm mt-4 touch-target-h w-full"
@@ -1457,6 +1921,17 @@
 					</div>
 				{:else if authType === 'qr'}
 					<div class="form-control w-full mt-2">
+						<!-- First focusable so dialog focuses it; same value/handler as global input. Always enabled for Station. -->
+						<input
+							type="text"
+							autocomplete="off"
+							inputmode="none"
+							aria-label="Barcode scanner input"
+							class="sr-only"
+							bind:value={hidScanValue}
+							bind:this={hidModalInputEl}
+							onkeydown={onHidKeydown}
+						/>
 						<QrScanner active={showQrScanner} onScan={handleQrScan} soundOnScan={true} />
 						{#if showQrScanner && scanCountdown > 0}
 							<div class="flex flex-wrap items-center gap-2 mt-2">
@@ -1464,6 +1939,12 @@
 								<button type="button" class="btn preset-tonal btn-sm touch-target-h px-3" onclick={extendScannerCountdown}>Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)</button>
 							</div>
 						{/if}
+						<p
+							class="text-sm text-surface-600 rounded-container border border-surface-200 bg-surface-50 px-3 py-2 mt-2"
+							aria-live="polite"
+						>
+							HID scanner turned on, waiting for scan.
+						</p>
 						<button type="button" class="btn preset-tonal btn-sm mt-1 touch-target-h" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
 						{#if tempQrScanToken}<p class="text-xs text-success-500 mt-1">✓ QR scanned</p>{/if}
 					</div>

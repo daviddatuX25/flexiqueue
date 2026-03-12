@@ -54,6 +54,21 @@ class ProgramDefaultSettingsTest extends TestCase
                 'balance_mode' => 'alternate',
                 'station_selection_mode' => 'shortest_queue',
                 'alternate_ratio' => [3, 1],
+                'alternate_priority_first' => false,
+                'display_scan_timeout_seconds' => 25,
+                'display_audio_muted' => true,
+                'display_audio_volume' => 0.7,
+                'display_tts_repeat_count' => 2,
+                'display_tts_repeat_delay_ms' => 2500,
+                'allow_public_triage' => true,
+                'allow_unverified_entry' => false,
+                'identity_binding_mode' => 'required',
+                'enable_display_hid_barcode' => false,
+                'enable_public_triage_hid_barcode' => true,
+                'enable_display_camera_scanner' => false,
+                'tts' => [
+                    'active_language' => 'fil',
+                ],
             ],
         ]);
 
@@ -64,12 +79,37 @@ class ProgramDefaultSettingsTest extends TestCase
         $response->assertJsonPath('settings.balance_mode', 'alternate');
         $response->assertJsonPath('settings.station_selection_mode', 'shortest_queue');
         $response->assertJsonPath('settings.alternate_ratio', [3, 1]);
+        $response->assertJsonPath('settings.alternate_priority_first', false);
+        $response->assertJsonPath('settings.display_scan_timeout_seconds', 25);
+        $response->assertJsonPath('settings.display_audio_muted', true);
+        $response->assertJsonPath('settings.display_audio_volume', 0.7);
+        $response->assertJsonPath('settings.display_tts_repeat_count', 2);
+        $response->assertJsonPath('settings.display_tts_repeat_delay_ms', 2500);
+        $response->assertJsonPath('settings.allow_public_triage', true);
+        $response->assertJsonPath('settings.allow_unverified_entry', false);
+        $response->assertJsonPath('settings.identity_binding_mode', 'required');
+        $response->assertJsonPath('settings.enable_display_hid_barcode', false);
+        $response->assertJsonPath('settings.enable_public_triage_hid_barcode', true);
+        $response->assertJsonPath('settings.enable_display_camera_scanner', false);
+        $response->assertJsonPath('settings.tts.active_language', 'fil');
 
         $row = DB::table('program_default_settings')->first();
         $this->assertNotNull($row);
         $decoded = json_decode($row->settings, true);
         $this->assertSame(30, $decoded['no_show_timer_seconds']);
         $this->assertSame(5, $decoded['max_no_show_attempts']);
+        $this->assertSame(25, $decoded['display_scan_timeout_seconds']);
+        $this->assertTrue($decoded['display_audio_muted']);
+        $this->assertSame(0.7, $decoded['display_audio_volume']);
+        $this->assertSame(2, $decoded['display_tts_repeat_count']);
+        $this->assertSame(2500, $decoded['display_tts_repeat_delay_ms']);
+        $this->assertTrue($decoded['allow_public_triage']);
+        $this->assertFalse($decoded['allow_unverified_entry']);
+        $this->assertSame('required', $decoded['identity_binding_mode']);
+        $this->assertFalse($decoded['enable_display_hid_barcode']);
+        $this->assertTrue($decoded['enable_public_triage_hid_barcode']);
+        $this->assertFalse($decoded['enable_display_camera_scanner']);
+        $this->assertSame('fil', $decoded['tts']['active_language'] ?? null);
 
         $getResponse = $this->actingAs($this->admin)->getJson('/api/admin/program-default-settings');
         $getResponse->assertStatus(200);

@@ -21,6 +21,19 @@ class PermissionRequestService
      */
     public function create(Session $session, string $actionType, int $requesterUserId, string $reason, ?int $targetStationId = null, ?int $targetTrackId = null, ?array $customSteps = null): PermissionRequest
     {
+        if ($actionType === PermissionRequest::ACTION_OVERRIDE
+            && $session->status === 'serving'
+            && $session->current_station_id !== null
+            && ! $session->isOnHold()
+        ) {
+            $session->loadMissing('currentStation');
+            $station = $session->currentStation;
+            if ($station) {
+                $this->sessionService->moveToHolding($session, $station, $requesterUserId, $reason);
+                $session = $session->fresh();
+            }
+        }
+
         $pr = PermissionRequest::create([
             'session_id' => $session->id,
             'action_type' => $actionType,

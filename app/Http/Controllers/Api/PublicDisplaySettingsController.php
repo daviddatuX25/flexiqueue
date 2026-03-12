@@ -51,7 +51,7 @@ class PublicDisplaySettingsController extends Controller
             $payload['temp_code']
         );
 
-        foreach (['display_audio_muted', 'display_audio_volume', 'enable_display_hid_barcode', 'enable_public_triage_hid_barcode', 'enable_display_camera_scanner'] as $key) {
+        foreach (['display_audio_muted', 'display_audio_volume', 'enable_display_hid_barcode', 'enable_public_triage_hid_barcode', 'enable_display_camera_scanner', 'enable_public_triage_camera_scanner'] as $key) {
             if (array_key_exists($key, $payload)) {
                 $settings[$key] = $payload[$key];
             }
@@ -68,6 +68,7 @@ class PublicDisplaySettingsController extends Controller
             $program->settings()->getEnableDisplayCameraScanner(),
             $program->settings()->getDisplayTtsRepeatCount(),
             $program->settings()->getDisplayTtsRepeatDelayMs(),
+            $program->settings()->getEnablePublicTriageCameraScanner(),
         ));
 
         return response()->json([
@@ -76,6 +77,7 @@ class PublicDisplaySettingsController extends Controller
             'enable_display_hid_barcode' => $program->settings()->getEnableDisplayHidBarcode(),
             'enable_public_triage_hid_barcode' => $program->settings()->getEnablePublicTriageHidBarcode(),
             'enable_display_camera_scanner' => $program->settings()->getEnableDisplayCameraScanner(),
+            'enable_public_triage_camera_scanner' => $program->settings()->getEnablePublicTriageCameraScanner(),
         ]);
     }
 }

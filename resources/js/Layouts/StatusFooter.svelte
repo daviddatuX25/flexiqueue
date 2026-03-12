@@ -17,6 +17,14 @@
     const csrfToken = $derived($page.props?.csrf_token ?? "");
     const activeProgram = $derived($page.props?.activeProgram ?? null);
     const role = $derived(user?.role ?? "");
+    const currentPath = $derived($page.url ?? "");
+    const isLiveSessionRoute = $derived(
+        currentPath === "/station" ||
+            currentPath.startsWith("/station/") ||
+            currentPath === "/triage" ||
+            currentPath === "/program-overrides",
+    );
+    const isAdminRoute = $derived(currentPath.startsWith("/admin"));
 
     let networkConnected = $state(
         typeof navigator !== "undefined" ? navigator.onLine : true,
@@ -233,11 +241,20 @@
         const program = activeProgram;
         const r = role;
 
-        if (r === "admin" && program?.id) {
+        // Admin on live-session pages (Station/Triage/Program Overrides) → jump to Program detail
+        if (r === "admin" && isLiveSessionRoute && program?.id) {
             router.visit(`/admin/programs/${program.id}`);
-        } else {
-            router.visit("/station");
+            return;
         }
+
+        // Admin inside Admin layout (or anywhere else) → jump to Station view
+        if (r === "admin" && isAdminRoute) {
+            router.visit("/station");
+            return;
+        }
+
+        // Non-admin: keep behavior — go to Station
+        router.visit("/station");
     }
 </script>
 
@@ -246,7 +263,7 @@
     role="status"
     aria-live="polite"
 >
-    <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 shrink overflow-hidden">
+    <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 shrink">
         <!-- Program + Connection status: compact but tappable -->
         <button
             type="button"

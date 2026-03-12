@@ -357,7 +357,7 @@
 
             <div class="max-w-5xl mx-auto text-center z-10 relative">
                 <div
-                    class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/60 backdrop-blur-md border border-primary-200 text-primary-600 text-[10px] md:text-xs font-bold tracking-[0.2em] uppercase shadow-sm mb-10"
+                    class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/60 backdrop-blur-md md:backdrop-blur-none md:bg-white/80 border border-primary-200 text-primary-600 text-[10px] md:text-xs font-bold tracking-[0.2em] uppercase shadow-sm mb-10"
                     in:fade={{ delay: 100 }}
                 >
                     <span class="relative flex h-2 w-2">
@@ -406,7 +406,7 @@
                         in:fade={{ delay: 400 }}
                     >
                         <div
-                            class="bg-white/60 dark:bg-slate-800/60 backdrop-blur-xl border border-surface-200/50 dark:border-slate-700/50 rounded-2xl px-8 py-5 shadow-lg"
+                            class="bg-white/60 dark:bg-slate-800/60 backdrop-blur-xl md:backdrop-blur-none md:bg-white/80 md:dark:bg-slate-800/80 border border-surface-200/50 dark:border-slate-700/50 rounded-2xl px-8 py-5 shadow-lg"
                         >
                             <div
                                 class="text-5xl font-black text-surface-800 dark:text-white"
@@ -420,7 +420,7 @@
                             </div>
                         </div>
                         <div
-                            class="bg-white/60 dark:bg-slate-800/60 backdrop-blur-xl border border-surface-200/50 dark:border-slate-700/50 rounded-2xl px-8 py-5 shadow-lg"
+                            class="bg-white/60 dark:bg-slate-800/60 backdrop-blur-xl md:backdrop-blur-none md:bg-white/80 md:dark:bg-slate-800/80 border border-surface-200/50 dark:border-slate-700/50 rounded-2xl px-8 py-5 shadow-lg"
                         >
                             <div
                                 class="text-5xl font-black text-primary-600 dark:text-primary-400"
@@ -464,7 +464,7 @@
                     {#if !authUser}
                         <Link
                             href="/login"
-                            class="w-full sm:w-auto px-8 py-4 rounded-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-md hover:bg-white dark:hover:bg-slate-700 border border-surface-200 dark:border-slate-700 !text-surface-800 dark:!text-white font-bold text-lg hover:-translate-y-1 transition-all duration-300 shadow-sm"
+                            class="w-full sm:w-auto px-8 py-4 rounded-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-md md:backdrop-blur-none md:bg-white/95 md:dark:bg-slate-800/95 hover:bg-white dark:hover:bg-slate-700 border border-surface-200 dark:border-slate-700 !text-surface-800 dark:!text-white font-bold text-lg hover:-translate-y-1 transition-all duration-300 shadow-sm"
                         >
                             Staff Login
                         </Link>
@@ -902,7 +902,7 @@
                         <div class="lg:col-span-3 grid sm:grid-cols-2 gap-6">
                             <Link
                                 href="/display"
-                                class="bg-white/10 hover:bg-white/20 backdrop-blur-xl border border-white/20 p-8 rounded-[2rem] transition-all duration-300 hover:scale-[1.03] active:scale-95 text-center flex flex-col items-center gap-4"
+                                class="bg-white/10 hover:bg-white/20 backdrop-blur-xl md:backdrop-blur-none md:bg-white/15 border border-white/20 p-8 rounded-[2rem] transition-all duration-300 hover:scale-[1.03] active:scale-95 text-center flex flex-col items-center gap-4"
                             >
                                 <svg
                                     class="w-10 h-10 text-primary-200"
@@ -959,7 +959,7 @@
                             {:else}
                                 <Link
                                     href="/display/station/1"
-                                    class="bg-white/10 hover:bg-white/20 backdrop-blur-xl border border-white/20 p-8 rounded-[2rem] transition-all duration-300 hover:scale-[1.03] active:scale-95 text-center flex flex-col items-center gap-4"
+                                    class="bg-white/10 hover:bg-white/20 backdrop-blur-xl md:backdrop-blur-none md:bg-white/15 border border-white/20 p-8 rounded-[2rem] transition-all duration-300 hover:scale-[1.03] active:scale-95 text-center flex flex-col items-center gap-4"
                                 >
                                     <svg
                                         class="w-10 h-10 text-primary-200"
