@@ -22,6 +22,7 @@ class BindSessionRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'program_id' => ['nullable', 'integer', 'exists:programs,id'],
             // Allow identity_registration_request-only submissions (no token) for public/staff triage flows.
             'qr_hash' => ['required_without:identity_registration_request', 'string', 'max:64'],
             'track_id' => ['required_with:qr_hash', 'integer'],

@@ -49,7 +49,7 @@ class PublicDisplaySettingsAuthService
             }
         }
 
-        $verified = $this->verifyAutoDetect($validated, $authType);
+        $verified = $this->verifyAutoDetect($validated, $authType, $program);
 
         if (! $verified) {
             if (in_array($authType, ['temp_pin', 'temp_qr'], true)) {
@@ -80,13 +80,13 @@ class PublicDisplaySettingsAuthService
 
     /**
      * Auto-detect TEMP vs PRESET per spec:
-     * - PIN: temp first, then preset (active program)
+     * - PIN: temp first, then preset (program-scoped)
      * - QR: temp first, then preset
      *
      * @param  array<string, mixed>  $validated
      * @return array{verified: true, user_id: int, role: string}|null
      */
-    private function verifyAutoDetect(array $validated, ?string $authType): ?array
+    private function verifyAutoDetect(array $validated, ?string $authType, Program $program): ?array
     {
         // Legacy explicit auth_type support (kept for compatibility).
         if ($authType !== null) {
@@ -98,7 +98,7 @@ class PublicDisplaySettingsAuthService
                 'temp_pin' => $this->pinService->validateTemporaryPin((string) ($validated['temp_code'] ?? '')),
                 'temp_qr' => $this->pinService->validateTemporaryQr((string) ($validated['qr_scan_token'] ?? '')),
                 'preset_qr' => $this->pinService->validatePresetQr((string) ($validated['qr_scan_token'] ?? '')),
-                default => $this->pinService->validatePinForActiveProgram((string) ($validated['supervisor_pin'] ?? $validated['pin'] ?? '')),
+                default => $this->pinService->validatePinForProgram($program->id, (string) ($validated['supervisor_pin'] ?? $validated['pin'] ?? '')),
             };
         }
 
@@ -107,7 +107,7 @@ class PublicDisplaySettingsAuthService
         if ($pin !== '') {
             $temp = $this->pinService->validateTemporaryPin($pin);
             if ($temp) return $temp;
-            return $this->pinService->validatePinForActiveProgram($pin);
+            return $this->pinService->validatePinForProgram($program->id, $pin);
         }
 
         $qr = (string) ($validated['qr_scan_token'] ?? '');

@@ -26,7 +26,7 @@ class DisplayBoardServiceTest extends TestCase
 
     public function test_get_board_data_returns_null_queueing_method_when_no_program(): void
     {
-        $data = $this->service->getBoardData();
+        $data = $this->service->getBoardData(null);
 
         $this->assertArrayHasKey('balance_mode', $data);
         $this->assertArrayHasKey('station_selection_mode', $data);
@@ -40,12 +40,47 @@ class DisplayBoardServiceTest extends TestCase
         $this->assertNull($data['alternate_ratio']);
         $this->assertArrayHasKey('priority_first', $data);
         $this->assertNull($data['priority_first']);
+        $this->assertNull($data['program_name']);
+        $this->assertSame([], $data['now_serving']);
+        $this->assertSame(0, $data['total_in_queue']);
+    }
+
+    /** A.2.4: getBoardData(programId) returns data scoped to that program. */
+    public function test_get_board_data_with_program_id_returns_data_for_that_program(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Scoped Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+            'settings' => ['balance_mode' => 'fifo', 'station_selection_mode' => 'fixed'],
+        ]);
+
+        $data = $this->service->getBoardData($program->id);
+
+        $this->assertSame('Scoped Program', $data['program_name']);
+        $this->assertSame('fifo', $data['balance_mode']);
+        $this->assertSame('FIFO', $data['queueing_method_label']);
+        $this->assertIsArray($data['now_serving']);
+        $this->assertIsArray($data['waiting_by_station']);
+    }
+
+    /** A.2.4: getBoardData(null) returns no-program structure (program_name null, empty arrays). */
+    public function test_get_board_data_with_null_returns_no_program_structure(): void
+    {
+        $data = $this->service->getBoardData(null);
+
+        $this->assertNull($data['program_name']);
+        $this->assertSame([], $data['now_serving']);
+        $this->assertSame([], $data['waiting_by_station']);
+        $this->assertSame(0, $data['total_in_queue']);
     }
 
     public function test_get_board_data_includes_queueing_method_label_for_fifo(): void
     {
         $user = User::factory()->create();
-        Program::create([
+        $program = Program::create([
             'name' => 'Test',
             'description' => null,
             'is_active' => true,
@@ -53,7 +88,7 @@ class DisplayBoardServiceTest extends TestCase
             'settings' => ['balance_mode' => 'fifo', 'station_selection_mode' => 'fixed'],
         ]);
 
-        $data = $this->service->getBoardData();
+        $data = $this->service->getBoardData($program->id);
 
         $this->assertSame('fifo', $data['balance_mode']);
         $this->assertSame('fixed', $data['station_selection_mode']);
@@ -65,7 +100,7 @@ class DisplayBoardServiceTest extends TestCase
     public function test_get_board_data_includes_queueing_method_label_for_alternate(): void
     {
         $user = User::factory()->create();
-        Program::create([
+        $program = Program::create([
             'name' => 'Test',
             'description' => null,
             'is_active' => true,
@@ -73,7 +108,7 @@ class DisplayBoardServiceTest extends TestCase
             'settings' => ['balance_mode' => 'alternate', 'station_selection_mode' => 'fixed', 'alternate_ratio' => [2, 1]],
         ]);
 
-        $data = $this->service->getBoardData();
+        $data = $this->service->getBoardData($program->id);
 
         $this->assertSame('alternate', $data['balance_mode']);
         $this->assertSame('Balanced (alternate)', $data['queueing_method_label']);
@@ -84,7 +119,7 @@ class DisplayBoardServiceTest extends TestCase
     public function test_get_board_data_includes_combined_label_when_station_selection_not_fixed(): void
     {
         $user = User::factory()->create();
-        Program::create([
+        $program = Program::create([
             'name' => 'Test',
             'description' => null,
             'is_active' => true,
@@ -92,7 +127,7 @@ class DisplayBoardServiceTest extends TestCase
             'settings' => ['balance_mode' => 'fifo', 'station_selection_mode' => 'shortest_queue'],
         ]);
 
-        $data = $this->service->getBoardData();
+        $data = $this->service->getBoardData($program->id);
 
         $this->assertSame('shortest_queue', $data['station_selection_mode']);
         $this->assertSame('FIFO · Shortest queue', $data['queueing_method_label']);

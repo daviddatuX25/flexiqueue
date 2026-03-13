@@ -5,9 +5,11 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Services\DashboardService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 /**
  * Per 08-API-SPEC-PHASE1 §6.1: Dashboard endpoints. Auth: role:admin,supervisor.
+ * Per central-edge Phase A: program_id from query; when missing returns empty stats.
  */
 class DashboardController extends Controller
 {
@@ -18,16 +20,22 @@ class DashboardController extends Controller
     /**
      * Get dashboard stats (active program, sessions, stations, staff).
      */
-    public function stats(): JsonResponse
+    public function stats(Request $request): JsonResponse
     {
-        return response()->json($this->dashboardService->getStats());
+        $programId = $request->query('program_id');
+        $programId = is_numeric($programId) ? (int) $programId : null;
+
+        return response()->json($this->dashboardService->getStats($programId));
     }
 
     /**
      * Get stations for dashboard table (with current_client).
      */
-    public function stations(): JsonResponse
+    public function stations(Request $request): JsonResponse
     {
-        return response()->json($this->dashboardService->getDashboardStations());
+        $programId = $request->query('program_id');
+        $programId = is_numeric($programId) ? (int) $programId : null;
+
+        return response()->json($this->dashboardService->getDashboardStations($programId));
     }
 }

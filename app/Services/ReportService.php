@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AdminActionLog;
 use App\Models\ProgramAuditLog;
 use App\Models\TransactionLog;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -294,6 +295,95 @@ class ReportService
                 'created_at' => Carbon::parse($row->created_at)->toIso8601String(),
             ];
         });
+    }
+
+    /**
+     * Get paginated admin action log (user/site create, update, delete). Per SUPER-ADMIN-VS-ADMIN-SPEC.
+     *
+     * @param  array{from?: string, to?: string, page?: int, per_page?: int}  $filters
+     * @return LengthAwarePaginator<int, array{id: int, source: string, session_alias: string, action_type: string, station: string, staff: string, remarks: string|null, created_at: string}>
+     */
+    public function getAdminActionLog(array $filters): LengthAwarePaginator
+    {
+        $perPage = max(10, min(100, (int) ($filters['per_page'] ?? self::PER_PAGE)));
+        $page = max(1, (int) ($filters['page'] ?? 1));
+
+        $query = AdminActionLog::query()->with('user:id,name')->orderByDesc('created_at');
+
+        if (! empty($filters['from'])) {
+            $query->whereDate('created_at', '>=', $filters['from']);
+        }
+        if (! empty($filters['to'])) {
+            $query->whereDate('created_at', '<=', $filters['to']);
+        }
+
+        $paginator = $query->paginate($perPage, ['*'], 'page', $page);
+
+        $paginator->getCollection()->transform(function (AdminActionLog $log) {
+            $subject = $log->subject_type;
+            if ($log->subject_id) {
+                $subject .= '#'.$log->subject_id;
+            }
+            $remarks = $subject;
+            if (! empty($log->payload) && is_array($log->payload)) {
+                $remarks .= ' '.json_encode($log->payload);
+            }
+
+            return [
+                'id' => $log->id,
+                'source' => 'admin_action',
+                'session_alias' => '',
+                'action_type' => $log->action,
+                'station' => '—',
+                'staff' => $log->user?->name ?? '—',
+                'remarks' => $remarks,
+                'created_at' => $log->created_at?->toIso8601String() ?? '',
+            ];
+        });
+
+        return $paginator;
+    }
+
+    /**
+     * Stream CSV export of admin action log. Per SUPER-ADMIN-VS-ADMIN-SPEC.
+     *
+     * @param  array{from?: string, to?: string}  $filters
+     */
+    public function streamAdminActionCsv(array $filters): StreamedResponse
+    {
+        $query = AdminActionLog::query()->with('user:id,name')->orderBy('created_at');
+
+        if (! empty($filters['from'])) {
+            $query->whereDate('created_at', '>=', $filters['from']);
+        }
+        if (! empty($filters['to'])) {
+            $query->whereDate('created_at', '<=', $filters['to']);
+        }
+
+        $rows = $query->get();
+
+        $filename = 'flexiqueue-admin-actions-'.Carbon::now()->format('Y-m-d-His').'.csv';
+
+        return response()->streamDownload(function () use ($rows) {
+            $handle = fopen('php://output', 'w');
+            fputcsv($handle, ['Time', 'Source', 'Action', 'Staff', 'Subject', 'Remarks']);
+            foreach ($rows as $log) {
+                $subject = $log->subject_type.($log->subject_id ? '#'.$log->subject_id : '');
+                $remarks = ! empty($log->payload) && is_array($log->payload) ? json_encode($log->payload) : '';
+                fputcsv($handle, [
+                    $log->created_at?->toIso8601String() ?? '',
+                    'admin_action',
+                    $log->action,
+                    $log->user?->name ?? '—',
+                    $subject,
+                    $remarks,
+                ]);
+            }
+            fclose($handle);
+        }, $filename, [
+            'Content-Type' => 'text/csv',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+        ]);
     }
 
     /**

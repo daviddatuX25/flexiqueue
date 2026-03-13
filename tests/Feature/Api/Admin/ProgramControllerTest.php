@@ -8,10 +8,12 @@ use App\Models\ProgramAuditLog;
 use App\Models\ProgramStationAssignment;
 use App\Models\ServiceTrack;
 use App\Models\Session;
+use App\Models\Site;
 use App\Models\Station;
 use App\Models\Token;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -24,15 +26,30 @@ class ProgramControllerTest extends TestCase
 
     private User $admin;
 
+    private Site $site;
+
     protected function setUp(): void
     {
         parent::setUp();
-        $this->admin = User::factory()->admin()->create();
+        $this->site = Site::create([
+            'name' => 'Default Site',
+            'slug' => 'default',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $this->admin = User::factory()->admin()->create(['site_id' => $this->site->id]);
+    }
+
+    private function siteId(): int
+    {
+        return $this->site->id;
     }
 
     public function test_index_returns_all_programs(): void
     {
         Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'Program A',
             'description' => 'Desc A',
             'is_active' => false,
@@ -72,6 +89,7 @@ class ProgramControllerTest extends TestCase
     public function test_update_modifies_program(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'Old',
             'description' => 'Old desc',
             'is_active' => false,
@@ -92,6 +110,7 @@ class ProgramControllerTest extends TestCase
     public function test_update_tts_returns_requires_regeneration_when_stations_have_generated_tts(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -133,6 +152,7 @@ class ProgramControllerTest extends TestCase
     public function test_regenerate_station_tts_returns_200(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -154,6 +174,7 @@ class ProgramControllerTest extends TestCase
     public function test_update_merges_program_settings(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -183,6 +204,7 @@ class ProgramControllerTest extends TestCase
     public function test_update_rejects_max_no_show_attempts_out_of_range(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -210,6 +232,7 @@ class ProgramControllerTest extends TestCase
     public function test_update_rejects_display_audio_volume_out_of_range(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -230,6 +253,7 @@ class ProgramControllerTest extends TestCase
     public function test_update_persists_display_audio_settings(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -257,6 +281,7 @@ class ProgramControllerTest extends TestCase
     public function test_update_persists_display_tts_repeat_settings(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -283,6 +308,7 @@ class ProgramControllerTest extends TestCase
     public function test_update_persists_allow_unverified_entry_setting(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -308,6 +334,7 @@ class ProgramControllerTest extends TestCase
     public function test_update_rejects_display_tts_repeat_count_out_of_range(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -328,6 +355,7 @@ class ProgramControllerTest extends TestCase
     public function test_update_rejects_display_tts_repeat_delay_ms_out_of_range(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -347,6 +375,7 @@ class ProgramControllerTest extends TestCase
     public function test_identity_binding_mode_defaults_to_disabled_and_can_be_updated(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -378,6 +407,7 @@ class ProgramControllerTest extends TestCase
     public function test_update_persists_station_selection_mode(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -400,6 +430,7 @@ class ProgramControllerTest extends TestCase
     public function test_update_accepts_alternate_priority_first_setting(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -434,6 +465,7 @@ class ProgramControllerTest extends TestCase
     public function test_update_persists_auto_generate_station_tts_and_includes_in_resource(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -460,6 +492,7 @@ class ProgramControllerTest extends TestCase
     public function test_activate_returns_422_when_missing_required_config(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'Empty',
             'description' => null,
             'is_active' => false,
@@ -474,15 +507,18 @@ class ProgramControllerTest extends TestCase
         $this->assertContains('no_tracks', $missing);
     }
 
-    public function test_activate_sets_program_active_and_deactivates_others(): void
+    /** Per central-edge-v2-final Phase A: activate() no longer deactivates others (multi-program). */
+    public function test_activate_sets_program_active_and_does_not_deactivate_others(): void
     {
         $other = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'Other',
             'description' => null,
             'is_active' => true,
             'created_by' => $this->admin->id,
         ]);
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'To Activate',
             'description' => null,
             'is_active' => false,
@@ -495,23 +531,24 @@ class ProgramControllerTest extends TestCase
         $response->assertStatus(200);
         $response->assertJsonPath('program.is_active', true);
         $this->assertTrue($program->fresh()->is_active);
-        $this->assertFalse($other->fresh()->is_active);
+        $this->assertTrue($other->fresh()->is_active);
 
-        $this->assertDatabaseHas('program_audit_log', [
-            'program_id' => $other->id,
-            'staff_user_id' => $this->admin->id,
-            'action' => 'session_stop',
-        ]);
         $this->assertDatabaseHas('program_audit_log', [
             'program_id' => $program->id,
             'staff_user_id' => $this->admin->id,
             'action' => 'session_start',
         ]);
+        $this->assertDatabaseMissing('program_audit_log', [
+            'program_id' => $other->id,
+            'action' => 'session_stop',
+        ]);
     }
 
-    public function test_activate_fails_when_another_program_has_active_sessions(): void
+    /** Per central-edge-v2-final Phase A: activate() allows multiple programs active; only activateExclusive() enforces single-program. */
+    public function test_activate_succeeds_when_another_program_has_active_sessions_both_remain_active(): void
     {
         $runningProgram = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'Running Program',
             'description' => null,
             'is_active' => true,
@@ -544,6 +581,7 @@ class ProgramControllerTest extends TestCase
         ]);
 
         $otherProgram = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'Other Program',
             'description' => null,
             'is_active' => false,
@@ -553,15 +591,20 @@ class ProgramControllerTest extends TestCase
 
         $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$otherProgram->id}/activate");
 
-        $response->assertStatus(409);
-        $response->assertJsonFragment(['message' => 'Another program is currently running and has clients in the queue. Stop that program\'s session first (or wait until the queue is empty) before starting this program.']);
+        $response->assertStatus(200);
         $this->assertTrue($runningProgram->fresh()->is_active);
-        $this->assertFalse($otherProgram->fresh()->is_active);
+        $this->assertTrue($otherProgram->fresh()->is_active);
+        $this->assertDatabaseHas('program_audit_log', [
+            'program_id' => $otherProgram->id,
+            'staff_user_id' => $this->admin->id,
+            'action' => 'session_start',
+        ]);
     }
 
     public function test_activate_creates_session_start_log_when_no_previous_active(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'First',
             'description' => null,
             'is_active' => false,
@@ -583,6 +626,7 @@ class ProgramControllerTest extends TestCase
     {
         $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'To Activate',
             'description' => null,
             'is_active' => false,
@@ -625,6 +669,7 @@ class ProgramControllerTest extends TestCase
     public function test_deactivate_fails_when_active_sessions_exist(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => true,
@@ -665,6 +710,7 @@ class ProgramControllerTest extends TestCase
     public function test_deactivate_succeeds_when_no_active_sessions(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => true,
@@ -685,6 +731,7 @@ class ProgramControllerTest extends TestCase
     public function test_destroy_fails_when_sessions_exist(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -725,6 +772,7 @@ class ProgramControllerTest extends TestCase
     public function test_destroy_succeeds_when_no_sessions(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -740,6 +788,7 @@ class ProgramControllerTest extends TestCase
     public function test_station_delete_cleans_up_tts_files(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => false,
@@ -774,6 +823,7 @@ class ProgramControllerTest extends TestCase
     public function test_pause_sets_program_paused(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => true,
@@ -790,6 +840,7 @@ class ProgramControllerTest extends TestCase
     public function test_resume_clears_program_paused(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'P',
             'description' => null,
             'is_active' => true,
@@ -811,6 +862,40 @@ class ProgramControllerTest extends TestCase
         $response = $this->actingAs($staff)->getJson('/api/admin/programs');
 
         $response->assertStatus(403);
+    }
+
+    /** Per central-edge follow-up: activate returns warning when staff are in multiple active programs. */
+    public function test_activate_returns_warning_when_staff_assigned_to_multiple_active_programs(): void
+    {
+        $staff = User::factory()->create(['role' => 'staff']);
+
+        $programA = Program::create([
+            'site_id' => $this->siteId(),
+            'name' => 'Program A',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $this->admin->id,
+        ]);
+        $this->addMinimalActivateSetup($programA);
+        ProgramStationAssignment::where('program_id', $programA->id)->update(['user_id' => $staff->id]);
+
+        $programB = Program::create([
+            'site_id' => $this->siteId(),
+            'name' => 'Program B',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+        $this->addMinimalActivateSetup($programB);
+        ProgramStationAssignment::where('program_id', $programB->id)->update(['user_id' => $staff->id]);
+
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$programB->id}/activate");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('program.is_active', true);
+        $this->assertArrayHasKey('warning', $response->json());
+        $this->assertStringContainsString('1 staff member', $response->json('warning') ?? '');
+        $this->assertStringContainsString('more than one active program', $response->json('warning') ?? '');
     }
 
     /**

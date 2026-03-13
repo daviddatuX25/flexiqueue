@@ -50,6 +50,7 @@ class SessionBindTest extends TestCase
             'capacity' => 1,
             'is_active' => true,
         ]);
+        $this->staff->update(['assigned_station_id' => $this->station->id]);
         $process = Process::create(['program_id' => $this->program->id, 'name' => 'First Station', 'description' => null]);
         \Illuminate\Support\Facades\DB::table('station_process')->insert([
             'station_id' => $this->station->id,
@@ -106,7 +107,8 @@ class SessionBindTest extends TestCase
         ])->assertStatus(201);
 
         Event::assertDispatched(StationActivity::class, function (StationActivity $event) {
-            return $event->actionType === 'bind'
+            return $event->programId === $this->program->id
+                && $event->actionType === 'bind'
                 && $event->alias === 'A1'
                 && $event->stationId === $this->station->id
                 && str_contains($event->message, 'registered at triage');
@@ -329,6 +331,66 @@ class SessionBindTest extends TestCase
 
         $response->assertStatus(400);
         $response->assertJsonPath('message', 'No active program. Please activate a program first.');
+    }
+
+    /** Per central-edge A.2.2: staff without assigned station gets 422 on bind. */
+    public function test_bind_staff_without_assigned_station_returns_422(): void
+    {
+        $this->staff->update(['assigned_station_id' => null]);
+
+        $response = $this->actingAs($this->staff)->postJson('/api/sessions/bind', [
+            'qr_hash' => $this->token->qr_code_hash,
+            'track_id' => $this->track->id,
+            'client_category' => 'PWD',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'No station assigned.');
+    }
+
+    public function test_bind_admin_without_assigned_station_can_bind_with_program_id_in_body(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+
+        $response = $this->actingAs($admin)->postJson('/api/sessions/bind', [
+            'program_id' => $this->program->id,
+            'qr_hash' => $this->token->qr_code_hash,
+            'track_id' => $this->track->id,
+            'client_category' => 'Regular',
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('queue_sessions', ['program_id' => $this->program->id, 'alias' => 'A1']);
+    }
+
+    public function test_bind_admin_without_assigned_station_can_bind_with_session_selected_program(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+
+        $this->withSession([\App\Http\Controllers\StationPageController::SESSION_KEY_PROGRAM_ID => $this->program->id]);
+
+        $response = $this->actingAs($admin)->postJson('/api/sessions/bind', [
+            'qr_hash' => $this->token->qr_code_hash,
+            'track_id' => $this->track->id,
+            'client_category' => 'Regular',
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('queue_sessions', ['program_id' => $this->program->id, 'alias' => 'A1']);
+    }
+
+    public function test_bind_admin_without_assigned_station_returns_422_when_no_program_context(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+
+        $response = $this->actingAs($admin)->postJson('/api/sessions/bind', [
+            'qr_hash' => $this->token->qr_code_hash,
+            'track_id' => $this->track->id,
+            'client_category' => 'Regular',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'Program not selected or inactive.');
     }
 
     public function test_guest_cannot_bind_returns_401(): void

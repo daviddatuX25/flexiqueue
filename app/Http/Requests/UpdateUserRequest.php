@@ -30,6 +30,7 @@ class UpdateUserRequest extends FormRequest
             'role' => ['sometimes', 'required', 'string', Rule::enum(UserRole::class)],
             'is_active' => ['sometimes', 'boolean'],
             'override_pin' => ['nullable', 'string', 'size:6', 'regex:/^\d{6}$/'],
+            'site_id' => ['nullable', 'integer', 'exists:sites,id'],
         ];
     }
 

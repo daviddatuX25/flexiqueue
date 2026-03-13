@@ -17,7 +17,7 @@ class RedirectIfAuthenticated
         if ($request->user()) {
             $user = $request->user();
 
-            if ($user->role === UserRole::Admin) {
+            if ($user->role === UserRole::Admin || $user->role === UserRole::SuperAdmin) {
                 return redirect()->route('admin.dashboard');
             }
 

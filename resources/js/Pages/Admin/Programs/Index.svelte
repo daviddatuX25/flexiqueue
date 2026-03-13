@@ -209,6 +209,10 @@
         submitting = false;
         if (ok) {
             toaster.success({ title: "Session started." });
+            const warning = (data as { warning?: string } | undefined)?.warning;
+            if (warning) {
+                toaster.warning({ title: warning });
+            }
             activateMissing = [];
             router.reload();
         } else {

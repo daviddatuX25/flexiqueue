@@ -15,21 +15,21 @@ class PublicDisplaySettingsTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_no_active_program_returns_400(): void
+    public function test_missing_program_id_returns_422(): void
     {
         $response = $this->postJson('/api/public/display-settings', [
             'pin' => '123456',
             'enable_display_hid_barcode' => false,
         ]);
 
-        $response->assertStatus(400);
-        $response->assertJsonPath('message', 'No active program.');
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.program_id.0', 'The program id field is required.');
     }
 
     public function test_invalid_pin_returns_401(): void
     {
         $admin = User::factory()->admin()->withOverridePin('123456')->create();
-        Program::create([
+        $program = Program::create([
             'name' => 'Test',
             'description' => null,
             'is_active' => true,
@@ -37,6 +37,7 @@ class PublicDisplaySettingsTest extends TestCase
         ]);
 
         $response = $this->postJson('/api/public/display-settings', [
+            'program_id' => $program->id,
             'pin' => '999999',
             'enable_display_hid_barcode' => false,
         ]);
@@ -64,6 +65,7 @@ class PublicDisplaySettingsTest extends TestCase
         $program->supervisedBy()->attach($supervisor->id);
 
         $response = $this->postJson('/api/public/display-settings', [
+            'program_id' => $program->id,
             'pin' => '123456',
             'enable_display_hid_barcode' => false,
         ]);
@@ -92,6 +94,7 @@ class PublicDisplaySettingsTest extends TestCase
         ]);
 
         $response = $this->postJson('/api/public/display-settings', [
+            'program_id' => $program->id,
             'pin' => '654321',
             'display_audio_muted' => true,
             'display_audio_volume' => 0.5,
@@ -109,7 +112,7 @@ class PublicDisplaySettingsTest extends TestCase
     public function test_validation_requires_pin(): void
     {
         $admin = User::factory()->admin()->withOverridePin('123456')->create();
-        Program::create([
+        $program = Program::create([
             'name' => 'Test',
             'description' => null,
             'is_active' => true,
@@ -117,6 +120,7 @@ class PublicDisplaySettingsTest extends TestCase
         ]);
 
         $response = $this->postJson('/api/public/display-settings', [
+            'program_id' => $program->id,
             'pin' => '12345', // 5 digits
             'enable_display_hid_barcode' => false,
         ]);
@@ -138,6 +142,7 @@ class PublicDisplaySettingsTest extends TestCase
         ]);
 
         $response = $this->postJson('/api/public/display-settings', [
+            'program_id' => $program->id,
             'pin' => '123456',
             'enable_display_camera_scanner' => false,
         ]);
@@ -163,6 +168,7 @@ class PublicDisplaySettingsTest extends TestCase
         ]);
 
         $response = $this->postJson('/api/public/display-settings', [
+            'program_id' => $program->id,
             'pin' => '123456',
             'enable_public_triage_camera_scanner' => false,
         ]);

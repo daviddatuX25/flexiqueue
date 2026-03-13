@@ -14,16 +14,20 @@ use Inertia\Response;
  */
 class ReportPageController extends Controller
 {
-    public function index(): Response
+    public function index(\Illuminate\Http\Request $request): Response
     {
+        $siteId = $request->user()?->site_id;
         $programs = Program::query()
+            ->forSite($siteId)
             ->orderBy('name')
             ->get(['id', 'name'])
             ->map(fn ($p) => ['id' => $p->id, 'name' => $p->name])
             ->values()
             ->all();
 
+        $programIds = collect($programs)->pluck('id')->all();
         $stations = Station::query()
+            ->whereIn('program_id', $programIds)
             ->where('is_active', true)
             ->orderBy('name')
             ->get(['id', 'name', 'program_id'])
@@ -32,6 +36,7 @@ class ReportPageController extends Controller
             ->all();
 
         $staffUsers = User::query()
+            ->forSite($siteId)
             ->where('is_active', true)
             ->orderBy('name')
             ->get(['id', 'name'])
@@ -39,10 +44,13 @@ class ReportPageController extends Controller
             ->values()
             ->all();
 
+        $authUser = $request->user();
+
         return Inertia::render('Admin/Logs/Index', [
             'programs' => $programs,
             'stations' => $stations,
             'staffUsers' => $staffUsers,
+            'auth_is_super_admin' => $authUser->isSuperAdmin(),
         ]);
     }
 }

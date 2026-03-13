@@ -42,7 +42,9 @@ class StaffDashboardService
 
     private function getStationSummary(User $user): ?array
     {
-        $program = Program::where('is_active', true)->first();
+        // Per central-edge Phase A: program from user's assigned station only.
+        $user->loadMissing(['assignedStation.program']);
+        $program = $user->assignedStation?->program;
         if (! $program) {
             return null;
         }

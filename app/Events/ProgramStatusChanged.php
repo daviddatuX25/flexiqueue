@@ -8,14 +8,16 @@ use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 
 /**
- * Broadcast program paused/resumed to display.activity so the public
+ * Broadcast program paused/resumed to display.activity.{programId} so the public
  * display board can show or hide the "Program is paused" overlay in real time.
+ * Per central-edge-v2-final Phase A: program-scoped channel only.
  */
 class ProgramStatusChanged implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets;
 
     public function __construct(
+        public int $programId,
         public bool $programIsPaused
     ) {}
 
@@ -25,7 +27,7 @@ class ProgramStatusChanged implements ShouldBroadcastNow
     public function broadcastOn(): array
     {
         return [
-            new Channel('display.activity'),
+            new Channel('display.activity.'.$this->programId),
         ];
     }
 

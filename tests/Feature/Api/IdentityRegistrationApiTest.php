@@ -62,8 +62,8 @@ class IdentityRegistrationApiTest extends TestCase
 
     public function test_direct_creates_accepted_registration_and_client(): void
     {
-        ['program' => $program] = $this->createProgramWithTrack();
-        $staff = User::factory()->create(['role' => 'staff']);
+        ['program' => $program, 'station' => $station] = $this->createProgramWithTrack();
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson('/api/identity-registrations/direct', [
             'name' => 'Direct Client',
@@ -85,8 +85,8 @@ class IdentityRegistrationApiTest extends TestCase
 
     public function test_direct_with_id_type_and_number_creates_client_id_document(): void
     {
-        ['program' => $program] = $this->createProgramWithTrack();
-        $staff = User::factory()->create(['role' => 'staff']);
+        ['program' => $program, 'station' => $station] = $this->createProgramWithTrack();
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson('/api/identity-registrations/direct', [
             'name' => 'With ID',
@@ -108,8 +108,8 @@ class IdentityRegistrationApiTest extends TestCase
 
     public function test_direct_returns_422_when_name_or_birth_year_missing(): void
     {
-        ['program' => $program] = $this->createProgramWithTrack();
-        $staff = User::factory()->create(['role' => 'staff']);
+        ['program' => $program, 'station' => $station] = $this->createProgramWithTrack();
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson('/api/identity-registrations/direct', [
             'client_category' => 'Regular',
@@ -120,7 +120,7 @@ class IdentityRegistrationApiTest extends TestCase
 
     public function test_index_returns_pending_registrations_for_active_program(): void
     {
-        ['program' => $program] = $this->createProgramWithTrack();
+        ['program' => $program, 'station' => $station] = $this->createProgramWithTrack();
         $reg = IdentityRegistration::create([
             'program_id' => $program->id,
             'session_id' => null,
@@ -130,7 +130,7 @@ class IdentityRegistrationApiTest extends TestCase
             'status' => 'pending',
             'requested_at' => now(),
         ]);
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->getJson('/api/identity-registrations');
 
@@ -176,7 +176,7 @@ class IdentityRegistrationApiTest extends TestCase
         ]);
         $session->update(['identity_registration_id' => $reg->id]);
         $client = Client::factory()->create(['name' => 'Jane Doe', 'birth_year' => 1990]);
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson("/api/identity-registrations/{$reg->id}/accept", [
             'name' => 'Jane Doe',
@@ -225,7 +225,7 @@ class IdentityRegistrationApiTest extends TestCase
             'requested_at' => now(),
         ]);
         $session->update(['identity_registration_id' => $reg->id]);
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson("/api/identity-registrations/{$reg->id}/accept", [
             'name' => 'New Person',
@@ -252,7 +252,7 @@ class IdentityRegistrationApiTest extends TestCase
 
     public function test_reject_updates_status(): void
     {
-        ['program' => $program] = $this->createProgramWithTrack();
+        ['program' => $program, 'station' => $station] = $this->createProgramWithTrack();
         $reg = IdentityRegistration::create([
             'program_id' => $program->id,
             'session_id' => null,
@@ -262,7 +262,7 @@ class IdentityRegistrationApiTest extends TestCase
             'status' => 'pending',
             'requested_at' => now(),
         ]);
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson("/api/identity-registrations/{$reg->id}/reject", []);
 
@@ -274,7 +274,7 @@ class IdentityRegistrationApiTest extends TestCase
 
     public function test_verify_id_sets_verified_when_scanned_matches_stored(): void
     {
-        ['program' => $program] = $this->createProgramWithTrack();
+        ['program' => $program, 'station' => $station] = $this->createProgramWithTrack();
         $reg = IdentityRegistration::create([
             'program_id' => $program->id,
             'session_id' => null,
@@ -287,7 +287,7 @@ class IdentityRegistrationApiTest extends TestCase
             'status' => 'pending',
             'requested_at' => now(),
         ]);
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson("/api/identity-registrations/{$reg->id}/verify-id", [
             'id_type' => 'PhilHealth',
@@ -304,7 +304,7 @@ class IdentityRegistrationApiTest extends TestCase
 
     public function test_verify_id_returns_409_when_id_already_registered(): void
     {
-        ['program' => $program] = $this->createProgramWithTrack();
+        ['program' => $program, 'station' => $station] = $this->createProgramWithTrack();
         $existingClient = Client::factory()->create(['name' => 'Existing', 'birth_year' => 1990]);
         ClientIdDocument::create([
             'client_id' => $existingClient->id,
@@ -325,7 +325,7 @@ class IdentityRegistrationApiTest extends TestCase
             'status' => 'pending',
             'requested_at' => now(),
         ]);
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson("/api/identity-registrations/{$reg->id}/verify-id", [
             'id_type' => 'PhilHealth',
@@ -338,7 +338,7 @@ class IdentityRegistrationApiTest extends TestCase
 
     public function test_verify_id_returns_422_when_no_stored_id(): void
     {
-        ['program' => $program] = $this->createProgramWithTrack();
+        ['program' => $program, 'station' => $station] = $this->createProgramWithTrack();
         $reg = IdentityRegistration::create([
             'program_id' => $program->id,
             'session_id' => null,
@@ -351,7 +351,7 @@ class IdentityRegistrationApiTest extends TestCase
             'status' => 'pending',
             'requested_at' => now(),
         ]);
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson("/api/identity-registrations/{$reg->id}/verify-id", [
             'id_number' => '1234567890',
@@ -396,7 +396,7 @@ class IdentityRegistrationApiTest extends TestCase
             'requested_at' => now(),
         ]);
         $session->update(['identity_registration_id' => $reg->id]);
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson("/api/identity-registrations/{$reg->id}/accept", [
             'name' => 'Has Stored ID',
@@ -421,8 +421,8 @@ class IdentityRegistrationApiTest extends TestCase
 
     public function test_accept_with_verified_stored_id_attaches_to_existing_client(): void
     {
-        ['program' => $program] = $this->createProgramWithTrack();
-        $staff = User::factory()->create(['role' => 'staff']);
+        ['program' => $program, 'station' => $station] = $this->createProgramWithTrack();
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
         $client = Client::factory()->create(['name' => 'Target', 'birth_year' => 1999]);
 
         $reg = IdentityRegistration::create([
@@ -451,5 +451,282 @@ class IdentityRegistrationApiTest extends TestCase
         $doc = ClientIdDocument::where('client_id', $client->id)->first();
         $this->assertNotNull($doc);
         $this->assertSame('PhilHealth', $doc->id_type);
+    }
+
+    // --- A.2.2 Task B: staff must have assigned station; 422 "No station assigned." when null ---
+
+    public function test_index_returns_422_when_staff_has_no_assigned_station(): void
+    {
+        $this->createProgramWithTrack();
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+
+        $response = $this->actingAs($staff)->getJson('/api/identity-registrations');
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'No station assigned.');
+    }
+
+    public function test_direct_returns_422_when_staff_has_no_assigned_station(): void
+    {
+        $this->createProgramWithTrack();
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+
+        $response = $this->actingAs($staff)->postJson('/api/identity-registrations/direct', [
+            'name' => 'Direct Client',
+            'birth_year' => 1995,
+            'client_category' => 'Regular',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'No station assigned.');
+    }
+
+    public function test_possible_matches_returns_422_when_staff_has_no_assigned_station(): void
+    {
+        ['program' => $program] = $this->createProgramWithTrack();
+        $reg = IdentityRegistration::create([
+            'program_id' => $program->id,
+            'session_id' => null,
+            'name' => 'Jane Doe',
+            'birth_year' => 1990,
+            'client_category' => 'Regular',
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]);
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+
+        $response = $this->actingAs($staff)->getJson("/api/identity-registrations/{$reg->id}/possible-matches");
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'No station assigned.');
+    }
+
+    public function test_possible_matches_returns_data_when_staff_has_assigned_station(): void
+    {
+        ['program' => $program, 'station' => $station] = $this->createProgramWithTrack();
+        $reg = IdentityRegistration::create([
+            'program_id' => $program->id,
+            'session_id' => null,
+            'name' => 'Jane Doe',
+            'birth_year' => 1990,
+            'client_category' => 'Regular',
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]);
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
+
+        $response = $this->actingAs($staff)->getJson("/api/identity-registrations/{$reg->id}/possible-matches");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data', []);
+    }
+
+    public function test_verify_id_returns_422_when_staff_has_no_assigned_station(): void
+    {
+        ['program' => $program] = $this->createProgramWithTrack();
+        $reg = IdentityRegistration::create([
+            'program_id' => $program->id,
+            'session_id' => null,
+            'name' => 'Jane',
+            'birth_year' => 1990,
+            'client_category' => 'Regular',
+            'id_type' => 'PhilHealth',
+            'id_number_encrypted' => Crypt::encryptString('12-3456-7890'),
+            'id_number_last4' => '7890',
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]);
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+
+        $response = $this->actingAs($staff)->postJson("/api/identity-registrations/{$reg->id}/verify-id", [
+            'id_type' => 'PhilHealth',
+            'id_number' => '1234567890',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'No station assigned.');
+    }
+
+    public function test_accept_returns_422_when_staff_has_no_assigned_station(): void
+    {
+        ['program' => $program] = $this->createProgramWithTrack();
+        $reg = IdentityRegistration::create([
+            'program_id' => $program->id,
+            'session_id' => null,
+            'name' => 'Jane Doe',
+            'birth_year' => 1990,
+            'client_category' => 'Regular',
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]);
+        $client = Client::factory()->create(['name' => 'Jane Doe', 'birth_year' => 1990]);
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+
+        $response = $this->actingAs($staff)->postJson("/api/identity-registrations/{$reg->id}/accept", [
+            'name' => 'Jane Doe',
+            'birth_year' => 1990,
+            'client_category' => 'Regular',
+            'client_id' => $client->id,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'No station assigned.');
+    }
+
+    public function test_reject_returns_422_when_staff_has_no_assigned_station(): void
+    {
+        ['program' => $program] = $this->createProgramWithTrack();
+        $reg = IdentityRegistration::create([
+            'program_id' => $program->id,
+            'session_id' => null,
+            'name' => 'Jane',
+            'birth_year' => null,
+            'client_category' => null,
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]);
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+
+        $response = $this->actingAs($staff)->postJson("/api/identity-registrations/{$reg->id}/reject", []);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'No station assigned.');
+    }
+
+    // --- Central-edge follow-up: admin/supervisor with no assigned station uses session/request program context ---
+
+    public function test_index_returns_200_for_admin_without_station_when_session_has_program(): void
+    {
+        ['program' => $program] = $this->createProgramWithTrack();
+        IdentityRegistration::create([
+            'program_id' => $program->id,
+            'session_id' => null,
+            'name' => 'Jane Doe',
+            'birth_year' => 1990,
+            'client_category' => 'Regular',
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]);
+        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+
+        $response = $this
+            ->withSession([\App\Http\Controllers\StationPageController::SESSION_KEY_PROGRAM_ID => $program->id])
+            ->actingAs($admin)
+            ->getJson('/api/identity-registrations');
+
+        $response->assertStatus(200);
+        $response->assertJsonStructure(['data']);
+    }
+
+    public function test_direct_returns_200_for_admin_without_station_when_program_id_in_body(): void
+    {
+        ['program' => $program] = $this->createProgramWithTrack();
+        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+
+        $response = $this->actingAs($admin)->postJson('/api/identity-registrations/direct', [
+            'program_id' => $program->id,
+            'name' => 'Direct Admin Client',
+            'birth_year' => 1992,
+            'client_category' => 'Regular',
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('identity_registrations', [
+            'program_id' => $program->id,
+            'name' => 'Direct Admin Client',
+            'status' => 'accepted',
+        ]);
+    }
+
+    public function test_possible_matches_returns_200_for_admin_without_station_using_registration_program(): void
+    {
+        ['program' => $program] = $this->createProgramWithTrack();
+        $reg = IdentityRegistration::create([
+            'program_id' => $program->id,
+            'session_id' => null,
+            'name' => 'Jane Doe',
+            'birth_year' => 1990,
+            'client_category' => 'Regular',
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]);
+        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+
+        $response = $this->actingAs($admin)->getJson("/api/identity-registrations/{$reg->id}/possible-matches");
+
+        $response->assertStatus(200);
+        $response->assertJsonStructure(['data']);
+    }
+
+    public function test_verify_id_returns_200_for_admin_without_station_when_id_matches(): void
+    {
+        ['program' => $program] = $this->createProgramWithTrack();
+        $reg = IdentityRegistration::create([
+            'program_id' => $program->id,
+            'session_id' => null,
+            'name' => 'Jane',
+            'birth_year' => 1990,
+            'client_category' => 'Regular',
+            'id_type' => 'PhilHealth',
+            'id_number_encrypted' => Crypt::encryptString('12-3456-7890'),
+            'id_number_last4' => '7890',
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]);
+        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+
+        $response = $this->actingAs($admin)->postJson("/api/identity-registrations/{$reg->id}/verify-id", [
+            'id_type' => 'PhilHealth',
+            'id_number' => '12-3456-7890',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('verified', true);
+    }
+
+    public function test_accept_returns_200_for_admin_without_station_for_pending_registration(): void
+    {
+        ['program' => $program] = $this->createProgramWithTrack();
+        $reg = IdentityRegistration::create([
+            'program_id' => $program->id,
+            'session_id' => null,
+            'name' => 'Jane Doe',
+            'birth_year' => 1990,
+            'client_category' => 'Regular',
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]);
+        $client = Client::factory()->create(['name' => 'Jane Doe', 'birth_year' => 1990]);
+        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+
+        $response = $this->actingAs($admin)->postJson("/api/identity-registrations/{$reg->id}/accept", [
+            'name' => 'Jane Doe',
+            'birth_year' => 1990,
+            'client_category' => 'Regular',
+            'client_id' => $client->id,
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('identity_registrations', ['id' => $reg->id, 'status' => 'accepted']);
+    }
+
+    public function test_reject_returns_200_for_admin_without_station_for_pending_registration(): void
+    {
+        ['program' => $program] = $this->createProgramWithTrack();
+        $reg = IdentityRegistration::create([
+            'program_id' => $program->id,
+            'session_id' => null,
+            'name' => 'Jane',
+            'birth_year' => null,
+            'client_category' => null,
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]);
+        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+
+        $response = $this->actingAs($admin)->postJson("/api/identity-registrations/{$reg->id}/reject", []);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('identity_registrations', ['id' => $reg->id, 'status' => 'rejected']);
     }
 }

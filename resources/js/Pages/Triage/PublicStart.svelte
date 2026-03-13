@@ -38,6 +38,7 @@ interface Track {
 
 let {
 		allowed = false,
+		program_id = null as number | null,
 		program_name = null,
 		tracks = [],
 		date = '',
@@ -52,6 +53,7 @@ let {
 		allow_unverified_entry = false,
 	}: {
 		allowed: boolean;
+		program_id: number | null;
 		program_name: string | null;
 		tracks: Track[];
 		date: string;
@@ -403,9 +405,10 @@ $effect(() => {
 
 	onMount(() => {
 		const win = window as Window & { Echo?: { channel: (n: string) => { listen: (e: string, c: (ev: unknown) => void) => void }; leave: (n: string) => void } };
-		if (!allowed || typeof window === 'undefined' || !win.Echo) return;
+		if (!allowed || typeof window === 'undefined' || !win.Echo || program_id == null) return;
 		const echo = win.Echo;
-		const ch = echo.channel('display.activity');
+		const channelName = `display.activity.${program_id}`;
+		const ch = echo.channel(channelName);
 		ch.listen('.display_settings', (e: { enable_public_triage_hid_barcode?: boolean; enable_public_triage_camera_scanner?: boolean }) => {
 			if (typeof e.enable_public_triage_hid_barcode === 'boolean') {
 				enablePublicTriageHidBarcode = e.enable_public_triage_hid_barcode;
@@ -414,7 +417,7 @@ $effect(() => {
 				enablePublicTriageCameraScanner = e.enable_public_triage_camera_scanner;
 			}
 		});
-		return () => echo.leave('display.activity');
+		return () => echo.leave(channelName);
 	});
 
 	function extendCountdown() {
@@ -423,8 +426,13 @@ $effect(() => {
 	}
 
 	async function doTokenLookup(qrHash: string, physicalId: string): Promise<boolean> {
+		if (program_id == null) {
+			toaster.error({ title: 'Program not set. Please use the triage link for your program.' });
+			return false;
+		}
+		const programParam = `program_id=${encodeURIComponent(program_id)}`;
 		if (qrHash && qrHash.length >= 32) {
-			const { ok, data } = await api('GET', `/api/public/token-lookup?qr_hash=${encodeURIComponent(qrHash)}`);
+			const { ok, data } = await api('GET', `/api/public/token-lookup?qr_hash=${encodeURIComponent(qrHash)}&${programParam}`);
 			if (!ok) {
 				toaster.error({ title: (data as { message?: string })?.message ?? 'Token not found.' });
 				return false;
@@ -438,7 +446,7 @@ $effect(() => {
 			return true;
 		}
 		if (physicalId.trim()) {
-			const { ok, data } = await api('GET', `/api/public/token-lookup?physical_id=${encodeURIComponent(physicalId.trim())}`);
+			const { ok, data } = await api('GET', `/api/public/token-lookup?physical_id=${encodeURIComponent(physicalId.trim())}&${programParam}`);
 			if (!ok) {
 				toaster.error({ title: (data as { message?: string })?.message ?? 'Token not found.' });
 				return false;
@@ -480,7 +488,8 @@ $effect(() => {
 		binderMode = 'lookup_in_progress';
 		boundClient = null;
 
-		const body: { id_number: string; id_type?: string } = { id_number: trimmed };
+		const body: { program_id?: number; id_number: string; id_type?: string } = { id_number: trimmed };
+		if (program_id != null) body.program_id = program_id;
 		if (publicIdType !== 'Auto') {
 			body.id_type = publicIdType;
 		}
@@ -635,8 +644,13 @@ $effect(() => {
 
 	async function handleBind() {
 		if (!scannedToken || selectedTrackId == null) return;
+		if (program_id == null) {
+			toaster.error({ title: 'Program not set. Please use the triage link for your program.' });
+			return;
+		}
 		isSubmitting = true;
-		const body: any = {
+		const body: Record<string, unknown> = {
+			program_id,
 			qr_hash: scannedToken.qr_hash,
 			track_id: Number(selectedTrackId),
 			client_category: 'Regular',
@@ -700,12 +714,17 @@ $effect(() => {
 
 	async function submitRequestIdentificationRegistration() {
 		if (!scannedToken || selectedTrackId == null) return;
+		if (program_id == null) {
+			toaster.error({ title: 'Program not set. Please use the triage link for your program.' });
+			return;
+		}
 		isSubmitting = true;
 		const nameStr = String(regName ?? '').trim();
 		const birthYearStr = String(regBirthYear ?? '').trim();
 		const idNumberStr = String(publicIdValue ?? '').trim();
 		const idTypeForReg = requestRegIdType || (id_types?.[0] ?? '');
 		const body: Record<string, unknown> = {
+			program_id,
 			qr_hash: scannedToken.qr_hash,
 			track_id: Number(selectedTrackId),
 			identity_registration_request: {
@@ -747,12 +766,17 @@ $effect(() => {
 	}
 
 	async function submitGuestIdentificationRegistration() {
+		if (program_id == null) {
+			toaster.error({ title: 'Program not set. Please use the triage link for your program.' });
+			return;
+		}
 		isSubmitting = true;
 		const nameStr = String(regName ?? '').trim();
 		const birthYearStr = String(regBirthYear ?? '').trim();
 		const idNumberStr = String(publicIdValue ?? '').trim();
 		const idTypeForReg = guestRegIdType || (id_types?.[0] ?? '');
 		const body: Record<string, unknown> = {
+			program_id,
 			identity_registration_request: {
 				...(nameStr ? { name: nameStr } : {}),
 				...(birthYearStr ? { birth_year: Number(birthYearStr) || undefined } : {}),

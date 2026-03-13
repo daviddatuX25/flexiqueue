@@ -17,6 +17,7 @@ class ClientLookupByIdRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'program_id' => ['nullable', 'integer', 'exists:programs,id'],
             'id_type' => ['nullable', 'string', 'max:50'],
             'id_number' => ['required', 'string', 'max:255'],
         ];

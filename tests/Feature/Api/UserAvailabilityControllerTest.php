@@ -3,6 +3,8 @@
 namespace Tests\Feature\Api;
 
 use App\Events\StaffAvailabilityUpdated;
+use App\Models\Program;
+use App\Models\Station;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
@@ -97,24 +99,57 @@ class UserAvailabilityControllerTest extends TestCase
         ]);
     }
 
-    /** Per flexiqueue-wrx: display board gets real-time staff availability via broadcast. */
-    public function test_update_dispatches_staff_availability_updated_broadcast(): void
+    /** Per flexiqueue-wrx: display board gets real-time staff availability via broadcast. A.5: only when user has assigned station (program-scoped channel). */
+    public function test_update_dispatches_staff_availability_updated_broadcast_when_user_has_assigned_station(): void
     {
         Event::fake([StaffAvailabilityUpdated::class]);
 
+        $creator = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Test Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $creator->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Desk A',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
         $user = User::factory()->create([
             'name' => 'Jane Doe',
             'availability_status' => 'offline',
+            'assigned_station_id' => $station->id,
         ]);
 
         $this->actingAs($user)->patchJson('/api/users/me/availability', [
             'status' => 'on_break',
         ]);
 
-        Event::assertDispatched(StaffAvailabilityUpdated::class, function (StaffAvailabilityUpdated $event) use ($user) {
-            return $event->userId === $user->id
+        Event::assertDispatched(StaffAvailabilityUpdated::class, function (StaffAvailabilityUpdated $event) use ($user, $program) {
+            return $event->programId === $program->id
+                && $event->userId === $user->id
                 && $event->availabilityStatus === 'on_break'
                 && $event->name === 'Jane Doe';
         });
+    }
+
+    /** A.5: when user has no assigned station, StaffAvailabilityUpdated is not broadcast (no program-scoped channel). */
+    public function test_update_does_not_dispatch_staff_availability_broadcast_when_user_has_no_station(): void
+    {
+        Event::fake([StaffAvailabilityUpdated::class]);
+
+        $user = User::factory()->create([
+            'name' => 'Admin User',
+            'availability_status' => 'offline',
+            'assigned_station_id' => null,
+        ]);
+
+        $this->actingAs($user)->patchJson('/api/users/me/availability', [
+            'status' => 'available',
+        ]);
+
+        Event::assertNotDispatched(StaffAvailabilityUpdated::class);
     }
 }

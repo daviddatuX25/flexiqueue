@@ -15,6 +15,7 @@ use Illuminate\Http\Request;
 
 /**
  * Per 08-API-SPEC-PHASE1 §5.1: Program CRUD + activate/deactivate. Auth: role:admin.
+ * Per central-edge B.4: programs are scoped by authenticated user's site_id.
  */
 class ProgramController extends Controller
 {
@@ -23,11 +24,14 @@ class ProgramController extends Controller
     ) {}
 
     /**
-     * List all programs.
+     * List all programs (site-scoped). Per B.4: only programs in the admin's site.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
+        $siteId = $request->user()->site_id;
+
         $programs = Program::query()
+            ->forSite($siteId)
             ->orderBy('name')
             ->get()
             ->map(fn (Program $p) => $this->programResource($p));
@@ -36,25 +40,33 @@ class ProgramController extends Controller
     }
 
     /**
-     * Create program. Per spec: 201 with program object.
+     * Create program. Per spec: 201 with program object. Per B.4: site_id from auth.
      */
     public function store(StoreProgramRequest $request): JsonResponse
     {
+        $user = $request->user();
+        if ($user->site_id === null) {
+            abort(403, 'You must be assigned to a site to create programs.');
+        }
+
         $program = Program::create([
+            'site_id' => $user->site_id,
             'name' => $request->validated('name'),
             'description' => $request->validated('description'),
             'is_active' => false,
-            'created_by' => $request->user()->id,
+            'created_by' => $user->id,
         ]);
 
         return response()->json(['program' => $this->programResource($program)], 201);
     }
 
     /**
-     * Get program details (includes tracks, stations, stats per spec).
+     * Get program details (includes tracks, stations, stats per spec). Per B.4: 404 if not in site.
      */
-    public function show(Program $program): JsonResponse
+    public function show(Request $request, Program $program): JsonResponse
     {
+        $this->ensureProgramInSite($request, $program);
+
         $program->loadCount(['serviceTracks', 'stations', 'queueSessions']);
 
         return response()->json([
@@ -66,10 +78,12 @@ class ProgramController extends Controller
     }
 
     /**
-     * Update program. Settings merged with existing when provided.
+     * Update program. Settings merged with existing when provided. Per B.4: 404 if not in site.
      */
     public function update(UpdateProgramRequest $request, Program $program): JsonResponse
     {
+        $this->ensureProgramInSite($request, $program);
+
         $validated = $request->validated();
         $settings = $validated['settings'] ?? null;
         unset($validated['settings']);
@@ -87,6 +101,7 @@ class ProgramController extends Controller
         $program = $program->fresh();
         if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('enable_display_hid_barcode', $settings) || array_key_exists('enable_public_triage_hid_barcode', $settings) || array_key_exists('enable_display_camera_scanner', $settings) || array_key_exists('enable_public_triage_camera_scanner', $settings) || array_key_exists('display_tts_repeat_count', $settings) || array_key_exists('display_tts_repeat_delay_ms', $settings))) {
             event(new DisplaySettingsUpdated(
+                $program->id,
                 $program->settings()->getDisplayAudioMuted(),
                 $program->settings()->getDisplayAudioVolume(),
                 $program->settings()->getEnableDisplayHidBarcode(),
@@ -123,10 +138,12 @@ class ProgramController extends Controller
     }
 
     /**
-     * Regenerate TTS for all stations of the program (connector + station phrase). Called after user confirms regeneration prompt.
+     * Regenerate TTS for all stations of the program (connector + station phrase). Per B.4: 404 if not in site.
      */
-    public function regenerateStationTts(Program $program): JsonResponse
+    public function regenerateStationTts(Request $request, Program $program): JsonResponse
     {
+        $this->ensureProgramInSite($request, $program);
+
         $workerIdle = QueueWorkerIdleCheck::appearsIdle();
         $useSync = $workerIdle && config('tts.allow_sync_when_queue_unavailable', false);
 
@@ -142,11 +159,13 @@ class ProgramController extends Controller
     }
 
     /**
-     * Activate program (deactivates current active).
+     * Activate program (deactivates current active). Per B.4: 404 if not in site.
      * Per ISSUES-ELABORATION §16: returns 422 with missing[] if pre-session checks fail.
      */
-    public function activate(Program $program): JsonResponse
+    public function activate(Request $request, Program $program): JsonResponse
     {
+        $this->ensureProgramInSite($request, $program);
+
         $check = $this->programService->canActivate($program);
         if (! $check['can_activate']) {
             $messages = [
@@ -169,14 +188,24 @@ class ProgramController extends Controller
             return response()->json(['message' => $e->getMessage()], 409);
         }
 
-        return response()->json(['program' => $this->programResource($program)]);
+        $payload = ['program' => $this->programResource($program)];
+        $staffInMultipleCount = $this->programService->getStaffInMultipleActiveProgramsCount();
+        if ($staffInMultipleCount > 0) {
+            $payload['warning'] = $staffInMultipleCount === 1
+                ? '1 staff member is assigned to more than one active program. They will need to choose one program when using Station or Triage.'
+                : "{$staffInMultipleCount} staff members are assigned to more than one active program. They will need to choose one program when using Station or Triage.";
+        }
+
+        return response()->json($payload);
     }
 
     /**
-     * Pause program. Queue times do not count while paused.
+     * Pause program. Queue times do not count while paused. Per B.4: 404 if not in site.
      */
-    public function pause(Program $program): JsonResponse
+    public function pause(Request $request, Program $program): JsonResponse
     {
+        $this->ensureProgramInSite($request, $program);
+
         try {
             $program = $this->programService->pause($program);
         } catch (\InvalidArgumentException $e) {
@@ -187,10 +216,12 @@ class ProgramController extends Controller
     }
 
     /**
-     * Resume program. Queue times count again.
+     * Resume program. Queue times count again. Per B.4: 404 if not in site.
      */
-    public function resume(Program $program): JsonResponse
+    public function resume(Request $request, Program $program): JsonResponse
     {
+        $this->ensureProgramInSite($request, $program);
+
         try {
             $program = $this->programService->resume($program);
         } catch (\InvalidArgumentException $e) {
@@ -201,10 +232,12 @@ class ProgramController extends Controller
     }
 
     /**
-     * Deactivate program. 400 if active sessions exist.
+     * Deactivate program. 400 if active sessions exist. Per B.4: 404 if not in site.
      */
     public function deactivate(Request $request, Program $program): JsonResponse
     {
+        $this->ensureProgramInSite($request, $program);
+
         try {
             $program = $this->programService->deactivate($program);
         } catch (\InvalidArgumentException $e) {
@@ -215,10 +248,12 @@ class ProgramController extends Controller
     }
 
     /**
-     * Delete program. 400 if any sessions exist.
+     * Delete program. 400 if any sessions exist. Per B.4: 404 if not in site.
      */
-    public function destroy(Program $program): JsonResponse
+    public function destroy(Request $request, Program $program): JsonResponse
     {
+        $this->ensureProgramInSite($request, $program);
+
         try {
             $this->programService->delete($program);
         } catch (\InvalidArgumentException $e) {
@@ -226,6 +261,20 @@ class ProgramController extends Controller
         }
 
         return response()->json(null, 204);
+    }
+
+    /**
+     * Per central-edge B.4: ensure admin has a site and program belongs to it. 403 if no site, 404 if wrong site.
+     */
+    private function ensureProgramInSite(Request $request, Program $program): void
+    {
+        $siteId = $request->user()->site_id;
+        if ($siteId === null) {
+            abort(403, 'You must be assigned to a site to access this resource.');
+        }
+        if ($program->site_id !== $siteId) {
+            abort(404);
+        }
     }
 
     private function programResource(Program $program): array

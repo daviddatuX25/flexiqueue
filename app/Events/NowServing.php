@@ -9,7 +9,8 @@ use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Per 08-API-SPEC-PHASE1 §3.2: broadcast now_serving to global.queue when serving state changes.
+ * Per 08-API-SPEC-PHASE1 §3.2: broadcast now_serving to queue.{programId} when serving state changes.
+ * Per central-edge-v2-final Phase A: global.queue → queue.{programId}; display.station.{id} unchanged.
  */
 class NowServing implements ShouldBroadcastNow
 {
@@ -19,6 +20,7 @@ class NowServing implements ShouldBroadcastNow
      * @param  array<string, mixed>  $payload
      */
     public function __construct(
+        public int $programId,
         public int $stationId,
         public array $payload
     ) {}
@@ -29,7 +31,7 @@ class NowServing implements ShouldBroadcastNow
     public function broadcastOn(): array
     {
         return [
-            new Channel('global.queue'),
+            new Channel('queue.'.$this->programId),
             new Channel('display.station.'.$this->stationId),
         ];
     }

@@ -29,7 +29,10 @@ class HomeController extends Controller
 
         if ($user) {
             $roleBadge = $user->role->value;
-            if ($user->isAdmin() || $user->isSupervisorForAnyProgram()) {
+            if ($user->isSuperAdmin()) {
+                $dashboardRoute = route('admin.dashboard');
+                $dashboardLabel = 'Go to admin console';
+            } elseif ($user->isAdmin() || $user->isSupervisorForAnyProgram()) {
                 $dashboardRoute = route('admin.dashboard');
                 $dashboardLabel = 'Go to your dashboard';
             } else {
@@ -38,13 +41,15 @@ class HomeController extends Controller
             }
         }
 
-        $activeProgram = Program::where('is_active', true)->first();
-        if ($activeProgram) {
-            $stats = $this->stationQueueService->getProgramFooterStats($activeProgram);
+        // Per central-edge Phase A: footer stats from user's assigned station program when present.
+        $program = $user?->assignedStation?->program;
+        if ($program) {
+            $stats = $this->stationQueueService->getProgramFooterStats($program);
             $queueCount = $stats['queue_count'];
             $processedToday = $stats['processed_today'];
         }
 
+        $programs = Program::where('is_active', true)->orderBy('name')->get(['id', 'name']);
         return Inertia::render('Home', [
             'dashboardRoute' => $dashboardRoute,
             'dashboardLabel' => $dashboardLabel,
@@ -54,7 +59,7 @@ class HomeController extends Controller
             'appVersion' => config('app.version', '1.0.0-dev'),
             'queueCount' => $queueCount,
             'processedToday' => $processedToday,
-            'hasActiveProgram' => $activeProgram !== null,
+            'hasActiveProgram' => $programs->isNotEmpty(),
             // Use Laravel's asset() helper so the hero background image always
             // resolves against the correct app URL (host + port), both in dev and prod.
             'heroImageUrl' => asset('images/mswdo_tagudin.jpg'),

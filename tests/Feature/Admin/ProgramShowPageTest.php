@@ -6,11 +6,13 @@ use App\Models\Process;
 use App\Models\Program;
 use App\Models\ServiceTrack;
 use App\Models\Session;
+use App\Models\Site;
 use App\Models\Station;
 use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -24,15 +26,30 @@ class ProgramShowPageTest extends TestCase
 
     private User $admin;
 
+    private Site $site;
+
     protected function setUp(): void
     {
         parent::setUp();
-        $this->admin = User::factory()->admin()->create();
+        $this->site = Site::create([
+            'name' => 'Default Site',
+            'slug' => 'default',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $this->admin = User::factory()->admin()->create(['site_id' => $this->site->id]);
+    }
+
+    private function siteId(): int
+    {
+        return $this->site->id;
     }
 
     public function test_program_show_page_includes_nav_tabs_in_spec_order(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'Tab Order',
             'description' => null,
             'is_active' => true,
@@ -57,6 +74,7 @@ class ProgramShowPageTest extends TestCase
     public function test_program_show_with_require_override_and_no_supervisors_provides_data_for_warning(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'No Supervisors',
             'description' => null,
             'is_active' => true,
@@ -92,6 +110,7 @@ class ProgramShowPageTest extends TestCase
     {
         $staffWithPin = User::factory()->create(['role' => 'staff']);
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'With Supervisors',
             'description' => null,
             'is_active' => true,
@@ -131,6 +150,7 @@ class ProgramShowPageTest extends TestCase
     public function test_program_show_settings_tab_receives_alternate_priority_first(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'Alt Ratio',
             'description' => null,
             'is_active' => false,
@@ -162,6 +182,7 @@ class ProgramShowPageTest extends TestCase
     public function test_program_show_returns_stats_with_active_sessions(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'Stats Program',
             'description' => null,
             'is_active' => true,
@@ -194,6 +215,7 @@ class ProgramShowPageTest extends TestCase
     public function test_program_show_returns_active_sessions_count_when_queue_has_sessions(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'Active Queue',
             'description' => null,
             'is_active' => true,
@@ -240,6 +262,7 @@ class ProgramShowPageTest extends TestCase
     public function test_program_show_tracks_include_total_estimated_and_travel_queue_minutes(): void
     {
         $program = Program::create([
+            'site_id' => $this->siteId(),
             'name' => 'Time Program',
             'description' => null,
             'is_active' => false,

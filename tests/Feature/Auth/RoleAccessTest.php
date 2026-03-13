@@ -84,9 +84,79 @@ class RoleAccessTest extends TestCase
     public function test_staff_can_access_station_and_triage(): void
     {
         $staff = User::factory()->create(['role' => 'staff']);
+        $admin = User::factory()->admin()->create();
+        $program = Program::create([
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $admin->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Triage Station',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $staff->update(['assigned_station_id' => $station->id]);
 
         $this->actingAs($staff)->get(route('station'))->assertStatus(200);
         $this->actingAs($staff)->get(route('triage'))->assertStatus(200);
+    }
+
+    public function test_station_route_with_explicit_station_uses_station_program_when_multiple_active_programs(): void
+    {
+        $staff = User::factory()->create(['role' => 'staff']);
+        $admin = User::factory()->admin()->create();
+
+        $programA = Program::create([
+            'name' => 'Program A',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $admin->id,
+        ]);
+        $programB = Program::create([
+            'name' => 'Program B',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $admin->id,
+        ]);
+
+        $stationA = Station::create([
+            'program_id' => $programA->id,
+            'name' => 'Station A',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $stationB = Station::create([
+            'program_id' => $programB->id,
+            'name' => 'Station B',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+
+        ServiceTrack::create([
+            'program_id' => $programA->id,
+            'name' => 'Track A',
+            'color' => '#ff0000',
+        ]);
+        ServiceTrack::create([
+            'program_id' => $programB->id,
+            'name' => 'Track B',
+            'color' => '#00ff00',
+        ]);
+
+        $response = $this->actingAs($staff)->get(route('station', ['station' => $stationB]));
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->component('Station/Index')
+            ->where('station.id', $stationB->id)
+            ->where('station.name', 'Station B')
+            ->has('stations', 1)
+            ->where('stations.0.id', $stationB->id)
+            ->where('stations.0.name', 'Station B')
+            ->has('tracks', 1)
+        );
     }
 
     public function test_staff_with_program_station_assignment_sees_station_on_station_page(): void
@@ -110,6 +180,7 @@ class RoleAccessTest extends TestCase
             'user_id' => $staff->id,
             'station_id' => $station->id,
         ]);
+        $staff->update(['assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->get(route('station'));
 
@@ -125,6 +196,19 @@ class RoleAccessTest extends TestCase
     public function test_admin_can_access_station_and_triage(): void
     {
         $admin = User::factory()->admin()->create();
+        $program = Program::create([
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $admin->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Triage Station',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $admin->update(['assigned_station_id' => $station->id]);
 
         $this->actingAs($admin)->get(route('station'))->assertStatus(200);
         $this->actingAs($admin)->get(route('triage'))->assertStatus(200);
@@ -132,8 +216,16 @@ class RoleAccessTest extends TestCase
 
     public function test_admin_can_access_program_show_returns_200(): void
     {
-        $admin = User::factory()->admin()->create();
+        $site = \App\Models\Site::create([
+            'name' => 'Default',
+            'slug' => 'default',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(\Illuminate\Support\Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
         $program = Program::create([
+            'site_id' => $site->id,
             'name' => 'Test',
             'description' => null,
             'is_active' => false,
@@ -147,9 +239,17 @@ class RoleAccessTest extends TestCase
 
     public function test_staff_cannot_access_program_show_returns_403(): void
     {
-        $admin = User::factory()->admin()->create();
-        $staff = User::factory()->create(['role' => 'staff']);
+        $site = \App\Models\Site::create([
+            'name' => 'Default',
+            'slug' => 'default',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(\Illuminate\Support\Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
         $program = Program::create([
+            'site_id' => $site->id,
             'name' => 'Test',
             'description' => null,
             'is_active' => false,

@@ -35,10 +35,32 @@ class ReportController extends Controller
     }
 
     /**
-     * Get audit log entries. Query: ?program_id=1&from=Y-m-d&to=Y-m-d&action_type=override&station_id=2&staff_user_id=3&program_session_id=4&page=1
+     * Get audit log entries. Query: ?program_id=1&from=Y-m-d&to=Y-m-d&action_type=...&page=1
+     * Per SUPER-ADMIN-VS-ADMIN-SPEC: ?scope=admin and super_admin returns only admin action log.
      */
     public function audit(Request $request): JsonResponse
     {
+        $scope = $request->query('scope');
+        if ($scope === 'admin' && $request->user()->isSuperAdmin()) {
+            $filters = [
+                'from' => $request->query('from'),
+                'to' => $request->query('to'),
+                'page' => $request->query('page', 1),
+                'per_page' => min(100, max(10, (int) $request->query('per_page', 50))),
+            ];
+            $paginator = $this->reportService->getAdminActionLog($filters);
+
+            return response()->json([
+                'data' => $paginator->getCollection()->values()->all(),
+                'meta' => [
+                    'total' => $paginator->total(),
+                    'per_page' => $paginator->perPage(),
+                    'current_page' => $paginator->currentPage(),
+                ],
+                'scope' => 'admin',
+            ]);
+        }
+
         $filters = [
             'program_id' => $request->query('program_id'),
             'from' => $request->query('from'),
@@ -64,10 +86,20 @@ class ReportController extends Controller
     }
 
     /**
-     * Download audit log as CSV. Same query params as audit (includes staff_user_id, program_session_id).
+     * Download audit log as CSV. Same query params as audit.
+     * Per SUPER-ADMIN-VS-ADMIN-SPEC: ?scope=admin and super_admin returns admin action log CSV only.
      */
     public function auditExport(Request $request): StreamedResponse
     {
+        if ($request->query('scope') === 'admin' && $request->user()->isSuperAdmin()) {
+            $filters = [
+                'from' => $request->query('from'),
+                'to' => $request->query('to'),
+            ];
+
+            return $this->reportService->streamAdminActionCsv($filters);
+        }
+
         $filters = [
             'program_id' => $request->query('program_id'),
             'from' => $request->query('from'),

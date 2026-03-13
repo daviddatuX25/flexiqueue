@@ -9,14 +9,16 @@ use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Per plan: broadcast display audio and HID settings to display.activity so the general display board
+ * Per plan: broadcast display audio and HID settings to display.activity.{programId} so the general display board
  * and public triage can update in real time when admin or PIN-verified user changes them.
+ * Per central-edge-v2-final Phase A: program-scoped channel only.
  */
 class DisplaySettingsUpdated implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
+        public int $programId,
         public bool $displayAudioMuted,
         public float $displayAudioVolume,
         public bool $enableDisplayHidBarcode = true,
@@ -33,7 +35,7 @@ class DisplaySettingsUpdated implements ShouldBroadcastNow
     public function broadcastOn(): array
     {
         return [
-            new Channel('display.activity'),
+            new Channel('display.activity.'.$this->programId),
         ];
     }
 

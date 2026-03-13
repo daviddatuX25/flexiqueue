@@ -565,14 +565,14 @@ class StationQueueApiTest extends TestCase
         $this->assertSame($this->staff->name, $interview['assigned_staff'][0]['name']);
     }
 
-    public function test_get_stations_no_active_program_returns_400(): void
+    public function test_get_stations_inactive_program_returns_empty_stations(): void
     {
         $this->program->update(['is_active' => false]);
 
         $response = $this->actingAs($this->staff)->getJson('/api/stations');
 
-        $response->assertStatus(400);
-        $response->assertJsonPath('message', 'No active program. Please activate a program first.');
+        $response->assertStatus(200);
+        $response->assertJsonPath('stations', []);
     }
 
     public function test_guest_cannot_get_stations_returns_401(): void
@@ -582,14 +582,39 @@ class StationQueueApiTest extends TestCase
         $response->assertStatus(401);
     }
 
-    public function test_staff_unassigned_can_get_stations_list(): void
+    public function test_staff_unassigned_gets_422_when_requesting_stations_list(): void
     {
         $unassigned = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
 
         $response = $this->actingAs($unassigned)->getJson('/api/stations');
 
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'No station assigned.');
+    }
+
+    public function test_admin_without_station_gets_422_when_requesting_stations_list_without_program_context(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+
+        $response = $this->actingAs($admin)->getJson('/api/stations');
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'Program not selected or inactive.');
+    }
+
+    public function test_admin_without_station_can_get_stations_list_when_session_has_program(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+
+        $response = $this
+            ->withSession([\App\Http\Controllers\StationPageController::SESSION_KEY_PROGRAM_ID => $this->program->id])
+            ->actingAs($admin)
+            ->getJson('/api/stations');
+
         $response->assertStatus(200);
-        $response->assertJsonPath('stations.0.name', 'Interview');
+        $stations = $response->json('stations');
+        $this->assertIsArray($stations);
+        $this->assertCount(2, $stations);
     }
 
     public function test_queue_excludes_sessions_at_other_stations(): void
@@ -634,6 +659,72 @@ class StationQueueApiTest extends TestCase
         $response->assertStatus(200);
         $response->assertJsonPath('stats.total_waiting', 0);
         $response->assertJsonPath('waiting', []);
+    }
+
+    /** A.6.2: With two programs active, each station queue remains isolated per program. */
+    public function test_multi_program_station_queue_is_isolated_per_program(): void
+    {
+        // Program B: second program with its own station and waiting session
+        $programB = Program::create([
+            'name' => 'Program B',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $this->staff->id,
+        ]);
+        $stationB = Station::create([
+            'program_id' => $programB->id,
+            'name' => 'B Station',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $trackB = ServiceTrack::create([
+            'program_id' => $programB->id,
+            'name' => 'Track B',
+            'is_default' => true,
+            'color_code' => '#AAAAAA',
+        ]);
+        TrackStep::create([
+            'track_id' => $trackB->id,
+            'station_id' => $stationB->id,
+            'step_order' => 1,
+            'is_required' => true,
+        ]);
+        $tokenB = $this->createToken('QB1');
+        Session::create([
+            'token_id' => $tokenB->id,
+            'program_id' => $programB->id,
+            'track_id' => $trackB->id,
+            'alias' => 'QB1',
+            'client_category' => 'Regular',
+            'current_station_id' => $stationB->id,
+            'current_step_order' => 1,
+            'status' => 'waiting',
+            'queued_at_station' => now(),
+        ]);
+
+        // Program A: ensure there is a waiting session at station1
+        $tokenA = $this->createToken('QA1');
+        Session::create([
+            'token_id' => $tokenA->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'QA1',
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'status' => 'waiting',
+            'queued_at_station' => now(),
+        ]);
+
+        // Queue for Program A station must not include Program B alias
+        $response = $this->actingAs($this->staff)->getJson("/api/stations/{$this->station1->id}/queue");
+
+        $response->assertStatus(200);
+        $waiting = $response->json('waiting');
+        $this->assertIsArray($waiting);
+        $aliases = array_column($waiting, 'alias');
+        $this->assertContains('QA1', $aliases);
+        $this->assertNotContains('QB1', $aliases);
     }
 
     public function test_call_blocked_when_at_client_capacity(): void

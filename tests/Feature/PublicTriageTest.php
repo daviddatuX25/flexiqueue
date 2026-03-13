@@ -82,10 +82,13 @@ class PublicTriageTest extends TestCase
 
         $response = $this->get('/triage/start');
 
+        $response->assertRedirect('/public/triage/'.$program->id);
+        $response = $this->get('/public/triage/'.$program->id);
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
             ->component('Triage/PublicStart')
             ->where('allowed', true)
+            ->where('program_id', $program->id)
             ->has('program_name')
             ->has('tracks')
             ->has('date')
@@ -112,8 +115,9 @@ class PublicTriageTest extends TestCase
 
     public function test_triage_start_returns_200_with_allowed_false_when_program_disallows_public_triage(): void
     {
-        $this->createProgramWithTracks(false);
+        ['program' => $program] = $this->createProgramWithTracks(false);
 
+        // Per central-edge Phase A: when no program allows public triage, render selector (no redirect).
         $response = $this->get('/triage/start');
 
         $response->assertStatus(200);
@@ -125,10 +129,10 @@ class PublicTriageTest extends TestCase
 
     public function test_public_token_lookup_returns_200_when_allowed_and_token_exists(): void
     {
-        $this->createProgramWithTracks(true);
+        ['program' => $program] = $this->createProgramWithTracks(true);
         $token = $this->createToken('A1');
 
-        $response = $this->getJson('/api/public/token-lookup?qr_hash='.urlencode($token->qr_code_hash));
+        $response = $this->getJson('/api/public/token-lookup?qr_hash='.urlencode($token->qr_code_hash).'&program_id='.$program->id);
 
         $response->assertStatus(200);
         $response->assertJsonPath('physical_id', 'A1');
@@ -138,10 +142,10 @@ class PublicTriageTest extends TestCase
 
     public function test_public_token_lookup_returns_403_when_public_triage_disabled(): void
     {
-        $this->createProgramWithTracks(false);
+        ['program' => $program] = $this->createProgramWithTracks(false);
         $token = $this->createToken('A1');
 
-        $response = $this->getJson('/api/public/token-lookup?qr_hash='.urlencode($token->qr_code_hash));
+        $response = $this->getJson('/api/public/token-lookup?qr_hash='.urlencode($token->qr_code_hash).'&program_id='.$program->id);
 
         $response->assertStatus(403);
         $response->assertJsonPath('message', 'Public self-serve triage is not available.');
@@ -149,9 +153,9 @@ class PublicTriageTest extends TestCase
 
     public function test_public_token_lookup_returns_404_when_token_not_found(): void
     {
-        $this->createProgramWithTracks(true);
+        ['program' => $program] = $this->createProgramWithTracks(true);
 
-        $response = $this->getJson('/api/public/token-lookup?physical_id=Z99');
+        $response = $this->getJson('/api/public/token-lookup?physical_id=Z99&program_id='.$program->id);
 
         $response->assertStatus(404);
         $response->assertJsonPath('message', 'Token not found.');
@@ -159,10 +163,11 @@ class PublicTriageTest extends TestCase
 
     public function test_public_bind_creates_session_returns_201_when_allowed(): void
     {
-        ['track' => $track] = $this->createProgramWithTracks(true);
+        ['program' => $program, 'track' => $track] = $this->createProgramWithTracks(true);
         $token = $this->createToken('A1');
 
         $response = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $program->id,
             'qr_hash' => $token->qr_code_hash,
             'track_id' => $track->id,
             'client_category' => 'Regular',
@@ -180,10 +185,11 @@ class PublicTriageTest extends TestCase
 
     public function test_public_bind_returns_403_when_disabled(): void
     {
-        ['track' => $track] = $this->createProgramWithTracks(false);
+        ['program' => $program, 'track' => $track] = $this->createProgramWithTracks(false);
         $token = $this->createToken('A1');
 
         $response = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $program->id,
             'qr_hash' => $token->qr_code_hash,
             'track_id' => $track->id,
             'client_category' => 'Regular',
@@ -213,6 +219,7 @@ class PublicTriageTest extends TestCase
         $token->update(['status' => 'in_use', 'current_session_id' => $session->id]);
 
         $response = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $program->id,
             'qr_hash' => $token->qr_code_hash,
             'track_id' => $track->id,
             'client_category' => 'Regular',
@@ -224,10 +231,11 @@ class PublicTriageTest extends TestCase
 
     public function test_public_bind_transaction_log_has_null_staff_user_id(): void
     {
-        ['track' => $track] = $this->createProgramWithTracks(true);
+        ['program' => $program, 'track' => $track] = $this->createProgramWithTracks(true);
         $token = $this->createToken('A1');
 
         $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $program->id,
             'qr_hash' => $token->qr_code_hash,
             'track_id' => $track->id,
             'client_category' => 'Regular',
@@ -240,10 +248,11 @@ class PublicTriageTest extends TestCase
 
     public function test_public_bind_identity_registration_request_mutually_exclusive_with_client_binding_returns_422(): void
     {
-        ['track' => $track] = $this->createProgramWithTracks(true);
+        ['program' => $program, 'track' => $track] = $this->createProgramWithTracks(true);
         $token = $this->createToken('A1');
 
         $response = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $program->id,
             'qr_hash' => $token->qr_code_hash,
             'track_id' => $track->id,
             'client_binding' => ['client_id' => 1, 'source' => 'test', 'id_document_id' => 1],
@@ -260,6 +269,7 @@ class PublicTriageTest extends TestCase
         $token = $this->createToken('A1');
 
         $response = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $program->id,
             'qr_hash' => $token->qr_code_hash,
             'track_id' => $track->id,
             'identity_registration_request' => [
@@ -288,6 +298,7 @@ class PublicTriageTest extends TestCase
         ['program' => $program] = $this->createProgramWithTracks(true, ['allow_unverified_entry' => true]);
 
         $response = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $program->id,
             'identity_registration_request' => [
                 'name' => 'Jane Doe',
                 'birth_year' => 1990,
@@ -316,6 +327,7 @@ class PublicTriageTest extends TestCase
         $token = $this->createToken('A1');
 
         $response = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $program->id,
             'qr_hash' => $token->qr_code_hash,
             'track_id' => $track->id,
             'identity_registration_request' => [
@@ -367,6 +379,7 @@ class PublicTriageTest extends TestCase
         ]);
 
         $response = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $program->id,
             'qr_hash' => $token->qr_code_hash,
             'track_id' => $track->id,
             'identity_registration_request' => [
@@ -425,6 +438,7 @@ class PublicTriageTest extends TestCase
         $secondToken = $this->createToken('B1');
 
         $response = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $program->id,
             'qr_hash' => $secondToken->qr_code_hash,
             'track_id' => $track->id,
             'client_category' => 'Regular',
@@ -440,6 +454,200 @@ class PublicTriageTest extends TestCase
         $response->assertJsonPath('active_session.alias', 'A1');
         $this->assertDatabaseMissing('queue_sessions', [
             'token_id' => $secondToken->id,
+        ]);
+    }
+
+    // --- A.2.3: Public triage program from URL (GET /public/triage/{program}) ---
+
+    public function test_public_triage_page_returns_200_with_program_id_when_active_and_allow_public_triage(): void
+    {
+        ['program' => $program] = $this->createProgramWithTracks(true);
+
+        $response = $this->get('/public/triage/'.$program->id);
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->component('Triage/PublicStart')
+            ->where('allowed', true)
+            ->where('program_id', $program->id)
+            ->has('program_name')
+            ->has('tracks')
+        );
+    }
+
+    public function test_public_triage_page_returns_404_for_inactive_program(): void
+    {
+        ['program' => $program] = $this->createProgramWithTracks(true);
+        $program->update(['is_active' => false]);
+
+        $response = $this->get('/public/triage/'.$program->id);
+
+        $response->assertStatus(404);
+    }
+
+    public function test_public_triage_page_returns_404_for_missing_program(): void
+    {
+        $response = $this->get('/public/triage/99999');
+
+        $response->assertStatus(404);
+    }
+
+    public function test_public_triage_page_returns_200_with_allowed_false_when_allow_public_triage_false(): void
+    {
+        ['program' => $program] = $this->createProgramWithTracks(false);
+
+        $response = $this->get('/public/triage/'.$program->id);
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->component('Triage/PublicStart')
+            ->where('allowed', false)
+            ->where('program_id', $program->id)
+        );
+    }
+
+    public function test_bind_with_program_id_sets_session_program_id(): void
+    {
+        ['program' => $program, 'track' => $track] = $this->createProgramWithTracks(true);
+        $token = $this->createToken('A1');
+
+        $response = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $program->id,
+            'qr_hash' => $token->qr_code_hash,
+            'track_id' => $track->id,
+            'client_category' => 'Regular',
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('queue_sessions', [
+            'alias' => 'A1',
+            'program_id' => $program->id,
+        ]);
+    }
+
+    public function test_bind_without_program_id_returns_403_or_422(): void
+    {
+        ['track' => $track] = $this->createProgramWithTracks(true);
+        $token = $this->createToken('A1');
+
+        $response = $this->postJson('/api/public/sessions/bind', [
+            'qr_hash' => $token->qr_code_hash,
+            'track_id' => $track->id,
+            'client_category' => 'Regular',
+        ]);
+
+        $this->assertContains($response->status(), [403, 422]);
+    }
+
+    public function test_bind_with_invalid_program_id_returns_403_or_422(): void
+    {
+        ['track' => $track] = $this->createProgramWithTracks(true);
+        $token = $this->createToken('A1');
+
+        $response = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => 99999,
+            'qr_hash' => $token->qr_code_hash,
+            'track_id' => $track->id,
+            'client_category' => 'Regular',
+        ]);
+
+        $this->assertContains($response->status(), [403, 422]);
+    }
+
+    public function test_token_lookup_with_valid_program_id_returns_200_when_token_found(): void
+    {
+        ['program' => $program] = $this->createProgramWithTracks(true);
+        $token = $this->createToken('A1');
+
+        $response = $this->getJson('/api/public/token-lookup?qr_hash='.urlencode($token->qr_code_hash).'&program_id='.$program->id);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('physical_id', 'A1');
+        $response->assertJsonPath('status', 'available');
+    }
+
+    public function test_token_lookup_with_invalid_program_id_returns_403(): void
+    {
+        $this->createProgramWithTracks(true);
+        $token = $this->createToken('A1');
+
+        $response = $this->getJson('/api/public/token-lookup?qr_hash='.urlencode($token->qr_code_hash).'&program_id=99999');
+
+        $response->assertStatus(403);
+    }
+
+    public function test_token_lookup_with_inactive_program_id_returns_403(): void
+    {
+        ['program' => $program] = $this->createProgramWithTracks(true);
+        $program->update(['is_active' => false]);
+        $token = $this->createToken('A1');
+
+        $response = $this->getJson('/api/public/token-lookup?qr_hash='.urlencode($token->qr_code_hash).'&program_id='.$program->id);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_token_lookup_without_program_id_returns_403(): void
+    {
+        $this->createProgramWithTracks(true);
+        $token = $this->createToken('A1');
+
+        $response = $this->getJson('/api/public/token-lookup?qr_hash='.urlencode($token->qr_code_hash));
+
+        $response->assertStatus(403);
+    }
+
+    /** A.6.3: In multi-program setup, public triage binds sessions to the correct program_id. */
+    public function test_public_triage_multi_program_bind_sessions_are_scoped_to_correct_programs(): void
+    {
+        ['program' => $programA, 'track' => $trackA] = $this->createProgramWithTracks(true, [
+            'allow_unverified_entry' => true,
+        ]);
+        ['program' => $programB, 'track' => $trackB] = $this->createProgramWithTracks(true, [
+            'allow_unverified_entry' => true,
+        ]);
+
+        $tokenA = $this->createToken('PA1');
+        $tokenB = $this->createToken('PB1');
+
+        // Bind in Program A
+        $responseA = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $programA->id,
+            'qr_hash' => $tokenA->qr_code_hash,
+            'track_id' => $trackA->id,
+            'client_category' => 'Regular',
+        ]);
+        $responseA->assertStatus(201);
+        $aliasA = $responseA->json('session.alias');
+
+        // Bind in Program B
+        $responseB = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $programB->id,
+            'qr_hash' => $tokenB->qr_code_hash,
+            'track_id' => $trackB->id,
+            'client_category' => 'Regular',
+        ]);
+        $responseB->assertStatus(201);
+        $aliasB = $responseB->json('session.alias');
+
+        // Each session must be bound to its own program
+        $this->assertDatabaseHas('queue_sessions', [
+            'alias' => $aliasA,
+            'program_id' => $programA->id,
+        ]);
+        $this->assertDatabaseHas('queue_sessions', [
+            'alias' => $aliasB,
+            'program_id' => $programB->id,
+        ]);
+
+        // Cross-contamination checks
+        $this->assertDatabaseMissing('queue_sessions', [
+            'alias' => $aliasA,
+            'program_id' => $programB->id,
+        ]);
+        $this->assertDatabaseMissing('queue_sessions', [
+            'alias' => $aliasB,
+            'program_id' => $programA->id,
         ]);
     }
 }

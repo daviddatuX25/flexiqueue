@@ -15,9 +15,14 @@
     const page = usePage();
     const user = $derived($page.props?.auth?.user ?? null);
     const csrfToken = $derived($page.props?.csrf_token ?? "");
-    const activeProgram = $derived($page.props?.activeProgram ?? null);
+    /** Current program in context: from controller (e.g. activeProgram) or shared Inertia data (currentProgram). */
+    const activeProgram = $derived($page.props?.activeProgram ?? $page.props?.currentProgram ?? null);
     const role = $derived(user?.role ?? "");
+    const isSuperAdmin = $derived(role === "super_admin");
     const currentPath = $derived($page.url ?? "");
+    const canSwitchProgram = $derived(!!$page.props?.canSwitchProgram);
+    const programs = $derived($page.props?.programs ?? []);
+    /** Routes where staff run live sessions (station/triage/overrides). Used for program context + dropdown visibility. */
     const isLiveSessionRoute = $derived(
         currentPath === "/station" ||
             currentPath.startsWith("/station/") ||
@@ -25,6 +30,8 @@
             currentPath === "/program-overrides",
     );
     const isAdminRoute = $derived(currentPath.startsWith("/admin"));
+    /** Roles that can switch program from footer (admin/supervisor). Single place for future role changes. */
+    const isAdminOrSupervisor = $derived(role === "admin" || role === "supervisor");
 
     let networkConnected = $state(
         typeof navigator !== "undefined" ? navigator.onLine : true,
@@ -38,6 +45,8 @@
     let availabilityWrapEl = $state(null);
     /** Position for fixed-footer availability menu (anchored just above status chip) */
     let menuPosition = $state({ left: 0, bottom: 0 });
+    /** Position for fixed-footer program switch drop-up */
+    let programSwitchMenuPosition = $state({ left: 0, bottom: 0 });
     /** Per eym: full-screen overlay when on break (only after user selected On break and PATCH succeeded) */
     let showOnBreakOverlay = $state(false);
     let resumeButtonEl = $state(null);
@@ -50,18 +59,23 @@
             ? "ongoing"
             : "standby",
     );
-    const programLabel = $derived(
-        programMode === "ongoing" ? "Ongoing program" : "Stand by",
-    );
-    const programLabelShort = $derived(
-        programMode === "ongoing" ? "Ongoing" : "Standby",
+    const programName = $derived(
+        activeProgram?.name ?? "All programs",
     );
     const connectionLabel = $derived(
         networkConnected ? "Connected" : "Offline",
     );
     const isProgramClickable = $derived(
-        !!user && networkConnected && programMode === "ongoing",
+        !!user && !isSuperAdmin && networkConnected && programMode === "ongoing",
     );
+    /** Show program dropdown: live-session when canSwitchProgram, or admin pages when admin/supervisor; need 2+ programs. */
+    let programSwitchOpen = $state(false);
+    const showProgramSwitch = $derived(
+        programs.length > 1 &&
+            ((isLiveSessionRoute && canSwitchProgram) || (isAdminRoute && isAdminOrSupervisor)),
+    );
+    const currentProgramId = $derived(activeProgram?.id ?? null);
+    /** Main chip click = navigate (program detail or station). Chevron = open program dropdown when showProgramSwitch. */
 
     $effect(() => {
         const u = $page.props?.auth?.user;
@@ -107,6 +121,26 @@
         return () => document.removeEventListener("click", fn, true);
     });
 
+    let programSwitchWrapEl = $state(null);
+    $effect(() => {
+        if (!programSwitchOpen || typeof document === "undefined") return;
+        const fn = (e) => {
+            if (programSwitchWrapEl && !programSwitchWrapEl.contains(e.target)) {
+                programSwitchOpen = false;
+            }
+        };
+        document.addEventListener("click", fn, true);
+        return () => document.removeEventListener("click", fn, true);
+    });
+    $effect(() => {
+        if (!programSwitchOpen || typeof document === "undefined") return;
+        const fn = (e) => {
+            if (e.key === "Escape") programSwitchOpen = false;
+        };
+        document.addEventListener("keydown", fn);
+        return () => document.removeEventListener("keydown", fn);
+    });
+
     /** Per j4n: Escape closes menu */
     $effect(() => {
         if (!menuOpen || typeof document === "undefined") return;
@@ -137,6 +171,27 @@
             if (!el) return;
             const rect = el.getBoundingClientRect();
             menuPosition = {
+                left: rect.left,
+                bottom: Math.max(8, window.innerHeight - rect.top + 4),
+            };
+        };
+        update();
+        window.addEventListener("resize", update);
+        window.addEventListener("scroll", update, true);
+        return () => {
+            window.removeEventListener("resize", update);
+            window.removeEventListener("scroll", update, true);
+        };
+    });
+
+    /** When footer is fixed, position program switch drop-up above the chip. */
+    $effect(() => {
+        if (!programSwitchOpen || !fixed || typeof window === "undefined") return;
+        const update = () => {
+            const el = programSwitchWrapEl;
+            if (!el) return;
+            const rect = el.getBoundingClientRect();
+            programSwitchMenuPosition = {
                 left: rect.left,
                 bottom: Math.max(8, window.innerHeight - rect.top + 4),
             };
@@ -188,6 +243,34 @@
         }
     }
 
+    function getProgramSwitchBasePath() {
+        const path = typeof currentPath === "string" ? currentPath : "";
+        const pathname = path.split("?")[0] || "/";
+        if (pathname.startsWith("/station")) return "/station";
+        if (pathname === "/triage") return "/triage";
+        if (pathname === "/program-overrides") return "/program-overrides";
+        return "/station";
+    }
+
+    /**
+     * On program select in dropdown: switch context and stay in current "mode".
+     * - On admin pages → go to that program's admin page (/admin/programs/{id}).
+     * - On station/triage/overrides → set session and stay on same page type (base?program=id).
+     */
+    function switchProgram(programId) {
+        programSwitchOpen = false;
+        if (isSuperAdmin) {
+            return;
+        }
+        if (isAdminRoute) {
+            router.visit(`/admin/programs/${programId}`);
+        } else {
+            const base = getProgramSwitchBasePath();
+            router.visit(`${base}?program=${programId}`);
+        }
+    }
+
+
     /** Per eym: focus Resume when overlay opens (keyboard-accessible) */
     $effect(() => {
         if (!showOnBreakOverlay || typeof document === "undefined") return;
@@ -235,25 +318,24 @@
         menuOpen = !menuOpen;
     }
 
+    /**
+     * Main chip click: navigate between "program view" (admin) and "station view", keeping the same program context.
+     * - On station/triage/overrides → go to this program's admin page.
+     * - On admin → go to station with ?program=id when we have one, so station doesn't jump to "first active".
+     */
     function handleProgramClick() {
-        if (!isProgramClickable) return;
+        if (!isProgramClickable || isSuperAdmin) return;
 
         const program = activeProgram;
-        const r = role;
 
-        // Admin on live-session pages (Station/Triage/Program Overrides) → jump to Program detail
-        if (r === "admin" && isLiveSessionRoute && program?.id) {
+        if (isAdminOrSupervisor && isLiveSessionRoute && program?.id) {
             router.visit(`/admin/programs/${program.id}`);
             return;
         }
-
-        // Admin inside Admin layout (or anywhere else) → jump to Station view
-        if (r === "admin" && isAdminRoute) {
-            router.visit("/station");
+        if (isAdminOrSupervisor && isAdminRoute) {
+            router.visit(program?.id ? `/station?program=${program.id}` : "/station");
             return;
         }
-
-        // Non-admin: keep behavior — go to Station
         router.visit("/station");
     }
 </script>
@@ -264,35 +346,83 @@
     aria-live="polite"
 >
     <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 shrink">
-        <!-- Program + Connection status: compact but tappable -->
-        <button
-            type="button"
-            class="flex flex-col items-start justify-center gap-0.5 px-2 sm:px-3 py-1.5 min-h-[44px] rounded-full border text-left transition-all duration-200 shadow-sm shrink-0
-                {programMode === 'ongoing'
-                    ? 'bg-success-50 text-success-800 border-success-200'
-                    : 'bg-surface-100 text-surface-800 border-surface-200'}
-                {isProgramClickable ? 'cursor-pointer hover:bg-success-100' : 'cursor-default'}"
-            onclick={handleProgramClick}
-            disabled={!isProgramClickable}
-            aria-label="{programLabel} — {connectionLabel}"
-        >
-                    <span class="text-[0.65rem] sm:text-[0.72rem] font-semibold uppercase tracking-wide leading-tight whitespace-nowrap">
-                <span class="sm:hidden">{programLabelShort}</span>
-                <span class="hidden sm:inline">{programLabel}</span>
-            </span>
-            <span class="inline-flex items-center gap-1 text-[0.72rem] whitespace-nowrap {programMode === 'ongoing' ? 'text-success-800' : 'text-surface-600'}">
-                <span
-                    class="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse {networkConnected
-                        ? 'bg-success-500 shadow-[0_0_4px_rgba(34,197,94,0.7)]'
-                        : 'bg-error-500 shadow-[0_0_4px_rgba(239,68,68,0.7)]'}"
-                    aria-hidden="true"
-                ></span>
-                <span>{connectionLabel}</span>
-            </span>
-        </button>
+        <!-- Program + Connection: main chip = view switching (uses current program from session); chevron = precise click to open program drop-up. -->
+        <div class="relative shrink-0" bind:this={programSwitchWrapEl}>
+            <div
+                class="flex items-stretch rounded-full border overflow-hidden
+                    {programMode === 'ongoing'
+                        ? 'bg-success-50 text-success-800 border-success-200'
+                        : 'bg-surface-100 text-surface-800 border-surface-200'}"
+            >
+            <button
+                type="button"
+                class="flex flex-col items-start justify-center gap-0.5 px-2 sm:px-3 py-1.5 min-h-[44px] text-left transition-all duration-200 shrink-0
+                    {isProgramClickable ? 'cursor-pointer hover:bg-success-100' : 'cursor-default'}"
+                onclick={handleProgramClick}
+                disabled={!isProgramClickable}
+                aria-label="{programName} — {connectionLabel}. Click to switch between program and station view"
+            >
+                <span class="text-[0.65rem] sm:text-[0.72rem] font-semibold uppercase tracking-wide leading-tight whitespace-nowrap max-w-[12rem] sm:max-w-[16rem] truncate">
+                    {programName}
+                </span>
+                <span class="inline-flex items-center gap-1 text-[0.72rem] whitespace-nowrap {programMode === 'ongoing' ? 'text-success-800' : 'text-surface-600'}">
+                    <span
+                        class="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse {networkConnected
+                            ? 'bg-success-500 shadow-[0_0_4px_rgba(34,197,94,0.7)]'
+                            : 'bg-error-500 shadow-[0_0_4px_rgba(239,68,68,0.7)]'}"
+                        aria-hidden="true"
+                    ></span>
+                    <span>{connectionLabel}</span>
+                </span>
+            </button>
+            {#if showProgramSwitch}
+                <button
+                    type="button"
+                    class="flex items-center justify-center min-w-[36px] px-2 border-l border-current/20 text-surface-500 hover:bg-black/5 transition-colors touch-target"
+                    onclick={(e) => {
+                        e.stopPropagation();
+                        programSwitchOpen = !programSwitchOpen;
+                    }}
+                    aria-haspopup="listbox"
+                    aria-expanded={programSwitchOpen}
+                    aria-label="Change program (current: {activeProgram?.name ?? 'program'})"
+                >
+                    <ChevronUp
+                        class="w-3.5 h-3.5 transition-transform {programSwitchOpen ? 'rotate-180' : ''}"
+                        aria-hidden="true"
+                    />
+                </button>
+            {/if}
+            </div>
+            {#if showProgramSwitch && programSwitchOpen && !fixed}
+                <ul
+                    role="listbox"
+                    class="absolute bottom-full left-0 mb-1 min-w-[11rem] max-h-[12rem] overflow-y-auto py-1 rounded-lg border border-surface-200 bg-surface-50 shadow-lg z-50"
+                    aria-label="Select program"
+                >
+                    {#each programs as p (p.id)}
+                        <li role="option" aria-selected={currentProgramId === p.id}>
+                            <button
+                                type="button"
+                                class="w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-none
+                                    {currentProgramId === p.id
+                                        ? 'text-primary-700 font-medium'
+                                        : 'text-surface-700 hover:bg-surface-100'}"
+                                onclick={() => switchProgram(p.id)}
+                            >
+                                {#if currentProgramId === p.id}
+                                    <CheckCircle2 class="w-4 h-4 text-primary-500 shrink-0" aria-hidden="true" />
+                                {/if}
+                                <span>{p.name}</span>
+                            </button>
+                        </li>
+                    {/each}
+                </ul>
+            {/if}
+        </div>
 
         <!-- Availability Status (per j4n: drop-up selector; offline = read-only) -->
-        {#if user}
+        {#if user && !isSuperAdmin}
             <div
                 class="relative"
                 bind:this={availabilityWrapEl}
@@ -429,6 +559,33 @@
             >
         </div>
     </div>
+
+    {#if programSwitchOpen && fixed && showProgramSwitch}
+        <ul
+            role="listbox"
+            class="fixed z-[90] mb-1 min-w-[11rem] max-h-[12rem] overflow-y-auto py-1 rounded-lg border border-surface-200 bg-surface-50 shadow-lg"
+            style={`left: ${programSwitchMenuPosition.left}px; bottom: ${programSwitchMenuPosition.bottom}px;`}
+            aria-label="Select program"
+        >
+            {#each programs as p (p.id)}
+                <li role="option" aria-selected={currentProgramId === p.id}>
+                    <button
+                        type="button"
+                        class="w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-none
+                            {currentProgramId === p.id
+                                ? 'text-primary-700 font-medium'
+                                : 'text-surface-700 hover:bg-surface-100'}"
+                        onclick={() => switchProgram(p.id)}
+                    >
+                        {#if currentProgramId === p.id}
+                            <CheckCircle2 class="w-4 h-4 text-primary-500 shrink-0" aria-hidden="true" />
+                        {/if}
+                        <span>{p.name}</span>
+                    </button>
+                </li>
+            {/each}
+        </ul>
+    {/if}
 
     {#if menuOpen && fixed}
         <ul

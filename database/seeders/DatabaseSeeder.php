@@ -7,6 +7,7 @@ use App\Models\Process;
 use App\Models\Program;
 use App\Models\ProgramStationAssignment;
 use App\Models\ServiceTrack;
+use App\Models\Site;
 use App\Models\Station;
 use App\Models\TrackStep;
 use App\Models\User;
@@ -33,6 +34,10 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
+        $this->call(DefaultSiteSeeder::class);
+
+        $defaultSite = Site::where('slug', 'default')->firstOrFail();
+
         $password = Hash::make('password');
         $defaultPin = Hash::make('123456');
 
@@ -46,6 +51,7 @@ class DatabaseSeeder extends Seeder
                 'is_active' => true,
                 'override_pin' => $defaultPin,
                 'override_qr_token' => Hash::make(Str::random(64)),
+                'site_id' => $defaultSite->id,
             ]
         );
 
@@ -70,6 +76,7 @@ class DatabaseSeeder extends Seeder
                     'is_active' => true,
                     'override_pin' => $defaultPin,
                     'override_qr_token' => Hash::make(Str::random(64)),
+                    'site_id' => $defaultSite->id,
                 ]
             );
         }
@@ -81,6 +88,7 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Financial and material assistance for medical, educational, burial, transport, and food needs. DSWD devolved program.',
                 'is_active' => true,
                 'created_by' => $admin->id,
+                'site_id' => $defaultSite->id,
                 'settings' => [
                     'priority_first' => true,
                     'balance_mode' => 'alternate',
@@ -184,6 +192,7 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Monthly pension for qualified indigent senior citizens. DSWD devolved program.',
                 'is_active' => false,
                 'created_by' => $admin->id,
+                'site_id' => $defaultSite->id,
                 'settings' => [
                     'priority_first' => true,
                     'balance_mode' => 'fifo',
@@ -266,6 +275,7 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Daily feeding for undernourished children. DSWD devolved program.',
                 'is_active' => false,
                 'created_by' => $admin->id,
+                'site_id' => $defaultSite->id,
                 'settings' => [
                     'priority_first' => true,
                     'balance_mode' => 'fifo',
@@ -332,6 +342,7 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Municipal certificate for accessing indigent funds, PAO, and hospital discounts.',
                 'is_active' => false,
                 'created_by' => $admin->id,
+                'site_id' => $defaultSite->id,
                 'settings' => [
                     'priority_first' => true,
                     'balance_mode' => 'fifo',
@@ -398,6 +409,7 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Issuance of Senior Citizen ID and medicine/grocery booklet (60+ years).',
                 'is_active' => false,
                 'created_by' => $admin->id,
+                'site_id' => $defaultSite->id,
                 'settings' => [
                     'priority_first' => true,
                     'balance_mode' => 'fifo',
@@ -471,6 +483,7 @@ class DatabaseSeeder extends Seeder
                 'description' => 'PWD ID issuance and/or financial/educational assistance. Barangay cert, medical docs.',
                 'is_active' => false,
                 'created_by' => $admin->id,
+                'site_id' => $defaultSite->id,
                 'settings' => [
                     'priority_first' => true,
                     'balance_mode' => 'fifo',
@@ -544,6 +557,7 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Issuance of Solo Parent ID for discounts and privileges under law.',
                 'is_active' => false,
                 'created_by' => $admin->id,
+                'site_id' => $defaultSite->id,
                 'settings' => [
                     'priority_first' => true,
                     'balance_mode' => 'fifo',
@@ -617,6 +631,7 @@ class DatabaseSeeder extends Seeder
                 'description' => '4Ps inquiries, Listahanan status, grievance, or beneficiary orientation at LGU.',
                 'is_active' => false,
                 'created_by' => $admin->id,
+                'site_id' => $defaultSite->id,
                 'settings' => [
                     'priority_first' => true,
                     'balance_mode' => 'fifo',

@@ -239,7 +239,9 @@
     const showPeopleServed = $derived(hasActiveProgram);
 
     const initialJourneyTab =
-        roleBadge === "admin" || roleBadge === "supervisor"
+        roleBadge === "admin" ||
+        roleBadge === "supervisor" ||
+        roleBadge === "super_admin"
             ? "admin"
             : roleBadge === "staff"
               ? "staff"

@@ -236,13 +236,14 @@ class StationQueueService
     }
 
     /**
-     * List stations for the active program with queue_count and assigned_staff.
+     * List stations for the given program with queue_count and assigned_staff.
+     * Per central-edge Phase A: programId from request context; no single-active.
      */
-    public function listStationsForActiveProgram(): array
+    public function listStationsForProgram(int $programId): array
     {
-        $program = Program::query()->where('is_active', true)->first();
+        $program = Program::find($programId);
 
-        if (! $program) {
+        if (! $program || ! $program->is_active) {
             return ['stations' => []];
         }
 

@@ -17,6 +17,7 @@ class User extends Authenticatable
     use HasFactory, Notifiable;
 
     protected $fillable = [
+        'site_id',
         'name',
         'email',
         'password',
@@ -63,6 +64,11 @@ class User extends Authenticatable
         return $this->belongsTo(Station::class, 'assigned_station_id');
     }
 
+    public function site(): BelongsTo
+    {
+        return $this->belongsTo(Site::class);
+    }
+
     public function transactionLogs(): HasMany
     {
         return $this->hasMany(TransactionLog::class, 'staff_user_id');
@@ -84,6 +90,15 @@ class User extends Authenticatable
         return $this->role === UserRole::Admin;
     }
 
+    /**
+     * Super admin can manage all sites and assign/change user site.
+     * Per central-edge follow-up: assign-site-to-user-ui.
+     */
+    public function isSuperAdmin(): bool
+    {
+        return $this->role === UserRole::SuperAdmin;
+    }
+
     public function isSupervisorForProgram(int $programId): bool
     {
         return $this->supervisedPrograms()->where('programs.id', $programId)->exists();
@@ -92,6 +107,23 @@ class User extends Authenticatable
     public function isSupervisorForAnyProgram(): bool
     {
         return $this->supervisedPrograms()->exists();
+    }
+
+    /**
+     * Scope to users belonging to the given site.
+     * Per central-edge B.4: admin user list and single-resource access are site-scoped.
+     * When $siteId is null, returns no rows (admin with no site cannot see any user).
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<User>  $query
+     * @return \Illuminate\Database\Eloquent\Builder<User>
+     */
+    public function scopeForSite($query, ?int $siteId)
+    {
+        if ($siteId === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where('site_id', $siteId);
     }
 
     public function temporaryAuthorizations(): HasMany

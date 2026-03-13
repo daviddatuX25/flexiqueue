@@ -80,7 +80,7 @@ class DashboardControllerTest extends TestCase
 
     public function test_stats_returns_200_for_admin(): void
     {
-        $response = $this->actingAs($this->admin)->getJson('/api/dashboard/stats');
+        $response = $this->actingAs($this->admin)->getJson('/api/dashboard/stats?program_id='.$this->program->id);
 
         $response->assertStatus(200);
         $response->assertJsonStructure([
@@ -105,7 +105,7 @@ class DashboardControllerTest extends TestCase
 
     public function test_stats_returns_200_for_supervisor(): void
     {
-        $response = $this->actingAs($this->supervisor)->getJson('/api/dashboard/stats');
+        $response = $this->actingAs($this->supervisor)->getJson('/api/dashboard/stats?program_id='.$this->program->id);
 
         $response->assertStatus(200);
         $response->assertJsonPath('active_program.name', 'Cash Assistance');
@@ -122,7 +122,7 @@ class DashboardControllerTest extends TestCase
     {
         $this->program->update(['is_active' => false]);
 
-        $response = $this->actingAs($this->admin)->getJson('/api/dashboard/stats');
+        $response = $this->actingAs($this->admin)->getJson('/api/dashboard/stats?program_id='.$this->program->id);
 
         $response->assertStatus(200);
         $response->assertJsonPath('active_program', null);
@@ -132,7 +132,7 @@ class DashboardControllerTest extends TestCase
 
     public function test_stations_returns_200_for_admin(): void
     {
-        $response = $this->actingAs($this->admin)->getJson('/api/dashboard/stations');
+        $response = $this->actingAs($this->admin)->getJson('/api/dashboard/stations?program_id='.$this->program->id);
 
         $response->assertStatus(200);
         $response->assertJsonStructure(['stations' => [['id', 'name', 'is_active', 'queue_count', 'current_client', 'assigned_staff']]]);

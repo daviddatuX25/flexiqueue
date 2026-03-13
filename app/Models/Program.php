@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 class Program extends Model
 {
     protected $fillable = [
+        'site_id',
         'name',
         'description',
         'is_active',
@@ -70,6 +71,11 @@ class Program extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function site(): BelongsTo
+    {
+        return $this->belongsTo(Site::class);
     }
 
     public function serviceTracks(): HasMany
@@ -185,6 +191,16 @@ class Program extends Model
         return $this->hasMany(ProgramStationAssignment::class, 'program_id');
     }
 
+    /**
+     * Tokens assigned to this program via program_token pivot.
+     * Per central-edge-v2-final §Phase C — Token–Program Association.
+     */
+    public function tokens(): BelongsToMany
+    {
+        return $this->belongsToMany(Token::class, 'program_token')
+            ->withPivot('created_at');
+    }
+
     /** Per program diagram visualizer: one layout per program. */
     public function diagram(): HasOne
     {
@@ -194,5 +210,22 @@ class Program extends Model
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
+    }
+
+    /**
+     * Scope to programs belonging to the given site.
+     * Per central-edge B.4: admin program list and single-resource access are site-scoped.
+     * When $siteId is null, returns no rows (admin with no site cannot see any program).
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<Program>  $query
+     * @return \Illuminate\Database\Eloquent\Builder<Program>
+     */
+    public function scopeForSite($query, ?int $siteId)
+    {
+        if ($siteId === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where('site_id', $siteId);
     }
 }

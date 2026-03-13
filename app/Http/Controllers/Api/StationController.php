@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Events\StationDisplaySettingsUpdated;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\StationPageController;
 use App\Http\Requests\SetStationPriorityFirstRequest;
 use App\Http\Requests\UpdateStationDisplaySettingsRequest;
 use App\Models\Program;
@@ -139,20 +140,36 @@ class StationController extends Controller
     }
 
     /**
-     * List stations for active program. Per spec §4.2.
+     * List stations for staff's program. Per spec §4.2.
+     * Per central-edge Phase A: program from user's assigned station.
      * Auth: any authenticated staff.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $program = Program::query()->where('is_active', true)->first();
+        $user = $request->user();
+        $programId = $user->assignedStation?->program_id;
 
-        if (! $program) {
-            return response()->json([
-                'message' => 'No active program. Please activate a program first.',
-            ], 400);
+        // Per central-edge follow-up: admin/supervisor with no assigned station uses session-selected program context.
+        if ($programId === null) {
+            if (! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
+                return response()->json([
+                    'message' => 'No station assigned.',
+                ], 422);
+            }
+
+            $programId = $request->session()->get(StationPageController::SESSION_KEY_PROGRAM_ID);
+            $program = $programId ? Program::query()->where('id', (int) $programId)->where('is_active', true)->first() : null;
+            if (! $program) {
+                return response()->json(['message' => 'Program not selected or inactive.'], 422);
+            }
+            if (! $user->isAdmin() && ! $user->isSupervisorForProgram($program->id)) {
+                return response()->json(['message' => 'Forbidden.'], 403);
+            }
+
+            $programId = $program->id;
         }
 
-        $data = $this->stationQueueService->listStationsForActiveProgram();
+        $data = $this->stationQueueService->listStationsForProgram($programId);
 
         return response()->json($data);
     }

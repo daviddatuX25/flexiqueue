@@ -22,10 +22,17 @@ class DisplayBoardService
 {
     /**
      * Get board data for the informant display: now serving, waiting by station, program name.
+     * A.2.4: When $programId is null, return no-program structure. When set, use that program (must be active).
      */
-    public function getBoardData(): array
+    public function getBoardData(?int $programId = null): array
     {
-        $program = Program::query()->where('is_active', true)->first();
+        $startedAt = microtime(true);
+
+        // Per central-edge Phase A: use programId from request; no single-active lookup.
+        $program = $programId !== null ? Program::find($programId) : null;
+        if ($program !== null && ! $program->is_active) {
+            $program = null;
+        }
 
         if (! $program) {
             return [
@@ -161,7 +168,7 @@ class DisplayBoardService
             ? (bool) $settings['alternate_priority_first']
             : (bool) ($settings['priority_first'] ?? true);
 
-        return [
+        $result = [
             'program_name' => $program->name,
             'date' => now()->format('F j, Y'),
             'now_serving' => $nowServing,
@@ -189,6 +196,21 @@ class DisplayBoardService
             'priority_first' => $program->settings()->getPriorityFirst(),
             'alternate_priority_first' => $alternatePriorityFirst,
         ];
+
+        $durationMs = (microtime(true) - $startedAt) * 1000;
+
+        // Lightweight performance instrumentation for display board rendering.
+        // Only logs in debug environments to avoid noisy logs in production.
+        if (config('app.debug')) {
+            logger()->info('display_board.getBoardData', [
+                'program_id' => $program->id,
+                'duration_ms' => round($durationMs, 2),
+                'total_in_queue' => $totalInQueue,
+                'station_count' => count($stationIds),
+            ]);
+        }
+
+        return $result;
     }
 
     /**

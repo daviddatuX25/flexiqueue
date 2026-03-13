@@ -22,6 +22,7 @@ class UpdatePublicDisplaySettingsRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'program_id' => ['required', 'integer', 'exists:programs,id'],
             // New simplified contract: send either `pin` or `qr_scan_token`.
             // (We still accept legacy auth_type payloads for compatibility.)
             'pin' => [

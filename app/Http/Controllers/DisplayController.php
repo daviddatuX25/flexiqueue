@@ -9,6 +9,7 @@ use App\Models\ServiceTrack;
 use App\Models\Station;
 use App\Services\CheckStatusService;
 use App\Services\DisplayBoardService;
+use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -24,10 +25,49 @@ class DisplayController extends Controller
 
     /**
      * Show the "Now Serving" board. Public.
+     * A.2.4: Resolve program from query param ?program={id}. If absent, show program selector (programs list, no single program).
+     * If invalid or inactive program id, render same view with program_not_found and empty board.
      */
-    public function board(): Response
+    public function board(Request $request): Response
     {
-        $data = $this->displayBoardService->getBoardData();
+        $programId = $request->query('program');
+        $programId = is_numeric($programId) ? (int) $programId : null;
+
+        $programs = Program::query()
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(fn (Program $p) => ['id' => $p->id, 'name' => $p->name])
+            ->values()
+            ->all();
+
+        if ($programId !== null) {
+            $program = Program::query()
+                ->where('id', $programId)
+                ->where('is_active', true)
+                ->first();
+
+            if ($program) {
+                $data = $this->displayBoardService->getBoardData($program->id);
+                $data['programs'] = $programs;
+                $data['currentProgram'] = ['id' => $program->id, 'name' => $program->name];
+                $data['program_not_found'] = false;
+
+                return Inertia::render('Display/Board', $data);
+            }
+
+            $data = $this->displayBoardService->getBoardData(null);
+            $data['programs'] = $programs;
+            $data['currentProgram'] = null;
+            $data['program_not_found'] = true;
+
+            return Inertia::render('Display/Board', $data);
+        }
+
+        $data = $this->displayBoardService->getBoardData(null);
+        $data['programs'] = $programs;
+        $data['currentProgram'] = null;
+        $data['program_not_found'] = false;
 
         return Inertia::render('Display/Board', $data);
     }
@@ -38,8 +78,9 @@ class DisplayController extends Controller
      */
     public function stationBoard(Station $station): Response
     {
-        $program = Program::query()->where('is_active', true)->first();
-        if (! $program || $station->program_id !== $program->id || ! $station->is_active) {
+        // Per central-edge Phase A: program from station; validate active.
+        $program = $station->program;
+        if (! $program || ! $program->is_active || ! $station->is_active) {
             abort(404);
         }
 
@@ -49,24 +90,58 @@ class DisplayController extends Controller
     }
 
     /**
-     * Show public self-serve triage page. When program allows, clients can scan token and choose track.
-     * When no active program or allow_public_triage is false, show "Self-service is not available".
+     * Redirect /triage/start to first active program with allow_public_triage, or show not available.
+     * Per A.2.3: backward compat so existing links still work.
      */
-    public function publicTriage(): Response
+    public function triageStartRedirect(): \Illuminate\Http\RedirectResponse|Response
     {
-        $program = Program::query()->where('is_active', true)->with('serviceTracks:id,program_id,name,is_default')->first();
+        // Per central-edge Phase A: no single-active fallback; use first active with allow_public_triage.
+        $programs = Program::query()->where('is_active', true)->get();
+        $program = $programs->first(fn ($p) => $p->settings()->getAllowPublicTriage());
 
-        if (! $program || ! $program->settings()->getAllowPublicTriage()) {
+        if ($program) {
+            return redirect()->route('triage.public', ['program' => $program->id]);
+        }
+
+        return Inertia::render('Triage/PublicStart', [
+            'allowed' => false,
+            'program_id' => null,
+            'program_name' => null,
+            'tracks' => [],
+            'date' => now()->format('F j, Y'),
+            'display_scan_timeout_seconds' => 20,
+            'enable_public_triage_hid_barcode' => true,
+            'enable_public_triage_camera_scanner' => true,
+            'id_types' => ClientIdTypes::all(),
+            'allow_unverified_entry' => false,
+        ]);
+    }
+
+    /**
+     * Show public self-serve triage page for a specific program. When program allows, clients can scan token and choose track.
+     * When program inactive (404) or allow_public_triage is false, show "Self-service is not available" (allowed: false).
+     * Per A.2.3: program from URL; pass program_id in props for API calls.
+     */
+    public function publicTriage(Program $program): Response
+    {
+        if (! $program->is_active) {
+            abort(404);
+        }
+
+        $program->load('serviceTracks:id,program_id,name,is_default');
+
+        if (! $program->settings()->getAllowPublicTriage()) {
             return Inertia::render('Triage/PublicStart', [
                 'allowed' => false,
-                'program_name' => null,
+                'program_id' => $program->id,
+                'program_name' => $program->name,
                 'tracks' => [],
                 'date' => now()->format('F j, Y'),
-                'display_scan_timeout_seconds' => 20,
-                'enable_public_triage_hid_barcode' => true,
-                'enable_public_triage_camera_scanner' => true,
+                'display_scan_timeout_seconds' => $program->settings()->getDisplayScanTimeoutSeconds(),
+                'enable_public_triage_hid_barcode' => $program->settings()->getEnablePublicTriageHidBarcode(),
+                'enable_public_triage_camera_scanner' => $program->settings()->getEnablePublicTriageCameraScanner(),
                 'id_types' => ClientIdTypes::all(),
-                'allow_unverified_entry' => false,
+                'allow_unverified_entry' => $program->settings()->getAllowUnverifiedEntry(),
             ]);
         }
 
@@ -78,6 +153,7 @@ class DisplayController extends Controller
 
         return Inertia::render('Triage/PublicStart', [
             'allowed' => true,
+            'program_id' => $program->id,
             'program_name' => $program->name,
             'tracks' => $tracks,
             'identity_binding_mode' => $program->settings()->getIdentityBindingMode(),
@@ -101,7 +177,9 @@ class DisplayController extends Controller
 
         $inertiaProps = $this->checkStatusResultToInertiaProps($data);
 
-        $program = Program::query()->where('is_active', true)->first();
+        // Per central-edge Phase A: program from token/session when in_use, else optional ?program=; no single-active.
+        $programId = (int) ($data['program_id'] ?? request()->query('program') ?? 0);
+        $program = $programId > 0 ? Program::find($programId) : null;
         $inertiaProps['display_scan_timeout_seconds'] = $program ? $program->settings()->getDisplayScanTimeoutSeconds() : 20;
         $inertiaProps['program_name'] = $program?->name;
         $inertiaProps['date'] = now()->format('F j, Y');

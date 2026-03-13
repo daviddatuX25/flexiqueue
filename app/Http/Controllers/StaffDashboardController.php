@@ -27,8 +27,11 @@ class StaffDashboardController extends Controller
         }
         $metrics = $this->staffDashboardService->getMetricsForUser($user);
 
-        $program = \App\Models\Program::where('is_active', true)->first();
-        $footerStats = $this->stationQueueService->getProgramFooterStats($program);
+        // Per central-edge Phase A: program from staff's assigned station only.
+        $program = $user->assignedStation?->program;
+        $footerStats = $program
+            ? $this->stationQueueService->getProgramFooterStats($program)
+            : ['queue_count' => 0, 'processed_today' => 0];
 
         return Inertia::render('Staff/Dashboard', [
             'metrics' => $metrics,

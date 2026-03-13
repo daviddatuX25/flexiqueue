@@ -11,7 +11,8 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Per 08-API-SPEC-PHASE1 §5.1: activate (deactivates current), deactivate (no active sessions), delete (no sessions).
+ * Per 08-API-SPEC-PHASE1 §5.1: activate, deactivate (no active sessions), delete (no sessions).
+ * Per central-edge-v2-final Phase A: activate() no longer deactivates others; use activateExclusive() for single-program (e.g. Pi).
  * Per flexiqueue-loo: program session start/stop recorded in program_audit_log.
  * Per ISSUES-ELABORATION §16: pre-session checkers before activate.
  */
@@ -48,10 +49,34 @@ class ProgramService
     }
 
     /**
-     * Activate this program; deactivate the current active program.
-     * Fails if another program is active and still has clients in the queue (waiting/called/serving).
+     * Activate this program. Does not deactivate other programs (multi-program foundation).
+     * Per central-edge-v2-final Phase A: use activateExclusive() where single-program semantics are required (e.g. Pi import).
      */
     public function activate(Program $program): Program
+    {
+        return DB::transaction(function () use ($program) {
+            $program->update(['is_active' => true, 'is_paused' => false]);
+
+            $staffUserId = Auth::id();
+            if ($staffUserId) {
+                ProgramAuditLog::create([
+                    'program_id' => $program->id,
+                    'staff_user_id' => $staffUserId,
+                    'action' => 'session_start',
+                ]);
+            }
+
+            $this->syncAssignedStationForProgram($program);
+
+            return $program->fresh();
+        });
+    }
+
+    /**
+     * Activate this program and deactivate all others (single-program semantics, e.g. Pi after package import).
+     * Fails if another program is active and still has clients in the queue (waiting/called/serving).
+     */
+    public function activateExclusive(Program $program): Program
     {
         $previousActive = Program::where('is_active', true)->where('id', '!=', $program->id)->first();
         if ($previousActive && $previousActive->queueSessions()->active()->exists()) {
@@ -88,6 +113,26 @@ class ProgramService
     }
 
     /**
+     * Count staff users (role=staff) who have station assignments in more than one active program.
+     * Per central-edge follow-up: on program day, show warning when activating if any staff are in multiple active programs.
+     */
+    public function getStaffInMultipleActiveProgramsCount(): int
+    {
+        $activeProgramIds = Program::where('is_active', true)->pluck('id')->all();
+        if (count($activeProgramIds) < 2) {
+            return 0;
+        }
+
+        return (int) ProgramStationAssignment::query()
+            ->whereIn('program_id', $activeProgramIds)
+            ->whereHas('user', fn ($q) => $q->where('role', 'staff'))
+            ->select('user_id')
+            ->groupBy('user_id')
+            ->havingRaw('COUNT(DISTINCT program_id) > 1')
+            ->count();
+    }
+
+    /**
      * Sync users.assigned_station_id for all staff based on ProgramStationAssignment for this program.
      * Staff with assignment get their station; staff whose assigned_station_id is in this program
      * but have no assignment get nulled.
@@ -118,7 +163,7 @@ class ProgramService
 
         $program->update(['is_paused' => true]);
 
-        broadcast(new ProgramStatusChanged(true));
+        broadcast(new ProgramStatusChanged($program->id, true));
 
         return $program->fresh();
     }
@@ -134,7 +179,7 @@ class ProgramService
 
         $program->update(['is_paused' => false]);
 
-        broadcast(new ProgramStatusChanged(false));
+        broadcast(new ProgramStatusChanged($program->id, false));
 
         return $program->fresh();
     }

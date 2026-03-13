@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Events\TokenDeleted;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -44,6 +45,16 @@ class Token extends Model
     public function queueSessions(): HasMany
     {
         return $this->hasMany(Session::class);
+    }
+
+    /**
+     * Programs this token is assigned to via program_token pivot.
+     * Per central-edge-v2-final §Phase C — Token–Program Association.
+     */
+    public function programs(): BelongsToMany
+    {
+        return $this->belongsToMany(Program::class, 'program_token')
+            ->withPivot('created_at');
     }
 
     /**

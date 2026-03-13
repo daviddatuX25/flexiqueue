@@ -109,11 +109,16 @@ import {
 		display_audio_volume?: number;
 	}
 
+	/** A.4.2: currentProgram from controller; fallback to program for transition. */
 	let {
 		station = null,
 		stations = [],
 		tracks = [],
 		canSwitchStation = false,
+		canSwitchProgram = false,
+		programs = [],
+		currentProgram = null,
+		program = null,
 		queueCount = 0,
 		processedToday = 0,
 		display_scan_timeout_seconds = 20,
@@ -122,10 +127,16 @@ import {
 		stations: StationInfo[];
 		tracks: StationInfo[];
 		canSwitchStation: boolean;
+		canSwitchProgram?: boolean;
+		programs?: { id: number; name: string }[];
+		currentProgram?: { id: number; name: string } | null;
+		program?: { id: number; name: string } | null;
 		queueCount?: number;
 		processedToday?: number;
 		display_scan_timeout_seconds?: number;
 	} = $props();
+
+	const effectiveCurrentProgram = $derived(currentProgram ?? program);
 
 	let queue = $state<QueueData | null>(null);
 	let loading = $state(true);

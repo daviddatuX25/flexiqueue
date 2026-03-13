@@ -20,6 +20,7 @@
         X,
         ShieldCheck,
         IdCard,
+        Building2,
     } from "lucide-svelte";
     import StatusFooter from "./StatusFooter.svelte";
     import FlexiQueueToaster from "../Components/FlexiQueueToaster.svelte";
@@ -34,24 +35,35 @@
     const pageStore = usePage();
     const user = $derived($pageStore.props?.auth?.user ?? null);
     const roleLabel = $derived(user?.role ?? "");
+    const isSuperAdmin = $derived(user?.role === "super_admin");
     const currentPath = $derived($pageStore.url ?? "");
-
     function isActive(href) {
         if (href === "/admin/dashboard" || href === "/admin")
             return currentPath === href || currentPath === "/admin";
         return currentPath.startsWith(href);
     }
 
-    const navItems = [
+    const superAdminNavHrefs = [
+        "/admin/dashboard",
+        "/admin/users",
+        "/admin/sites",
+        "/admin/logs",
+        "/admin/settings",
+    ];
+    const allNavItems = [
         { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
         { href: "/admin/programs", label: "Programs", icon: FolderKanban },
         { href: "/admin/clients", label: "Clients", icon: IdCard },
         { href: "/admin/tokens", label: "Tokens", icon: Ticket },
         { href: "/admin/users", label: "Staff", icon: Users },
+        { href: "/admin/sites", label: "Sites", icon: Building2 },
         { href: "/admin/logs", label: "Audit log", icon: BarChart3 },
         { href: "/admin/analytics", label: "Analytics", icon: PieChart },
         { href: "/admin/settings", label: "System", icon: Settings },
     ];
+    const navItems = $derived(
+        isSuperAdmin ? allNavItems.filter((item) => superAdminNavHrefs.includes(item.href)) : allNavItems,
+    );
 </script>
 
 <div class="flex flex-col h-screen overflow-hidden bg-transparent">
@@ -214,6 +226,15 @@
                         />
                         <span class="capitalize">{roleLabel}</span>
                     </span>
+                    <button
+                        type="button"
+                        class="flex items-center gap-2 px-3 py-2 rounded-lg text-surface-700 hover:bg-surface-200 hover:text-surface-950 font-medium transition-colors touch-target-h border-0 bg-transparent cursor-pointer"
+                        onclick={() => router.post("/logout")}
+                        title="Log out"
+                    >
+                        <LogOut class="w-5 h-5 shrink-0 opacity-70" aria-hidden="true" />
+                        <span class="hidden sm:inline">Log out</span>
+                    </button>
                 </div>
             </header>
 

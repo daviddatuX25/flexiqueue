@@ -22,7 +22,7 @@
 	import PinOrQrInput from '../../Components/PinOrQrInput.svelte';
 	import UserAvatar from '../../Components/UserAvatar.svelte';
 	import ThemeToggle from '../../Components/ThemeToggle.svelte';
-	import { Camera, Settings } from 'lucide-svelte';
+	import { Camera, Settings, Monitor, FolderOpen, AlertCircle } from 'lucide-svelte';
 	import {
 		prepareDisplayTts,
 		cancelCurrentAnnouncement,
@@ -55,7 +55,12 @@
 		return '';
 	}
 
+/** A.2.4: programs list for selector when no program in URL; currentProgram when ?program= set; program_not_found when invalid/inactive id. A.4.2: fallback to program for transition. */
 let {
+	programs = [],
+	currentProgram = null,
+	program = null,
+	program_not_found = false,
 	program_name = null,
 	date = '',
 	now_serving = [],
@@ -80,6 +85,12 @@ let {
 	alternate_ratio = null,
 	station_selection_mode = null,
 } = $props();
+
+/** Effective program: currentProgram with fallback to program for transition. */
+const effectiveCurrentProgram = $derived(currentProgram ?? program);
+
+/** True when board content (now serving, queue, etc.) should be shown; false when showing program selector or "no program". */
+const showBoardContent = $derived(effectiveCurrentProgram != null && !program_not_found);
 
 /** Synced from prop + .program_status; when true, show "Program is paused" overlay (real-time). */
 let programIsPaused = $state(false);
@@ -147,7 +158,9 @@ let stationTtsByName = $state({});
 					scanHandled = false;
 				}
 				if (typeof window !== 'undefined') {
-					window.history.replaceState({}, '', '/display');
+					parsed.searchParams.delete('scan');
+					const search = parsed.searchParams.toString();
+					window.history.replaceState({}, '', parsed.pathname + (search ? '?' + search : ''));
 				}
 			}
 		} catch {
@@ -308,14 +321,12 @@ let stationTtsByName = $state({});
 		}
 	}
 
-	onMount(() => {
-		prepareDisplayTts((voices) => {
-			availableTtsVoices = (voices || []).map((v) => ({ name: v.name, lang: v.lang || '' }));
-		});
-		if (typeof window === 'undefined' || !window.Echo) return;
+	/** A.5: Subscribe to program-scoped channels only (display.activity.{programId}, queue.{programId}). No legacy channels. */
+	function setupEcho(programId) {
+		if (typeof window === 'undefined' || !window.Echo) return () => {};
+		if (programId == null) return () => {};
 		const echo = window.Echo;
-		const activityChannel = echo.channel('display.activity');
-		activityChannel.listen('.station_activity', (e) => {
+		const handler = (e) => {
 			const item = {
 				station_name: e.station_name ?? '—',
 				message: e.message ?? '',
@@ -338,19 +349,18 @@ let stationTtsByName = $state({});
 					})
 				);
 			}
-			// Per ISSUES-ELABORATION §10: refresh waiting/now serving so "Currently waiting" updates in realtime
 			refreshBoardData();
-		});
-		// Per flexiqueue-wrx: staff availability changes → refresh staff footer only
-		activityChannel.listen('.staff_availability', () => {
+		};
+		const leaves = [];
+		const programActivity = echo.channel(`display.activity.${programId}`);
+		programActivity.listen('.station_activity', handler);
+		programActivity.listen('.staff_availability', () => {
 			router.reload({ only: ['staff_at_stations', 'staff_online'] });
 		});
-		// Program paused/resumed → show or hide blocker overlay in real time
-		activityChannel.listen('.program_status', (e) => {
+		programActivity.listen('.program_status', (e) => {
 			programIsPaused = !!e.program_is_paused;
 		});
-		// Per plan: admin or PIN-verified user changed display settings → update local state (audio + HID + camera scanner)
-		activityChannel.listen('.display_settings', (e) => {
+		programActivity.listen('.display_settings', (e) => {
 			displayAudioMuted = !!e.display_audio_muted;
 			displayAudioVolume = Math.max(0, Math.min(1, Number(e.display_audio_volume ?? 1)));
 			if (typeof e.enable_display_hid_barcode === 'boolean') enableDisplayHidBarcode = e.enable_display_hid_barcode;
@@ -361,14 +371,25 @@ let stationTtsByName = $state({});
 			if (typeof e.display_tts_repeat_count === 'number') displayTtsRepeatCount = Math.max(1, Math.min(3, e.display_tts_repeat_count));
 			if (typeof e.display_tts_repeat_delay_ms === 'number') displayTtsRepeatDelayMs = Math.max(500, Math.min(10000, e.display_tts_repeat_delay_ms));
 		});
-		// Real-time: refresh Now Serving and waiting list when serve/transfer/complete (not only on activity)
-		const queueChannel = echo.channel('global.queue');
-		queueChannel.listen('.now_serving', refreshBoardData);
-		queueChannel.listen('.queue_length', refreshBoardData);
+		leaves.push(`display.activity.${programId}`);
+		const programQueue = echo.channel(`queue.${programId}`);
+		programQueue.listen('.now_serving', refreshBoardData);
+		programQueue.listen('.queue_length', refreshBoardData);
+		leaves.push(`queue.${programId}`);
 		return () => {
 			cancelCurrentAnnouncement();
-			echo.leave('display.activity');
-			echo.leave('global.queue');
+			leaves.forEach((ch) => echo.leave(ch));
+		};
+	}
+
+	onMount(() => {
+		prepareDisplayTts((voices) => {
+			availableTtsVoices = (voices || []).map((v) => ({ name: v.name, lang: v.lang || '' }));
+		});
+		const programId = effectiveCurrentProgram?.id ?? null;
+		const teardown = setupEcho(programId);
+		return () => {
+			if (teardown) teardown();
 		};
 	});
 
@@ -503,9 +524,68 @@ let stationTtsByName = $state({});
 	<title>Now Serving — FlexiQueue</title>
 </svelte:head>
 
-<DisplayLayout programName={program_name} {date}>
+<DisplayLayout programName={program_name ?? (effectiveCurrentProgram?.name ?? null)} {date}>
 	{#snippet children()}
 	<div class="relative">
+		{#if !showBoardContent}
+			<!-- A.2.4: Program selector / empty state — per 07-UI-UX-SPECS empty-state pattern and PublicStart "not available" (neutral surface, no warning/error). -->
+			<div class="flex flex-col gap-6 max-w-4xl mx-auto pb-28 px-4">
+				{#if program_not_found}
+					<div
+						role="status"
+						class="rounded-container bg-surface-50 border border-surface-200 p-6 md:p-8 text-center shadow-sm"
+						aria-label="Program not found"
+					>
+						<div class="bg-surface-100 p-4 rounded-full text-surface-500 inline-flex mb-4" aria-hidden="true">
+							<AlertCircle class="w-8 h-8" />
+						</div>
+						<h2 class="text-xl font-bold text-surface-950 mb-2">Program not found</h2>
+						<p class="text-surface-600 mb-4">The selected program is invalid or inactive. Choose a program below.</p>
+					</div>
+				{/if}
+				{#if programs && programs.length > 0}
+					<section
+						role="status"
+						class="flex flex-col gap-6"
+						aria-label="Select a program"
+					>
+						<div class="text-center">
+							<h1 class="text-xl font-bold text-surface-950 mb-1">Select a program</h1>
+							<p class="text-surface-600 text-sm">Choose a program to view its display board.</p>
+						</div>
+						<ul class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+							{#each programs as prog (prog.id)}
+								<li>
+									<button
+										type="button"
+										class="card bg-surface-50 border border-surface-200 rounded-container shadow-sm w-full flex flex-col items-center justify-center p-6 min-h-[120px] touch-target-h text-center hover:border-primary-300 hover:bg-primary-50/50 focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors"
+										onclick={() => router.visit(`/display?program=${prog.id}`)}
+									>
+										<div class="bg-surface-100 p-3 rounded-full text-surface-500 mb-3" aria-hidden="true">
+											<Monitor class="w-6 h-6" />
+										</div>
+										<span class="font-semibold text-surface-950">{prog.name}</span>
+										<span class="text-xs text-surface-500 mt-1">View board</span>
+									</button>
+								</li>
+							{/each}
+						</ul>
+					</section>
+				{:else}
+					<div
+						role="status"
+						class="rounded-container bg-surface-50 border border-surface-200 p-8 md:p-12 flex flex-col items-center justify-center text-center shadow-sm"
+						aria-label="No active program"
+					>
+						<div class="bg-surface-100 p-4 rounded-full text-surface-400 mb-4" aria-hidden="true">
+							<FolderOpen class="w-8 h-8" />
+						</div>
+						<h2 class="text-lg font-semibold text-surface-950 mb-2">No active program</h2>
+						<p class="text-surface-600 max-w-sm mt-1">There are no programs available for the display board.</p>
+					</div>
+				{/if}
+			</div>
+		{:else}
 		{#if programIsPaused}
 			<div
 				class="absolute inset-0 z-10 flex items-center justify-center bg-surface-950/80 rounded-container min-h-[280px]"
@@ -557,8 +637,18 @@ let stationTtsByName = $state({});
 
 			<!-- Scan section: HID barcode input and/or camera scanner CTA. Section always visible for Settings. -->
 		<section>
-			<div class="flex items-center justify-between gap-2 mb-3">
+			<div class="flex items-center justify-between gap-2 mb-3 flex-wrap">
 				<h2 class="text-xl font-bold text-surface-950">CHECK YOUR STATUS</h2>
+				<div class="flex items-center gap-2">
+					{#if programs && programs.length > 1}
+						<button
+							type="button"
+							class="btn preset-tonal text-sm touch-target-h"
+							onclick={() => router.visit('/display')}
+						>
+							Change program
+						</button>
+					{/if}
 				<button
 					type="button"
 					class="btn btn-icon preset-tonal shrink-0 touch-target"
@@ -568,6 +658,7 @@ let stationTtsByName = $state({});
 				>
 					<Settings class="w-5 h-5" />
 				</button>
+				</div>
 			</div>
 			{#if !enableDisplayHidBarcode && !effectiveAllowCameraScanner}
 				<p class="text-sm text-surface-950/80 rounded-container border border-surface-200 bg-surface-50 p-4">
@@ -943,9 +1034,11 @@ let stationTtsByName = $state({});
 			{/if}
 		</section>
 		</div>
+		{/if}
 	</div>
 
-	<!-- Fixed footer: staff and availability only. Marquee-style single row in dark mode. -->
+	<!-- Fixed footer: staff and availability only when a program is selected. -->
+	{#if showBoardContent}
 	<footer
 		class="display-footer fixed bottom-0 left-0 right-0 z-30 px-4 py-3 bg-surface-800 text-surface-100 shadow-[0_-4px_12px_rgba(0,0,0,0.08)]"
 		aria-label="Staff on duty"
@@ -995,5 +1088,6 @@ let stationTtsByName = $state({});
 			{/if}
 		</div>
 	</footer>
+	{/if}
 	{/snippet}
 </DisplayLayout>

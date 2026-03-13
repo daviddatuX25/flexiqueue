@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\StationPageController;
 use App\Models\PermissionRequest;
 use App\Models\Program;
 use App\Models\Station;
 use App\Models\TemporaryAuthorization;
 use App\Services\StationQueueService;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -14,6 +16,7 @@ use Inertia\Response;
 /**
  * Program Overrides page: Generate PIN/QR, view and manage permission requests.
  * Per TRACK-OVERRIDES-REFACTOR: tracks, authorizations list, target_track.
+ * Per follow-up: admin/supervisor with no station use same session program as Station/Triage; pass canSwitchProgram for footer.
  */
 class ProgramOverridesPageController extends Controller
 {
@@ -21,12 +24,38 @@ class ProgramOverridesPageController extends Controller
         private StationQueueService $stationQueueService
     ) {}
 
-    public function __invoke(Request $request): Response
+    public function __invoke(Request $request): Response|RedirectResponse
     {
         $user = $request->user();
         $canApprove = $user->isAdmin() || $user->isSupervisorForAnyProgram();
+        $isAdminOrSupervisorWithoutStation = ($user->isAdmin() || $user->isSupervisorForAnyProgram()) && $user->assignedStation === null;
 
-        $program = Program::where('is_active', true)->first();
+        // Staff with per-program station assignments in more than one active program can choose
+        // which program overrides context to work in; shares session key with Station/Triage.
+        $staffHasMultiProgramAssignments = ! $user->isAdmin()
+            && ! $user->isSupervisorForAnyProgram()
+            && $user->programStationAssignments()
+                ->whereHas('program', fn ($q) => $q->where('is_active', true))
+                ->distinct('program_id')
+                ->count('program_id') > 1;
+
+        $canSwitchProgram = $isAdminOrSupervisorWithoutStation || $staffHasMultiProgramAssignments;
+
+        // Optional ?program=id: set session and redirect (shared with Station/Triage).
+        if ($canSwitchProgram && $request->has('program')) {
+            $programId = (int) $request->query('program');
+            $programModel = Program::query()->where('id', $programId)->where('is_active', true)->first();
+            if ($programModel) {
+                $request->session()->put(StationPageController::SESSION_KEY_PROGRAM_ID, $programModel->id);
+
+                return redirect('/program-overrides');
+            }
+        }
+
+        // Shared resolver with Station/Triage:
+        // - Session key → assigned station program → first active program.
+        $program = StationPageController::resolveProgramForStaffWithoutStation($request);
+        $program = $program && $program->is_active ? $program : null;
         $footerStats = $this->stationQueueService->getProgramFooterStats($program);
         $stations = [];
         $tracks = [];
@@ -94,8 +123,42 @@ class ProgramOverridesPageController extends Controller
             'target_track' => $pr->targetTrack ? ['id' => $pr->targetTrack->id, 'name' => $pr->targetTrack->name] : null,
         ])->values()->all();
 
+        $programsForSelector = [];
+        if ($canSwitchProgram) {
+            $query = Program::query()
+                ->where('is_active', true)
+                ->orderBy('name');
+
+            if ($staffHasMultiProgramAssignments) {
+                $assignedProgramIds = $user->programStationAssignments()
+                    ->whereHas('program', fn ($q) => $q->where('is_active', true))
+                    ->pluck('program_id')
+                    ->unique()
+                    ->all();
+
+                $query->whereIn('id', $assignedProgramIds);
+            }
+
+            $programsForSelector = $query
+                ->get(['id', 'name'])
+                ->map(fn (Program $p) => ['id' => $p->id, 'name' => $p->name])
+                ->values()
+                ->all();
+        }
+
+        $currentProgramPayload = $program ? [
+            'id' => $program->id,
+            'name' => $program->name,
+            'is_active' => $program->is_active,
+            'is_paused' => $program->is_paused ?? false,
+        ] : null;
+
         return Inertia::render('ProgramOverrides/Index', [
             'canApprove' => $canApprove,
+            'canSwitchProgram' => $canSwitchProgram,
+            'programs' => $programsForSelector,
+            'activeProgram' => $currentProgramPayload,
+            'currentProgram' => $currentProgramPayload,
             'stations' => $stations,
             'tracks' => $tracks,
             'authorizations' => $authorizations,

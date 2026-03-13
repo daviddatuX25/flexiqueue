@@ -20,6 +20,8 @@ use App\Http\Requests\ServeSessionRequest;
 use App\Http\Requests\TransferSessionRequest;
 use App\Http\Resources\SessionResource;
 use App\Exceptions\IdentityBindingException;
+use App\Http\Controllers\StationPageController;
+use App\Models\Program;
 use App\Models\Session;
 use App\Models\User;
 use App\Services\PinService;
@@ -55,16 +57,45 @@ class SessionController extends Controller
 
     /**
      * Bind token to new session. Per spec §3.1.
+     * Per central-edge A.2.2: staff must have assigned station; program resolved from station.
      */
     public function bind(BindSessionRequest $request): JsonResponse
     {
+        $user = $request->user();
+        $programId = $user->assignedStation?->program_id;
+
+        // Per central-edge follow-up: admin/supervisor with no assigned station uses session-selected program context.
+        if ($programId === null) {
+            if (! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
+                return response()->json(['message' => 'No station assigned.'], 422);
+            }
+
+            $programId = $request->validated('program_id');
+            if ($programId === null) {
+                $programId = $request->session()->get(StationPageController::SESSION_KEY_PROGRAM_ID);
+            }
+
+            $program = $programId ? Program::query()->where('id', (int) $programId)->where('is_active', true)->first() : null;
+            if (! $program) {
+                return response()->json(['message' => 'Program not selected or inactive.'], 422);
+            }
+            if (! $user->isAdmin() && ! $user->isSupervisorForProgram($program->id)) {
+                return response()->json(['message' => 'Forbidden.'], 403);
+            }
+
+            $programId = $program->id;
+        }
+
         try {
             $result = $this->sessionService->bind(
                 $request->validated('qr_hash'),
                 (int) $request->validated('track_id'),
                 $request->validated('client_category'),
-                $request->user()->id,
-                $request->validated('client_binding')
+                $user->id,
+                $request->validated('client_binding'),
+                null,
+                null,
+                $programId
             );
         } catch (IdentityBindingException $e) {
             return response()->json([

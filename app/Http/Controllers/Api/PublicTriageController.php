@@ -42,8 +42,24 @@ class PublicTriageController extends Controller
     ) {}
 
     /**
-     * GET /api/public/token-lookup?qr_hash=... or ?physical_id=...
-     * Returns { physical_id, qr_hash, status }. 403 when public triage disabled.
+     * Resolve program from program_id; return 403 if missing, inactive, or allow_public_triage false.
+     */
+    private function resolveProgramForPublicTriage(?int $programId): ?Program
+    {
+        if ($programId === null) {
+            return null;
+        }
+        $program = Program::find($programId);
+        if (! $program || ! $program->is_active || ! $program->settings()->getAllowPublicTriage()) {
+            return null;
+        }
+
+        return $program;
+    }
+
+    /**
+     * GET /api/public/token-lookup?qr_hash=...&program_id=... or ?physical_id=...&program_id=...
+     * Returns { physical_id, qr_hash, status }. 403 when program_id missing/invalid or public triage disabled.
      */
     public function tokenLookup(Request $request): JsonResponse
     {
@@ -52,8 +68,9 @@ class PublicTriageController extends Controller
             return response()->json(['message' => 'Too many requests. Try again later.'], 429);
         }
 
-        $program = Program::where('is_active', true)->first();
-        if (! $program || ! $program->settings()->getAllowPublicTriage()) {
+        $programId = $request->query('program_id') !== null ? (int) $request->query('program_id') : null;
+        $program = $this->resolveProgramForPublicTriage($programId);
+        if (! $program) {
             return response()->json(['message' => 'Public self-serve triage is not available.'], 403);
         }
 
@@ -88,9 +105,9 @@ class PublicTriageController extends Controller
     }
 
     /**
-     * POST /api/public/sessions/bind — qr_hash, track_id, optional client_category (default Regular).
+     * POST /api/public/sessions/bind — program_id, qr_hash, track_id, optional client_category (default Regular).
      * Optional identity_registration_request (name?, birth_year?, client_category?) when ID not found; mutually exclusive with client_binding.
-     * 403 when public triage disabled. 201 on success. When identity_registration_request and allow_unverified_entry false, returns request_submitted (no session).
+     * 403 when program_id missing/invalid or public triage disabled. 201 on success. When identity_registration_request and allow_unverified_entry false, returns request_submitted (no session).
      */
     public function bind(BindSessionRequest $request): JsonResponse
     {
@@ -99,8 +116,9 @@ class PublicTriageController extends Controller
             return response()->json(['message' => 'Too many requests. Try again later.'], 429);
         }
 
-        $program = Program::where('is_active', true)->first();
-        if (! $program || ! $program->settings()->getAllowPublicTriage()) {
+        $programId = $request->validated('program_id');
+        $program = $programId !== null ? $this->resolveProgramForPublicTriage((int) $programId) : null;
+        if (! $program) {
             return response()->json(['message' => 'Public self-serve triage is not available.'], 403);
         }
 
@@ -181,7 +199,8 @@ class PublicTriageController extends Controller
                     null,
                     null,
                     'public_triage',
-                    $registration->id
+                    $registration->id,
+                    $program->id
                 );
             } catch (\InvalidArgumentException $e) {
                 $code = $e->getCode() === 422 ? 422 : 400;
@@ -274,7 +293,10 @@ class PublicTriageController extends Controller
                 $trackId,
                 $clientCategory,
                 null,
-                $request->validated('client_binding')
+                $request->validated('client_binding'),
+                null,
+                null,
+                $program->id
             );
         } catch (IdentityBindingException $e) {
             return response()->json([
@@ -365,7 +387,7 @@ class PublicTriageController extends Controller
 
     /**
      * POST /api/public/clients/lookup-by-id — limited identity lookup for public triage.
-     * No auth. Rate limited. 403 when program does not allow public binding.
+     * No auth. Rate limited. Requires program_id in body. 403 when program_id missing/invalid or program does not allow public binding.
      *
      * Response shape mirrors staff /api/clients/lookup-by-id but never returns raw ID numbers:
      * - { match_status: 'not_found', client: null }
@@ -382,8 +404,9 @@ class PublicTriageController extends Controller
             return response()->json(['message' => 'Too many requests. Try again later.'], 429);
         }
 
-        $program = Program::where('is_active', true)->first();
-        if (! $program || ! $program->settings()->allowsPublicBinding()) {
+        $programId = $request->validated('program_id');
+        $program = $programId !== null ? Program::find((int) $programId) : null;
+        if (! $program || ! $program->is_active || ! $program->settings()->allowsPublicBinding()) {
             return response()->json(['message' => 'Public identity binding is not available.'], 403);
         }
 

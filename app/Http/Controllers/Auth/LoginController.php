@@ -95,7 +95,7 @@ class LoginController extends Controller
     private function redirectByRole(UserRole $role): RedirectResponse
     {
         return match ($role) {
-            UserRole::Admin => redirect()->route('admin.dashboard'),
+            UserRole::Admin, UserRole::SuperAdmin => redirect()->route('admin.dashboard'),
             UserRole::Staff => redirect()->route('station'),
         };
     }

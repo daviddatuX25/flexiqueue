@@ -8,15 +8,16 @@ use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 
 /**
- * Per flexiqueue-wrx: broadcast staff availability change to display.activity
+ * Per flexiqueue-wrx: broadcast staff availability change to display.activity.{programId}
  * so the public display board can refresh staff list in real time.
- * Public channel; payload minimal (no sensitive data).
+ * Per central-edge-v2-final Phase A: program-scoped channel only. Omit broadcast when user has no assigned program.
  */
 class StaffAvailabilityUpdated implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets;
 
     public function __construct(
+        public int $programId,
         public int $userId,
         public string $availabilityStatus,
         public string $name
@@ -28,7 +29,7 @@ class StaffAvailabilityUpdated implements ShouldBroadcastNow
     public function broadcastOn(): array
     {
         return [
-            new Channel('display.activity'),
+            new Channel('display.activity.'.$this->programId),
         ];
     }
 

@@ -20,14 +20,15 @@ class PublicDisplaySettingsController extends Controller
     ) {}
 
     /**
-     * Update display and triage settings. Authorization must be from an admin or supervisor of the active program.
+     * Update display and triage settings. Authorization must be from an admin or supervisor of the program.
+     * Per central-edge Phase A: program_id required in request; no single-active.
      */
     public function update(UpdatePublicDisplaySettingsRequest $request): JsonResponse
     {
-        $program = Program::query()->where('is_active', true)->first();
+        $program = Program::find((int) $request->validated('program_id'));
 
-        if (! $program) {
-            return response()->json(['message' => 'No active program.'], 400);
+        if (! $program || ! $program->is_active) {
+            return response()->json(['message' => 'Program not found or inactive.'], 400);
         }
 
         $auth = $this->authService->verify($request->validated(), $program, $request);
@@ -61,6 +62,7 @@ class PublicDisplaySettingsController extends Controller
         $program = $program->fresh();
 
         event(new DisplaySettingsUpdated(
+            $program->id,
             $program->settings()->getDisplayAudioMuted(),
             $program->settings()->getDisplayAudioVolume(),
             $program->settings()->getEnableDisplayHidBarcode(),

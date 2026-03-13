@@ -184,6 +184,7 @@ class ClientIdentityApiTest extends TestCase
             'capacity' => 1,
             'is_active' => true,
         ]);
+        $staff->update(['assigned_station_id' => $station->id]);
         $process = Process::create(['program_id' => $program->id, 'name' => 'P1', 'description' => null]);
         \Illuminate\Support\Facades\DB::table('station_process')->insert([
             'station_id' => $station->id,
@@ -236,6 +237,7 @@ class ClientIdentityApiTest extends TestCase
             'capacity' => 1,
             'is_active' => true,
         ]);
+        $staff->update(['assigned_station_id' => $station->id]);
         $process = Process::create(['program_id' => $program->id, 'name' => 'P1', 'description' => null]);
         \Illuminate\Support\Facades\DB::table('station_process')->insert([
             'station_id' => $station->id,
@@ -319,6 +321,7 @@ class ClientIdentityApiTest extends TestCase
             'capacity' => 1,
             'is_active' => true,
         ]);
+        $staff->update(['assigned_station_id' => $station->id]);
         $process = Process::create(['program_id' => $program->id, 'name' => 'P1', 'description' => null]);
         \Illuminate\Support\Facades\DB::table('station_process')->insert([
             'station_id' => $station->id,

@@ -188,14 +188,14 @@ class PinService
     }
 
     /**
-     * Validate PIN for public display-settings: PIN must match a supervisor of the active program or an admin.
-     * Used by public display/triage settings API (no auth). Returns user info on success.
+     * Validate PIN for public display-settings: PIN must match a supervisor of the program or an admin.
+     * Per central-edge Phase A: programId from request; no single-active.
      *
      * @return array{verified: true, user_id: int, role: string}|null
      */
-    public function validatePinForActiveProgram(string $pin): ?array
+    public function validatePinForProgram(int $programId, string $pin): ?array
     {
-        $program = Program::query()->where('is_active', true)->first();
+        $program = Program::find($programId);
         if (! $program) {
             return null;
         }

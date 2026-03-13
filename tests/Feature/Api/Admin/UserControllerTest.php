@@ -3,9 +3,11 @@
 namespace Tests\Feature\Api\Admin;
 
 use App\Models\Program;
+use App\Models\Site;
 use App\Models\Station;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -26,9 +28,17 @@ class UserControllerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->admin = User::factory()->admin()->create();
-        $this->staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        $site = Site::create([
+            'name' => 'Default Site',
+            'slug' => 'default',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $this->admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $this->staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id, 'assigned_station_id' => null]);
         $program = Program::create([
+            'site_id' => $site->id,
             'name' => 'Test Program',
             'description' => null,
             'is_active' => true,

@@ -5,8 +5,10 @@ namespace Tests\Feature\Api\Admin;
 use App\Models\Program;
 use App\Models\ProgramStationAssignment;
 use App\Models\ServiceTrack;
+use App\Models\Site;
 use App\Models\Station;
 use App\Models\User;
+use Illuminate\Support\Str;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -29,11 +31,19 @@ class ProgramStaffControllerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->admin = User::factory()->admin()->create();
-        $this->staff1 = User::factory()->create(['role' => 'staff']);
-        $this->staff2 = User::factory()->create(['role' => 'staff']);
+        $site = Site::create([
+            'name' => 'Default Site',
+            'slug' => 'default',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $this->admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $this->staff1 = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $this->staff2 = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
 
         $this->program = Program::create([
+            'site_id' => $site->id,
             'name' => 'Test Program',
             'description' => null,
             'is_active' => true,
@@ -148,7 +158,11 @@ class ProgramStaffControllerTest extends TestCase
 
     public function test_add_supervisor_requires_override_pin(): void
     {
-        $staffNoPin = User::factory()->create(['role' => 'staff', 'override_pin' => null]);
+        $staffNoPin = User::factory()->create([
+            'role' => 'staff',
+            'override_pin' => null,
+            'site_id' => $this->program->site_id,
+        ]);
 
         $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$this->program->id}/supervisors", [
             'user_id' => $staffNoPin->id,
@@ -160,7 +174,9 @@ class ProgramStaffControllerTest extends TestCase
 
     public function test_add_supervisor_with_pin_returns_201(): void
     {
-        $staffWithPin = User::factory()->supervisor()->withOverridePin('123456')->create();
+        $staffWithPin = User::factory()->supervisor()->withOverridePin('123456')->create([
+            'site_id' => $this->program->site_id,
+        ]);
 
         $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$this->program->id}/supervisors", [
             'user_id' => $staffWithPin->id,
@@ -177,7 +193,9 @@ class ProgramStaffControllerTest extends TestCase
 
     public function test_remove_supervisor_returns_200(): void
     {
-        $staffWithPin = User::factory()->supervisor()->withOverridePin('123456')->create();
+        $staffWithPin = User::factory()->supervisor()->withOverridePin('123456')->create([
+            'site_id' => $this->program->site_id,
+        ]);
         $this->program->supervisedBy()->attach($staffWithPin->id);
 
         $response = $this->actingAs($this->admin)->deleteJson("/api/admin/programs/{$this->program->id}/supervisors/{$staffWithPin->id}");
@@ -193,5 +211,50 @@ class ProgramStaffControllerTest extends TestCase
     {
         $response = $this->actingAs($this->staff1)->getJson("/api/admin/programs/{$this->program->id}/staff-assignments");
         $response->assertStatus(403);
+    }
+
+    /** Per central-edge follow-up: allow multi-program assignment; API returns warning when staff already in another program. */
+    public function test_assign_staff_to_second_program_returns_201_with_warning_when_already_assigned_to_another(): void
+    {
+        ProgramStationAssignment::create([
+            'program_id' => $this->program->id,
+            'user_id' => $this->staff1->id,
+            'station_id' => $this->station1->id,
+        ]);
+
+        $programB = Program::create([
+            'site_id' => $this->program->site_id,
+            'name' => 'Program B',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $this->admin->id,
+        ]);
+        $stationB = Station::create([
+            'program_id' => $programB->id,
+            'name' => 'Station B',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        ServiceTrack::create([
+            'program_id' => $programB->id,
+            'name' => 'Default',
+            'is_default' => true,
+            'color_code' => '#333',
+        ]);
+
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$programB->id}/staff-assignments", [
+            'user_id' => $this->staff1->id,
+            'station_id' => $stationB->id,
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('user_id', $this->staff1->id);
+        $response->assertJsonPath('station_id', $stationB->id);
+        $response->assertJsonPath('warning', 'This staff is already assigned to another program. On the day, they can only work in one program at a time (they will choose or be assigned to one).');
+        $this->assertDatabaseHas('program_station_assignments', [
+            'program_id' => $programB->id,
+            'user_id' => $this->staff1->id,
+            'station_id' => $stationB->id,
+        ]);
     }
 }

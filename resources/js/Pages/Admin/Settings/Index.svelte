@@ -49,6 +49,8 @@
     }
 
     const page = usePage();
+    const authUser = $derived((page?.props as { auth?: { user?: { role?: string } } })?.auth?.user);
+    const canManageIntegrations = $derived(authUser?.role === "super_admin");
 
     const MSG_SESSION_EXPIRED = "Session expired. Please refresh and try again.";
     const MSG_NETWORK_ERROR = "Network error. Please try again.";
@@ -597,7 +599,7 @@
     onMount(() => {
         fetchSummary();
         const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-        if (params?.get("tab") === "integrations") {
+        if (params?.get("tab") === "integrations" && canManageIntegrations) {
             activeTab = "integrations";
             fetchElevenLabsStatus();
             fetchUsage();
@@ -650,16 +652,18 @@
                 <HardDrive class="w-4 h-4 shrink-0" />
                 Storage
             </button>
-            <button
-                type="button"
-                class="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors touch-target-h {activeTab === 'integrations'
-                    ? 'bg-primary-500 text-primary-contrast-500 shadow-sm'
-                    : 'text-surface-700 hover:bg-surface-200 hover:text-surface-950'}"
-                onclick={() => selectTab("integrations")}
-            >
-                <Plug2 class="w-4 h-4 shrink-0" />
-                Integrations
-            </button>
+            {#if canManageIntegrations}
+                <button
+                    type="button"
+                    class="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors touch-target-h {activeTab === 'integrations'
+                        ? 'bg-primary-500 text-primary-contrast-500 shadow-sm'
+                        : 'text-surface-700 hover:bg-surface-200 hover:text-surface-950'}"
+                    onclick={() => selectTab("integrations")}
+                >
+                    <Plug2 class="w-4 h-4 shrink-0" />
+                    Integrations
+                </button>
+            {/if}
         </div>
 
         {#if activeTab === "storage"}
@@ -987,6 +991,7 @@
             </p>
         </section>
         {:else if activeTab === "integrations"}
+        {#if canManageIntegrations}
         <!-- Integrations: ElevenLabs -->
         <section
             class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6 flex flex-col gap-6"
@@ -1280,6 +1285,11 @@
                 </p>
             {/if}
         </section>
+        {:else}
+            <p class="text-surface-600 font-medium rounded-container border border-surface-200 bg-surface-50 p-4">
+                Only platform administrators can manage integrations.
+            </p>
+        {/if}
         {/if}
     </div>
 

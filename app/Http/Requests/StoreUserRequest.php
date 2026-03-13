@@ -27,6 +27,7 @@ class StoreUserRequest extends FormRequest
             'password' => ['required', 'string', 'min:8', 'max:255'],
             'role' => ['required', 'string', Rule::enum(UserRole::class)],
             'override_pin' => ['nullable', 'string', 'size:6', 'regex:/^\d{6}$/'],
+            'site_id' => ['nullable', 'integer', 'exists:sites,id'],
         ];
     }
 

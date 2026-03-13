@@ -26,6 +26,8 @@ class DisplayBoardTest extends TestCase
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
             ->component('Display/Board')
+            ->has('programs')
+            ->has('currentProgram')
             ->has('program_name')
             ->has('date')
             ->has('now_serving')
@@ -95,7 +97,7 @@ class DisplayBoardTest extends TestCase
         ]);
         $token->update(['current_session_id' => Session::first()->id]);
 
-        $response = $this->get('/display');
+        $response = $this->get('/display?program='.$program->id);
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -130,7 +132,7 @@ class DisplayBoardTest extends TestCase
             'is_paused' => true,
             'created_by' => $user->id,
         ]);
-        $response = $this->get('/display');
+        $response = $this->get('/display?program='.$program->id);
         $response->assertStatus(200);
         $data = $response->viewData('page')['props'];
         $this->assertTrue($data['program_is_paused']);
@@ -148,7 +150,7 @@ class DisplayBoardTest extends TestCase
             'created_by' => $user->id,
             'settings' => ['display_scan_timeout_seconds' => 120],
         ]);
-        $response = $this->get('/display');
+        $response = $this->get('/display?program='.$program->id);
         $response->assertStatus(200);
         $data = $response->viewData('page')['props'];
         $this->assertSame(120, $data['display_scan_timeout_seconds']);
@@ -191,7 +193,7 @@ class DisplayBoardTest extends TestCase
         ]);
         $token->update(['current_session_id' => Session::first()->id]);
 
-        $response = $this->get('/display');
+        $response = $this->get('/display?program='.$program->id);
 
         $response->assertStatus(200);
         $data = $response->viewData('page')['props'];
@@ -234,7 +236,7 @@ class DisplayBoardTest extends TestCase
             'availability_status' => 'away',
         ]);
 
-        $response = $this->get('/display');
+        $response = $this->get('/display?program='.$program->id);
 
         $response->assertStatus(200);
         $props = $response->viewData('page')['props'];
@@ -306,7 +308,7 @@ class DisplayBoardTest extends TestCase
             'action_type' => 'check_in',
         ]);
 
-        $response = $this->get('/display');
+        $response = $this->get('/display?program='.$program->id);
 
         $response->assertStatus(200);
         $props = $response->viewData('page')['props'];
@@ -371,7 +373,7 @@ class DisplayBoardTest extends TestCase
             'action_type' => 'bind',
         ]);
 
-        $response = $this->get('/display');
+        $response = $this->get('/display?program='.$program->id);
 
         $response->assertStatus(200);
         $props = $response->viewData('page')['props'];
@@ -776,7 +778,7 @@ class DisplayBoardTest extends TestCase
             ],
         ]);
 
-        $response = $this->get('/display');
+        $response = $this->get('/display?program='.$program->id);
 
         $response->assertStatus(200);
         $props = $response->viewData('page')['props'];
@@ -790,7 +792,7 @@ class DisplayBoardTest extends TestCase
     public function test_display_board_includes_tts_repeat_settings_when_program_has_them(): void
     {
         $user = User::factory()->create();
-        Program::create([
+        $program = Program::create([
             'name' => 'Test',
             'description' => null,
             'is_active' => true,
@@ -801,7 +803,7 @@ class DisplayBoardTest extends TestCase
             ],
         ]);
 
-        $response = $this->get('/display');
+        $response = $this->get('/display?program='.$program->id);
 
         $response->assertStatus(200);
         $props = $response->viewData('page')['props'];
@@ -826,5 +828,232 @@ class DisplayBoardTest extends TestCase
         $this->assertArrayHasKey('display_tts_repeat_delay_ms', $props);
         $this->assertSame(1, $props['display_tts_repeat_count']);
         $this->assertSame(2000, $props['display_tts_repeat_delay_ms']);
+    }
+
+    // --- A.2.4 Display board program resolution (query param ?program=, selector when absent) ---
+
+    /** GET /display with no query returns programs list and no single program; empty board state. */
+    public function test_display_board_without_program_param_returns_programs_and_selector_state(): void
+    {
+        $user = User::factory()->create();
+        Program::create([
+            'name' => 'Program A',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        Program::create([
+            'name' => 'Program B',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+
+        $response = $this->get('/display');
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->component('Display/Board')
+            ->has('programs')
+            ->has('currentProgram')
+        );
+        $props = $response->viewData('page')['props'];
+        $this->assertNull($props['currentProgram']);
+        $this->assertIsArray($props['programs']);
+        $this->assertCount(2, $props['programs']);
+        $names = array_column($props['programs'], 'name');
+        $this->assertContains('Program A', $names);
+        $this->assertContains('Program B', $names);
+        foreach ($props['programs'] as $p) {
+            $this->assertArrayHasKey('id', $p);
+            $this->assertArrayHasKey('name', $p);
+        }
+        $this->assertNull($props['program_name']);
+        $this->assertSame([], $props['now_serving']);
+        $this->assertSame(0, $props['total_in_queue']);
+    }
+
+    /** GET /display?program=1 with active program returns board data and currentProgram. */
+    public function test_display_board_with_program_param_returns_board_for_that_program(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Cash Assistance',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Interview',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $track = ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'Priority',
+            'is_default' => true,
+        ]);
+        $token = new \App\Models\Token;
+        $token->qr_code_hash = hash('sha256', Str::random(32));
+        $token->physical_id = 'A1';
+        $token->status = 'in_use';
+        $token->save();
+        Session::create([
+            'token_id' => $token->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'A1',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+        ]);
+        $token->update(['current_session_id' => Session::first()->id]);
+
+        $response = $this->get('/display?program='.$program->id);
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->component('Display/Board')
+            ->where('program_name', 'Cash Assistance')
+            ->where('total_in_queue', 1)
+            ->has('currentProgram')
+        );
+        $props = $response->viewData('page')['props'];
+        $this->assertNotNull($props['currentProgram']);
+        $this->assertSame($program->id, $props['currentProgram']['id']);
+        $this->assertSame('Cash Assistance', $props['currentProgram']['name']);
+        $this->assertCount(1, $props['now_serving']);
+        $this->assertSame('A1', $props['now_serving'][0]['alias']);
+    }
+
+    /** GET /display?program=999 (invalid id) returns 200 with program_not_found and empty board. */
+    public function test_display_board_with_invalid_program_param_returns_not_found_state(): void
+    {
+        $response = $this->get('/display?program=99999');
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->component('Display/Board')
+            ->has('program_not_found')
+        );
+        $props = $response->viewData('page')['props'];
+        $this->assertTrue($props['program_not_found']);
+        $this->assertNull($props['program_name']);
+        $this->assertSame([], $props['now_serving']);
+        $this->assertSame(0, $props['total_in_queue']);
+    }
+
+    /** GET /display?program=X with inactive program returns program_not_found and empty board. */
+    public function test_display_board_with_inactive_program_param_returns_not_found_state(): void
+    {
+        $user = User::factory()->create();
+        $program = Program::create([
+            'name' => 'Inactive Program',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $user->id,
+        ]);
+
+        $response = $this->get('/display?program='.$program->id);
+
+        $response->assertStatus(200);
+        $props = $response->viewData('page')['props'];
+        $this->assertTrue($props['program_not_found']);
+        $this->assertNull($props['program_name']);
+        $this->assertSame([], $props['now_serving']);
+        $this->assertSame(0, $props['total_in_queue']);
+    }
+
+    /** A.6.2: When two programs are active, each display board view shows only its own program's sessions. */
+    public function test_multi_program_display_board_is_isolated_per_program(): void
+    {
+        $user = User::factory()->create();
+
+        // Program A with one serving session
+        $programA = Program::create([
+            'name' => 'Program A',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $stationA = Station::create([
+            'program_id' => $programA->id,
+            'name' => 'A Station',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $trackA = ServiceTrack::create([
+            'program_id' => $programA->id,
+            'name' => 'Track A',
+            'is_default' => true,
+        ]);
+        $tokenA = new \App\Models\Token;
+        $tokenA->qr_code_hash = hash('sha256', Str::random(32));
+        $tokenA->physical_id = 'A1';
+        $tokenA->status = 'in_use';
+        $tokenA->save();
+        Session::create([
+            'token_id' => $tokenA->id,
+            'program_id' => $programA->id,
+            'track_id' => $trackA->id,
+            'alias' => 'A1',
+            'current_station_id' => $stationA->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+        ]);
+        $tokenA->update(['current_session_id' => Session::where('alias', 'A1')->first()->id]);
+
+        // Program B with one serving session
+        $programB = Program::create([
+            'name' => 'Program B',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $stationB = Station::create([
+            'program_id' => $programB->id,
+            'name' => 'B Station',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $trackB = ServiceTrack::create([
+            'program_id' => $programB->id,
+            'name' => 'Track B',
+            'is_default' => true,
+        ]);
+        $tokenB = new \App\Models\Token;
+        $tokenB->qr_code_hash = hash('sha256', Str::random(32));
+        $tokenB->physical_id = 'B1';
+        $tokenB->status = 'in_use';
+        $tokenB->save();
+        Session::create([
+            'token_id' => $tokenB->id,
+            'program_id' => $programB->id,
+            'track_id' => $trackB->id,
+            'alias' => 'B1',
+            'current_station_id' => $stationB->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+        ]);
+        $tokenB->update(['current_session_id' => Session::where('alias', 'B1')->first()->id]);
+
+        // Board for Program A: only A1 visible
+        $responseA = $this->get('/display?program='.$programA->id);
+        $responseA->assertStatus(200);
+        $propsA = $responseA->viewData('page')['props'];
+        $this->assertSame('Program A', $propsA['program_name']);
+        $aliasesA = array_column($propsA['now_serving'], 'alias');
+        $this->assertContains('A1', $aliasesA);
+        $this->assertNotContains('B1', $aliasesA);
+
+        // Board for Program B: only B1 visible
+        $responseB = $this->get('/display?program='.$programB->id);
+        $responseB->assertStatus(200);
+        $propsB = $responseB->viewData('page')['props'];
+        $this->assertSame('Program B', $propsB['program_name']);
+        $aliasesB = array_column($propsB['now_serving'], 'alias');
+        $this->assertContains('B1', $aliasesB);
+        $this->assertNotContains('A1', $aliasesB);
     }
 }

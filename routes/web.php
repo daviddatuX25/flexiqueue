@@ -4,6 +4,7 @@ use App\Events\TestBroadcast;
 use App\Http\Controllers\Admin\ProgramPageController;
 use App\Http\Controllers\Api\Admin\ProgramController as AdminProgramController;
 use App\Http\Controllers\Api\Admin\ProgramStaffController;
+use App\Http\Controllers\Api\Admin\ProgramTokenController;
 use App\Http\Controllers\Api\Admin\ReportController as AdminReportController;
 use App\Http\Controllers\Api\Admin\StationController as AdminStationController;
 use App\Http\Controllers\Api\Admin\ProcessController as AdminProcessController;
@@ -21,6 +22,7 @@ use App\Http\Controllers\Api\Admin\SystemController as AdminSystemController;
 use App\Http\Controllers\Api\Admin\ClientIdDocumentRevealController;
 use App\Http\Controllers\Api\Admin\ClientAdminController;
 use App\Http\Controllers\Api\Admin\ClientIdDocumentAdminController;
+use App\Http\Controllers\Api\Admin\SiteController as AdminSiteController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\CheckStatusController;
 use App\Http\Controllers\Api\PublicDisplaySettingsController;
@@ -40,6 +42,7 @@ use App\Http\Controllers\Api\TemporaryQrController;
 use App\Http\Controllers\Api\VerifyPinController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Admin\ReportPageController;
+use App\Http\Controllers\Admin\SitesPageController;
 use App\Http\Controllers\Admin\TokenPrintController;
 use App\Http\Controllers\Admin\UserPageController;
 use App\Http\Controllers\Admin\ClientPageController;
@@ -53,7 +56,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
-// Per 08-API-SPEC-PHASE1 §5: admin API (session auth, role:admin)
+// Per SUPER-ADMIN-VS-ADMIN-SPEC: admin-only API (programs, tokens, analytics, print/tts settings). Super_admin has no access.
 Route::middleware(['auth', 'role:admin'])->prefix('api/admin')->group(function (): void {
     Route::get('/program-default-settings', [ProgramDefaultSettingsController::class, 'show']);
     Route::put('/program-default-settings', [ProgramDefaultSettingsController::class, 'update']);
@@ -70,12 +73,10 @@ Route::middleware(['auth', 'role:admin'])->prefix('api/admin')->group(function (
     Route::post('/programs/{program}/pause', [AdminProgramController::class, 'pause'])->name('api.admin.programs.pause');
     Route::post('/programs/{program}/resume', [AdminProgramController::class, 'resume'])->name('api.admin.programs.resume');
     Route::delete('/programs/{program}', [AdminProgramController::class, 'destroy']);
-    // Per 08-API-SPEC-PHASE1 §5.2: ServiceTrack CRUD
     Route::get('/programs/{program}/tracks', [AdminTrackController::class, 'index']);
     Route::post('/programs/{program}/tracks', [AdminTrackController::class, 'store']);
     Route::put('/tracks/{service_track}', [AdminTrackController::class, 'update']);
     Route::delete('/tracks/{service_track}', [AdminTrackController::class, 'destroy']);
-    // Per 08-API-SPEC-PHASE1 §5.3: Station CRUD
     Route::get('/programs/{program}/processes', [AdminProcessController::class, 'index']);
     Route::post('/programs/{program}/processes', [AdminProcessController::class, 'store']);
     Route::put('/programs/{program}/processes/{process}', [AdminProcessController::class, 'update']);
@@ -87,60 +88,33 @@ Route::middleware(['auth', 'role:admin'])->prefix('api/admin')->group(function (
     Route::put('/stations/{station}', [AdminStationController::class, 'update']);
     Route::post('/stations/{station}/regenerate-tts', [AdminStationController::class, 'regenerateTts']);
     Route::delete('/stations/{station}', [AdminStationController::class, 'destroy']);
-    // Per 08-API-SPEC-PHASE1 §5.4: Track Steps
     Route::get('/tracks/{track}/steps', [AdminStepController::class, 'index']);
     Route::post('/tracks/{track}/steps', [AdminStepController::class, 'store']);
     Route::post('/tracks/{track}/steps/reorder', [AdminStepController::class, 'reorder']);
     Route::put('/steps/{step}', [AdminStepController::class, 'update']);
     Route::delete('/steps/{step}', [AdminStepController::class, 'destroy']);
-    // Per refactor plan: program-scoped staff assignments and supervisors
     Route::get('/programs/{program}/staff-assignments', [ProgramStaffController::class, 'staffAssignments']);
     Route::post('/programs/{program}/staff-assignments', [ProgramStaffController::class, 'assignStaff']);
     Route::delete('/programs/{program}/staff-assignments/{user}', [ProgramStaffController::class, 'unassignStaff']);
     Route::get('/programs/{program}/supervisors', [ProgramStaffController::class, 'supervisors']);
     Route::post('/programs/{program}/supervisors', [ProgramStaffController::class, 'addSupervisor']);
     Route::delete('/programs/{program}/supervisors/{user}', [ProgramStaffController::class, 'removeSupervisor']);
-    // Per 08-API-SPEC-PHASE1 §5.5: Tokens
+    Route::get('/programs/{program}/tokens', [ProgramTokenController::class, 'index']);
+    Route::post('/programs/{program}/tokens/bulk', [ProgramTokenController::class, 'bulkStore']);
+    Route::post('/programs/{program}/tokens', [ProgramTokenController::class, 'store']);
+    Route::delete('/programs/{program}/tokens/{token}', [ProgramTokenController::class, 'destroy']);
     Route::get('/tokens', [AdminTokenController::class, 'index']);
     Route::post('/tokens/batch', [AdminTokenController::class, 'batch']);
     Route::put('/tokens/{token}', [AdminTokenController::class, 'update']);
     Route::delete('/tokens/{token}', [AdminTokenController::class, 'destroy']);
     Route::post('/tokens/batch-delete', [AdminTokenController::class, 'batchDelete']);
     Route::post('/tokens/regenerate-tts', [AdminTokenController::class, 'regenerateTts']);
-    // Print template settings
     Route::get('/print-settings', [PrintSettingsController::class, 'show']);
     Route::put('/print-settings', [PrintSettingsController::class, 'update']);
-    // Token TTS settings (global server voice + rate)
     Route::get('/token-tts-settings', [TokenTtsSettingsController::class, 'show']);
     Route::put('/token-tts-settings', [TokenTtsSettingsController::class, 'update']);
     Route::get('/tts/sample-phrase', [TokenTtsSettingsController::class, 'samplePhrase']);
     Route::post('/print-settings/image', [PrintSettingsController::class, 'upload']);
-    // Per 08-API-SPEC-PHASE1 §5.6, §5.7: User CRUD and staff assignment
-    Route::get('/users', [AdminUserController::class, 'index']);
-    Route::post('/users', [AdminUserController::class, 'store']);
-    Route::put('/users/{user}', [AdminUserController::class, 'update']);
-    Route::delete('/users/{user}', [AdminUserController::class, 'destroy']);
-    Route::post('/users/{user}/reset-password', [AdminUserController::class, 'resetPassword']);
-    Route::post('/users/{user}/assign-station', [AdminUserController::class, 'assignStation']);
-    Route::post('/users/{user}/unassign-station', [AdminUserController::class, 'unassignStation']);
-    // Clients: destructive actions (admin only)
-    Route::delete('/clients/{client}', [ClientAdminController::class, 'destroy']);
-    Route::delete('/client-id-documents/{client_id_document}', [ClientIdDocumentAdminController::class, 'destroy']);
-    Route::post('/client-id-documents/{client_id_document}/reassign', [ClientIdDocumentAdminController::class, 'reassign']);
-    // Integrations (ElevenLabs TTS)
-    Route::get('/integrations/elevenlabs', [ElevenLabsIntegrationController::class, 'show']);
-    Route::get('/integrations/elevenlabs/usage', [ElevenLabsIntegrationController::class, 'usage']);
-    Route::get('/integrations/elevenlabs/voices', [ElevenLabsIntegrationController::class, 'voices']);
-    Route::get('/integrations/elevenlabs/accounts', [ElevenLabsIntegrationController::class, 'index']);
-    Route::post('/integrations/elevenlabs/accounts', [ElevenLabsIntegrationController::class, 'store']);
-    Route::put('/integrations/elevenlabs/accounts/{account}', [ElevenLabsIntegrationController::class, 'update']);
-    Route::post('/integrations/elevenlabs/accounts/{account}/activate', [ElevenLabsIntegrationController::class, 'activate']);
-    Route::delete('/integrations/elevenlabs/accounts/{account}', [ElevenLabsIntegrationController::class, 'destroy']);
-    // System and storage monitoring
-    Route::get('/system/storage', [AdminSystemController::class, 'storage']);
-    Route::post('/system/storage/clear', [AdminSystemController::class, 'clearStorage']);
-    Route::post('/system/storage/clear-orphaned-tts', [AdminSystemController::class, 'clearOrphanedTts']);
-    // Analytics (summary, throughput, wait distribution, station utilization, tracks, heatmap, funnel, token/tts health)
     Route::get('/analytics/summary', [AdminAnalyticsController::class, 'summary']);
     Route::get('/analytics/throughput', [AdminAnalyticsController::class, 'throughput']);
     Route::get('/analytics/wait-time-distribution', [AdminAnalyticsController::class, 'waitTimeDistribution']);
@@ -149,12 +123,45 @@ Route::middleware(['auth', 'role:admin'])->prefix('api/admin')->group(function (
     Route::get('/analytics/busiest-hours', [AdminAnalyticsController::class, 'busiestHours']);
     Route::get('/analytics/drop-off-funnel', [AdminAnalyticsController::class, 'dropOffFunnel']);
     Route::get('/analytics/token-tts-health', [AdminAnalyticsController::class, 'tokenTtsHealth']);
-    // Per 08-API-SPEC-PHASE1 §5.8: Audit log (program sessions + audit log API)
+});
+
+// Per SUPER-ADMIN-VS-ADMIN-SPEC: integrations API is super_admin only.
+Route::middleware(['auth', 'role:super_admin'])->prefix('api/admin')->group(function (): void {
+    Route::get('/integrations/elevenlabs', [ElevenLabsIntegrationController::class, 'show']);
+    Route::get('/integrations/elevenlabs/usage', [ElevenLabsIntegrationController::class, 'usage']);
+    Route::get('/integrations/elevenlabs/voices', [ElevenLabsIntegrationController::class, 'voices']);
+    Route::get('/integrations/elevenlabs/accounts', [ElevenLabsIntegrationController::class, 'index']);
+    Route::post('/integrations/elevenlabs/accounts', [ElevenLabsIntegrationController::class, 'store']);
+    Route::put('/integrations/elevenlabs/accounts/{account}', [ElevenLabsIntegrationController::class, 'update']);
+    Route::post('/integrations/elevenlabs/accounts/{account}/activate', [ElevenLabsIntegrationController::class, 'activate']);
+    Route::delete('/integrations/elevenlabs/accounts/{account}', [ElevenLabsIntegrationController::class, 'destroy']);
+});
+
+// Per 08-API-SPEC-PHASE1 §5: shared admin API (users, sites, system storage, logs, clients). Both admin and super_admin.
+Route::middleware(['auth', 'role:admin,super_admin'])->prefix('api/admin')->group(function (): void {
+    Route::get('/users', [AdminUserController::class, 'index']);
+    Route::post('/users', [AdminUserController::class, 'store']);
+    Route::put('/users/{user}', [AdminUserController::class, 'update']);
+    Route::delete('/users/{user}', [AdminUserController::class, 'destroy']);
+    Route::post('/users/{user}/reset-password', [AdminUserController::class, 'resetPassword']);
+    Route::post('/users/{user}/assign-station', [AdminUserController::class, 'assignStation']);
+    Route::post('/users/{user}/unassign-station', [AdminUserController::class, 'unassignStation']);
+    Route::delete('/clients/{client}', [ClientAdminController::class, 'destroy']);
+    Route::delete('/client-id-documents/{client_id_document}', [ClientIdDocumentAdminController::class, 'destroy']);
+    Route::post('/client-id-documents/{client_id_document}/reassign', [ClientIdDocumentAdminController::class, 'reassign']);
+    Route::get('/system/storage', [AdminSystemController::class, 'storage']);
+    Route::post('/system/storage/clear', [AdminSystemController::class, 'clearStorage']);
+    Route::post('/system/storage/clear-orphaned-tts', [AdminSystemController::class, 'clearOrphanedTts']);
     Route::get('/logs/program-sessions', [AdminReportController::class, 'programSessions']);
     Route::get('/logs/audit', [AdminReportController::class, 'audit']);
     Route::get('/logs/audit/export', [AdminReportController::class, 'auditExport']);
     Route::post('/client-id-documents/{client_id_document}/reveal', [ClientIdDocumentRevealController::class, 'reveal'])
         ->middleware('throttle:5,1');
+    Route::get('/sites', [AdminSiteController::class, 'index']);
+    Route::post('/sites', [AdminSiteController::class, 'store']);
+    Route::get('/sites/{site}', [AdminSiteController::class, 'show']);
+    Route::put('/sites/{site}', [AdminSiteController::class, 'update']);
+    Route::post('/sites/{site}/regenerate-key', [AdminSiteController::class, 'regenerateKey']);
 });
 
 // Per 08-API-SPEC-PHASE1 §6.1: Dashboard API (admin, supervisor)
@@ -242,6 +249,15 @@ Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login')->
 Route::post('/login', [LoginController::class, 'login'])->middleware('guest');
 Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->middleware('auth');
 
+// Per central-edge B.2: sync/bridge auth stub (site API key only; no session)
+Route::post('/api/sync/test-site-auth', function (\Illuminate\Http\Request $request) {
+    $site = $request->attributes->get('site');
+    if (! $site) {
+        return response()->json(['message' => 'Site not bound.'], 500);
+    }
+    return response()->json(['site_id' => $site->id, 'slug' => $site->slug]);
+})->middleware('site.api_key');
+
 // Per 08-API-SPEC-PHASE1 §2.1 & 05-SECURITY-CONTROLS §2.4: public (no auth)
 Route::get('/api/check-status/{qr_hash}', [CheckStatusController::class, 'show']);
 
@@ -251,7 +267,9 @@ Route::get('/display/station/{station}', [DisplayController::class, 'stationBoar
 Route::get('/display/status/{qr_hash}', [DisplayController::class, 'status'])->name('display.status');
 
 // Per plan: public self-serve triage (no auth; 403 when program allow_public_triage is false)
-Route::get('/triage/start', [DisplayController::class, 'publicTriage'])->name('triage.start');
+// A.2.3: Canonical URL is /public/triage/{program}; /triage/start redirects for backward compat.
+Route::get('/public/triage/{program}', [DisplayController::class, 'publicTriage'])->name('triage.public');
+Route::get('/triage/start', [DisplayController::class, 'triageStartRedirect'])->name('triage.start');
 Route::get('/api/public/token-lookup', [PublicTriageController::class, 'tokenLookup']);
 Route::post('/api/public/sessions/bind', [PublicTriageController::class, 'bind']);
 Route::post('/api/public/clients/lookup-by-id', [PublicTriageController::class, 'publicLookupById'])
@@ -267,19 +285,26 @@ Route::get('/api/public/tts/token/{token}', [TtsController::class, 'token']);
 // Per HOMEPAGE-PLAN: public landing + auth strip (Option B). No auth required.
 Route::get('/', [HomeController::class, 'index'])->name('home');
 
-// Per 05-SECURITY-CONTROLS §3.4: admin-only routes
-Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->group(function (): void {
+// Per 05-SECURITY-CONTROLS §3.4: admin UI shared by admin and super_admin (dashboard, users, logs, settings, sites).
+Route::middleware(['auth', 'role:admin,super_admin'])->prefix('admin')->name('admin.')->group(function (): void {
     Route::redirect('/', '/admin/dashboard', 302)->name('index');
-    Route::get('/dashboard', fn () => Inertia::render('Admin/Dashboard'))->name('dashboard');
+    Route::get('/dashboard', [\App\Http\Controllers\Admin\DashboardPageController::class, 'index'])->name('dashboard');
+    Route::get('/users', [UserPageController::class, 'index'])->name('users');
+    Route::get('/logs', [ReportPageController::class, 'index'])->name('logs');
+    Route::get('/settings', fn () => Inertia::render('Admin/Settings/Index'))->name('settings');
+    Route::get('/sites', [SitesPageController::class, 'index'])->name('sites');
+    Route::get('/sites/create', [SitesPageController::class, 'create'])->name('sites.create');
+    Route::get('/sites/{site}', [SitesPageController::class, 'show'])->name('sites.show');
+});
+
+// Per SUPER-ADMIN-VS-ADMIN-SPEC: programs, tokens, analytics are admin-only (super_admin has no access).
+Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->group(function (): void {
     Route::get('/programs', [ProgramPageController::class, 'index'])->name('programs');
     Route::get('/program-default-settings', fn () => Inertia::render('Admin/ProgramDefaultSettings'))->name('program-default-settings');
     Route::get('/programs/{program}', [ProgramPageController::class, 'show'])->name('programs.show');
     Route::get('/tokens', fn () => Inertia::render('Admin/Tokens/Index'))->name('tokens');
     Route::get('/tokens/print', TokenPrintController::class)->name('tokens.print');
-    Route::get('/users', [UserPageController::class, 'index'])->name('users');
-    Route::get('/logs', [ReportPageController::class, 'index'])->name('logs');
     Route::get('/analytics', fn () => Inertia::render('Admin/Analytics/Index'))->name('analytics');
-    Route::get('/settings', fn () => Inertia::render('Admin/Settings/Index'))->name('settings');
 });
 
 // Admin + program supervisors: client list/detail (no reveal; reveal remains API admin-only).

@@ -37,13 +37,21 @@ class SessionService
      * Bind token to a new session. Throws domain exceptions for 400/409 cases.
      * When $staffUserId is null (public self-serve), transaction_log records null for audit.
      * When $identityRegistrationId is set (public flow with "request identification registration"), client_id is null and session is linked to the registration.
+     * When $programId is not null (staff triage), program is resolved by ID; otherwise uses single active program (e.g. public triage).
      *
      * @return array{session: \App\Models\Session, token: array}
      */
-    public function bind(string $qrHash, int $trackId, ?string $clientCategory, ?int $staffUserId = null, ?array $clientBindingPayload = null, ?string $bindingSource = null, ?int $identityRegistrationId = null): array
+    public function bind(string $qrHash, int $trackId, ?string $clientCategory, ?int $staffUserId = null, ?array $clientBindingPayload = null, ?string $bindingSource = null, ?int $identityRegistrationId = null, ?int $programId = null): array
     {
-        $program = Program::where('is_active', true)->first();
+        // Per central-edge Phase A: programId from request context only; no single-active fallback.
+        if ($programId === null) {
+            throw new \InvalidArgumentException('Program is required.', 422);
+        }
+        $program = Program::find($programId);
         if (! $program) {
+            throw new \InvalidArgumentException('Program not found.', 422);
+        }
+        if (! $program->is_active) {
             throw new \InvalidArgumentException('No active program. Please activate a program first.');
         }
 
@@ -162,11 +170,12 @@ class SessionService
             }
 
             event(new ClientArrived($session->fresh(['currentStation', 'serviceTrack']), $firstStationId));
-            event(new QueueLengthUpdated($firstStationId));
+            event(new QueueLengthUpdated($session->program_id, $firstStationId));
 
             // Per ISSUES-ELABORATION §10: broadcast so display board shows triage bind in real time
             $firstStation = Station::find($firstStationId);
             event(new StationActivity(
+                $session->program_id,
                 $firstStationId,
                 $firstStation?->name ?? 'Triage',
                 "{$session->alias} registered at triage",
@@ -236,8 +245,9 @@ class SessionService
                 ? "{$session->alias} called from priority lane"
                 : "{$session->alias} called";
             event(new StatusUpdate($session->current_station_id, $session));
-            event(new QueueLengthUpdated($session->current_station_id));
+            event(new QueueLengthUpdated($session->program_id, $session->current_station_id));
             event(new StationActivity(
+                $session->program_id,
                 $session->current_station_id,
                 $station?->name ?? '—',
                 $message,
@@ -354,13 +364,14 @@ class SessionService
             $session = $session->fresh(['currentStation', 'serviceTrack', 'token']);
             $station = $session->currentStation;
             event(new StatusUpdate($session->current_station_id, $session));
-            event(new NowServing($session->current_station_id, [
+            event(new NowServing($session->program_id, $session->current_station_id, [
                 'session_id' => $session->id,
                 'alias' => $session->alias,
                 'category' => $session->client_category,
             ]));
-            event(new QueueLengthUpdated($session->current_station_id));
+            event(new QueueLengthUpdated($session->program_id, $session->current_station_id));
             event(new StationActivity(
+                $session->program_id,
                 $session->current_station_id,
                 $station?->name ?? '—',
                 "{$session->alias} arrived (serving)",
@@ -441,13 +452,13 @@ class SessionService
 
             event(new StatusUpdate($previousStationId, $session));
             event(new ClientArrived($session, $targetStationId));
-            event(new NowServing($targetStationId, [
+            event(new NowServing($session->program_id, $targetStationId, [
                 'session_id' => $session->id,
                 'alias' => $session->alias,
                 'category' => $session->client_category,
             ]));
-            event(new QueueLengthUpdated($previousStationId));
-            event(new QueueLengthUpdated($targetStationId));
+            event(new QueueLengthUpdated($session->program_id, $previousStationId));
+            event(new QueueLengthUpdated($session->program_id, $targetStationId));
 
             return [
                 'session' => $session,
@@ -537,7 +548,7 @@ class SessionService
 
             $session = $session->fresh(['currentStation', 'serviceTrack', 'token']);
             event(new StatusUpdate($station->id, $session));
-            event(new QueueLengthUpdated($station->id));
+            event(new QueueLengthUpdated($session->program_id, $station->id));
         });
     }
 
@@ -581,8 +592,8 @@ class SessionService
 
             $session = $session->fresh(['currentStation', 'serviceTrack', 'token']);
             event(new StatusUpdate($station->id, $session));
-            event(new QueueLengthUpdated($station->id));
-            event(new NowServing($station->id, [
+            event(new QueueLengthUpdated($session->program_id, $station->id));
+            event(new NowServing($session->program_id, $station->id, [
                 'session_id' => $session->id,
                 'alias' => $session->alias,
                 'category' => $session->client_category,
@@ -631,9 +642,9 @@ class SessionService
 
             $session = $session->fresh(['currentStation', 'serviceTrack', 'token']);
             event(new StatusUpdate($stationId, $session));
-            event(new QueueLengthUpdated($stationId));
+            event(new QueueLengthUpdated($session->program_id, $stationId));
             if ($wasServing) {
-                event(new NowServing($stationId, [
+                event(new NowServing($session->program_id, $stationId, [
                     'session_id' => $session->id,
                     'alias' => $session->alias,
                     'category' => $session->client_category,
@@ -720,7 +731,7 @@ class SessionService
             $session = $session->fresh(['currentStation', 'serviceTrack']);
             if ($stationId) {
                 event(new StatusUpdate($stationId, $session));
-                event(new QueueLengthUpdated($stationId));
+                event(new QueueLengthUpdated($session->program_id, $stationId));
             }
 
             $result = [
@@ -811,8 +822,8 @@ class SessionService
 
             event(new StatusUpdate($previousStationId, $session));
             event(new ClientArrived($session, $targetStationId));
-            event(new QueueLengthUpdated($previousStationId));
-            event(new QueueLengthUpdated($targetStationId));
+            event(new QueueLengthUpdated($session->program_id, $previousStationId));
+            event(new QueueLengthUpdated($session->program_id, $targetStationId));
 
             return [
                 'session' => $session,
@@ -862,7 +873,7 @@ class SessionService
             $session = $session->fresh();
             if ($stationId) {
                 event(new StatusUpdate($stationId, $session));
-                event(new QueueLengthUpdated($stationId));
+                event(new QueueLengthUpdated($session->program_id, $stationId));
             }
 
             return [
@@ -960,10 +971,10 @@ class SessionService
 
             if ($previousStationId !== null) {
                 event(new StatusUpdate($previousStationId, $session));
-                event(new QueueLengthUpdated($previousStationId));
+                event(new QueueLengthUpdated($session->program_id, $previousStationId));
             }
             event(new ClientArrived($session, $targetStationId));
-            event(new QueueLengthUpdated($targetStationId));
+            event(new QueueLengthUpdated($session->program_id, $targetStationId));
 
             return [
                 'session' => $session,
@@ -1014,7 +1025,7 @@ class SessionService
             ]);
 
             event(new ClientArrived($session->fresh(['currentStation', 'serviceTrack']), $firstStationId));
-            event(new QueueLengthUpdated($firstStationId));
+            event(new QueueLengthUpdated($session->program_id, $firstStationId));
 
             return ['session' => $session->fresh()];
         });
@@ -1071,10 +1082,10 @@ class SessionService
 
             if ($prevId !== null) {
                 event(new StatusUpdate($prevId, $session));
-                event(new QueueLengthUpdated($prevId));
+                event(new QueueLengthUpdated($session->program_id, $prevId));
             }
             event(new ClientArrived($session, $firstStationId));
-            event(new QueueLengthUpdated($firstStationId));
+            event(new QueueLengthUpdated($session->program_id, $firstStationId));
 
             return [
                 'session' => $session,

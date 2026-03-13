@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\StationPageController;
 use App\Models\IdentityRegistration;
 use App\Models\Program;
 use App\Services\ClientIdDocumentService;
@@ -24,13 +25,28 @@ class IdentityRegistrationController extends Controller
     ) {}
 
     /**
-     * GET /api/identity-registrations — list pending for active program.
+     * GET /api/identity-registrations — list pending for staff's station program.
+     * Per A.2.2: program from user.assigned_station_id → station.program_id.
      */
     public function index(Request $request): JsonResponse
     {
-        $program = Program::where('is_active', true)->first();
+        $user = $request->user();
+        $program = $user->assignedStation?->program;
+
+        // Per central-edge follow-up: admin/supervisor with no assigned station uses session-selected program context.
         if (! $program) {
-            return response()->json(['data' => []]);
+            if (! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
+                return response()->json(['message' => 'No station assigned.'], 422);
+            }
+
+            $programId = $request->session()->get(StationPageController::SESSION_KEY_PROGRAM_ID);
+            $program = $programId ? Program::query()->where('id', (int) $programId)->where('is_active', true)->first() : null;
+            if (! $program) {
+                return response()->json(['message' => 'Program not selected or inactive.'], 422);
+            }
+            if (! $user->isAdmin() && ! $user->isSupervisorForProgram($program->id)) {
+                return response()->json(['message' => 'Forbidden.'], 403);
+            }
         }
 
         $registrations = IdentityRegistration::query()
@@ -65,6 +81,7 @@ class IdentityRegistrationController extends Controller
     public function direct(Request $request): JsonResponse
     {
         $request->validate([
+            'program_id' => ['nullable', 'integer', 'exists:programs,id'],
             'name' => ['required', 'string', 'max:150'],
             'birth_year' => ['required', 'integer', 'min:1900', 'max:2100'],
             'client_category' => ['required', 'string', 'max:50'],
@@ -72,9 +89,26 @@ class IdentityRegistrationController extends Controller
             'id_number' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $program = Program::where('is_active', true)->first();
+        $user = $request->user();
+        $program = $user->assignedStation?->program;
+
+        // Per central-edge follow-up: admin/supervisor with no assigned station uses request program_id then session-selected program context.
         if (! $program) {
-            return response()->json(['message' => 'No active program.'], 422);
+            if (! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
+                return response()->json(['message' => 'No station assigned.'], 422);
+            }
+
+            $programId = $request->input('program_id');
+            if ($programId === null) {
+                $programId = $request->session()->get(StationPageController::SESSION_KEY_PROGRAM_ID);
+            }
+            $program = $programId ? Program::query()->where('id', (int) $programId)->where('is_active', true)->first() : null;
+            if (! $program) {
+                return response()->json(['message' => 'Program not selected or inactive.'], 422);
+            }
+            if (! $user->isAdmin() && ! $user->isSupervisorForProgram($program->id)) {
+                return response()->json(['message' => 'Forbidden.'], 403);
+            }
         }
 
         $name = $request->string('name')->trim();
@@ -127,10 +161,24 @@ class IdentityRegistrationController extends Controller
     /**
      * GET /api/identity-registrations/{id}/possible-matches — clients matching name + birth_year for accept flow.
      */
-    public function possibleMatches(IdentityRegistration $identityRegistration): JsonResponse
+    public function possibleMatches(Request $request, IdentityRegistration $identityRegistration): JsonResponse
     {
-        $program = Program::where('is_active', true)->first();
-        if (! $program || $identityRegistration->program_id !== $program->id || $identityRegistration->status !== 'pending') {
+        $user = $request->user();
+        $program = $user->assignedStation?->program;
+
+        if (! $program) {
+            if (! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
+                return response()->json(['message' => 'No station assigned.'], 422);
+            }
+            $program = Program::query()->where('id', (int) $identityRegistration->program_id)->where('is_active', true)->first();
+            if (! $program) {
+                return response()->json(['message' => 'Program not selected or inactive.'], 422);
+            }
+            if (! $user->isAdmin() && ! $user->isSupervisorForProgram($program->id)) {
+                return response()->json(['message' => 'Forbidden.'], 403);
+            }
+        }
+        if ($identityRegistration->program_id !== $program->id || $identityRegistration->status !== 'pending') {
             return response()->json(['data' => []]);
         }
 
@@ -170,8 +218,22 @@ class IdentityRegistrationController extends Controller
             'id_number' => ['required', 'string', 'max:255'],
         ]);
 
-        $program = Program::where('is_active', true)->first();
-        if (! $program || $identityRegistration->program_id !== $program->id || $identityRegistration->status !== 'pending') {
+        $user = $request->user();
+        $program = $user->assignedStation?->program;
+
+        if (! $program) {
+            if (! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
+                return response()->json(['message' => 'No station assigned.'], 422);
+            }
+            $program = Program::query()->where('id', (int) $identityRegistration->program_id)->where('is_active', true)->first();
+            if (! $program) {
+                return response()->json(['message' => 'Program not selected or inactive.'], 422);
+            }
+            if (! $user->isAdmin() && ! $user->isSupervisorForProgram($program->id)) {
+                return response()->json(['message' => 'Forbidden.'], 403);
+            }
+        }
+        if ($identityRegistration->program_id !== $program->id || $identityRegistration->status !== 'pending') {
             return response()->json(['message' => 'Registration not found or already resolved.'], 404);
         }
 
@@ -226,8 +288,22 @@ class IdentityRegistrationController extends Controller
             'register_id.id_number' => ['required_with:register_id', 'string', 'max:255'],
         ]);
 
-        $program = Program::where('is_active', true)->first();
-        if (! $program || $identityRegistration->program_id !== $program->id || $identityRegistration->status !== 'pending') {
+        $user = $request->user();
+        $program = $user->assignedStation?->program;
+
+        if (! $program) {
+            if (! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
+                return response()->json(['message' => 'No station assigned.'], 422);
+            }
+            $program = Program::query()->where('id', (int) $identityRegistration->program_id)->where('is_active', true)->first();
+            if (! $program) {
+                return response()->json(['message' => 'Program not selected or inactive.'], 422);
+            }
+            if (! $user->isAdmin() && ! $user->isSupervisorForProgram($program->id)) {
+                return response()->json(['message' => 'Forbidden.'], 403);
+            }
+        }
+        if ($identityRegistration->program_id !== $program->id || $identityRegistration->status !== 'pending') {
             return response()->json(['message' => 'Registration not found or already resolved.'], 404);
         }
 
@@ -291,8 +367,22 @@ class IdentityRegistrationController extends Controller
      */
     public function reject(Request $request, IdentityRegistration $identityRegistration): JsonResponse
     {
-        $program = Program::where('is_active', true)->first();
-        if (! $program || $identityRegistration->program_id !== $program->id || $identityRegistration->status !== 'pending') {
+        $user = $request->user();
+        $program = $user->assignedStation?->program;
+
+        if (! $program) {
+            if (! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
+                return response()->json(['message' => 'No station assigned.'], 422);
+            }
+            $program = Program::query()->where('id', (int) $identityRegistration->program_id)->where('is_active', true)->first();
+            if (! $program) {
+                return response()->json(['message' => 'Program not selected or inactive.'], 422);
+            }
+            if (! $user->isAdmin() && ! $user->isSupervisorForProgram($program->id)) {
+                return response()->json(['message' => 'Forbidden.'], 403);
+            }
+        }
+        if ($identityRegistration->program_id !== $program->id || $identityRegistration->status !== 'pending') {
             return response()->json(['message' => 'Registration not found or already resolved.'], 404);
         }
 

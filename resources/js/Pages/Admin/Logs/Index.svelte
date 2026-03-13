@@ -58,10 +58,12 @@
         programs = [],
         stations = [],
         staffUsers = [],
+        auth_is_super_admin = false,
     }: {
         programs: ProgramItem[];
         stations: StationItem[];
         staffUsers: StaffUserItem[];
+        auth_is_super_admin?: boolean;
     } = $props();
 
     let data = $state<AuditLogEntry[]>([]);
@@ -148,30 +150,43 @@
 
     function buildAuditUrl(pageNum = 1): string {
         const params = new URLSearchParams();
-        if (filterProgramId) params.set("program_id", String(filterProgramId));
-        if (filterFrom) params.set("from", filterFrom);
-        if (filterTo) params.set("to", filterTo);
-        if (filterActionType) params.set("action_type", filterActionType);
-        if (filterStationId) params.set("station_id", String(filterStationId));
-        if (filterStaffUserId)
-            params.set("staff_user_id", String(filterStaffUserId));
-        if (filterProgramSessionId)
-            params.set("program_session_id", String(filterProgramSessionId));
-        params.set("page", String(pageNum));
+        if (auth_is_super_admin) {
+            params.set("scope", "admin");
+            if (filterFrom) params.set("from", filterFrom);
+            if (filterTo) params.set("to", filterTo);
+            params.set("page", String(pageNum));
+        } else {
+            if (filterProgramId) params.set("program_id", String(filterProgramId));
+            if (filterFrom) params.set("from", filterFrom);
+            if (filterTo) params.set("to", filterTo);
+            if (filterActionType) params.set("action_type", filterActionType);
+            if (filterStationId) params.set("station_id", String(filterStationId));
+            if (filterStaffUserId)
+                params.set("staff_user_id", String(filterStaffUserId));
+            if (filterProgramSessionId)
+                params.set("program_session_id", String(filterProgramSessionId));
+            params.set("page", String(pageNum));
+        }
         return `/api/admin/logs/audit?${params.toString()}`;
     }
 
     function buildExportUrl(): string {
         const params = new URLSearchParams();
-        if (filterProgramId) params.set("program_id", String(filterProgramId));
-        if (filterFrom) params.set("from", filterFrom);
-        if (filterTo) params.set("to", filterTo);
-        if (filterActionType) params.set("action_type", filterActionType);
-        if (filterStationId) params.set("station_id", String(filterStationId));
-        if (filterStaffUserId)
-            params.set("staff_user_id", String(filterStaffUserId));
-        if (filterProgramSessionId)
-            params.set("program_session_id", String(filterProgramSessionId));
+        if (auth_is_super_admin) {
+            params.set("scope", "admin");
+            if (filterFrom) params.set("from", filterFrom);
+            if (filterTo) params.set("to", filterTo);
+        } else {
+            if (filterProgramId) params.set("program_id", String(filterProgramId));
+            if (filterFrom) params.set("from", filterFrom);
+            if (filterTo) params.set("to", filterTo);
+            if (filterActionType) params.set("action_type", filterActionType);
+            if (filterStationId) params.set("station_id", String(filterStationId));
+            if (filterStaffUserId)
+                params.set("staff_user_id", String(filterStaffUserId));
+            if (filterProgramSessionId)
+                params.set("program_session_id", String(filterProgramSessionId));
+        }
         const q = params.toString();
         return q
             ? `/api/admin/logs/audit/export?${q}`
@@ -258,7 +273,7 @@
     }
 
     function applyFilters() {
-        fetchProgramSessions();
+        if (!auth_is_super_admin) fetchProgramSessions();
         fetchAudit(1);
     }
 
@@ -270,7 +285,7 @@
         filterStationId = "";
         filterStaffUserId = "";
         filterProgramSessionId = "";
-        fetchProgramSessions();
+        if (!auth_is_super_admin) fetchProgramSessions();
         fetchAudit(1);
     }
 
@@ -357,7 +372,7 @@
     );
 
     onMount(() => {
-        fetchProgramSessions();
+        if (!auth_is_super_admin) fetchProgramSessions();
         fetchAudit(1);
     });
 </script>
@@ -379,7 +394,11 @@
                     Audit log
                 </h1>
                 <p class="mt-2 text-surface-600 max-w-3xl leading-relaxed">
-                    View transaction logs and export to CSV for COA compliance.
+                    {#if auth_is_super_admin}
+                        Platform admin actions (user and site changes) only.
+                    {:else}
+                        View transaction logs and export to CSV for COA compliance.
+                    {/if}
                 </p>
             </div>
         </div>
@@ -424,6 +443,7 @@
                     <div
                         class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-x-4 gap-y-5"
                     >
+                        {#if !auth_is_super_admin}
                         <div class="form-control">
                             <label for="filter-program" class="label pb-1.5">
                                 <span
@@ -446,6 +466,7 @@
                                 {/each}
                             </select>
                         </div>
+                        {/if}
                         <div class="form-control">
                             <label for="filter-from" class="label pb-1.5">
                                 <span
@@ -474,6 +495,7 @@
                                 bind:value={filterTo}
                             />
                         </div>
+                        {#if !auth_is_super_admin}
                         <div class="form-control">
                             <label
                                 for="filter-program-session"
@@ -554,6 +576,7 @@
                                 {/each}
                             </select>
                         </div>
+                        {/if}
                     </div>
                     <div
                         class="flex justify-end mt-6 pt-5 border-t border-surface-100"

@@ -18,10 +18,11 @@ class ProgramPageController extends Controller
 {
     public function index(Request $request): Response
     {
+        $siteId = $request->user()?->site_id;
         $search = trim((string) $request->query('search', ''));
         $search = mb_strlen($search) > 100 ? mb_substr($search, 0, 100) : $search;
 
-        $query = Program::query()->orderBy('name');
+        $query = Program::query()->forSite($siteId)->orderBy('name');
 
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
@@ -48,10 +49,15 @@ class ProgramPageController extends Controller
     }
 
     /**
-     * Program detail with tracks for BD-009. Per 09-UI-ROUTES-PHASE1 §3.8.
+     * Program detail with tracks for BD-009. Per 09-UI-ROUTES-PHASE1 §3.8. Per central-edge B.4: 404 if not in site.
      */
-    public function show(Program $program): Response
+    public function show(Request $request, Program $program): Response
     {
+        $siteId = $request->user()?->site_id;
+        if ($siteId === null || $program->site_id !== $siteId) {
+            abort(404);
+        }
+
         try {
             return $this->buildProgramShowResponse($program);
         } catch (\Throwable $e) {
@@ -59,6 +65,7 @@ class ProgramPageController extends Controller
 
             return Inertia::render('Admin/Programs/Show', [
                 'program' => null,
+                'currentProgram' => null,
                 'tracks' => [],
                 'processes' => [],
                 'stations' => [],
@@ -172,51 +179,53 @@ class ProgramPageController extends Controller
             'completed_sessions' => Session::where('program_id', $program->id)->whereIn('status', ['completed', 'cancelled', 'no_show'])->count(),
         ];
 
-        return Inertia::render('Admin/Programs/Show', [
-            'program' => [
-                'id' => $program->id,
-                'name' => $program->name,
-                'description' => $program->description,
-                'is_active' => $program->is_active,
-                'is_paused' => $program->is_paused ?? false,
-                'created_at' => $program->created_at?->toIso8601String(),
-                'settings' => [
-                    'no_show_timer_seconds' => (int) ($settings['no_show_timer_seconds'] ?? 10),
-                    'max_no_show_attempts' => $programSettings->getMaxNoShowAttempts(),
-                    'require_permission_before_override' => (bool) ($settings['require_permission_before_override'] ?? true),
-                    'priority_first' => (bool) ($settings['priority_first'] ?? true),
-                    'balance_mode' => $settings['balance_mode'] ?? 'fifo',
-                    'station_selection_mode' => $settings['station_selection_mode'] ?? 'fixed',
-                    'alternate_ratio' => [
-                        (int) (($settings['alternate_ratio'] ?? [1, 1])[0] ?? 1),
-                        (int) (($settings['alternate_ratio'] ?? [1, 1])[1] ?? 1),
-                    ],
-                    'alternate_priority_first' => (bool) ($settings['alternate_priority_first'] ?? true),
-                    'display_scan_timeout_seconds' => array_key_exists('display_scan_timeout_seconds', $settings)
-                        ? (int) $settings['display_scan_timeout_seconds']
-                        : 20,
-                    'display_audio_muted' => $programSettings->getDisplayAudioMuted(),
-                    'display_audio_volume' => $programSettings->getDisplayAudioVolume(),
-                    'display_tts_repeat_count' => $programSettings->getDisplayTtsRepeatCount(),
-                    'display_tts_repeat_delay_ms' => $programSettings->getDisplayTtsRepeatDelayMs(),
-                    'allow_public_triage' => $programSettings->getAllowPublicTriage(),
-                    'identity_binding_mode' => $programSettings->getIdentityBindingMode(),
-                    'enable_display_hid_barcode' => $programSettings->getEnableDisplayHidBarcode(),
-                    'enable_public_triage_hid_barcode' => $programSettings->getEnablePublicTriageHidBarcode(),
-                    'enable_display_camera_scanner' => $programSettings->getEnableDisplayCameraScanner(),
-                    'tts' => [
-                        'active_language' => $programSettings->getTtsActiveLanguage(),
-                        'connector' => [
-                            'languages' => $connectorLanguages,
-                        ],
+        $programPayload = [
+            'id' => $program->id,
+            'name' => $program->name,
+            'description' => $program->description,
+            'is_active' => $program->is_active,
+            'is_paused' => $program->is_paused ?? false,
+            'created_at' => $program->created_at?->toIso8601String(),
+            'settings' => [
+                'no_show_timer_seconds' => (int) ($settings['no_show_timer_seconds'] ?? 10),
+                'max_no_show_attempts' => $programSettings->getMaxNoShowAttempts(),
+                'require_permission_before_override' => (bool) ($settings['require_permission_before_override'] ?? true),
+                'priority_first' => (bool) ($settings['priority_first'] ?? true),
+                'balance_mode' => $settings['balance_mode'] ?? 'fifo',
+                'station_selection_mode' => $settings['station_selection_mode'] ?? 'fixed',
+                'alternate_ratio' => [
+                    (int) (($settings['alternate_ratio'] ?? [1, 1])[0] ?? 1),
+                    (int) (($settings['alternate_ratio'] ?? [1, 1])[1] ?? 1),
+                ],
+                'alternate_priority_first' => (bool) ($settings['alternate_priority_first'] ?? true),
+                'display_scan_timeout_seconds' => array_key_exists('display_scan_timeout_seconds', $settings)
+                    ? (int) $settings['display_scan_timeout_seconds']
+                    : 20,
+                'display_audio_muted' => $programSettings->getDisplayAudioMuted(),
+                'display_audio_volume' => $programSettings->getDisplayAudioVolume(),
+                'display_tts_repeat_count' => $programSettings->getDisplayTtsRepeatCount(),
+                'display_tts_repeat_delay_ms' => $programSettings->getDisplayTtsRepeatDelayMs(),
+                'allow_public_triage' => $programSettings->getAllowPublicTriage(),
+                'identity_binding_mode' => $programSettings->getIdentityBindingMode(),
+                'enable_display_hid_barcode' => $programSettings->getEnableDisplayHidBarcode(),
+                'enable_public_triage_hid_barcode' => $programSettings->getEnablePublicTriageHidBarcode(),
+                'enable_display_camera_scanner' => $programSettings->getEnableDisplayCameraScanner(),
+                'tts' => [
+                    'active_language' => $programSettings->getTtsActiveLanguage(),
+                    'connector' => [
+                        'languages' => $connectorLanguages,
                     ],
                 ],
             ],
+        ];
+
+        return Inertia::render('Admin/Programs/Show', [
+            'program' => $programPayload,
+            'currentProgram' => $programPayload,
             'tracks' => $tracks,
             'processes' => $processes,
             'stations' => $stations,
             'stats' => $stats,
-            // Tab order for nav (Overview → Processes → Stations → Staff → Track → Settings). Per ISSUES-ELABORATION §13.
             'tab_order' => ['Overview', 'Processes', 'Stations', 'Staff', 'Track', 'Diagram', 'Settings'],
         ]);
     }

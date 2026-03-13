@@ -139,7 +139,8 @@ class SessionActionsTest extends TestCase
         $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/call");
 
         Event::assertDispatched(StationActivity::class, function (StationActivity $event) {
-            return $event->stationId === $this->station1->id
+            return $event->programId === $this->program->id
+                && $event->stationId === $this->station1->id
                 && $event->stationName === 'First Station'
                 && str_contains($event->message, 'A1')
                 && str_contains($event->message, 'priority lane')
@@ -190,7 +191,8 @@ class SessionActionsTest extends TestCase
         $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/call");
 
         Event::assertDispatched(StationActivity::class, function (StationActivity $event) {
-            return $event->stationId === $this->station1->id
+            return $event->programId === $this->program->id
+                && $event->stationId === $this->station1->id
                 && $event->alias === 'A1'
                 && $event->actionType === 'call'
                 && str_contains($event->message, 'A1')
@@ -207,7 +209,8 @@ class SessionActionsTest extends TestCase
         $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/serve");
 
         Event::assertDispatched(StationActivity::class, function (StationActivity $event) {
-            return $event->stationId === $this->station1->id
+            return $event->programId === $this->program->id
+                && $event->stationId === $this->station1->id
                 && $event->stationName === 'First Station'
                 && str_contains($event->message, 'A1')
                 && str_contains($event->message, 'arrived (serving)')

@@ -9,14 +9,15 @@ use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Per plan: broadcast station activity to display.board for real-time activity feed.
- * Public channel for informant display.
+ * Per plan: broadcast station activity to display.activity.{programId} and display.station.{id} for real-time activity feed.
+ * Per central-edge-v2-final Phase A: display.activity → display.activity.{programId}; display.station.{id} unchanged.
  */
 class StationActivity implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
+        public int $programId,
         public int $stationId,
         public string $stationName,
         public string $message,
@@ -33,7 +34,7 @@ class StationActivity implements ShouldBroadcastNow
     public function broadcastOn(): array
     {
         return [
-            new Channel('display.activity'),
+            new Channel('display.activity.'.$this->programId),
             new Channel('display.station.'.$this->stationId),
         ];
     }

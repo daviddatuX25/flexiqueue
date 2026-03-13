@@ -30,11 +30,15 @@ class UserAvailabilityController extends Controller
 
         $this->logAvailabilityChange($user->id, $oldStatus, $status);
 
-        broadcast(new StaffAvailabilityUpdated(
-            $user->id,
-            $user->availability_status ?? 'offline',
-            $user->name ?? ''
-        ));
+        $programId = $user->assignedStation?->program_id;
+        if ($programId !== null) {
+            broadcast(new StaffAvailabilityUpdated(
+                $programId,
+                $user->id,
+                $user->availability_status ?? 'offline',
+                $user->name ?? ''
+            ));
+        }
 
         return response()->json([
             'availability_status' => $user->availability_status,

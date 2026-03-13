@@ -38,6 +38,7 @@
         ChevronLeft,
         ChevronRight,
         Volume2,
+        Key,
     } from "lucide-svelte";
 
     interface ProgramItem {
@@ -137,6 +138,13 @@
         };
     }
 
+    /** Per Phase C: token assigned to program (from GET .../tokens). */
+    interface TokenItem {
+        id: number;
+        physical_id: string;
+        status?: string;
+    }
+
     interface ProgramStats {
         total_sessions: number;
         active_sessions: number;
@@ -161,7 +169,7 @@
         stats?: ProgramStats;
     } = $props();
 
-    const VALID_TABS = ["overview", "processes", "stations", "staff", "tracks", "diagram", "settings"] as const;
+    const VALID_TABS = ["overview", "processes", "stations", "staff", "tokens", "tracks", "diagram", "settings"] as const;
     type TabId = (typeof VALID_TABS)[number];
     const TAB_STORAGE_KEY = (programId: number) =>
         `flexiqueue:admin-program-tab-${programId}`;
@@ -542,6 +550,46 @@
             cancelled = true;
         };
     });
+
+    // Tokens tab: fetch program tokens when tab is selected (Phase C.3)
+    $effect(() => {
+        if (activeTab !== "tokens" || !program?.id) return;
+        let cancelled = false;
+        tokensLoading = true;
+        const check419 = (r: Response) => {
+            if (r.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return Promise.resolve({});
+            }
+            return r.json().catch(() => ({}));
+        };
+        fetch(`/api/admin/programs/${program.id}/tokens`, {
+            headers: {
+                Accept: "application/json",
+                "X-CSRF-TOKEN": getCsrfToken(),
+                "X-Requested-With": "XMLHttpRequest",
+            },
+            credentials: "same-origin",
+        })
+            .then(check419)
+            .then((data: { tokens?: TokenItem[] }) => {
+                if (cancelled) return;
+                programTokens = (data?.tokens ?? []) as TokenItem[];
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    programTokens = [];
+                    toaster.error({ title: MSG_NETWORK_ERROR });
+                }
+            })
+            .finally(() => {
+                if (!cancelled) tokensLoading = false;
+            });
+        return () => {
+            cancelled = true;
+        };
+    });
+
     let showReorderConfirm = $state(false);
     let pendingReorderStepIds = $state<number[]>([]);
     let reorderScope = $state<"new_only" | "migrate">("new_only");
@@ -605,6 +653,15 @@
     let staffLoading = $state(false);
     let staffAssigningUserId = $state<number | null>(null);
     let staffAssigningStationId = $state<number | null>(null);
+
+    // Tokens tab state (Phase C.3)
+    let programTokens = $state<TokenItem[]>([]);
+    let tokensLoading = $state(false);
+    let tokenAssignIdInput = $state("");
+    let tokenPatternInput = $state("");
+    let tokenAssigning = $state(false);
+    let tokenUnassigningId = $state<number | null>(null);
+    let bulkAssigning = $state(false);
 
     /** One row per (station, slot) for multiple staff per station. Per bead flexiqueue-bci. */
     const staffStationSlots = $derived(
@@ -769,8 +826,13 @@
             `/api/admin/programs/${program.id}/activate`,
         );
         submitting = false;
-        if (ok) router.reload();
-        else {
+        if (ok) {
+            const warning = (data as { warning?: string } | undefined)?.warning;
+            if (warning) {
+                toaster.warning({ title: warning });
+            }
+            router.reload();
+        } else {
             toaster.error({ title: message ?? "Failed to start session." });
             const missing = (data as { missing?: string[] } | undefined)?.missing;
             if (Array.isArray(missing))
@@ -1893,6 +1955,107 @@
         } else toaster.error({ title: msg ?? "Failed to remove supervisor." });
     }
 
+    /** Phase C.3.1: Assign one or more tokens to the program (POST .../tokens). */
+    async function handleAssignToken() {
+        const trimmed = tokenAssignIdInput.trim();
+        if (!trimmed || !program?.id) return;
+        const ids = trimmed
+            .split(/[\s,]+/)
+            .map((s) => parseInt(s, 10))
+            .filter((n) => Number.isInteger(n) && n > 0);
+        if (ids.length === 0) {
+            toaster.error({ title: "Enter at least one valid token ID (number)." });
+            return;
+        }
+        tokenAssigning = true;
+        try {
+            const body = ids.length === 1 ? { token_id: ids[0] } : { token_ids: ids };
+            const { ok, data, message: msg } = await api(
+                "POST",
+                `/api/admin/programs/${program.id}/tokens`,
+                body,
+            );
+            if (ok) {
+                tokenAssignIdInput = "";
+                toaster.success({
+                    title: ids.length === 1 ? "Token assigned." : `${ids.length} tokens assigned.`,
+                });
+                // Refresh token list
+                const res = await fetch(`/api/admin/programs/${program.id}/tokens`, {
+                    headers: {
+                        Accept: "application/json",
+                        "X-CSRF-TOKEN": getCsrfToken(),
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
+                    credentials: "same-origin",
+                });
+                if (res.ok) {
+                    const json = await res.json().catch(() => ({}));
+                    programTokens = (json?.tokens ?? []) as TokenItem[];
+                }
+            } else toaster.error({ title: msg ?? "Failed to assign token(s)." });
+        } finally {
+            tokenAssigning = false;
+        }
+    }
+
+    /** Phase C.3.1: Unassign token from program (DELETE .../tokens/{tokenId}). */
+    async function handleUnassignToken(tokenId: number) {
+        if (!program?.id) return;
+        tokenUnassigningId = tokenId;
+        try {
+            const { ok, message: msg } = await api(
+                "DELETE",
+                `/api/admin/programs/${program.id}/tokens/${tokenId}`,
+            );
+            if (ok) {
+                programTokens = programTokens.filter((t) => t.id !== tokenId);
+                toaster.success({ title: "Token unassigned." });
+            } else toaster.error({ title: msg ?? "Failed to unassign token." });
+        } finally {
+            tokenUnassigningId = null;
+        }
+    }
+
+    /** Phase C.3.2: Bulk assign by pattern (POST .../tokens/bulk). */
+    async function handleBulkAssignToken() {
+        const pattern = tokenPatternInput.trim();
+        if (!pattern || !program?.id) {
+            toaster.error({ title: "Enter a pattern (e.g. A* or A%)." });
+            return;
+        }
+        bulkAssigning = true;
+        try {
+            const { ok, data, message: msg } = await api(
+                "POST",
+                `/api/admin/programs/${program.id}/tokens/bulk`,
+                { pattern },
+            );
+            if (ok) {
+                const added = (data as { added_count?: number })?.added_count ?? 0;
+                tokenPatternInput = "";
+                toaster.success({
+                    title: added === 1 ? "1 token assigned." : `${added} tokens assigned.`,
+                });
+                // Refresh token list
+                const res = await fetch(`/api/admin/programs/${program.id}/tokens`, {
+                    headers: {
+                        Accept: "application/json",
+                        "X-CSRF-TOKEN": getCsrfToken(),
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
+                    credentials: "same-origin",
+                });
+                if (res.ok) {
+                    const json = await res.json().catch(() => ({}));
+                    programTokens = (json?.tokens ?? []) as TokenItem[];
+                }
+            } else toaster.error({ title: msg ?? "Failed to bulk assign tokens." });
+        } finally {
+            bulkAssigning = false;
+        }
+    }
+
     function formatDate(iso: string | null): string {
         if (!iso) return "";
         try {
@@ -2102,6 +2265,7 @@
                     <button type="button" role="tab" id="tab-processes" tabindex={activeTab === 'processes' ? 0 : -1} aria-selected={activeTab === 'processes'} aria-controls="tabpanel-processes" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'processes' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "processes")}>Processes</button>
                     <button type="button" role="tab" id="tab-stations" tabindex={activeTab === 'stations' ? 0 : -1} aria-selected={activeTab === 'stations'} aria-controls="tabpanel-stations" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'stations' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "stations")}>Stations</button>
                     <button type="button" role="tab" id="tab-staff" tabindex={activeTab === 'staff' ? 0 : -1} aria-selected={activeTab === 'staff'} aria-controls="tabpanel-staff" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'staff' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "staff")}>Staff</button>
+                    <button type="button" role="tab" id="tab-tokens" tabindex={activeTab === 'tokens' ? 0 : -1} aria-selected={activeTab === 'tokens'} aria-controls="tabpanel-tokens" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'tokens' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "tokens")}>Tokens</button>
                     <button type="button" role="tab" id="tab-tracks" tabindex={activeTab === 'tracks' ? 0 : -1} aria-selected={activeTab === 'tracks'} aria-controls="tabpanel-tracks" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'tracks' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "tracks")}>Track</button>
                     <button type="button" role="tab" id="tab-diagram" tabindex={activeTab === 'diagram' ? 0 : -1} aria-selected={activeTab === 'diagram'} aria-controls="tabpanel-diagram" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'diagram' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "diagram")}>Diagram</button>
                     <button type="button" role="tab" id="tab-settings" tabindex={activeTab === 'settings' ? 0 : -1} aria-selected={activeTab === 'settings'} aria-controls="tabpanel-settings" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'settings' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "settings")}>Settings</button>
@@ -2746,6 +2910,127 @@
                             </div>
                         </div>
                     {/if}
+                </section>
+            </div>
+        {:else if activeTab === "tokens"}
+            <!-- Tokens tab: Phase C.3 — assign/unassign tokens to program -->
+            <div id="tabpanel-tokens" role="tabpanel" aria-labelledby="tab-tokens" tabindex="-1" class="space-y-8">
+                <section>
+                    <h2 class="text-lg font-semibold text-surface-950 mb-4">
+                        Tokens assigned to this program
+                    </h2>
+                    <p class="text-sm text-surface-950/70 mb-4">
+                        Tokens (e.g. QR/barcode identifiers) that can be used for this program. Assign individually by ID or in bulk by pattern.
+                    </p>
+                    {#if tokensLoading}
+                        <div
+                            class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
+                        >
+                            <span class="loading-spinner loading-lg text-primary-500 mb-4"></span>
+                            <p class="text-surface-600 font-medium animate-pulse">Loading tokens...</p>
+                        </div>
+                    {:else if programTokens.length === 0}
+                        <div
+                            role="status"
+                            aria-label="No tokens assigned"
+                            class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
+                        >
+                            <div class="bg-surface-100 p-4 rounded-full text-surface-400 mb-4">
+                                <Key class="w-8 h-8" />
+                            </div>
+                            <h3 class="text-lg font-semibold text-surface-950">No tokens assigned</h3>
+                            <p class="text-surface-600 max-w-sm mt-2">
+                                Assign tokens below by ID or use bulk assign with a pattern (e.g. A* or A%).
+                            </p>
+                        </div>
+                    {:else}
+                        <div class="table-container">
+                            <table class="table table-zebra">
+                                <thead>
+                                    <tr>
+                                        <th>Physical ID</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {#each programTokens as token (token.id)}
+                                        <tr>
+                                            <td class="font-medium">{token.physical_id}</td>
+                                            <td>{token.status ?? "—"}</td>
+                                            <td>
+                                                <button
+                                                    type="button"
+                                                    class="btn preset-tonal btn-sm touch-target-h min-h-[48px]"
+                                                    aria-label="Unassign {token.physical_id}"
+                                                    disabled={tokenUnassigningId === token.id}
+                                                    onclick={() => handleUnassignToken(token.id)}
+                                                >
+                                                    Unassign
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    {/each}
+                                </tbody>
+                            </table>
+                        </div>
+                    {/if}
+                </section>
+
+                <section>
+                    <h2 class="text-lg font-semibold text-surface-950 mb-4">Assign by token ID</h2>
+                    <p class="text-sm text-surface-950/70 mb-4">
+                        Enter one token ID or several separated by commas or spaces.
+                    </p>
+                    <div class="flex flex-wrap items-end gap-3">
+                        <label for="token-assign-id-input" class="flex flex-col gap-1 min-w-[200px]">
+                            <span class="label-text">Token ID(s)</span>
+                            <input
+                                id="token-assign-id-input"
+                                type="text"
+                                class="input rounded-container border border-surface-200 px-3 py-2 touch-target-h"
+                                placeholder="e.g. 1 or 1, 2, 3"
+                                bind:value={tokenAssignIdInput}
+                                disabled={tokenAssigning}
+                            />
+                        </label>
+                        <button
+                            type="button"
+                            class="btn preset-filled-primary-500 touch-target-h min-h-[48px]"
+                            disabled={!tokenAssignIdInput.trim() || tokenAssigning}
+                            onclick={handleAssignToken}
+                        >
+                            Assign
+                        </button>
+                    </div>
+                </section>
+
+                <section>
+                    <h2 class="text-lg font-semibold text-surface-950 mb-4">Bulk assign by pattern</h2>
+                    <p class="text-sm text-surface-950/70 mb-4">
+                        Assign all tokens whose physical ID matches a pattern (e.g. <code class="px-1 py-0.5 rounded bg-surface-200 text-sm">A*</code> or <code class="px-1 py-0.5 rounded bg-surface-200 text-sm">A%</code>).
+                    </p>
+                    <div class="flex flex-wrap items-end gap-3">
+                        <label for="token-bulk-pattern-input" class="flex flex-col gap-1 min-w-[200px]">
+                            <span class="label-text">Pattern</span>
+                            <input
+                                id="token-bulk-pattern-input"
+                                type="text"
+                                class="input rounded-container border border-surface-200 px-3 py-2 touch-target-h"
+                                placeholder="e.g. A* or A%"
+                                bind:value={tokenPatternInput}
+                                disabled={bulkAssigning}
+                            />
+                        </label>
+                        <button
+                            type="button"
+                            class="btn preset-filled-primary-500 touch-target-h min-h-[48px]"
+                            disabled={!tokenPatternInput.trim() || bulkAssigning}
+                            onclick={handleBulkAssignToken}
+                        >
+                            Bulk assign
+                        </button>
+                    </div>
                 </section>
             </div>
         {:else if activeTab === "tracks"}

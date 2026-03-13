@@ -32,8 +32,13 @@
 		identity_binding_mode?: 'disabled' | 'optional' | 'required';
 	}
 
+	/** A.4.2: currentProgram from controller; fallback to program then activeProgram for transition. */
 	let {
+		currentProgram = null,
+		program = null,
 		activeProgram = null,
+		canSwitchProgram = false,
+		programs = [],
 		queueCount = 0,
 		processedToday = 0,
 		display_scan_timeout_seconds = 20,
@@ -42,7 +47,11 @@
 		id_types = [],
 		pending_identity_registrations = [],
 	}: {
-		activeProgram: ActiveProgram | null;
+		currentProgram?: ActiveProgram | null;
+		program?: ActiveProgram | null;
+		activeProgram?: ActiveProgram | null;
+		canSwitchProgram?: boolean;
+		programs?: { id: number; name: string }[];
 		queueCount?: number;
 		processedToday?: number;
 		display_scan_timeout_seconds?: number;
@@ -52,6 +61,8 @@
 		pending_identity_registrations?: { id: number; name: string | null; birth_year: number | null; client_category: string | null; id_type: string | null; id_number_last4: string | null; id_verified_at: string | null; id_verified_by_user_id: number | null; id_verified_by: string | null; requested_at: string; session_id: number | null; session_alias: string | null }[];
 	} = $props();
 
+	const effectiveProgram = $derived(currentProgram ?? program ?? activeProgram);
+
 	const CATEGORIES = [
 		{ label: 'Regular', value: 'Regular' },
 		{ label: 'PWD / Senior / Pregnant', value: 'PWD / Senior / Pregnant' },
@@ -60,7 +71,7 @@
 
 	/** When track count is at or below this, show buttons instead of dropdown. */
 	const MAX_TRACKS_FOR_BUTTONS = 4;
-	const showTrackButtons = $derived((activeProgram?.tracks?.length ?? 0) <= MAX_TRACKS_FOR_BUTTONS);
+	const showTrackButtons = $derived((effectiveProgram?.tracks?.length ?? 0) <= MAX_TRACKS_FOR_BUTTONS);
 
 	let showScanner = $state(false);
 	/** When 'verify_id', scan verifies stored ID; when 'capture_id_accept', scan fills optional ID in Accept modal; when 'capture_id_new_reg', scan fills ID in New registration modal; else token lookup. */
@@ -99,7 +110,7 @@
 	let triageSettingsLocalCamera = $state(true);
 
 	let bindingMode = $derived<BinderBindingMode>(
-		(activeProgram?.identity_binding_mode as BinderBindingMode | undefined) ?? 'disabled',
+		(effectiveProgram?.identity_binding_mode as BinderBindingMode | undefined) ?? 'disabled',
 	);
 	let clientBinding = $state<ClientBindingPayload | null>(null);
 	let binderStatus = $state<BinderComponentStatus>('idle');
@@ -266,6 +277,7 @@
 		const idNumberStr = String(newRegIdNumber ?? '').trim();
 
 		const body: Record<string, unknown> = {
+			...(effectiveProgram?.id != null ? { program_id: effectiveProgram.id } : {}),
 			name: nameStr,
 			birth_year: birthYear,
 			client_category: newRegCategory || 'Regular',
@@ -331,14 +343,14 @@
 	}
 
 	function setDefaultTrack() {
-		if (activeProgram?.tracks?.length) {
-			const def = activeProgram.tracks.find((t) => t.is_default);
-			selectedTrackId = def?.id ?? activeProgram.tracks[0]?.id ?? null;
+		if (effectiveProgram?.tracks?.length) {
+			const def = effectiveProgram.tracks.find((t) => t.is_default);
+			selectedTrackId = def?.id ?? effectiveProgram.tracks[0]?.id ?? null;
 		}
 	}
 
 	$effect(() => {
-		if (activeProgram?.tracks?.length && selectedTrackId === null) {
+		if (effectiveProgram?.tracks?.length && selectedTrackId === null) {
 			setDefaultTrack();
 		}
 	});
@@ -640,6 +652,9 @@
 			track_id: Number(selectedTrackId),
 			client_category: selectedCategory,
 		};
+		if (effectiveProgram?.id != null) {
+			payload.program_id = effectiveProgram.id;
+		}
 		if (clientBinding) {
 			payload.client_binding = clientBinding;
 		}
@@ -826,7 +841,7 @@
 
 <MobileLayout headerTitle="Triage" {queueCount} {processedToday}>
 	<div class="flex flex-col gap-4 md:gap-6 text-surface-950 w-full max-w-2xl mx-auto px-4 md:px-6 py-4 md:py-6">
-		{#if !activeProgram}
+		{#if !effectiveProgram}
 			<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-6 md:p-8 text-center text-surface-950/80">
 				<p class="font-medium">No active program</p>
 				<p class="mt-2 text-sm">Activate a program from Admin → Programs.</p>
@@ -1347,7 +1362,7 @@
 						<p class="text-sm font-medium text-surface-950 mb-2">Track</p>
 						{#if showTrackButtons}
 							<div class="flex flex-wrap gap-2">
-								{#each activeProgram?.tracks ?? [] as track (track.id)}
+								{#each effectiveProgram?.tracks ?? [] as track (track.id)}
 									<button
 										type="button"
 										class="btn touch-target-h px-4 py-2 {selectedTrackId === track.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
@@ -1366,7 +1381,7 @@
 							class="select select-theme w-full rounded-container border border-surface-200 px-3 py-2 touch-target-h"
 								bind:value={selectedTrackId}
 							>
-								{#each activeProgram?.tracks ?? [] as track (track.id)}
+								{#each effectiveProgram?.tracks ?? [] as track (track.id)}
 									<option value={track.id}>{track.name}</option>
 								{/each}
 							</select>

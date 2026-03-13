@@ -16,12 +16,12 @@ class DashboardService
 {
     /**
      * Get dashboard stats. Per 08-API-SPEC §6.1 response shape.
+     * Per central-edge Phase A: programId from request (admin selection); no single-active.
      */
-    public function getStats(): array
+    public function getStats(?int $programId = null): array
     {
-        $program = Program::query()->where('is_active', true)->first();
-
-        if (! $program) {
+        $program = $programId !== null ? Program::find($programId) : null;
+        if (! $program || ! $program->is_active) {
             return [
                 'active_program' => null,
                 'sessions' => [
@@ -110,12 +110,12 @@ class DashboardService
 
     /**
      * Get stations for dashboard table: queue_count, assigned_staff, current_client, is_active.
+     * Per central-edge Phase A: programId from request; no single-active.
      */
-    public function getDashboardStations(): array
+    public function getDashboardStations(?int $programId = null): array
     {
-        $program = Program::query()->where('is_active', true)->first();
-
-        if (! $program) {
+        $program = $programId !== null ? Program::find($programId) : null;
+        if (! $program || ! $program->is_active) {
             return ['stations' => []];
         }
 

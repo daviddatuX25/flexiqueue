@@ -3,9 +3,11 @@
 namespace Tests\Feature\Api\Admin;
 
 use App\Models\Program;
+use App\Models\Site;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class ProgramDefaultSettingsApplyToProgramTest extends TestCase
@@ -17,7 +19,14 @@ class ProgramDefaultSettingsApplyToProgramTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->admin = User::factory()->admin()->create();
+        $site = Site::create([
+            'name' => 'Default',
+            'slug' => 'default',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $this->admin = User::factory()->admin()->create(['site_id' => $site->id]);
     }
 
     public function test_applying_defaults_to_program_updates_program_settings_and_downstream_props(): void
@@ -54,7 +63,12 @@ class ProgramDefaultSettingsApplyToProgramTest extends TestCase
 
         // Create a program with empty settings.
         /** @var Program $program */
-        $program = Program::factory()->create([
+        $program = Program::create([
+            'site_id' => $this->admin->site_id,
+            'name' => 'Test Program',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
             'settings' => [],
         ]);
 
@@ -91,18 +105,19 @@ class ProgramDefaultSettingsApplyToProgramTest extends TestCase
         $this->assertFalse($program->settings['enable_display_camera_scanner']);
         $this->assertSame('ilo', $program->settings['tts']['active_language'] ?? null);
 
-        // Verify downstream public triage props now reflect updated settings.
+        // Verify downstream public triage page props now reflect updated settings.
         DB::table('programs')->where('id', $program->id)->update(['is_active' => true]);
 
-        $publicTriage = $this->get('/display/triage/status')
-            ->assertStatus(200)
-            ->viewData('props');
-
-        $this->assertTrue($publicTriage['allowed']);
-        $this->assertSame('required', $publicTriage['identity_binding_mode']);
-        $this->assertFalse($publicTriage['allow_unverified_entry']);
-        $this->assertSame(15, $publicTriage['display_scan_timeout_seconds']);
-        $this->assertTrue($publicTriage['enable_public_triage_hid_barcode']);
+        $response = $this->get('/public/triage/'.$program->id);
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->component('Triage/PublicStart')
+            ->where('allowed', true)
+            ->where('identity_binding_mode', 'required')
+            ->where('allow_unverified_entry', false)
+            ->where('display_scan_timeout_seconds', 15)
+            ->where('enable_public_triage_hid_barcode', true)
+        );
     }
 }
 

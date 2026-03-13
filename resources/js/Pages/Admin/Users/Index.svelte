@@ -19,6 +19,12 @@
     } from "lucide-svelte";
     import UserAvatar from "../../../Components/UserAvatar.svelte";
 
+    interface SiteOption {
+        id: number;
+        name: string;
+        slug: string;
+    }
+
     interface UserItem {
         id: number;
         name: string;
@@ -29,9 +35,24 @@
         availability_status?: string;
         assigned_station_id: number | null;
         assigned_station: { id: number; name: string } | null;
+        site?: SiteOption | null;
     }
 
-    let { users = [] }: { users: UserItem[] } = $props();
+    let {
+        users = [],
+        sites = [],
+        auth_is_super_admin = false,
+        auth_user_id,
+        allowed_roles_for_create = ["staff"],
+        allowed_roles_for_edit = ["staff"],
+    }: {
+        users: UserItem[];
+        sites?: SiteOption[];
+        auth_is_super_admin?: boolean;
+        auth_user_id?: number;
+        allowed_roles_for_create?: ("admin" | "staff")[];
+        allowed_roles_for_edit?: ("admin" | "staff")[];
+    } = $props();
 
     let submitting = $state(false);
     let showCreateModal = $state(false);
@@ -45,12 +66,14 @@
     let createPassword = $state("");
     let createRole = $state<"admin" | "staff">("staff");
     let createOverridePin = $state("");
+    let createSiteId = $state<string | number>("");
     let editName = $state("");
     let editEmail = $state("");
     let editRole = $state<"admin" | "staff">("staff");
     let editIsActive = $state(true);
     let editPassword = $state("");
     let editOverridePin = $state("");
+    let editSiteId = $state<string | number>("");
     let resetPassword = $state("");
 
     const page = usePage();
@@ -119,8 +142,9 @@
         createName = "";
         createEmail = "";
         createPassword = "";
-        createRole = "staff";
+        createRole = (allowed_roles_for_create?.[0] ?? "staff") as "admin" | "staff";
         createOverridePin = "";
+        createSiteId = sites?.length ? sites[0].id : "";
         showCreateModal = true;
     }
 
@@ -140,6 +164,7 @@
             password: string;
             role: string;
             override_pin?: string;
+            site_id?: number | null;
         } = {
             name: createName.trim(),
             email: createEmail.trim(),
@@ -148,6 +173,8 @@
         };
         if (createOverridePin.trim())
             body.override_pin = createOverridePin.trim();
+        if (auth_is_super_admin && sites?.length)
+            body.site_id = (createSiteId === "" || createSiteId == null) ? null : Number(createSiteId);
         const { ok, message: msg } = await api(
             "POST",
             "/api/admin/users",
@@ -164,11 +191,12 @@
     function openEdit(u: UserItem) {
         editUser = u;
         editName = u.name;
-        editEmail = u.email;
-        editRole = u.role as "admin" | "staff";
+        const allowed = allowed_roles_for_edit ?? ["staff"];
+        editRole = (allowed.includes(u.role as "admin" | "staff") ? u.role : allowed[0]) as "admin" | "staff";
         editIsActive = u.is_active;
         editPassword = "";
         editOverridePin = "";
+        editSiteId = u.site?.id ?? "";
         showEditModal = true;
     }
 
@@ -182,6 +210,7 @@
             is_active: boolean;
             password?: string;
             override_pin?: string | null;
+            site_id?: number | null;
         } = {
             name: editName.trim(),
             email: editEmail.trim(),
@@ -191,13 +220,15 @@
         if (editPassword.trim()) body.password = editPassword.trim();
         if (editOverridePin.trim()) body.override_pin = editOverridePin.trim();
         else body.override_pin = null;
+        if (auth_is_super_admin)
+            body.site_id = (editSiteId === "" || editSiteId == null) ? null : Number(editSiteId);
         const {
             ok,
             data,
             message: msg,
         } = await api("PUT", `/api/admin/users/${editUser.id}`, body);
         submitting = false;
-        if (ok && data?.user) {
+        if (ok && (data as { user?: UserItem })?.user) {
             toaster.success({ title: "User updated." });
             showEditModal = false;
             editUser = null;
@@ -328,6 +359,7 @@
                 <th>Name</th>
                 <th>Email</th>
                 <th>Role</th>
+                <th>Site</th>
                 <th>Status</th>
                 <th>Availability</th>
                 <th>Assigned to</th>
@@ -353,6 +385,9 @@
                                 : 'preset-tonal'} shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
                             >{user.role}</span
                         >
+                    </td>
+                    <td class="text-surface-700">
+                        <span class="text-surface-950/80">{user.site?.name ?? "—"}</span>
                     </td>
                     <td>
                         {#if user.is_active}
@@ -414,15 +449,17 @@
                                 >
                                     <Key class="w-3.5 h-3.5" /> PW
                                 </button>
-                                <button
-                                    type="button"
-                                    class="btn btn-sm preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
-                                    onclick={() =>
-                                        openDeactivateConfirm(user)}
-                                    disabled={submitting}
-                                >
-                                    <Ban class="w-3.5 h-3.5" /> Disable
-                                </button>
+                                {#if user.id !== auth_user_id}
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
+                                        onclick={() =>
+                                            openDeactivateConfirm(user)}
+                                        disabled={submitting}
+                                    >
+                                        <Ban class="w-3.5 h-3.5" /> Disable
+                                    </button>
+                                {/if}
                             {:else}
                                 <button
                                     type="button"
@@ -498,6 +535,13 @@
                     <div>
                         <span
                             class="text-xs text-surface-500 block mb-0.5 uppercase tracking-wider font-semibold"
+                            >Site</span
+                        >
+                        <span class="text-surface-950 font-medium truncate block">{user.site?.name ?? "—"}</span>
+                    </div>
+                    <div>
+                        <span
+                            class="text-xs text-surface-500 block mb-0.5 uppercase tracking-wider font-semibold"
                             >Availability</span
                         >
                         {#if user.availability_status === "available"}
@@ -554,14 +598,16 @@
                         >
                             <Key class="w-3.5 h-3.5" /> PW
                         </button>
-                        <button
-                            type="button"
-                            class="btn btn-sm flex-1 preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
-                            onclick={() => openDeactivateConfirm(user)}
-                            disabled={submitting}
-                        >
-                            <Ban class="w-3.5 h-3.5" /> Disable
-                        </button>
+                        {#if user.id !== auth_user_id}
+                            <button
+                                type="button"
+                                class="btn btn-sm flex-1 preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                                onclick={() => openDeactivateConfirm(user)}
+                                disabled={submitting}
+                            >
+                                <Ban class="w-3.5 h-3.5" /> Disable
+                            </button>
+                        {/if}
                     {:else}
                         <button
                             type="button"
@@ -619,13 +665,30 @@
                 ><span class="label-text font-medium">Role</span></label
             >
             <select
-                class="select rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
+                class="select select-theme rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                 bind:value={createRole}
             >
-                <option value="staff">Staff</option>
-                <option value="admin">Admin</option>
+                {#each allowed_roles_for_create ?? ["staff"] as r}
+                    <option value={r}>{r === "admin" ? "Admin" : "Staff"}</option>
+                {/each}
             </select>
         </div>
+        {#if auth_is_super_admin && sites?.length}
+            <div class="form-control">
+                <label class="label"
+                    ><span class="label-text font-medium">Site</span></label
+                >
+                <select
+                    class="select select-theme rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
+                    bind:value={createSiteId}
+                >
+                    <option value="">— No site —</option>
+                    {#each sites as s (s.id)}
+                        <option value={s.id}>{s.name}</option>
+                    {/each}
+                </select>
+            </div>
+        {/if}
         <div class="form-control">
             <label class="label"
                 ><span class="label-text font-medium"
@@ -697,13 +760,41 @@
                     ><span class="label-text font-medium">Role</span></label
                 >
                 <select
-                    class="select rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
+                    class="select select-theme rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                     bind:value={editRole}
+                    disabled={editUser?.id === auth_user_id}
                 >
-                    <option value="staff">Staff</option>
-                    <option value="admin">Admin</option>
+                    {#each allowed_roles_for_edit ?? ["staff"] as r}
+                        <option value={r}>{r === "admin" ? "Admin" : "Staff"}</option>
+                    {/each}
                 </select>
+                {#if editUser?.id === auth_user_id}
+                    <p class="label-text-alt text-surface-500 mt-1">You cannot change your own role.</p>
+                {/if}
             </div>
+            {#if auth_is_super_admin && sites?.length}
+                <div class="form-control">
+                    <label class="label"
+                        ><span class="label-text font-medium">Site</span></label
+                    >
+                    <select
+                        class="select select-theme rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
+                        bind:value={editSiteId}
+                    >
+                        <option value="">— No site —</option>
+                        {#each sites as s (s.id)}
+                            <option value={s.id}>{s.name}</option>
+                        {/each}
+                    </select>
+                </div>
+            {:else}
+                <div class="form-control">
+                    <label class="label"
+                        ><span class="label-text font-medium">Site</span></label
+                    >
+                    <p class="text-surface-700 py-2">{editUser.site?.name ?? "—"}</p>
+                </div>
+            {/if}
             <div
                 class="form-control mt-2 mb-2 p-3 border border-surface-100 rounded-container bg-surface-50/50"
             >
