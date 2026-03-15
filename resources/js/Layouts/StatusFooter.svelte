@@ -1,18 +1,24 @@
 <script>
     /**
      * StatusFooter — dual indicator (network + user availability), queue count, clock.
-     * Per staff-availability-status plan: [Network] [Availability] | Queue | Processed | time.
+     * Per staff-availability-status plan: [Network] [Availability] | Today's progress (In queue | Served) | time.
      * Per flexiqueue-j4n: Availability is a drop-up menu (Available | On break | Away); offline = read-only.
      * Per flexiqueue-eym: On break shows full-screen overlay with Resume button.
      */
     import { usePage, router } from "@inertiajs/svelte";
-    import { Users, CheckCircle2, Clock, ChevronUp, Play } from "lucide-svelte";
+    import { Users, CheckCircle2, Clock, ChevronUp, Play, QrCode } from "lucide-svelte";
     import { toaster } from "../lib/toaster.js";
+    import ProgramChip from "../Components/ProgramChip.svelte";
 
     /** When true (default), footer is fixed to viewport bottom. When false, it flows in a parent fixed container (e.g. MobileLayout). */
-    let { queueCount = 0, processedToday = 0, fixed = true } = $props();
+    /** When true, footer has no background (e.g. inside MobileLayout where white bg is not needed). */
+    /** When true and fixed=false: hide time / today's progress; layout: left=program, center=QR (if showQrButton), right=availability. */
+    let { queueCount = 0, processedToday = 0, fixed = true, transparent = false, compact = false, showQrButton = false, onQrClick } = $props();
 
     const page = usePage();
+    /** On admin: today's in-queue and served from dashboard API (real-time poll). */
+    let adminInQueue = $state(null);
+    let adminServedToday = $state(null);
     const user = $derived($page.props?.auth?.user ?? null);
     const csrfToken = $derived($page.props?.csrf_token ?? "");
     /** Current program in context: from controller (e.g. activeProgram) or shared Inertia data (currentProgram). */
@@ -27,7 +33,7 @@
         currentPath === "/station" ||
             currentPath.startsWith("/station/") ||
             currentPath === "/triage" ||
-            currentPath === "/program-overrides",
+            currentPath === "/track-overrides",
     );
     const isAdminRoute = $derived(currentPath.startsWith("/admin"));
     /** Roles that can switch program from footer (admin/supervisor). Single place for future role changes. */
@@ -65,8 +71,9 @@
     const connectionLabel = $derived(
         networkConnected ? "Connected" : "Offline",
     );
+    /** Chip clickable when program is ongoing, or when admin/supervisor can switch (e.g. on admin page) so footer is never wrongly disabled. */
     const isProgramClickable = $derived(
-        !!user && !isSuperAdmin && networkConnected && programMode === "ongoing",
+        !!user && !isSuperAdmin && networkConnected && (programMode === "ongoing" || showProgramSwitch),
     );
     /** Show program dropdown: live-session when canSwitchProgram, or admin pages when admin/supervisor; need 2+ programs. */
     let programSwitchOpen = $state(false);
@@ -76,6 +83,42 @@
     );
     const currentProgramId = $derived(activeProgram?.id ?? null);
     /** Main chip click = navigate (program detail or station). Chevron = open program dropdown when showProgramSwitch. */
+    /** First program (admin context) for fetching today's progress. */
+    const firstProgramId = $derived(programs?.length > 0 ? programs[0].id : null);
+    /** Displayed today stats: on admin use fetched values (today only), else use props. */
+    const displayInQueue = $derived(isAdminRoute && adminInQueue !== null ? adminInQueue : queueCount);
+    const displayServedToday = $derived(isAdminRoute && adminServedToday !== null ? adminServedToday : processedToday);
+
+    /** On admin route: poll dashboard stats for today's in-queue and served (real-time). */
+    $effect(() => {
+        if (!isAdminRoute || !firstProgramId || typeof fetch === "undefined") return;
+        const csrf = $page.props?.csrf_token ?? "";
+        let cancelled = false;
+        async function fetchToday() {
+            try {
+                const res = await fetch(`/api/dashboard/stats?program_id=${firstProgramId}`, {
+                    headers: { Accept: "application/json", "X-CSRF-TOKEN": csrf, "X-Requested-With": "XMLHttpRequest" },
+                    credentials: "same-origin",
+                });
+                if (!res.ok || cancelled) return;
+                const data = await res.json().catch(() => ({}));
+                if (cancelled) return;
+                adminInQueue = data.sessions?.active ?? 0;
+                adminServedToday = data.sessions?.completed_today ?? 0;
+            } catch (_) {
+                if (!cancelled) {
+                    adminInQueue = 0;
+                    adminServedToday = 0;
+                }
+            }
+        }
+        fetchToday();
+        const id = setInterval(fetchToday, 30000);
+        return () => {
+            cancelled = true;
+            clearInterval(id);
+        };
+    });
 
     $effect(() => {
         const u = $page.props?.auth?.user;
@@ -248,7 +291,7 @@
         const pathname = path.split("?")[0] || "/";
         if (pathname.startsWith("/station")) return "/station";
         if (pathname === "/triage") return "/triage";
-        if (pathname === "/program-overrides") return "/program-overrides";
+        if (pathname === "/track-overrides") return "/track-overrides";
         return "/station";
     }
 
@@ -340,85 +383,143 @@
     }
 </script>
 
+<!-- Per ui-ux-tasks-checklist: footer program status spacing — plenty of space/padding -->
 <footer
-    class="shrink-0 bg-surface-50 border-t border-surface-200 px-3 sm:px-4 py-2.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-2 text-xs font-medium text-surface-600 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)] z-40 min-w-0 {fixed ? 'fixed bottom-0 left-0 right-0' : ''}"
+    class="shrink-0 px-4 sm:px-5 py-3.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2.5 text-xs font-medium text-surface-600 dark:text-slate-300 z-40 min-w-0 {transparent ? 'bg-transparent' : 'bg-surface-50 dark:bg-slate-900 border-t border-surface-200 dark:border-slate-700 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)]'} {fixed ? 'fixed bottom-0 left-0 right-0' : ''}"
     role="status"
     aria-live="polite"
 >
-    <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 shrink">
-        <!-- Program + Connection: main chip = view switching (uses current program from session); chevron = precise click to open program drop-up. -->
-        <div class="relative shrink-0" bind:this={programSwitchWrapEl}>
-            <div
-                class="flex items-stretch rounded-full border overflow-hidden
-                    {programMode === 'ongoing'
-                        ? 'bg-success-50 text-success-800 border-success-200'
-                        : 'bg-surface-100 text-surface-800 border-surface-200'}"
-            >
-            <button
-                type="button"
-                class="flex flex-col items-start justify-center gap-0.5 px-2 sm:px-3 py-1.5 min-h-[44px] text-left transition-all duration-200 shrink-0
-                    {isProgramClickable ? 'cursor-pointer hover:bg-success-100' : 'cursor-default'}"
-                onclick={handleProgramClick}
-                disabled={!isProgramClickable}
-                aria-label="{programName} — {connectionLabel}. Click to switch between program and station view"
-            >
-                <span class="text-[0.65rem] sm:text-[0.72rem] font-semibold uppercase tracking-wide leading-tight whitespace-nowrap max-w-[12rem] sm:max-w-[16rem] truncate">
+    {#if compact}
+        <!-- Compact (mobile) layout: Program | QR (center) | Availability (right) -->
+        <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 shrink">
+            <div class="relative shrink-0 max-w-[12rem] sm:max-w-none" bind:this={programSwitchWrapEl}>
+                <ProgramChip
                     {programName}
-                </span>
-                <span class="inline-flex items-center gap-1 text-[0.72rem] whitespace-nowrap {programMode === 'ongoing' ? 'text-success-800' : 'text-surface-600'}">
-                    <span
-                        class="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse {networkConnected
-                            ? 'bg-success-500 shadow-[0_0_4px_rgba(34,197,94,0.7)]'
-                            : 'bg-error-500 shadow-[0_0_4px_rgba(239,68,68,0.7)]'}"
-                        aria-hidden="true"
-                    ></span>
-                    <span>{connectionLabel}</span>
-                </span>
-            </button>
-            {#if showProgramSwitch}
+                    {programMode}
+                    {connectionLabel}
+                    {networkConnected}
+                    {isProgramClickable}
+                    {showProgramSwitch}
+                    {programs}
+                    currentProgramId={currentProgramId}
+                    programSwitchOpen={programSwitchOpen}
+                    onProgramClick={handleProgramClick}
+                    onChevronClick={() => (programSwitchOpen = !programSwitchOpen)}
+                    onSwitchProgram={(id) => switchProgram(id)}
+                    {fixed}
+                    menuPosition={programSwitchMenuPosition}
+                />
+            </div>
+        </div>
+
+        <!-- Center: Admin/supervisor QR scan — brand green, white icon, prominent -->
+        <div class="flex items-center justify-center shrink-0">
+            {#if showQrButton && onQrClick}
                 <button
                     type="button"
-                    class="flex items-center justify-center min-w-[36px] px-2 border-l border-current/20 text-surface-500 hover:bg-black/5 transition-colors touch-target"
-                    onclick={(e) => {
-                        e.stopPropagation();
-                        programSwitchOpen = !programSwitchOpen;
-                    }}
-                    aria-haspopup="listbox"
-                    aria-expanded={programSwitchOpen}
-                    aria-label="Change program (current: {activeProgram?.name ?? 'program'})"
+                    class="w-14 h-14 rounded-full flex items-center justify-center bg-primary-500 hover:bg-primary-600 active:bg-primary-700 text-white shadow-lg ring-2 ring-primary-400/40 active:scale-95 transition-all touch-target"
+                    aria-label="Scan QR to approve"
+                    onclick={onQrClick}
                 >
-                    <ChevronUp
-                        class="w-3.5 h-3.5 transition-transform {programSwitchOpen ? 'rotate-180' : ''}"
-                        aria-hidden="true"
-                    />
+                    <QrCode class="h-7 w-7" />
                 </button>
-            {/if}
-            </div>
-            {#if showProgramSwitch && programSwitchOpen && !fixed}
-                <ul
-                    role="listbox"
-                    class="absolute bottom-full left-0 mb-1 min-w-[11rem] max-h-[12rem] overflow-y-auto py-1 rounded-lg border border-surface-200 bg-surface-50 shadow-lg z-50"
-                    aria-label="Select program"
+            {:else if showQrButton}
+                <div
+                    class="w-12 h-12 rounded-full flex items-center justify-center bg-surface-200 dark:bg-slate-700 text-surface-500 dark:text-slate-400"
+                    aria-hidden="true"
                 >
-                    {#each programs as p (p.id)}
-                        <li role="option" aria-selected={currentProgramId === p.id}>
-                            <button
-                                type="button"
-                                class="w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-none
-                                    {currentProgramId === p.id
-                                        ? 'text-primary-700 font-medium'
-                                        : 'text-surface-700 hover:bg-surface-100'}"
-                                onclick={() => switchProgram(p.id)}
-                            >
-                                {#if currentProgramId === p.id}
-                                    <CheckCircle2 class="w-4 h-4 text-primary-500 shrink-0" aria-hidden="true" />
-                                {/if}
-                                <span>{p.name}</span>
-                            </button>
-                        </li>
-                    {/each}
-                </ul>
+                    <QrCode class="h-6 w-6" />
+                </div>
             {/if}
+        </div>
+
+        <!-- Right: Staff availability -->
+        <div class="flex items-center justify-end min-w-0 flex-1 shrink">
+            {#if user && !isSuperAdmin}
+                <div class="relative shrink-0" bind:this={availabilityWrapEl}>
+                    {#if !networkConnected}
+                        <div
+                            class="flex items-center gap-1.5 rounded-full px-3 py-2 border bg-surface-100 dark:bg-slate-800 text-surface-500 dark:text-slate-400 border-surface-200 dark:border-slate-600"
+                            aria-label="Availability: Offline"
+                        >
+                            <span class="w-2 h-2 bg-surface-400 rounded-full" aria-hidden="true"></span>
+                            <span>{labels.offline}</span>
+                        </div>
+                    {:else}
+                        <button
+                            type="button"
+                            class="flex items-center gap-1.5 rounded-full px-2 sm:px-3 py-2 border transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed shrink-0
+                                {availabilityStatus === 'available' ? 'bg-success-50 dark:bg-success-900/30 text-success-700 dark:text-success-300 border-success-200 dark:border-success-700 hover:bg-success-100 dark:hover:bg-success-900/50' : ''}
+                                {availabilityStatus === 'on_break' ? 'bg-warning-50 dark:bg-warning-900/30 text-warning-700 dark:text-warning-300 border-warning-200 dark:border-warning-700 hover:bg-warning-100 dark:hover:bg-warning-900/50' : ''}
+                                {availabilityStatus === 'away' ? 'bg-surface-100 dark:bg-slate-800 text-surface-700 dark:text-slate-300 border-surface-200 dark:border-slate-600 hover:bg-surface-200 dark:hover:bg-slate-700' : ''}
+                                {availabilityStatus === 'offline' ? 'bg-surface-100 dark:bg-slate-800 text-surface-500 dark:text-slate-400 border-surface-200 dark:border-slate-600' : ''}"
+                            onclick={toggleMenu}
+                            disabled={isUpdating}
+                            aria-haspopup="listbox"
+                            aria-expanded={menuOpen}
+                            aria-label="Availability: {labels[availabilityStatus] ?? availabilityStatus}"
+                        >
+                            {#if availabilityStatus === "available"}
+                                <span class="w-2 h-2 bg-success-500 rounded-full" aria-hidden="true"></span>
+                            {:else if availabilityStatus === "on_break"}
+                                <span class="w-2 h-2 bg-warning-500 rounded-full" aria-hidden="true"></span>
+                            {:else}
+                                <span class="w-2 h-2 bg-surface-400 dark:bg-slate-500 rounded-full" aria-hidden="true"></span>
+                            {/if}
+                            <span>{labels[availabilityStatus] ?? availabilityStatus}</span>
+                            <ChevronUp class="w-3.5 h-3.5 transition-transform {menuOpen ? 'rotate-180' : ''}" aria-hidden="true" />
+                        </button>
+                        {#if menuOpen && !fixed}
+                            <ul
+                                role="listbox"
+                                class="absolute bottom-full right-0 mb-1 min-w-[10rem] py-1 rounded-lg border border-surface-200 dark:border-slate-600 bg-surface-50 dark:bg-slate-800 shadow-lg z-50"
+                                aria-label="Set availability"
+                            >
+                                {#each menuOptions as opt}
+                                    <li role="option" aria-selected={availabilityStatus === opt.value}>
+                                        <button
+                                            type="button"
+                                            class="w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-none text-surface-800 dark:text-slate-200 {availabilityStatus === opt.value ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300' : 'hover:bg-surface-100 dark:hover:bg-slate-700'}"
+                                            onclick={() => selectAvailability(opt.value)}
+                                            disabled={isUpdating}
+                                        >
+                                            {#if opt.value === "available"}
+                                                <span class="w-2 h-2 bg-success-500 rounded-full shrink-0" aria-hidden="true"></span>
+                                            {:else if opt.value === "on_break"}
+                                                <span class="w-2 h-2 bg-warning-500 rounded-full shrink-0" aria-hidden="true"></span>
+                                            {:else}
+                                                <span class="w-2 h-2 bg-surface-400 rounded-full shrink-0" aria-hidden="true"></span>
+                                            {/if}
+                                            <span>{opt.label}</span>
+                                        </button>
+                                    </li>
+                                {/each}
+                            </ul>
+                        {/if}
+                    {/if}
+                </div>
+            {/if}
+        </div>
+    {:else}
+    <!-- Default layout: left = program + availability, right = today's progress (in queue | served) + time. Program chip uses same mobile-style component as compact. -->
+    <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 shrink">
+        <div class="relative shrink-0 max-w-[12rem] sm:max-w-none" bind:this={programSwitchWrapEl}>
+            <ProgramChip
+                {programName}
+                {programMode}
+                {connectionLabel}
+                {networkConnected}
+                {isProgramClickable}
+                {showProgramSwitch}
+                {programs}
+                currentProgramId={currentProgramId}
+                programSwitchOpen={programSwitchOpen}
+                onProgramClick={handleProgramClick}
+                onChevronClick={() => (programSwitchOpen = !programSwitchOpen)}
+                onSwitchProgram={(id) => switchProgram(id)}
+                {fixed}
+                menuPosition={programSwitchMenuPosition}
+            />
         </div>
 
         <!-- Availability Status (per j4n: drop-up selector; offline = read-only) -->
@@ -429,7 +530,7 @@
             >
                 {#if !networkConnected}
                     <div
-                        class="flex items-center gap-1.5 rounded-full px-3 py-1.5 border bg-surface-100 text-surface-500 border-surface-200"
+                        class="flex items-center gap-1.5 rounded-full px-3 py-2 border bg-surface-100 text-surface-500 border-surface-200"
                         aria-label="Availability: Offline (no connection)"
                     >
                         <span
@@ -441,7 +542,7 @@
                 {:else}
                     <button
                         type="button"
-                        class="flex items-center gap-1 sm:gap-1.5 rounded-full px-2 sm:px-3 py-1.5 border transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed shrink-0
+                        class="flex items-center gap-1 sm:gap-1.5 rounded-full px-2 sm:px-3 py-2 border transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed shrink-0
 						{availabilityStatus === 'available'
                             ? 'bg-success-50 text-success-700 border-success-200 hover:bg-success-100'
                             : ''}
@@ -526,30 +627,32 @@
         {/if}
     </div>
 
-    <div class="flex items-center gap-2 sm:gap-5 shrink-0">
+    {#if !compact}
+    <div class="flex items-center gap-2 sm:gap-5 shrink-0" title="Today's progress">
+        <span class="hidden sm:inline text-surface-500 dark:text-slate-500 text-[11px] font-medium uppercase tracking-wide shrink-0">Today's progress</span>
         <div
-            class="flex items-center gap-1.5 text-surface-600 hidden sm:flex"
-            title="Tokens in Queue"
+            class="flex items-center gap-1.5 text-surface-600 dark:text-slate-400 hidden sm:flex"
+            title="Sessions in queue today"
         >
-            <Users class="w-4 h-4 text-surface-400" />
+            <Users class="w-4 h-4 text-surface-400 dark:text-slate-500" />
             <span
-                >Queue: <strong class="text-surface-900">{queueCount}</strong
+                >In queue: <strong class="text-surface-900 dark:text-slate-100">{displayInQueue}</strong
                 ></span
             >
         </div>
         <div
-            class="flex items-center gap-1.5 text-surface-600 hidden sm:flex"
-            title="Tokens Processed Today"
+            class="flex items-center gap-1.5 text-surface-600 dark:text-slate-400 hidden sm:flex"
+            title="Sessions served today"
         >
-            <CheckCircle2 class="w-4 h-4 text-surface-400" />
+            <CheckCircle2 class="w-4 h-4 text-surface-400 dark:text-slate-500" />
             <span
-                >Processed: <strong class="text-surface-900"
-                    >{processedToday}</strong
+                >Served: <strong class="text-surface-900 dark:text-slate-100"
+                    >{displayServedToday}</strong
                 ></span
             >
         </div>
         <div
-            class="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 bg-surface-100/50 rounded-full border border-surface-200 text-surface-700 shrink-0"
+            class="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 bg-surface-100/50 dark:bg-slate-800/50 rounded-full border border-surface-200 dark:border-slate-600 text-surface-700 dark:text-slate-300 shrink-0"
             title="Current Time"
         >
             <Clock class="w-3.5 h-3.5" />
@@ -559,33 +662,10 @@
             >
         </div>
     </div>
-
-    {#if programSwitchOpen && fixed && showProgramSwitch}
-        <ul
-            role="listbox"
-            class="fixed z-[90] mb-1 min-w-[11rem] max-h-[12rem] overflow-y-auto py-1 rounded-lg border border-surface-200 bg-surface-50 shadow-lg"
-            style={`left: ${programSwitchMenuPosition.left}px; bottom: ${programSwitchMenuPosition.bottom}px;`}
-            aria-label="Select program"
-        >
-            {#each programs as p (p.id)}
-                <li role="option" aria-selected={currentProgramId === p.id}>
-                    <button
-                        type="button"
-                        class="w-full text-left flex items-center gap-2 px-3 py-2 text-sm rounded-none
-                            {currentProgramId === p.id
-                                ? 'text-primary-700 font-medium'
-                                : 'text-surface-700 hover:bg-surface-100'}"
-                        onclick={() => switchProgram(p.id)}
-                    >
-                        {#if currentProgramId === p.id}
-                            <CheckCircle2 class="w-4 h-4 text-primary-500 shrink-0" aria-hidden="true" />
-                        {/if}
-                        <span>{p.name}</span>
-                    </button>
-                </li>
-            {/each}
-        </ul>
     {/if}
+    {/if}
+
+    <!-- Fixed-position program dropdown is rendered inside ProgramChip when fixed=true -->
 
     {#if menuOpen && fixed}
         <ul

@@ -4,37 +4,41 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Site;
-use App\Models\User;
+use App\Models\SiteShortLink;
 use App\Services\SiteApiKeyService;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
 
 /**
  * Per central-edge B.5: Admin UI for site management (list, create, show with masked key and edge settings).
- * Per assign-site-to-user: show users in this site; super_admin can move user to another site.
+ * Users are managed on the Staff page only; one admin manages one site.
  */
 class SitesPageController extends Controller
 {
-    public function index(Request $request): Response
+    public function index(Request $request): Response|RedirectResponse
     {
         $authUser = $request->user();
-        $query = Site::query()->orderBy('name');
+        // Per plan: site-scoped admin has no Sites nav; redirect if they hit the URL directly.
         if (! $authUser->isSuperAdmin()) {
-            if ($authUser->site_id === null) {
-                return Inertia::render('Admin/Sites/Index', ['sites' => []]);
-            }
-            $query->where('id', $authUser->site_id);
+            return redirect()->route('admin.dashboard');
         }
+        $query = Site::query()->orderBy('name');
         $sites = $query->get()->map(fn (Site $s) => [
             'id' => $s->id,
             'name' => $s->name,
             'slug' => $s->slug,
+            'is_default' => (bool) ($s->is_default ?? false),
             'created_at' => $s->created_at?->toIso8601String(),
         ]);
 
+        $defaultSiteId = Site::where('is_default', true)->value('id');
+
         return Inertia::render('Admin/Sites/Index', [
             'sites' => $sites,
+            'default_site_id' => $defaultSiteId,
             'auth_is_super_admin' => $authUser->isSuperAdmin(),
         ]);
     }
@@ -54,39 +58,60 @@ class SitesPageController extends Controller
         if (! $authUser->isSuperAdmin() && $authUser->site_id !== $site->id) {
             abort(404);
         }
-        $usersInSite = User::query()
-            ->forSite($site->id)
-            ->orderBy('name')
-            ->get(['id', 'name', 'email', 'role'])
-            ->map(fn (User $u) => [
-                'id' => $u->id,
-                'name' => $u->name,
-                'email' => $u->email,
-                'role' => $u->role->value,
-            ])
-            ->values()
-            ->all();
+
+        $defaultSiteId = Site::where('is_default', true)->value('id');
+
+        $settings = $site->settings ?? [];
+        $heroPath = $settings['landing_hero_image_path'] ?? null;
+        $landingHeroImageUrl = null;
+        if (is_string($heroPath) && $heroPath !== '') {
+            $landingHeroImageUrl = Storage::disk('public')->url($heroPath);
+        }
+
+        $siteEntryLink = SiteShortLink::query()
+            ->where('site_id', $site->id)
+            ->where('type', SiteShortLink::TYPE_SITE_ENTRY)
+            ->first();
 
         $payload = [
             'site' => [
                 'id' => $site->id,
                 'name' => $site->name,
                 'slug' => $site->slug,
-                'settings' => $site->settings ?? [],
+                'is_default' => (bool) ($site->is_default ?? false),
+                'settings' => $settings,
                 'edge_settings' => $site->edge_settings ?? [],
                 'created_at' => $site->created_at?->toIso8601String(),
                 'updated_at' => $site->updated_at?->toIso8601String(),
+                'landing_hero_image_url' => $landingHeroImageUrl,
             ],
+            'landing' => [
+                'hero_title' => $settings['landing_hero_title'] ?? $site->name,
+                'hero_description' => $settings['landing_hero_description'] ?? null,
+                'hero_image_url' => $landingHeroImageUrl,
+                'sections' => $settings['landing_sections'] ?? [],
+                'show_stats' => (bool) ($settings['landing_show_stats'] ?? false),
+                'public_access_key' => $settings['public_access_key'] ?? null,
+            ],
+            'site_entry_short_url' => $siteEntryLink
+                ? rtrim(config('app.url'), '/').'/go/'.$siteEntryLink->code
+                : null,
+            'site_landing_url' => url('/site/'.$site->slug),
             'api_key_masked' => SiteApiKeyService::maskedPlaceholder(),
-            'users_in_site' => $usersInSite,
+            'default_site_id' => $defaultSiteId,
             'auth_is_super_admin' => $authUser->isSuperAdmin(),
         ];
 
         if ($authUser->isSuperAdmin()) {
             $payload['sites'] = Site::query()
                 ->orderBy('name')
-                ->get(['id', 'name', 'slug'])
-                ->map(fn (Site $s) => ['id' => $s->id, 'name' => $s->name, 'slug' => $s->slug])
+                ->get(['id', 'name', 'slug', 'is_default'])
+                ->map(fn (Site $s) => [
+                    'id' => $s->id,
+                    'name' => $s->name,
+                    'slug' => $s->slug,
+                    'is_default' => (bool) ($s->is_default ?? false),
+                ])
                 ->values()
                 ->all();
         }

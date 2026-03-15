@@ -8,6 +8,8 @@ use App\Http\Requests\StoreProgramRequest;
 use App\Http\Requests\UpdateProgramRequest;
 use App\Jobs\GenerateStationTtsJob;
 use App\Models\Program;
+use App\Models\ProgramAccessToken;
+use App\Models\SiteShortLink;
 use App\Services\ProgramService;
 use App\Support\QueueWorkerIdleCheck;
 use Illuminate\Http\JsonResponse;
@@ -91,12 +93,28 @@ class ProgramController extends Controller
         if ($settings !== null) {
             $merged = $program->settings ?? [];
             foreach ($settings as $k => $v) {
+                if ($k === 'page_banner_image_path') {
+                    continue;
+                }
                 $merged[$k] = $v;
             }
             $validated['settings'] = $merged;
         }
 
+        $oldKey = $program->settings()->getPublicAccessKey();
+        $newKey = isset($validated['settings']['public_access_key']) ? $validated['settings']['public_access_key'] : null;
+        $newKey = $newKey === '' ? null : $newKey;
+        $keyChanged = ($oldKey ?? '') !== ($newKey ?? '');
+
         $program->update($validated);
+
+        if ($keyChanged) {
+            ProgramAccessToken::query()->where('program_id', $program->id)->delete();
+            SiteShortLink::query()
+                ->where('program_id', $program->id)
+                ->where('type', SiteShortLink::TYPE_PROGRAM_PRIVATE)
+                ->delete();
+        }
 
         $program = $program->fresh();
         if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('enable_display_hid_barcode', $settings) || array_key_exists('enable_public_triage_hid_barcode', $settings) || array_key_exists('enable_display_camera_scanner', $settings) || array_key_exists('enable_public_triage_camera_scanner', $settings) || array_key_exists('display_tts_repeat_count', $settings) || array_key_exists('display_tts_repeat_delay_ms', $settings))) {
@@ -244,6 +262,8 @@ class ProgramController extends Controller
             return response()->json(['message' => $e->getMessage()], 400);
         }
 
+        ProgramAccessToken::query()->where('program_id', $program->id)->delete();
+
         return response()->json(['program' => $this->programResource($program)]);
     }
 
@@ -253,6 +273,8 @@ class ProgramController extends Controller
     public function destroy(Request $request, Program $program): JsonResponse
     {
         $this->ensureProgramInSite($request, $program);
+
+        ProgramAccessToken::query()->where('program_id', $program->id)->delete();
 
         try {
             $this->programService->delete($program);
@@ -296,9 +318,11 @@ class ProgramController extends Controller
         return [
             'id' => $program->id,
             'name' => $program->name,
+            'slug' => $program->slug,
             'description' => $program->description,
             'is_active' => $program->is_active,
             'is_paused' => $program->is_paused ?? false,
+            'is_published' => $program->is_published ?? true,
             'created_at' => $program->created_at?->toIso8601String(),
             'settings' => [
                 'no_show_timer_seconds' => (int) ($settings['no_show_timer_seconds'] ?? 10),
@@ -320,6 +344,10 @@ class ProgramController extends Controller
                 'allow_public_triage' => $programSettings->getAllowPublicTriage(),
                 'allow_unverified_entry' => $programSettings->getAllowUnverifiedEntry(),
                 'identity_binding_mode' => $programSettings->getIdentityBindingMode(),
+                'public_access_key' => $programSettings->getPublicAccessKey(),
+                'public_access_expiry_hours' => $programSettings->getPublicAccessExpiryHours(),
+                'page_description' => $programSettings->getPageDescription(),
+                'page_announcement' => $programSettings->getPageAnnouncement(),
                 'tts' => [
                     'active_language' => $programSettings->getTtsActiveLanguage(),
                     'auto_generate_station_tts' => ($settings['tts']['auto_generate_station_tts'] ?? true) === true,

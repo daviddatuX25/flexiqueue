@@ -3,10 +3,12 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class PrintSetting extends Model
 {
     protected $fillable = [
+        'site_id',
         'cards_per_page',
         'paper',
         'orientation',
@@ -21,4 +23,9 @@ class PrintSetting extends Model
         'show_hint' => 'boolean',
         'show_cut_lines' => 'boolean',
     ];
+
+    public function site(): BelongsTo
+    {
+        return $this->belongsTo(Site::class);
+    }
 }

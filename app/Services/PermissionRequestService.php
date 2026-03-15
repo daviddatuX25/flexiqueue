@@ -6,6 +6,7 @@ use App\Events\PermissionRequestResponded;
 use App\Http\Resources\SessionResource;
 use App\Models\PermissionRequest;
 use App\Models\Session;
+use Illuminate\Support\Str;
 
 /**
  * Handles permission request lifecycle: create, approve, reject.
@@ -39,6 +40,7 @@ class PermissionRequestService
             'action_type' => $actionType,
             'requester_user_id' => $requesterUserId,
             'status' => PermissionRequest::STATUS_PENDING,
+            'request_token' => Str::random(64),
             'target_station_id' => $targetStationId,
             'target_track_id' => $targetTrackId,
             'custom_steps' => $customSteps,
@@ -211,7 +213,39 @@ class PermissionRequestService
             return ['session' => $reassignResult['session']];
         }
 
+        // Reject without reassign: cancel the session so the token is freed (not stuck unmovable).
+        if ($pr->action_type === PermissionRequest::ACTION_OVERRIDE && $session->status === 'awaiting_approval') {
+            $this->sessionService->cancel($session, $responderUserId, 'Permission request rejected');
+        }
+
         return null;
+    }
+
+    /**
+     * Cancel a pending permission request (e.g. on timeout). Requester only.
+     * Sets status to cancelled, responded_at for audit, broadcasts so list and Station UI update.
+     */
+    public function cancel(PermissionRequest $pr, int $requesterUserId): void
+    {
+        if ($pr->requester_user_id !== $requesterUserId) {
+            throw new \InvalidArgumentException('Only the requester can cancel.', 403);
+        }
+        if (! $pr->isPending()) {
+            throw new \InvalidArgumentException('Request is no longer pending.', 409);
+        }
+
+        $pr->update([
+            'status' => PermissionRequest::STATUS_CANCELLED,
+            'responded_at' => now(),
+        ]);
+
+        broadcast(new PermissionRequestResponded($pr->fresh()))->toOthers();
+
+        // Cancel the session so the token is freed (not stuck unmovable).
+        $session = $pr->session->fresh();
+        if ($pr->action_type === PermissionRequest::ACTION_OVERRIDE && $session->status === 'awaiting_approval') {
+            $this->sessionService->cancel($session, $requesterUserId, 'Permission request cancelled');
+        }
     }
 
 }

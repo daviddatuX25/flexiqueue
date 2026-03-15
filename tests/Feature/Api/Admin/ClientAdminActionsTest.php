@@ -4,20 +4,38 @@ namespace Tests\Feature\Api\Admin;
 
 use App\Models\Client;
 use App\Models\ClientIdAuditLog;
-use App\Models\ClientIdDocument;
+use App\Models\Site;
 use App\Models\User;
+use App\Services\ClientService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
+/**
+ * Per PRIVACY-BY-DESIGN-IDENTITY-BINDING: client admin actions use phone-based audit.
+ */
 class ClientAdminActionsTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function site(): Site
+    {
+        return Site::firstOrCreate(
+            ['slug' => 'default'],
+            [
+                'name' => 'Default',
+                'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+                'settings' => [],
+                'edge_settings' => [],
+            ]
+        );
+    }
+
     public function test_delete_client_returns_200_when_no_audit_log_exists(): void
     {
-        $admin = User::factory()->admin()->create();
-        $client = Client::factory()->create();
+        $site = $this->site();
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $client = Client::factory()->create(['site_id' => $site->id]);
 
         $res = $this->actingAs($admin)->deleteJson("/api/admin/clients/{$client->id}");
 
@@ -27,24 +45,17 @@ class ClientAdminActionsTest extends TestCase
 
     public function test_delete_client_returns_409_when_audit_log_exists(): void
     {
-        $admin = User::factory()->admin()->create();
-        $client = Client::factory()->create();
-        $doc = ClientIdDocument::factory()->create([
-            'client_id' => $client->id,
-            'id_type' => 'PhilHealth',
-            'id_number_encrypted' => Crypt::encryptString('ABC-123'),
-            'id_number_hash' => str_repeat('a', 64),
-        ]);
+        $site = $this->site();
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $clientService = app(ClientService::class);
+        $client = $clientService->createClient('Juan Cruz', 1985, $site->id, '09171234567');
 
         ClientIdAuditLog::create([
             'client_id' => $client->id,
-            'client_id_document_id' => $doc->id,
             'staff_user_id' => $admin->id,
-            'action' => 'id_reveal',
+            'action' => 'phone_reveal',
+            'mobile_last2' => '67',
             'reason' => 'test',
-            'id_type' => $doc->id_type,
-            'id_last4' => '0123',
-            'created_at' => now(),
         ]);
 
         $res = $this->actingAs($admin)->deleteJson("/api/admin/clients/{$client->id}");
@@ -52,66 +63,4 @@ class ClientAdminActionsTest extends TestCase
         $res->assertStatus(409);
         $this->assertDatabaseHas('clients', ['id' => $client->id]);
     }
-
-    public function test_delete_id_document_returns_200_when_no_audit_log_exists(): void
-    {
-        $admin = User::factory()->admin()->create();
-        $doc = ClientIdDocument::factory()->create([
-            'id_type' => 'PhilHealth',
-            'id_number_encrypted' => Crypt::encryptString('ABC-123'),
-            'id_number_hash' => str_repeat('b', 64),
-        ]);
-
-        $res = $this->actingAs($admin)->deleteJson("/api/admin/client-id-documents/{$doc->id}");
-
-        $res->assertStatus(200)->assertJson(['deleted' => true]);
-        $this->assertDatabaseMissing('client_id_documents', ['id' => $doc->id]);
-    }
-
-    public function test_delete_id_document_returns_409_when_audit_log_exists(): void
-    {
-        $admin = User::factory()->admin()->create();
-        $doc = ClientIdDocument::factory()->create([
-            'id_type' => 'PhilHealth',
-            'id_number_encrypted' => Crypt::encryptString('ABC-123'),
-            'id_number_hash' => str_repeat('c', 64),
-        ]);
-
-        ClientIdAuditLog::create([
-            'client_id' => $doc->client_id,
-            'client_id_document_id' => $doc->id,
-            'staff_user_id' => $admin->id,
-            'action' => 'id_reveal',
-            'reason' => 'test',
-            'id_type' => $doc->id_type,
-            'id_last4' => '0123',
-            'created_at' => now(),
-        ]);
-
-        $res = $this->actingAs($admin)->deleteJson("/api/admin/client-id-documents/{$doc->id}");
-
-        $res->assertStatus(409);
-        $this->assertDatabaseHas('client_id_documents', ['id' => $doc->id]);
-    }
-
-    public function test_reassign_id_document_returns_200_and_updates_client_id(): void
-    {
-        $admin = User::factory()->admin()->create();
-        $from = Client::factory()->create();
-        $to = Client::factory()->create();
-        $doc = ClientIdDocument::factory()->create([
-            'client_id' => $from->id,
-            'id_type' => 'PhilHealth',
-            'id_number_encrypted' => Crypt::encryptString('ABC-123'),
-            'id_number_hash' => str_repeat('d', 64),
-        ]);
-
-        $res = $this->actingAs($admin)->postJson("/api/admin/client-id-documents/{$doc->id}/reassign", [
-            'target_client_id' => $to->id,
-        ]);
-
-        $res->assertStatus(200)->assertJsonPath('client_id_document.client_id', $to->id);
-        $this->assertDatabaseHas('client_id_documents', ['id' => $doc->id, 'client_id' => $to->id]);
-    }
 }
-

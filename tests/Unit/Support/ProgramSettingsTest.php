@@ -92,29 +92,25 @@ class ProgramSettingsTest extends TestCase
         $this->assertSame(10, ProgramSettings::fromArray(['max_no_show_attempts' => 99])->getMaxNoShowAttempts());
     }
 
+    /** Per IDENTITY-BINDING-FINAL-IMPLEMENTATION-PLAN: only disabled | required; optional washed out. */
     public function test_identity_binding_mode_defaults_and_validation(): void
     {
         $defaults = ProgramSettings::fromArray([]);
         $this->assertSame('disabled', $defaults->getIdentityBindingMode());
         $this->assertTrue($defaults->isBindingDisabled());
-        $this->assertFalse($defaults->isBindingOptional());
         $this->assertFalse($defaults->isBindingRequired());
-
-        $optional = ProgramSettings::fromArray(['identity_binding_mode' => 'optional']);
-        $this->assertSame('optional', $optional->getIdentityBindingMode());
-        $this->assertFalse($optional->isBindingDisabled());
-        $this->assertTrue($optional->isBindingOptional());
-        $this->assertFalse($optional->isBindingRequired());
 
         $required = ProgramSettings::fromArray(['identity_binding_mode' => 'required']);
         $this->assertSame('required', $required->getIdentityBindingMode());
         $this->assertFalse($required->isBindingDisabled());
-        $this->assertFalse($required->isBindingOptional());
         $this->assertTrue($required->isBindingRequired());
 
         $invalid = ProgramSettings::fromArray(['identity_binding_mode' => 'bogus']);
         $this->assertSame('disabled', $invalid->getIdentityBindingMode());
         $this->assertTrue($invalid->isBindingDisabled());
+
+        $optionalTreatedAsDisabled = ProgramSettings::fromArray(['identity_binding_mode' => 'optional']);
+        $this->assertSame('disabled', $optionalTreatedAsDisabled->getIdentityBindingMode());
     }
 
     public function test_public_binding_helpers_respect_matrix(): void
@@ -135,15 +131,7 @@ class ProgramSettingsTest extends TestCase
         $this->assertFalse($bindingDisabled->allowsPublicBinding());
         $this->assertFalse($bindingDisabled->requiresPublicBinding());
 
-        // Public triage enabled, binding optional.
-        $optional = ProgramSettings::fromArray([
-            'allow_public_triage' => true,
-            'identity_binding_mode' => 'optional',
-        ]);
-        $this->assertTrue($optional->allowsPublicBinding());
-        $this->assertFalse($optional->requiresPublicBinding());
-
-        // Public triage enabled, binding required.
+        // Public triage enabled, binding required (only mode that allows public binding per plan).
         $required = ProgramSettings::fromArray([
             'allow_public_triage' => true,
             'identity_binding_mode' => 'required',

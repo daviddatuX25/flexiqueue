@@ -3,35 +3,47 @@
 namespace Tests\Feature;
 
 use App\Models\Client;
-use App\Models\ClientIdDocument;
+use App\Models\DeviceAuthorization;
 use App\Models\IdentityRegistration;
 use App\Models\Process;
 use App\Models\Program;
 use App\Models\ServiceTrack;
 use App\Models\Session;
+use App\Models\Site;
 use App\Models\Station;
 use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\TransactionLog;
 use App\Models\User;
+use App\Services\DeviceAuthorizationService;
+use App\Support\DeviceLock;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Crypt;
 use Tests\TestCase;
 
 /**
- * Public self-serve triage: GET /triage/start, GET /api/public/token-lookup, POST /api/public/sessions/bind.
+ * Public self-serve triage: GET /public-triage, GET /api/public/token-lookup, POST /api/public/sessions/bind.
  * No auth. 403 when program allow_public_triage is false.
  */
 class PublicTriageTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function defaultSite(): Site
+    {
+        return Site::firstOrCreate(
+            ['slug' => 'default'],
+            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
+        );
+    }
+
     private function createProgramWithTracks(bool $allowPublicTriage = true, array $extraSettings = []): array
     {
+        $site = $this->defaultSite();
         $user = User::factory()->create();
         $settings = array_merge(['allow_public_triage' => $allowPublicTriage], $extraSettings);
         $program = Program::create([
+            'site_id' => $site->id,
             'name' => 'Test Program',
             'description' => null,
             'is_active' => true,
@@ -65,9 +77,51 @@ class PublicTriageTest extends TestCase
         return ['program' => $program, 'track' => $track, 'station' => $station, 'process' => $process];
     }
 
-    private function createToken(string $physicalId = 'A1'): Token
+    /** Per public-site plan: known_sites cookie required for /site/* routes. */
+    private function withKnownSiteCookie(Site $site): static
+    {
+        $value = json_encode([['slug' => $site->slug, 'name' => $site->name]]);
+
+        return $this->withUnencryptedCookie('known_sites', $value);
+    }
+
+    /** Per plan: request per-site triage URL with device auth + device lock (triage) so we get 200 PublicStart. */
+    private function getTriageWithDeviceAuth(Site $site, Program $program): \Illuminate\Testing\TestResponse
+    {
+        $service = app(DeviceAuthorizationService::class);
+        $result = $service->authorize($program, 'test-device-'.$program->id, DeviceAuthorization::SCOPE_SESSION);
+        $name = DeviceAuthorizationService::cookieNameForProgram($program);
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_TRIAGE, null);
+        $lockValue = $lockCookie->getValue();
+
+        return $this->withKnownSiteCookie($site)
+            ->withCookie($name, $result['cookie_value'])
+            ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockValue)
+            ->get('/site/'.$site->slug.'/public-triage/'.$program->slug);
+    }
+
+    /** Per plan: request legacy /public/triage/{id} with device auth + device lock (triage) so we get 200 PublicStart. */
+    private function getPublicTriageWithDeviceAuth(Program $program): \Illuminate\Testing\TestResponse
+    {
+        $service = app(DeviceAuthorizationService::class);
+        $result = $service->authorize($program, 'test-device-'.$program->id, DeviceAuthorization::SCOPE_SESSION);
+        $name = DeviceAuthorizationService::cookieNameForProgram($program);
+        $site = $program->site;
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_TRIAGE, null);
+        $lockValue = $lockCookie->getValue();
+
+        return $this->withCookie($name, $result['cookie_value'])
+            ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockValue)
+            ->get('/public/triage/'.$program->id);
+    }
+
+    private function createToken(string $physicalId = 'A1', ?int $siteId = null): Token
     {
         $token = new Token;
+        $siteId = $siteId ?? Site::first()?->id;
+        if ($siteId !== null) {
+            $token->site_id = $siteId;
+        }
         $token->qr_code_hash = hash('sha256', Str::random(32).$physicalId);
         $token->physical_id = $physicalId;
         $token->status = 'available';
@@ -78,12 +132,13 @@ class PublicTriageTest extends TestCase
 
     public function test_triage_start_returns_200_with_allowed_true_when_program_allows_public_triage(): void
     {
+        $site = $this->defaultSite();
         ['program' => $program] = $this->createProgramWithTracks(true, ['allow_unverified_entry' => true]);
 
-        $response = $this->get('/triage/start');
+        $response = $this->withKnownSiteCookie($site)->get('/site/'.$site->slug.'/public-triage');
 
-        $response->assertRedirect('/public/triage/'.$program->id);
-        $response = $this->get('/public/triage/'.$program->id);
+        $response->assertRedirect('/site/'.$site->slug.'/public-triage/'.$program->slug);
+        $response = $this->getTriageWithDeviceAuth($site, $program);
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
             ->component('Triage/PublicStart')
@@ -101,24 +156,30 @@ class PublicTriageTest extends TestCase
         $this->assertTrue($props['allow_unverified_entry']);
     }
 
+    /** Per plan: legacy /public-triage with no slug redirects to site triage; with no program allowing triage, shows allowed false. */
     public function test_triage_start_returns_200_with_allowed_false_when_no_program(): void
     {
-        $response = $this->get('/triage/start');
+        $site = $this->defaultSite();
+
+        $response = $this->get('/public-triage');
+
+        $response->assertRedirect('/site/'.$site->slug.'/public-triage');
+
+        $response = $this->withKnownSiteCookie($site)->get('/site/'.$site->slug.'/public-triage');
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
             ->component('Triage/PublicStart')
             ->where('allowed', false)
-            ->where('tracks', [])
         );
     }
 
     public function test_triage_start_returns_200_with_allowed_false_when_program_disallows_public_triage(): void
     {
-        ['program' => $program] = $this->createProgramWithTracks(false);
+        $site = $this->defaultSite();
+        $this->createProgramWithTracks(false);
 
-        // Per central-edge Phase A: when no program allows public triage, render selector (no redirect).
-        $response = $this->get('/triage/start');
+        $response = $this->withKnownSiteCookie($site)->get('/site/'.$site->slug.'/public-triage');
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -163,7 +224,11 @@ class PublicTriageTest extends TestCase
 
     public function test_public_bind_creates_session_returns_201_when_allowed(): void
     {
-        ['program' => $program, 'track' => $track] = $this->createProgramWithTracks(true);
+        // Plain bind (no client_binding) allowed when identity disabled + allow_unverified so binding not required.
+        ['program' => $program, 'track' => $track] = $this->createProgramWithTracks(true, [
+            'identity_binding_mode' => 'disabled',
+            'allow_unverified_entry' => true,
+        ]);
         $token = $this->createToken('A1');
 
         $response = $this->postJson('/api/public/sessions/bind', [
@@ -202,7 +267,10 @@ class PublicTriageTest extends TestCase
 
     public function test_public_bind_returns_409_when_token_in_use(): void
     {
-        ['track' => $track, 'station' => $station, 'program' => $program] = $this->createProgramWithTracks(true);
+        ['track' => $track, 'station' => $station, 'program' => $program] = $this->createProgramWithTracks(true, [
+            'identity_binding_mode' => 'disabled',
+            'allow_unverified_entry' => true,
+        ]);
         $token = $this->createToken('A1');
         $session = \App\Models\Session::create([
             'token_id' => $token->id,
@@ -231,7 +299,10 @@ class PublicTriageTest extends TestCase
 
     public function test_public_bind_transaction_log_has_null_staff_user_id(): void
     {
-        ['program' => $program, 'track' => $track] = $this->createProgramWithTracks(true);
+        ['program' => $program, 'track' => $track] = $this->createProgramWithTracks(true, [
+            'identity_binding_mode' => 'disabled',
+            'allow_unverified_entry' => true,
+        ]);
         $token = $this->createToken('A1');
 
         $this->postJson('/api/public/sessions/bind', [
@@ -255,17 +326,40 @@ class PublicTriageTest extends TestCase
             'program_id' => $program->id,
             'qr_hash' => $token->qr_code_hash,
             'track_id' => $track->id,
-            'client_binding' => ['client_id' => 1, 'source' => 'test', 'id_document_id' => 1],
-            'identity_registration_request' => ['name' => 'Jane'],
+            'client_binding' => ['client_id' => 1, 'source' => 'phone_match'],
+            'identity_registration_request' => ['first_name' => 'Jane', 'last_name' => 'Doe'],
         ]);
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['identity_registration_request']);
     }
 
+    public function test_public_bind_returns_403_when_allow_unverified_false_and_no_registration_request(): void
+    {
+        ['program' => $program, 'track' => $track] = $this->createProgramWithTracks(true, [
+            'identity_binding_mode' => 'required',
+            'allow_unverified_entry' => false,
+        ]);
+        $token = $this->createToken('A1');
+
+        $response = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $program->id,
+            'qr_hash' => $token->qr_code_hash,
+            'track_id' => $track->id,
+            'client_category' => 'Regular',
+        ]);
+
+        $response->assertStatus(403);
+        $response->assertJsonPath('message', 'Token binding is not available. Please verify your identity or submit a registration for staff to process.');
+        $this->assertDatabaseMissing('queue_sessions', ['token_id' => $token->id]);
+    }
+
     public function test_public_bind_identity_registration_request_allow_unverified_false_creates_registration_no_session(): void
     {
-        ['track' => $track, 'program' => $program] = $this->createProgramWithTracks(true, ['allow_unverified_entry' => false]);
+        ['track' => $track, 'program' => $program] = $this->createProgramWithTracks(true, [
+            'identity_binding_mode' => 'required',
+            'allow_unverified_entry' => false,
+        ]);
         $token = $this->createToken('A1');
 
         $response = $this->postJson('/api/public/sessions/bind', [
@@ -273,8 +367,9 @@ class PublicTriageTest extends TestCase
             'qr_hash' => $token->qr_code_hash,
             'track_id' => $track->id,
             'identity_registration_request' => [
-                'name' => 'Jane Doe',
-                'birth_year' => 1990,
+                'first_name' => 'Jane',
+                'last_name' => 'Doe',
+                'birth_date' => '1990-01-01',
                 'client_category' => 'Regular',
             ],
         ]);
@@ -283,8 +378,8 @@ class PublicTriageTest extends TestCase
         $response->assertJsonPath('request_submitted', true);
         $this->assertDatabaseHas('identity_registrations', [
             'program_id' => $program->id,
-            'name' => 'Jane Doe',
-            'birth_year' => 1990,
+            'first_name' => 'Jane',
+            'last_name' => 'Doe',
             'client_category' => 'Regular',
             'status' => 'pending',
         ]);
@@ -293,32 +388,65 @@ class PublicTriageTest extends TestCase
         $this->assertSame('available', $token->status);
     }
 
+    public function test_public_bind_returns_409_when_token_has_pending_identity_registration(): void
+    {
+        ['track' => $track, 'program' => $program] = $this->createProgramWithTracks(true, [
+            'identity_binding_mode' => 'required',
+            'allow_unverified_entry' => true,
+        ]);
+        $token = $this->createToken('A1');
+        IdentityRegistration::create([
+            'program_id' => $program->id,
+            'request_type' => 'registration',
+            'token_id' => $token->id,
+            'track_id' => $track->id,
+            'first_name' => 'Jane',
+            'last_name' => null,
+            'birth_date' => '1990-01-01',
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]);
+
+        $response = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $program->id,
+            'qr_hash' => $token->qr_code_hash,
+            'track_id' => $track->id,
+            'client_category' => 'Regular',
+        ]);
+
+        $response->assertStatus(409);
+        $response->assertJsonPath('message', 'This token already has a pending verification. Please see a staff member.');
+        $this->assertDatabaseMissing('queue_sessions', ['token_id' => $token->id]);
+    }
+
     public function test_public_bind_identity_registration_request_without_token_creates_registration_no_session(): void
     {
         ['program' => $program] = $this->createProgramWithTracks(true, ['allow_unverified_entry' => true]);
+        $mobile = '09171234567';
 
         $response = $this->postJson('/api/public/sessions/bind', [
             'program_id' => $program->id,
             'identity_registration_request' => [
-                'name' => 'Jane Doe',
-                'birth_year' => 1990,
+                'first_name' => 'Jane',
+                'last_name' => 'Doe',
+                'birth_date' => '1990-01-01',
                 'client_category' => 'Regular',
-                'id_type' => 'PhilHealth',
-                'id_number' => '1234567890',
+                'mobile' => $mobile,
             ],
         ]);
 
         $response->assertStatus(200);
         $response->assertJsonPath('request_submitted', true);
-        $this->assertDatabaseHas('identity_registrations', [
-            'program_id' => $program->id,
-            'name' => 'Jane Doe',
-            'birth_year' => 1990,
-            'client_category' => 'Regular',
-            'id_type' => 'PhilHealth',
-            'status' => 'pending',
-            'session_id' => null,
-        ]);
+        $reg = \App\Models\IdentityRegistration::where('program_id', $program->id)
+            ->where('first_name', 'Jane')
+            ->where('last_name', 'Doe')
+            ->where('client_category', 'Regular')
+            ->where('status', 'pending')
+            ->whereNull('session_id')
+            ->first();
+        $this->assertNotNull($reg);
+        $this->assertNotNull($reg->mobile_hash);
+        $this->assertNotNull($reg->mobile_encrypted);
     }
 
     public function test_public_bind_identity_registration_request_allow_unverified_true_creates_session_and_registration(): void
@@ -331,8 +459,9 @@ class PublicTriageTest extends TestCase
             'qr_hash' => $token->qr_code_hash,
             'track_id' => $track->id,
             'identity_registration_request' => [
-                'name' => 'Jane Doe',
-                'birth_year' => 1990,
+                'first_name' => 'Jane',
+                'last_name' => 'Doe',
+                'birth_date' => '1990-01-01',
                 'client_category' => 'PWD / Senior / Pregnant',
             ],
         ]);
@@ -351,29 +480,30 @@ class PublicTriageTest extends TestCase
         $reg = IdentityRegistration::where('program_id', $program->id)->where('status', 'pending')->first();
         $this->assertNotNull($reg);
         $this->assertSame($sessionId, $reg->session_id);
-        $this->assertSame('Jane Doe', $reg->name);
+        $this->assertSame('Jane', $reg->first_name);
+        $this->assertSame('Doe', $reg->last_name);
         $token->refresh();
         $this->assertSame('in_use', $token->status);
     }
 
-    public function test_public_bind_reuses_existing_pending_identity_registration_for_same_id_when_allow_unverified_true(): void
+    public function test_public_bind_reuses_existing_pending_identity_registration_for_same_mobile_when_allow_unverified_true(): void
     {
         ['track' => $track, 'program' => $program] = $this->createProgramWithTracks(true, ['allow_unverified_entry' => true]);
         $token = $this->createToken('A1');
 
-        $idType = 'PhilHealth';
-        $idNumber = '1234567890';
-        $last4 = '7890';
+        $mobile = '09171234567';
+        $mobileHash = app(\App\Services\MobileCryptoService::class)->hash($mobile);
+        $mobileEncrypted = app(\App\Services\MobileCryptoService::class)->encrypt($mobile);
 
         $existing = IdentityRegistration::create([
             'program_id' => $program->id,
             'session_id' => null,
-            'name' => 'Jane Doe',
-            'birth_year' => 1990,
+            'first_name' => 'Jane',
+            'last_name' => 'Doe',
+            'birth_date' => '1990-01-01',
             'client_category' => 'Regular',
-            'id_type' => $idType,
-            'id_number_encrypted' => Crypt::encryptString($idNumber),
-            'id_number_last4' => $last4,
+            'mobile_encrypted' => $mobileEncrypted,
+            'mobile_hash' => $mobileHash,
             'status' => 'pending',
             'requested_at' => now(),
         ]);
@@ -383,11 +513,11 @@ class PublicTriageTest extends TestCase
             'qr_hash' => $token->qr_code_hash,
             'track_id' => $track->id,
             'identity_registration_request' => [
-                'name' => 'Jane Doe',
-                'birth_year' => 1990,
+                'first_name' => 'Jane',
+                'last_name' => 'Doe',
+                'birth_date' => '1990-01-01',
                 'client_category' => 'Regular',
-                'id_type' => $idType,
-                'id_number' => $idNumber,
+                'mobile' => $mobile,
             ],
         ]);
 
@@ -397,27 +527,68 @@ class PublicTriageTest extends TestCase
         $this->assertSame(1, IdentityRegistration::query()
             ->where('program_id', $program->id)
             ->where('status', 'pending')
-            ->where('id_type', $idType)
-            ->where('id_number_last4', $last4)
+            ->where('mobile_hash', $mobileHash)
             ->count());
 
         $existing->refresh();
         $this->assertNotNull($existing->session_id);
     }
 
+    public function test_public_bind_when_mobile_matches_existing_client_creates_session_without_new_registration(): void
+    {
+        $site = \App\Models\Site::firstOrCreate(
+            ['slug' => 'default'],
+            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make('key'), 'settings' => [], 'edge_settings' => []]
+        );
+        ['track' => $track, 'program' => $program] = $this->createProgramWithTracks(true, ['allow_unverified_entry' => true]);
+        $program->update(['site_id' => $site->id]);
+
+        $clientService = app(\App\Services\ClientService::class);
+        $mobile = '09181112222';
+        $client = $clientService->createClient('Already', 'Registered', '1988-01-01', $site->id, $mobile);
+
+        $token = $this->createToken('C1');
+        $token->update(['site_id' => $site->id]);
+
+        $response = $this->postJson('/api/public/sessions/bind', [
+            'program_id' => $program->id,
+            'qr_hash' => $token->qr_code_hash,
+            'track_id' => $track->id,
+            'identity_registration_request' => [
+                'first_name' => 'Already',
+                'last_name' => 'Registered',
+                'birth_date' => '1988-01-01',
+                'client_category' => 'Regular',
+                'mobile' => $mobile,
+            ],
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('client_already_registered', true);
+
+        $session = Session::where('token_id', $token->id)->first();
+        $this->assertNotNull($session);
+        $this->assertSame($client->id, $session->client_id);
+
+        $this->assertSame(0, IdentityRegistration::query()
+            ->where('program_id', $program->id)
+            ->where('status', 'pending')
+            ->count());
+    }
+
     public function test_public_bind_returns_409_when_client_already_queued(): void
     {
         ['track' => $track, 'program' => $program, 'station' => $station] = $this->createProgramWithTracks(true, [
-            'identity_binding_mode' => 'optional',
+            'identity_binding_mode' => 'required',
+            'allow_unverified_entry' => true,
         ]);
 
-        $client = Client::factory()->create();
-        $idDocument = ClientIdDocument::create([
-            'client_id' => $client->id,
-            'id_type' => 'PhilHealth',
-            'id_number_encrypted' => encrypt('1234567890'),
-            'id_number_hash' => 'hash',
-        ]);
+        $clientService = app(\App\Services\ClientService::class);
+        $site = \App\Models\Site::firstOrCreate(
+            ['slug' => 'default'],
+            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make('key'), 'settings' => [], 'edge_settings' => []]
+        );
+        $client = $clientService->createClient('Juan', 'Cruz', '1985-01-01', $site->id, '09171234567');
 
         $firstToken = $this->createToken('A1');
         $existingSession = Session::create([
@@ -444,8 +615,7 @@ class PublicTriageTest extends TestCase
             'client_category' => 'Regular',
             'client_binding' => [
                 'client_id' => $client->id,
-                'source' => 'existing_id_document',
-                'id_document_id' => $idDocument->id,
+                'source' => 'phone_match',
             ],
         ]);
 
@@ -462,8 +632,10 @@ class PublicTriageTest extends TestCase
     public function test_public_triage_page_returns_200_with_program_id_when_active_and_allow_public_triage(): void
     {
         ['program' => $program] = $this->createProgramWithTracks(true);
+        $site = $program->site;
 
-        $response = $this->get('/public/triage/'.$program->id);
+        // Per plan: with device lock, only site-prefixed paths are allowed; use per-site triage URL.
+        $response = $this->getTriageWithDeviceAuth($site, $program);
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -508,7 +680,10 @@ class PublicTriageTest extends TestCase
 
     public function test_bind_with_program_id_sets_session_program_id(): void
     {
-        ['program' => $program, 'track' => $track] = $this->createProgramWithTracks(true);
+        ['program' => $program, 'track' => $track] = $this->createProgramWithTracks(true, [
+            'identity_binding_mode' => 'disabled',
+            'allow_unverified_entry' => true,
+        ]);
         $token = $this->createToken('A1');
 
         $response = $this->postJson('/api/public/sessions/bind', [

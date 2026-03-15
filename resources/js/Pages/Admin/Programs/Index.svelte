@@ -360,24 +360,28 @@
                     {/if}
                 </form>
             </div>
-            <div class="flex flex-col gap-3 w-full sm:w-auto sm:min-w-[260px]">
-                <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
-                    <Link
-                        href="/admin/program-default-settings"
-                        class="btn preset-tonal flex items-center gap-2 w-full sm:w-auto justify-center"
-                    >
-                        Default program settings
-                    </Link>
-                    <button
-                        type="button"
-                        class="btn preset-filled-primary-500 flex items-center gap-2 w-full sm:w-auto justify-center"
-                        onclick={openCreate}
-                    >
-                        <Plus class="w-4 h-4" />
-                        Create Program
-                    </button>
-                </div>
+            <div
+                class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto mt-2 sm:mt-0"
+            >
+                <button
+                    type="button"
+                    class="btn preset-filled-primary-500 flex justify-center items-center gap-2 w-full sm:w-auto shadow-sm transition-transform active:scale-95 md:flex hidden"
+                    onclick={openCreate}
+                    aria-label="Create Program"
+                >
+                    <Plus class="w-4 h-4" />
+                    Create Program
+                </button>
             </div>
+            <!-- Mobile FAB: circular icon-only button bottom-right, above footer (per Phase 3 Configuration) -->
+            <button
+                type="button"
+                class="fixed bottom-[87px] right-[23px] z-50 flex md:hidden items-center justify-center w-14 h-14 rounded-full bg-primary-500 text-primary-contrast-500 shadow-lg hover:bg-primary-600 active:scale-95 transition-transform touch-manipulation"
+                onclick={openCreate}
+                aria-label="Create Program"
+            >
+                <Plus class="w-6 h-6" aria-hidden="true" />
+            </button>
         </div>
 
         {#if programs.length === 0 && !initialSearch}

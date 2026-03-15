@@ -8,6 +8,8 @@
 		tableClass?: string;
 		/** Use smaller text for denser tables. */
 		compact?: boolean;
+		/** When true, wrap table in overflow-x-auto and give table min-width so it doesn't shrink; content scrolls horizontally. */
+		scrollable?: boolean;
 		/** Optional header snippet: rendered inside <thead>. */
 		head?: Snippet;
 		/** Optional body snippet: rendered inside <tbody>. */
@@ -18,13 +20,14 @@
 		class: containerClass = "",
 		tableClass = "",
 		compact = false,
+		scrollable = false,
 		head,
 		body,
 	}: Props = $props();
 </script>
 
 <!-- Shared admin data table shell. Usage:
-	<AdminTable class="mt-6 hidden md:block">
+	<AdminTable class="mt-6 hidden md:block" scrollable>
 		{#snippet head()}
 			<tr>...</tr>
 		{/snippet}
@@ -38,7 +41,7 @@
 <div
 	class={[
 		"table-container",
-		"w-full",
+		scrollable ? "overflow-x-auto" : "",
 		containerClass,
 	]
 		.filter(Boolean)
@@ -48,8 +51,8 @@
 		class={[
 			"table",
 			"fq-admin-table",
-			"w-full",
-			compact ? "text-sm" : "text-base",
+			scrollable ? "min-w-[42rem]" : "",
+			compact ? "table-compact text-sm" : "text-base",
 			tableClass,
 		]
 			.filter(Boolean)

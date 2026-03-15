@@ -1,0 +1,1031 @@
+/* FlexiQueue custom theme — per 07-UI-UX-SPECS.md Section 2.2, adapted for Skeleton.
+ * Primary (emerald green) and surface (cool gray base, white cards) match public/ui-kit-preview-branded.html. */
+
+[data-theme='flexiqueue'] {
+	color-scheme: light;
+	--spacing: 0.25rem;
+	--text-scaling: 1.067;
+	--base-font-color: var(--color-surface-950);
+	--base-font-color-dark: var(--color-surface-50);
+	--base-font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+	--base-font-size: inherit;
+	--base-line-height: inherit;
+	--base-font-weight: normal;
+	--base-font-style: normal;
+	--base-letter-spacing: 0em;
+	--heading-font-color: inherit;
+	--heading-font-color-dark: inherit;
+	--heading-font-family: inherit;
+	--heading-font-weight: bold;
+	--heading-font-style: normal;
+	--heading-letter-spacing: inherit;
+	--anchor-font-color: var(--color-primary-500);
+	--anchor-font-color-dark: var(--color-primary-400);
+	--anchor-font-family: inherit;
+	--anchor-font-size: inherit;
+	--anchor-line-height: inherit;
+	--anchor-font-weight: inherit;
+	--anchor-font-style: inherit;
+	--anchor-letter-spacing: inherit;
+	--anchor-text-decoration: none;
+	--anchor-text-decoration-hover: underline;
+	--anchor-text-decoration-active: none;
+	--anchor-text-decoration-focus: none;
+	--body-background-color: var(--color-surface-50);
+	--body-background-color-dark: var(--color-surface-950);
+	--radius-base: 0.5rem;
+	--radius-container: 0.75rem;
+	--default-border-width: 1px;
+	--default-divide-width: 1px;
+	--default-ring-width: 1px;
+
+	/* Elevation — visual hierarchy (card, raised, overlay) */
+	--shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+	--shadow-raised: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.07);
+	--shadow-modal: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
+
+	/* Primary: Emerald/teal green — matches public/ui-kit-preview-branded.html */
+	--color-primary-50: #ecfdf5;
+	--color-primary-100: #d1fae5;
+	--color-primary-200: #a7f3d0;
+	--color-primary-300: #6ee7b7;
+	--color-primary-400: #34d399;
+	--color-primary-500: #10b981;
+	--color-primary-600: #059669;
+	--color-primary-700: #047857;
+	--color-primary-800: #065f46;
+	--color-primary-900: #064e3b;
+	--color-primary-950: #022c22;
+	--color-primary-contrast-dark: var(--color-primary-950);
+	--color-primary-contrast-light: var(--color-primary-50);
+	--color-primary-contrast-50: var(--color-primary-contrast-dark);
+	--color-primary-contrast-100: var(--color-primary-contrast-dark);
+	--color-primary-contrast-200: var(--color-primary-contrast-dark);
+	--color-primary-contrast-300: var(--color-primary-contrast-dark);
+	--color-primary-contrast-400: var(--color-primary-contrast-dark);
+	--color-primary-contrast-500: var(--color-primary-contrast-light);
+	--color-primary-contrast-600: var(--color-primary-contrast-light);
+	--color-primary-contrast-700: var(--color-primary-contrast-light);
+	--color-primary-contrast-800: var(--color-primary-contrast-light);
+	--color-primary-contrast-900: var(--color-primary-contrast-light);
+	--color-primary-contrast-950: var(--color-primary-contrast-light);
+
+	/* Secondary: #4B5563 — gray */
+	--color-secondary-50: oklch(0.96 0.005 264);
+	--color-secondary-100: oklch(0.91 0.008 264);
+	--color-secondary-200: oklch(0.81 0.01 264);
+	--color-secondary-300: oklch(0.72 0.012 264);
+	--color-secondary-400: oklch(0.62 0.013 264);
+	--color-secondary-500: oklch(0.4464 0.0146 264.36);
+	--color-secondary-600: oklch(0.45 0.014 264);
+	--color-secondary-700: oklch(0.39 0.012 264);
+	--color-secondary-800: oklch(0.32 0.01 264);
+	--color-secondary-900: oklch(0.25 0.008 264);
+	--color-secondary-950: oklch(0.18 0.006 264);
+	--color-secondary-contrast-dark: var(--color-secondary-950);
+	--color-secondary-contrast-light: var(--color-secondary-50);
+	--color-secondary-contrast-50: var(--color-secondary-contrast-dark);
+	--color-secondary-contrast-100: var(--color-secondary-contrast-dark);
+	--color-secondary-contrast-200: var(--color-secondary-contrast-dark);
+	--color-secondary-contrast-300: var(--color-secondary-contrast-dark);
+	--color-secondary-contrast-400: var(--color-secondary-contrast-light);
+	--color-secondary-contrast-500: var(--color-secondary-contrast-light);
+	--color-secondary-contrast-600: var(--color-secondary-contrast-light);
+	--color-secondary-contrast-700: var(--color-secondary-contrast-light);
+	--color-secondary-contrast-800: var(--color-secondary-contrast-light);
+	--color-secondary-contrast-900: var(--color-secondary-contrast-light);
+	--color-secondary-contrast-950: var(--color-secondary-contrast-light);
+
+	/* Tertiary: #F59E0B — gold (accent / priority) */
+	--color-tertiary-50: oklch(0.96 0.05 75);
+	--color-tertiary-100: oklch(0.9 0.08 75);
+	--color-tertiary-200: oklch(0.84 0.11 75);
+	--color-tertiary-300: oklch(0.78 0.14 75);
+	--color-tertiary-400: oklch(0.72 0.16 75);
+	--color-tertiary-500: oklch(0.7618 0.1617 75.37);
+	--color-tertiary-600: oklch(0.68 0.15 75);
+	--color-tertiary-700: oklch(0.6 0.13 75);
+	--color-tertiary-800: oklch(0.52 0.11 75);
+	--color-tertiary-900: oklch(0.43 0.09 75);
+	--color-tertiary-950: oklch(0.35 0.07 75);
+	--color-tertiary-contrast-dark: var(--color-tertiary-950);
+	--color-tertiary-contrast-light: var(--color-tertiary-50);
+	--color-tertiary-contrast-50: var(--color-tertiary-contrast-dark);
+	--color-tertiary-contrast-100: var(--color-tertiary-contrast-dark);
+	--color-tertiary-contrast-200: var(--color-tertiary-contrast-dark);
+	--color-tertiary-contrast-300: var(--color-tertiary-contrast-dark);
+	--color-tertiary-contrast-400: var(--color-tertiary-contrast-dark);
+	--color-tertiary-contrast-500: var(--color-tertiary-contrast-dark);
+	--color-tertiary-contrast-600: var(--color-tertiary-contrast-light);
+	--color-tertiary-contrast-700: var(--color-tertiary-contrast-light);
+	--color-tertiary-contrast-800: var(--color-tertiary-contrast-light);
+	--color-tertiary-contrast-900: var(--color-tertiary-contrast-light);
+	--color-tertiary-contrast-950: var(--color-tertiary-contrast-light);
+
+	/* Success: #16A34A */
+	--color-success-50: oklch(0.94 0.09 178);
+	--color-success-100: oklch(0.92 0.1 178);
+	--color-success-200: oklch(0.89 0.11 177);
+	--color-success-300: oklch(0.87 0.12 176);
+	--color-success-400: oklch(0.85 0.13 175);
+	--color-success-500: oklch(0.5858 0.1686 149.48);
+	--color-success-600: oklch(0.53 0.14 175);
+	--color-success-700: oklch(0.46 0.11 176);
+	--color-success-800: oklch(0.39 0.08 178);
+	--color-success-900: oklch(0.32 0.06 179);
+	--color-success-950: oklch(0.24 0.04 185);
+	--color-success-contrast-dark: var(--color-success-950);
+	--color-success-contrast-light: var(--color-success-50);
+	--color-success-contrast-50: var(--color-success-contrast-dark);
+	--color-success-contrast-100: var(--color-success-contrast-dark);
+	--color-success-contrast-200: var(--color-success-contrast-dark);
+	--color-success-contrast-300: var(--color-success-contrast-dark);
+	--color-success-contrast-400: var(--color-success-contrast-dark);
+	--color-success-contrast-500: var(--color-success-contrast-dark);
+	--color-success-contrast-600: var(--color-success-contrast-dark);
+	--color-success-contrast-700: var(--color-success-contrast-light);
+	--color-success-contrast-800: var(--color-success-contrast-light);
+	--color-success-contrast-900: var(--color-success-contrast-light);
+	--color-success-contrast-950: var(--color-success-contrast-light);
+
+	/* Warning */
+	--color-warning-50: oklch(0.96 0.05 38);
+	--color-warning-100: oklch(0.93 0.08 38);
+	--color-warning-200: oklch(0.9 0.1 38);
+	--color-warning-300: oklch(0.88 0.12 38);
+	--color-warning-400: oklch(0.85 0.15 38);
+	--color-warning-500: oklch(0.593 0.2037 38.37);
+	--color-warning-600: oklch(0.55 0.18 38);
+	--color-warning-700: oklch(0.48 0.15 38);
+	--color-warning-800: oklch(0.42 0.12 38);
+	--color-warning-900: oklch(0.35 0.1 38);
+	--color-warning-950: oklch(0.28 0.08 38);
+	--color-warning-contrast-dark: var(--color-warning-950);
+	--color-warning-contrast-light: var(--color-warning-50);
+	--color-warning-contrast-50: var(--color-warning-contrast-dark);
+	--color-warning-contrast-100: var(--color-warning-contrast-dark);
+	--color-warning-contrast-200: var(--color-warning-contrast-dark);
+	--color-warning-contrast-300: var(--color-warning-contrast-dark);
+	--color-warning-contrast-400: var(--color-warning-contrast-dark);
+	--color-warning-contrast-500: var(--color-warning-contrast-dark);
+	--color-warning-contrast-600: var(--color-warning-contrast-light);
+	--color-warning-contrast-700: var(--color-warning-contrast-light);
+	--color-warning-contrast-800: var(--color-warning-contrast-light);
+	--color-warning-contrast-900: var(--color-warning-contrast-light);
+	--color-warning-contrast-950: var(--color-warning-contrast-light);
+
+	/* Error */
+	--color-error-50: oklch(0.9 0.04 27);
+	--color-error-100: oklch(0.83 0.07 27);
+	--color-error-200: oklch(0.77 0.11 27);
+	--color-error-300: oklch(0.72 0.15 27);
+	--color-error-400: oklch(0.67 0.19 27);
+	--color-error-500: oklch(0.5235 0.2109 27.33);
+	--color-error-600: oklch(0.49 0.19 27);
+	--color-error-700: oklch(0.45 0.17 27);
+	--color-error-800: oklch(0.41 0.15 27);
+	--color-error-900: oklch(0.36 0.13 27);
+	--color-error-950: oklch(0.32 0.11 27);
+	--color-error-contrast-dark: var(--color-error-950);
+	--color-error-contrast-light: var(--color-error-50);
+	--color-error-contrast-50: var(--color-error-contrast-dark);
+	--color-error-contrast-100: var(--color-error-contrast-dark);
+	--color-error-contrast-200: var(--color-error-contrast-dark);
+	--color-error-contrast-300: var(--color-error-contrast-dark);
+	--color-error-contrast-400: var(--color-error-contrast-light);
+	--color-error-contrast-500: var(--color-error-contrast-light);
+	--color-error-contrast-600: var(--color-error-contrast-light);
+	--color-error-contrast-700: var(--color-error-contrast-light);
+	--color-error-contrast-800: var(--color-error-contrast-light);
+	--color-error-contrast-900: var(--color-error-contrast-light);
+	--color-error-contrast-950: var(--color-error-contrast-light);
+
+	/* Surface — base backgrounds; matches ui-kit-preview-branded (cool gray base, white cards) */
+	--color-surface-50: #f8fafc;
+	--color-surface-100: #ffffff;
+	--color-surface-200: #f1f5f9;
+	--color-surface-300: #e2e8f0;
+	--color-surface-400: #cbd5e1;
+	--color-surface-500: #94a3b8;
+	--color-surface-600: #64748b;
+	--color-surface-700: #475569;
+	--color-surface-800: #334155;
+	--color-surface-900: #1e293b;
+	--color-surface-950: #0f172a;
+	--color-surface-contrast-dark: var(--color-surface-950);
+	--color-surface-contrast-light: var(--color-surface-50);
+	--color-surface-contrast-50: var(--color-surface-contrast-dark);
+	--color-surface-contrast-100: var(--color-surface-contrast-dark);
+	--color-surface-contrast-200: var(--color-surface-contrast-dark);
+	--color-surface-contrast-300: var(--color-surface-contrast-dark);
+	--color-surface-contrast-400: var(--color-surface-contrast-light);
+	--color-surface-contrast-500: var(--color-surface-contrast-light);
+	--color-surface-contrast-600: var(--color-surface-contrast-light);
+	--color-surface-contrast-700: var(--color-surface-contrast-light);
+	--color-surface-contrast-800: var(--color-surface-contrast-light);
+	--color-surface-contrast-900: var(--color-surface-contrast-light);
+	--color-surface-contrast-950: var(--color-surface-contrast-light);
+}
+
+/* Dark mode overrides — swap background/font and surface palette per Skeleton data-mode strategy */
+[data-theme='flexiqueue'][data-mode='dark'] {
+	color-scheme: dark;
+	--base-font-color: var(--base-font-color-dark);
+	--heading-font-color: var(--heading-font-color-dark);
+	--anchor-font-color: var(--anchor-font-color-dark);
+	--body-background-color: var(--body-background-color-dark);
+	/* Swap surface palette for dark backgrounds */
+	--color-surface-50: #0f172a;
+	--color-surface-100: #1e293b;
+	--color-surface-200: #334155;
+	--color-surface-300: #475569;
+	--color-surface-400: #64748b;
+	--color-surface-500: #94a3b8;
+	--color-surface-600: #cbd5e1;
+	--color-surface-700: #e2e8f0;
+	--color-surface-800: #f1f5f9;
+	--color-surface-900: #f8fafc;
+	--color-surface-950: #ffffff;
+}
+
+/* Temporary highlight for Triage identity registration row when opened from Station via highlight_session_id */
+.triage-row-highlight {
+	position: relative;
+	border-radius: var(--radius-container);
+	background-color: color-mix(in srgb, var(--color-primary-100) 60%, transparent);
+	animation: triage-row-flash 2s ease-out forwards;
+}
+
+@keyframes triage-row-flash {
+	0% {
+		box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+	}
+	60% {
+		box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+	}
+	100% {
+		box-shadow: none;
+		background-color: transparent;
+	}
+}
+
+/* Light mode: form controls — soft, low-contrast (avoid harsh dark-on-light) */
+[data-theme='flexiqueue']:not([data-mode='dark']) .input,
+[data-theme='flexiqueue']:not([data-mode='dark']) .select,
+[data-theme='flexiqueue']:not([data-mode='dark']) .textarea,
+[data-theme='flexiqueue']:not([data-mode='dark']) .input-group,
+[data-theme='flexiqueue']:not([data-mode='dark']) input[type="text"],
+[data-theme='flexiqueue']:not([data-mode='dark']) input[type="email"],
+[data-theme='flexiqueue']:not([data-mode='dark']) input[type="password"],
+[data-theme='flexiqueue']:not([data-mode='dark']) input[type="number"],
+[data-theme='flexiqueue']:not([data-mode='dark']) select,
+[data-theme='flexiqueue']:not([data-mode='dark']) textarea {
+	background-color: #ffffff !important;
+	color: #0f172a !important;
+	border-color: #e2e8f0;
+}
+/* Light mode: dropdown options — explicit so open list is readable (browser-dependent) */
+[data-theme='flexiqueue']:not([data-mode='dark']) select option {
+	background-color: #ffffff;
+	color: #0f172a;
+}
+[data-theme='flexiqueue']:not([data-mode='dark']) .input::placeholder,
+[data-theme='flexiqueue']:not([data-mode='dark']) input::placeholder,
+[data-theme='flexiqueue']:not([data-mode='dark']) textarea::placeholder {
+	color: #64748b;
+}
+[data-theme='flexiqueue']:not([data-mode='dark']) .checkbox,
+[data-theme='flexiqueue']:not([data-mode='dark']) input[type="checkbox"] {
+	background-color: #ffffff;
+	border-color: #cbd5e1;
+}
+[data-theme='flexiqueue']:not([data-mode='dark']) .checkbox:checked,
+[data-theme='flexiqueue']:not([data-mode='dark']) input[type="checkbox"]:checked {
+	background-color: var(--color-primary-500);
+	border-color: var(--color-primary-500);
+}
+
+/* Light mode: Quick Actions and similar — soft tonal surface (light bg, dark text), not high-contrast */
+[data-theme='flexiqueue']:not([data-mode='dark']) .preset-tonal-surface,
+[data-theme='flexiqueue']:not([data-mode='dark']) .btn.preset-tonal-surface {
+	background-color: var(--color-surface-200) !important;
+	color: var(--color-surface-950) !important;
+	border-color: var(--color-surface-300);
+}
+[data-theme='flexiqueue']:not([data-mode='dark']) .preset-tonal-surface:hover,
+[data-theme='flexiqueue']:not([data-mode='dark']) .btn.preset-tonal-surface:hover {
+	background-color: var(--color-surface-300) !important;
+	color: var(--color-surface-950) !important;
+	border-color: var(--color-surface-400);
+}
+
+/* Dark mode: soften inputs/selects/textareas — avoid stark white, use translucent */
+[data-theme='flexiqueue'][data-mode='dark'] .input,
+[data-theme='flexiqueue'][data-mode='dark'] .select,
+[data-theme='flexiqueue'][data-mode='dark'] .textarea,
+[data-theme='flexiqueue'][data-mode='dark'] .input-group,
+[data-theme='flexiqueue'][data-mode='dark'] input[type="text"],
+[data-theme='flexiqueue'][data-mode='dark'] input[type="email"],
+[data-theme='flexiqueue'][data-mode='dark'] input[type="password"],
+[data-theme='flexiqueue'][data-mode='dark'] input[type="number"],
+[data-theme='flexiqueue'][data-mode='dark'] select,
+[data-theme='flexiqueue'][data-mode='dark'] textarea {
+	background-color: rgba(255, 255, 255, 0.08) !important;
+	color: var(--color-surface-950) !important;
+	border-color: rgba(255, 255, 255, 0.12);
+}
+/* Dark mode: dropdown options — explicit for open list readability */
+[data-theme='flexiqueue'][data-mode='dark'] select option {
+	background-color: var(--color-surface-100);
+	color: var(--color-surface-950);
+}
+
+/* Themed select — guaranteed readable dropdown regardless of parent (use on every <select>) */
+[data-theme='flexiqueue']:not([data-mode='dark']) .select-theme,
+[data-theme='flexiqueue']:not([data-mode='dark']) select.select-theme {
+	background-color: #ffffff !important;
+	color: #0f172a !important;
+}
+[data-theme='flexiqueue']:not([data-mode='dark']) .select-theme option,
+[data-theme='flexiqueue']:not([data-mode='dark']) select.select-theme option {
+	background-color: #ffffff;
+	color: #0f172a;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .select-theme,
+[data-theme='flexiqueue'][data-mode='dark'] select.select-theme {
+	background-color: rgba(255, 255, 255, 0.08) !important;
+	color: var(--color-surface-950) !important;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .select-theme option,
+[data-theme='flexiqueue'][data-mode='dark'] select.select-theme option {
+	background-color: var(--color-surface-100);
+	color: var(--color-surface-950);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .input::placeholder,
+[data-theme='flexiqueue'][data-mode='dark'] input::placeholder,
+[data-theme='flexiqueue'][data-mode='dark'] textarea::placeholder {
+	color: rgba(255, 255, 255, 0.5);
+}
+
+/* Dark mode: soften checkboxes — translucent instead of solid white */
+[data-theme='flexiqueue'][data-mode='dark'] .checkbox,
+[data-theme='flexiqueue'][data-mode='dark'] input[type="checkbox"] {
+	background-color: rgba(255, 255, 255, 0.08);
+	border-color: rgba(255, 255, 255, 0.2);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .checkbox:checked,
+[data-theme='flexiqueue'][data-mode='dark'] input[type="checkbox"]:checked {
+	background-color: var(--color-primary-500);
+}
+
+/* Dark mode: soften preset-tonal-surface — avoid stark white on Quick Actions etc. */
+[data-theme='flexiqueue'][data-mode='dark'] .preset-tonal-surface,
+[data-theme='flexiqueue'][data-mode='dark'] .btn.preset-tonal-surface {
+	background-color: rgba(255, 255, 255, 0.08) !important;
+	color: var(--color-surface-950);
+	border-color: rgba(255, 255, 255, 0.12);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .preset-tonal-surface:hover,
+[data-theme='flexiqueue'][data-mode='dark'] .btn.preset-tonal-surface:hover {
+	background-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Program diagram canvas — light mode: light background and grid (match app theme, not system) */
+[data-theme='flexiqueue']:not([data-mode='dark']) .svelte-flow,
+[data-theme='flexiqueue']:not([data-mode='dark']) .svelte-flow.dark {
+	--xy-background-color: #f1f5f9 !important;
+	--xy-background-color-default: #f1f5f9 !important;
+	--xy-background-pattern-dots-color-default: #94a3b8 !important;
+	--xy-background-pattern-lines-color-default: #cbd5e1 !important;
+	--xy-background-pattern-cross-color-default: #cbd5e1 !important;
+	--xy-controls-button-background-color-default: #f8fafc !important;
+	--xy-controls-button-background-color-hover-default: #e2e8f0 !important;
+	--xy-controls-button-color-default: #0f172a !important;
+	--xy-controls-button-border-color-default: #e2e8f0 !important;
+}
+[data-theme='flexiqueue']:not([data-mode='dark']) .svelte-flow .svelte-flow__panel .btn.preset-tonal {
+	color: var(--color-surface-950) !important;
+	background-color: var(--color-surface-200);
+	border-color: var(--color-surface-300);
+}
+
+/* Program diagram canvas — dark mode: keep xyflow dark styling when app is dark */
+[data-theme='flexiqueue'][data-mode='dark'] .svelte-flow {
+	--xy-background-color: #141414 !important;
+	--xy-background-color-default: #141414 !important;
+	--xy-background-pattern-dots-color-default: #777 !important;
+}
+
+/* Program status banner (Program is Live) — dark mode: darker bg + darker buttons + readable text */
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live {
+	background-color: var(--color-success-900);
+	border-color: var(--color-success-700);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__icon {
+	color: var(--color-success-400);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__title {
+	color: var(--color-success-100);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__desc {
+	color: var(--color-success-300);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__divider {
+	background-color: var(--color-success-700);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__btn--view {
+	background-color: var(--color-primary-700) !important;
+	color: var(--color-primary-50);
+	border-color: var(--color-primary-600);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__btn--view:hover {
+	background-color: var(--color-primary-600) !important;
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__btn--pause {
+	background-color: var(--color-warning-700) !important;
+	color: var(--color-warning-50);
+	border-color: var(--color-warning-600);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__btn--pause:hover {
+	background-color: var(--color-warning-600) !important;
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__btn--stop {
+	background-color: var(--color-error-700) !important;
+	color: var(--color-error-50);
+	border-color: var(--color-error-600);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--live .program-status-banner__btn--stop:hover {
+	background-color: var(--color-error-600) !important;
+}
+
+/* Program is Paused banner — dark mode */
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--paused {
+	background-color: var(--color-warning-900);
+	border-color: var(--color-warning-700);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--paused h3 {
+	color: var(--color-warning-100);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] .program-status-banner--paused p.text-sm {
+	color: var(--color-warning-300);
+}
+
+/* StatusFooter: ongoing chip — dark mode: darker bg + readable text (avoid light mint on dark theme) */
+[data-theme='flexiqueue'][data-mode='dark'] footer button[aria-label*="Ongoing"] {
+	background-color: var(--color-success-800) !important;
+	border-color: var(--color-success-600);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] footer button[aria-label*="Ongoing"] span:first-of-type {
+	color: var(--color-success-100);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] footer button[aria-label*="Ongoing"] span:last-of-type span + span {
+	color: var(--color-success-200);
+}
+
+/* StatusFooter: availability "Available" button — dark mode: darker bg + readable text */
+[data-theme='flexiqueue'][data-mode='dark'] footer button[aria-label*="Available"] {
+	background-color: var(--color-success-800) !important;
+	border-color: var(--color-success-600);
+	color: var(--color-success-100);
+}
+
+[data-theme='flexiqueue'][data-mode='dark'] footer button[aria-label*="Available"]:hover {
+	background-color: var(--color-success-700) !important;
+}
+
+/* Home page — theme-adaptive backgrounds and contrast */
+
+/* Hero: dark in both themes so white title is readable (surface-950 becomes white in dark mode) */
+.home-hero-bg {
+	background-color: var(--color-surface-950);
+	position: relative;
+	isolation: isolate;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .home-hero-bg {
+	background-color: #0f172a;
+}
+
+/* Hero watermark + brand hue wash (theme-adaptive). Requires: public/images/mswdo_tagudin.jpg */
+.home-hero-bg::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background-image: var(--home-hero-img);
+	background-size: cover;
+	background-position: center;
+	background-repeat: no-repeat;
+	background-attachment: fixed;
+	/* Keep the hero dark enough in light mode for readable white headings */
+	opacity: 0.22;
+	filter: grayscale(1) brightness(2.15) contrast(1.08);
+	mix-blend-mode: screen;
+	pointer-events: none;
+	z-index: 0;
+}
+.home-hero-bg::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background: radial-gradient(60% 60% at 20% 10%, rgba(16, 185, 129, 0.22), rgba(16, 185, 129, 0) 60%),
+		radial-gradient(55% 55% at 85% 35%, rgba(45, 212, 191, 0.18), rgba(45, 212, 191, 0) 62%),
+		linear-gradient(135deg, rgba(34, 197, 94, 0.12), rgba(99, 102, 241, 0.08));
+	opacity: 0.9;
+	mix-blend-mode: soft-light;
+	pointer-events: none;
+	z-index: 1;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .home-hero-bg::before {
+	/* Dark mode: keep the hero clearly dark while still showing the image. */
+	opacity: 0.55;
+	filter: grayscale(1) brightness(0.7) contrast(1.2);
+	mix-blend-mode: multiply;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .home-hero-bg::after {
+	opacity: 0.45;
+	mix-blend-mode: soft-light;
+}
+
+/* Hero content: always light text on dark hero (no theme swap) */
+.home-hero-title {
+	color: #ffffff !important;
+}
+.home-hero-title-gradient {
+	color: transparent;
+	background: linear-gradient(90deg, #34d399, #10b981, #2dd4bf);
+	-webkit-background-clip: text;
+	background-clip: text;
+}
+.home-hero-subtitle {
+	color: #cbd5e1 !important;
+}
+.home-hero-badge {
+	background-color: rgba(255, 255, 255, 0.1);
+	color: #d1fae5 !important;
+}
+
+/* Hero stat boxes: always dark bg + light text (not swapped in dark mode) */
+.home-hero-stat {
+	background-color: rgba(51, 65, 85, 0.6);
+	backdrop-filter: blur(12px);
+	border: 1px solid rgba(71, 85, 105, 0.5);
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+.home-hero-stat-value {
+	color: #ffffff;
+}
+.home-hero-stat-label {
+	color: #94a3b8;
+}
+
+/* Hero secondary CTA (Staff Login): always dark translucent + light text */
+.home-hero-cta-secondary {
+	background-color: rgba(51, 65, 85, 0.5);
+	border-color: rgba(71, 85, 105, 0.6);
+	color: #f1f5f9;
+}
+.home-hero-cta-secondary:hover {
+	background-color: rgba(51, 65, 85, 0.7);
+	color: #ffffff;
+}
+
+/* Hero wave: match next section bg (surface-50) in both themes */
+.home-hero-wave {
+	color: var(--color-surface-50);
+}
+[data-theme='flexiqueue'][data-mode='dark'] .home-hero-wave {
+	color: #0f172a;
+}
+
+/* Top nav strip: frosted card in both themes; links/buttons must be visible */
+.home-nav-strip {
+	backdrop-filter: blur(12px);
+	box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+	border: 1px solid rgba(0, 0, 0, 0.06);
+}
+[data-theme='flexiqueue']:not([data-mode='dark']) .home-nav-strip {
+	background-color: rgba(255, 255, 255, 0.88);
+	color: #0f172a;
+}
+[data-theme='flexiqueue']:not([data-mode='dark']) .home-nav-strip a,
+[data-theme='flexiqueue']:not([data-mode='dark']) .home-nav-strip button {
+	color: inherit;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .home-nav-strip {
+	background-color: rgba(30, 41, 59, 0.9);
+	box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+	border-color: rgba(255, 255, 255, 0.1);
+	color: #e2e8f0;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .home-nav-strip a,
+[data-theme='flexiqueue'][data-mode='dark'] .home-nav-strip button {
+	color: #e2e8f0;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .home-nav-strip button {
+	background: none;
+	border: none;
+	cursor: pointer;
+	font: inherit;
+	padding: 0;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .home-nav-strip a:hover,
+[data-theme='flexiqueue'][data-mode='dark'] .home-nav-strip button:hover {
+	color: #f1f5f9;
+}
+
+/* Cards/surfaces: light in light mode, dark in dark mode (theme swap makes surface-100 = white in light, dark in dark) */
+.home-card-bg {
+	background-color: var(--color-surface-100);
+}
+[data-theme='flexiqueue'][data-mode='dark'] .home-card-bg {
+	background-color: #1e293b;
+}
+
+/* Card body and labels: readable on card bg in both themes */
+.home-card-label {
+	color: var(--color-surface-500);
+}
+[data-theme='flexiqueue'][data-mode='dark'] .home-card-label {
+	color: #94a3b8;
+}
+.home-card-body {
+	color: var(--color-surface-800);
+}
+[data-theme='flexiqueue'][data-mode='dark'] .home-card-body {
+	color: #e2e8f0;
+}
+/* Accent text on cards: dark primary in light, light primary in dark */
+.home-card-accent {
+	color: var(--color-primary-900);
+}
+[data-theme='flexiqueue'][data-mode='dark'] .home-card-accent {
+	color: var(--color-primary-300);
+}
+
+/* Tech section: always dark block (surface-950 becomes white in dark mode) */
+.home-tech-bg {
+	background-color: var(--color-surface-950);
+	color: #fff;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .home-tech-bg {
+	background-color: #0f172a;
+	color: #fff;
+}
+
+/* Tech section inner cards */
+.home-tech-card {
+	background-color: rgba(51, 65, 85, 0.8);
+	backdrop-filter: blur(8px);
+	border: 1px solid rgba(71, 85, 105, 0.5);
+}
+[data-theme='flexiqueue'][data-mode='dark'] .home-tech-card {
+	background-color: rgba(30, 41, 59, 0.9);
+	border-color: rgba(71, 85, 105, 0.6);
+}
+
+/* Display footer (Board page) — dark mode: keep footer dark (surface swap would make it light) */
+[data-theme='flexiqueue'][data-mode='dark'] .display-footer {
+	background-color: #1e293b !important;
+	color: #e2e8f0;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .display-footer .display-footer__chip {
+	background-color: rgba(255, 255, 255, 0.12) !important;
+	color: #f1f5f9;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .display-footer .text-surface-300 {
+	color: #94a3b8 !important;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .display-footer .text-surface-400 {
+	color: #64748b !important;
+}
+
+/* Global marquee — content+gap+content+gap, -50% loop, no flicker. Duration set inline by Marquee.svelte. */
+@keyframes fq-marquee-scroll {
+	0% { transform: translate3d(0, 0, 0); }
+	100% { transform: translate3d(-50%, 0, 0); }
+}
+.fq-marquee-track {
+	display: inline-flex;
+	align-items: center;
+	white-space: nowrap;
+	will-change: transform;
+	user-select: none;
+	animation-name: fq-marquee-scroll;
+	animation-timing-function: linear;
+	animation-iteration-count: infinite;
+}
+.fq-marquee-track:hover {
+	animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+	.fq-marquee-track {
+		animation: none;
+	}
+}
+
+/* Display footer staff bar only: custom track to avoid loop flicker. Do not reuse for other marquees. */
+.display-footer__marquee {
+	transform: translateZ(0);
+}
+.display-footer__marquee-inner {
+	backface-visibility: hidden;
+	contain: layout style paint;
+}
+
+/* White text on green — subtle shadow for legibility, separates text from brand green */
+[data-theme='flexiqueue'] .preset-filled-primary-500,
+[data-theme='flexiqueue'] .preset-filled-success-500,
+[data-theme='flexiqueue'] .badge.preset-filled-primary-500,
+[data-theme='flexiqueue'] .badge.preset-filled-success-500,
+[data-theme='flexiqueue'] .btn.preset-filled-primary-500,
+[data-theme='flexiqueue'] .btn.preset-filled-success-500,
+[data-theme='flexiqueue'] .preset-tonal-primary,
+[data-theme='flexiqueue'] .btn.preset-tonal-primary,
+[data-theme='flexiqueue'] .bg-primary-500.text-white,
+[data-theme='flexiqueue'] .bg-primary-500.text-primary-contrast-500,
+[data-theme='flexiqueue'] .bg-success-500.text-white,
+[data-theme='flexiqueue'] .bg-success-500.text-primary-contrast-500 {
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+/* Touch targets — 48px minimum per stack convention (mobile a11y) */
+@utility touch-target-h {
+	min-height: 48px;
+}
+@utility touch-target {
+	min-height: 48px;
+	min-width: 48px;
+}
+
+/* DaisyUI compatibility utilities — per SKELETON-COMPONENT-MAPPING */
+@utility form-control {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+}
+@utility card-body {
+	padding: 1rem 1.5rem;
+}
+@utility card-title {
+	font-size: 1.125rem;
+	font-weight: 600;
+	color: var(--color-surface-950);
+}
+@utility label-text-alt {
+	display: block;
+	font-size: 0.75rem;
+	line-height: 1.4;
+	color: var(--color-surface-600);
+}
+@utility label-text {
+	color: var(--color-surface-950);
+}
+@utility join {
+	display: flex;
+}
+@utility join-horizontal {
+	flex-direction: row;
+}
+
+/* Stats — DaisyUI compatibility; Skeleton theme tokens */
+@utility stats {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 1rem;
+}
+@utility stat {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+}
+@utility stat-figure {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: var(--radius-base);
+}
+@utility stat-title {
+	color: var(--color-surface-600);
+	font-size: 0.75rem;
+	font-weight: 500;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+@utility stat-value {
+	color: var(--color-surface-950);
+	font-size: 1.875rem;
+	font-weight: 700;
+	line-height: 1.2;
+}
+@utility stat-desc {
+	color: var(--color-surface-600);
+	font-size: 0.75rem;
+	margin-top: 0.25rem;
+}
+
+/* Tabs — Skeleton-compatible tab group (replaces DaisyUI tabs) */
+.tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem;
+	padding: 0.25rem;
+	background-color: var(--color-surface-100);
+	border-radius: var(--radius-container);
+	width: fit-content;
+}
+.tab {
+	padding: 0.5rem 1rem;
+	font-size: 0.875rem;
+	font-weight: 500;
+	color: var(--color-surface-950);
+	background-color: transparent;
+	border: none;
+	border-radius: var(--radius-base);
+	cursor: pointer;
+	transition: background-color 0.15s, color 0.15s;
+}
+.tab:hover {
+	background-color: var(--color-surface-200);
+}
+.tab-active {
+	background-color: var(--color-primary-500);
+	color: var(--color-primary-contrast-500);
+}
+.tab-active:hover {
+	background-color: var(--color-primary-600);
+	color: var(--color-primary-contrast-500);
+}
+
+/* Elevation utilities — use theme tokens for consistent hierarchy */
+[data-theme='flexiqueue'] .elevation-card {
+	box-shadow: var(--shadow-card);
+}
+[data-theme='flexiqueue'] .elevation-raised {
+	box-shadow: var(--shadow-raised);
+}
+[data-theme='flexiqueue'] .elevation-modal {
+	box-shadow: var(--shadow-modal);
+}
+
+/* Table container — consistent wrapper for data tables (rounded, elevation, bg) */
+[data-theme='flexiqueue'] .table-container {
+	background-color: transparent !important;
+	border-radius: var(--radius-container);
+	overflow-x: auto;
+	box-shadow: none !important;
+}
+[data-theme='flexiqueue'] .table-container .table {
+	background-color: transparent !important;
+}
+
+/* Header — opaque band so it clearly separates from frosted rows */
+[data-theme='flexiqueue'] .table-container .table thead th {
+	background-color: #ffffff !important;
+	color: var(--color-surface-950);
+	font-weight: 600;
+	font-size: 0.8125rem;
+	text-transform: none;
+	letter-spacing: 0;
+	white-space: nowrap;
+	border-bottom: 1px solid rgba(15, 23, 42, 0.08) !important;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .table-container .table thead th {
+	background-color: #0f172a !important;
+	border-bottom-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Translucent data rows — allow AppBackground to show through.
+ * Targeting `td` to ensure we override any framework cell backgrounds. */
+[data-theme='flexiqueue'] .fq-admin-table tbody tr td {
+	background-color: rgba(255, 255, 255, 0.03); /* very light frosting */
+	transition: background-color 0.12s ease-out;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .fq-admin-table tbody tr td {
+	background-color: rgba(15, 23, 42, 0.16);
+}
+
+/* Zebra stripping — slightly more opaque for even rows */
+[data-theme='flexiqueue']:not([data-mode='dark']) .fq-admin-table tbody tr:nth-child(even) td {
+	background-color: rgba(255, 255, 255, 0.07);
+}
+[data-theme='flexiqueue'][data-mode='dark'] .fq-admin-table tbody tr:nth-child(even) td {
+	background-color: rgba(255, 255, 255, 0.03);
+}
+
+/* Hover feedback */
+[data-theme='flexiqueue'] .fq-admin-table tbody tr:hover td {
+	background-color: rgba(255, 255, 255, 0.13) !important;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .fq-admin-table tbody tr:hover td {
+	background-color: rgba(255, 255, 255, 0.07) !important;
+}
+
+/* Ensure the trailing Actions column header is visually centered in admin tables,
+ * even when Skeleton's table defaults try to left-align headers. */
+[data-theme='flexiqueue'] .fq-admin-table thead tr th:last-child {
+	text-align: center !important;
+}
+
+/* Form labels and help text — ensure dark text in main content and dialogs */
+[data-theme='flexiqueue'] main .label,
+[data-theme='flexiqueue'] main .label-text,
+[data-theme='flexiqueue'] main .label-text-alt,
+[data-theme='flexiqueue'] dialog .label,
+[data-theme='flexiqueue'] dialog .label-text,
+[data-theme='flexiqueue'] dialog .label-text-alt {
+	color: var(--color-surface-950);
+}
+/* Dialog card body text (Skeleton inherits; dialogs may be outside main) */
+[data-theme='flexiqueue'] dialog .card {
+	color: var(--color-surface-950);
+}
+
+/* Profile page — force readable dark text (not inside Live Session; uses AppShell) */
+[data-theme='flexiqueue'] main .profile-page-content {
+	color: var(--color-surface-950);
+}
+[data-theme='flexiqueue'] main .label-text-alt {
+	color: var(--color-surface-600);
+	font-size: 0.8125rem;
+}
+
+/* Button presets — force readable text on light backgrounds (main + dialogs) */
+[data-theme='flexiqueue'] main .btn.preset-outlined,
+[data-theme='flexiqueue'] main .btn.preset-tonal,
+[data-theme='flexiqueue'] main a.btn.preset-outlined,
+[data-theme='flexiqueue'] main a.btn.preset-tonal,
+[data-theme='flexiqueue'] dialog .btn.preset-outlined,
+[data-theme='flexiqueue'] dialog .btn.preset-tonal {
+	color: var(--color-surface-950) !important;
+}
+
+/* Preset chips/spans (preset-outlined, preset-tonal) — readable text when not on buttons */
+[data-theme='flexiqueue'] span.preset-outlined,
+[data-theme='flexiqueue'] span.preset-tonal {
+	color: var(--color-surface-950) !important;
+}
+
+/* Badge preset-tonal — readable text (per SKELETON-COMPONENT-MAPPING badge-ghost migration) */
+[data-theme='flexiqueue'] .badge.preset-tonal,
+[data-theme='flexiqueue'] span.badge.preset-tonal {
+	color: var(--color-surface-950) !important;
+}
+
+/* Table text — explicit dark color for light theme readability */
+[data-theme='flexiqueue'] .table th,
+[data-theme='flexiqueue'] .table td {
+	color: var(--color-surface-950);
+}
+[data-theme='flexiqueue'] .table thead th {
+	color: var(--color-surface-600);
+}
+
+/* Loading spinner — Skeleton theme colors */
+@utility loading-spinner {
+	display: inline-block;
+	width: 1.5rem;
+	height: 1.5rem;
+	border: 2px solid var(--color-surface-200);
+	border-top-color: var(--color-primary-500);
+	border-radius: 50%;
+	animation: spin 0.8s linear infinite;
+}
+.loading-spinner.loading-sm {
+	width: 1rem;
+	height: 1rem;
+	border-width: 1.5px;
+}
+.loading-spinner.loading-lg {
+	width: 2.5rem;
+	height: 2.5rem;
+	border-width: 3px;
+}
+@keyframes spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* Progress bar primary — Skeleton theme */
+.progress-primary::-webkit-progress-value {
+	background-color: var(--color-primary-500);
+}
+.progress-primary::-moz-progress-bar {
+	background-color: var(--color-primary-500);
+}

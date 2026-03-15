@@ -103,9 +103,12 @@ class PermissionRequestApiTest extends TestCase
 
         $response->assertStatus(201);
         $response->assertJsonPath('status', 'pending');
+        $response->assertJsonStructure(['id', 'request_token', 'status', 'message']);
 
         $pr = PermissionRequest::where('session_id', $this->session->id)->first();
         $this->assertNotNull($pr);
+        $this->assertNotNull($pr->request_token);
+        $this->assertSame(64, strlen($pr->request_token));
         $this->assertSame($this->trackToStation2->id, $pr->target_track_id);
         $this->assertSame('override', $pr->action_type);
         $this->assertSame('', $pr->reason);
@@ -145,6 +148,7 @@ class PermissionRequestApiTest extends TestCase
             'action_type' => 'override',
             'requester_user_id' => $this->staff->id,
             'status' => PermissionRequest::STATUS_PENDING,
+            'request_token' => Str::random(64),
             'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Skip',
         ]);
@@ -170,6 +174,7 @@ class PermissionRequestApiTest extends TestCase
             'action_type' => 'override',
             'requester_user_id' => $this->staff->id,
             'status' => PermissionRequest::STATUS_PENDING,
+            'request_token' => Str::random(64),
             'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Skip',
         ]);
@@ -232,6 +237,7 @@ class PermissionRequestApiTest extends TestCase
             'action_type' => 'override',
             'requester_user_id' => $this->staff->id,
             'status' => PermissionRequest::STATUS_PENDING,
+            'request_token' => Str::random(64),
             'target_track_id' => null,
             'reason' => 'Custom path',
         ]);
@@ -258,6 +264,7 @@ class PermissionRequestApiTest extends TestCase
             'action_type' => 'override',
             'requester_user_id' => $this->staff->id,
             'status' => PermissionRequest::STATUS_PENDING,
+            'request_token' => Str::random(64),
             'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Skip',
         ]);
@@ -270,6 +277,108 @@ class PermissionRequestApiTest extends TestCase
         $response->assertJsonMissing(['session']);
 
         $this->session->refresh();
-        $this->assertSame('awaiting_approval', $this->session->status);
+        $this->session->token->refresh();
+        $this->assertSame('cancelled', $this->session->status);
+        $this->assertSame('available', $this->session->token->status);
+    }
+
+    public function test_approve_with_invalid_request_token_returns_403(): void
+    {
+        $pr = PermissionRequest::create([
+            'session_id' => $this->session->id,
+            'action_type' => 'override',
+            'requester_user_id' => $this->staff->id,
+            'status' => PermissionRequest::STATUS_PENDING,
+            'request_token' => Str::random(64),
+            'target_track_id' => $this->trackToStation2->id,
+            'reason' => 'Skip',
+        ]);
+        $this->session->update(['status' => 'awaiting_approval', 'current_station_id' => null]);
+
+        $response = $this->actingAs($this->supervisor)->postJson("/api/permission-requests/{$pr->id}/approve", [
+            'request_token' => Str::random(64),
+        ]);
+
+        $response->assertStatus(403);
+        $response->assertJsonPath('message', 'Invalid or expired QR.');
+    }
+
+    public function test_approve_with_correct_request_token_succeeds(): void
+    {
+        $token = Str::random(64);
+        $pr = PermissionRequest::create([
+            'session_id' => $this->session->id,
+            'action_type' => 'override',
+            'requester_user_id' => $this->staff->id,
+            'status' => PermissionRequest::STATUS_PENDING,
+            'request_token' => $token,
+            'target_track_id' => $this->trackToStation2->id,
+            'reason' => 'Skip',
+        ]);
+        $this->session->update(['status' => 'awaiting_approval', 'current_station_id' => null]);
+
+        $response = $this->actingAs($this->supervisor)->postJson("/api/permission-requests/{$pr->id}/approve", [
+            'request_token' => $token,
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('session.status', 'waiting');
+    }
+
+    public function test_cancel_pending_request_as_requester_succeeds(): void
+    {
+        $pr = PermissionRequest::create([
+            'session_id' => $this->session->id,
+            'action_type' => 'override',
+            'requester_user_id' => $this->staff->id,
+            'status' => PermissionRequest::STATUS_PENDING,
+            'request_token' => Str::random(64),
+            'target_track_id' => $this->trackToStation2->id,
+            'reason' => 'Skip',
+        ]);
+        $this->session->update(['status' => 'awaiting_approval', 'current_station_id' => null]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/permission-requests/{$pr->id}/cancel");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('message', 'Request cancelled.');
+        $pr->refresh();
+        $this->assertSame(PermissionRequest::STATUS_CANCELLED, $pr->status);
+    }
+
+    public function test_cancel_as_non_requester_returns_403(): void
+    {
+        $pr = PermissionRequest::create([
+            'session_id' => $this->session->id,
+            'action_type' => 'override',
+            'requester_user_id' => $this->staff->id,
+            'status' => PermissionRequest::STATUS_PENDING,
+            'request_token' => Str::random(64),
+            'target_track_id' => $this->trackToStation2->id,
+            'reason' => 'Skip',
+        ]);
+
+        $response = $this->actingAs($this->supervisor)->postJson("/api/permission-requests/{$pr->id}/cancel");
+
+        $response->assertStatus(403);
+        $pr->refresh();
+        $this->assertSame(PermissionRequest::STATUS_PENDING, $pr->status);
+    }
+
+    public function test_cancel_already_approved_request_returns_409(): void
+    {
+        $pr = PermissionRequest::create([
+            'session_id' => $this->session->id,
+            'action_type' => 'override',
+            'requester_user_id' => $this->staff->id,
+            'status' => PermissionRequest::STATUS_APPROVED,
+            'request_token' => Str::random(64),
+            'target_track_id' => $this->trackToStation2->id,
+            'reason' => 'Skip',
+        ]);
+
+        $response = $this->actingAs($this->staff)->postJson("/api/permission-requests/{$pr->id}/cancel");
+
+        $response->assertStatus(409);
     }
 }

@@ -13,15 +13,16 @@
 	 * on_break / away|offline). Mobile: bar wraps. Empty state: existing copy.
 	 */
 	import { get } from 'svelte/store';
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import { router, usePage } from '@inertiajs/svelte';
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
 	import Modal from '../../Components/Modal.svelte';
-	import QrScanner from '../../Components/QrScanner.svelte';
+	import ScanModal from '../../Components/ScanModal.svelte';
 	import AuthChoiceButtons from '../../Components/AuthChoiceButtons.svelte';
 	import PinOrQrInput from '../../Components/PinOrQrInput.svelte';
 	import UserAvatar from '../../Components/UserAvatar.svelte';
 	import ThemeToggle from '../../Components/ThemeToggle.svelte';
+	import { scrollBooster } from '../../lib/scrollBooster.js';
 	import { Camera, Settings, Monitor, FolderOpen, AlertCircle } from 'lucide-svelte';
 	import {
 		prepareDisplayTts,
@@ -34,6 +35,8 @@
 		shouldUseInputModeNone,
 		getLocalAllowHidOnThisDevice,
 		setLocalAllowHidOnThisDevice,
+		getLocalPersistentHidOnThisDevice,
+		setLocalPersistentHidOnThisDevice,
 		isMobileTouch,
 	} from '../../lib/displayHid.js';
 	import {
@@ -62,6 +65,9 @@ let {
 	program = null,
 	program_not_found = false,
 	program_name = null,
+	/** When set (per-site URL), program links use /site/{site_slug}/display?program= so server can return DeviceAuthorize. */
+	site_slug = null,
+	program_slug = null,
 	date = '',
 	now_serving = [],
 	waiting_by_station = [],
@@ -71,6 +77,7 @@ let {
 	staff_online = 0,
 	display_scan_timeout_seconds = 20,
 	program_is_paused = false,
+	program_is_active = true,
 	display_audio_muted = false,
 	display_audio_volume = 1,
 	enable_display_hid_barcode = true,
@@ -84,6 +91,8 @@ let {
 	queue_mode_display = null,
 	alternate_ratio = null,
 	station_selection_mode = null,
+	/** Per public-site plan: read-only board at /site/{site}/program/{program}/view; no device controls. */
+	publicView = false,
 } = $props();
 
 /** Effective program: currentProgram with fallback to program for transition. */
@@ -92,8 +101,19 @@ const effectiveCurrentProgram = $derived(currentProgram ?? program);
 /** True when board content (now serving, queue, etc.) should be shown; false when showing program selector or "no program". */
 const showBoardContent = $derived(effectiveCurrentProgram != null && !program_not_found);
 
+/** Base URL for display: per-site when site_slug set, else legacy /display. Used so clicking a program stays on same site and triggers device auth. */
+const displayBase = $derived(site_slug ? `/site/${site_slug}/display` : '/display');
+/** Choose device type page URL (for unlock flow). Only set when locked to a program with site. */
+const chooseUrl = $derived(
+	site_slug && (effectiveCurrentProgram?.slug ?? program_slug)
+		? `/site/${site_slug}/program/${effectiveCurrentProgram?.slug ?? program_slug}/devices`
+		: null
+);
+
 /** Synced from prop + .program_status; when true, show "Program is paused" overlay (real-time). */
 let programIsPaused = $state(false);
+/** Per plan Step 5: when false (program closed), show "Program is not currently running" overlay. */
+let programIsActive = $state(true);
 /** Per plan: display board TTS mute/volume — from props and .display_settings broadcast. */
 let displayAudioMuted = $state(false);
 let displayAudioVolume = $state(1);
@@ -114,6 +134,7 @@ let stationTtsByName = $state({});
 
 	$effect(() => {
 		programIsPaused = !!program_is_paused;
+		programIsActive = program_is_active !== false;
 	});
 	$effect(() => {
 		displayAudioMuted = !!display_audio_muted;
@@ -137,20 +158,16 @@ let stationTtsByName = $state({});
 				: {};
 	});
 
-	onMount(() => {
-		localAllowCameraScanner = shouldAllowCameraScanner('display');
-	});
-
 	$effect(() => {
-		// If device-local camera scanning is disabled while open, close immediately.
 		if (!localAllowCameraScanner) showScanner = false;
 	});
 
 	/** Open camera modal when URL has ?scan=1 only if camera scanner is enabled. */
 	$effect(() => {
-		const pageData = get(page);
-		const url = typeof pageData?.url === 'string' ? pageData.url : (typeof window !== 'undefined' ? window.location.href : '');
 		try {
+			const pageData = get(page);
+			if (!pageData || typeof pageData !== 'object') return;
+			const url = typeof pageData.url === 'string' ? pageData.url : (typeof window !== 'undefined' ? window.location.href : '');
 			const parsed = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
 			if (parsed.searchParams.get('scan') === '1') {
 				if (effectiveAllowCameraScanner) {
@@ -164,17 +181,18 @@ let stationTtsByName = $state({});
 				}
 			}
 		} catch {
-			// Ignore URL parse errors
+			// Ignore URL parse errors or missing page
 		}
 	});
 
 	let showScanner = $state(false);
-	/** Latch: ignore repeated onScan callbacks after first successful scan (per gotchas — stops flicker / unresponsive OK GOT IT). */
 	let scanHandled = $state(false);
-	/** Per flexiqueue-87p: countdown when scanner open; 0 = no auto-close. */
 	let scanCountdown = $state(0);
-	let scanCountdownIntervalId = $state(null);
-	/** Hidden input for HID barcode scanner on display; refocus every 2s when camera modal is closed. */
+	let scanCountdownIntervalId = null;
+	/** When true, HID is refocused every 2s when scan modal is closed (Display-like). When false, HID only in modal (Triage-like). */
+	let localPersistentHid = $state(true);
+	/** Modal HID input loses focus → show "click me to allow scans"; no 2s refocus inside modal. */
+	/** Hidden input for HID barcode scanner on display; refocus every 2s when modal closed and persistent HID on. */
 	let displayBarcodeValue = $state('');
 	let displayBarcodeInputEl = $state(null);
 	/** Activity feed: synced from props (and after reload), prepended by real-time events */
@@ -187,18 +205,75 @@ let stationTtsByName = $state({});
 	let displayPinOrQrRef = $state(null);
 	let displaySettingsError = $state('');
 	let displaySettingsSaving = $state(false);
-	/** 'auth' = PIN/QR step; 'settings' = program + device toggles. */
-	let displaySettingsStep = $state('auth');
-	let displaySettingsAuthPayload = $state(null);
 	let displaySettingsProgramHid = $state(true);
 	let displaySettingsCameraScanner = $state(true);
 	let displaySettingsMuted = $state(false);
 	let displaySettingsVolume = $state(1);
 	let displaySettingsLocalAllowHid = $state(false);
+	let displaySettingsLocalPersistentHid = $state(true);
 	let displaySettingsLocalAllowCamera = $state(true);
 	let availableTtsVoices = $state([]);
+	/** QR flow: create display-settings-request, show QR, poll until approved/rejected */
+	let displaySettingsRequestId = $state(null);
+	let displaySettingsRequestToken = $state(null);
+	let displaySettingsRequestState = $state('idle'); // idle | waiting | approved | rejected
+	let displaySettingsPollIntervalId = null;
+
+	/** Footer staff strip: click → horizontally scrollable; blur/click outside or after idle → back to marquee. */
+	let footerStaffMode = $state('marquee'); // 'marquee' | 'scrollable'
+	let footerScrollableTimeoutId = null;
+	let footerStaffRef = $state(null);
+	const FOOTER_SCROLLABLE_IDLE_MS = 4000;
+
+	function setFooterToScrollable() {
+		footerStaffMode = 'scrollable';
+		scheduleFooterBackToMarquee();
+		tick().then(() => footerStaffRef?.focus());
+	}
+
+	function switchFooterToMarquee() {
+		if (footerScrollableTimeoutId != null) {
+			clearTimeout(footerScrollableTimeoutId);
+			footerScrollableTimeoutId = null;
+		}
+		footerStaffMode = 'marquee';
+	}
+
+	function scheduleFooterBackToMarquee() {
+		if (footerScrollableTimeoutId != null) clearTimeout(footerScrollableTimeoutId);
+		footerScrollableTimeoutId = setTimeout(switchFooterToMarquee, FOOTER_SCROLLABLE_IDLE_MS);
+	}
+
+	function resetFooterScrollableIdle() {
+		if (footerStaffMode !== 'scrollable') return;
+		scheduleFooterBackToMarquee();
+	}
+
+	function handleFooterPointerDownOutside(e) {
+		if (footerStaffMode !== 'scrollable' || !footerStaffRef) return;
+		if (footerStaffRef.contains(e.target)) return;
+		switchFooterToMarquee();
+	}
+
+	function handleFooterFocusOut(e) {
+		if (footerStaffMode !== 'scrollable' || !footerStaffRef) return;
+		const next = e.relatedTarget;
+		if (next != null && footerStaffRef.contains(next)) return;
+		switchFooterToMarquee();
+	}
+
+	/** Unlock flow: change device type (back to choose page). Same PIN/QR as when entering. */
+	let showUnlockModal = $state(false);
+	let unlockAuthMode = $state('pin'); // 'pin' | 'request'
+	let unlockPin = $state('');
+	let unlockRequestId = $state(null);
+	let unlockRequestToken = $state(null);
+	let unlockRequestState = $state('idle');
+	let unlockPollIntervalId = null;
+	let unlockLoading = $state(false);
 	$effect(() => {
-		activityFeed = [...(station_activity ?? [])];
+		const raw = station_activity ?? [];
+		activityFeed = Array.isArray(raw) ? [...raw] : [];
 	});
 
 	/** Recent activity: max 20 items, fixed-height scroll (shows ~5 items). No View more/less. */
@@ -224,16 +299,22 @@ let stationTtsByName = $state({});
 
 	async function saveDisplaySettings() {
 		displaySettingsError = '';
-		const authBody = displaySettingsAuthPayload;
+		// PIN/QR required at save time (not at open)
+		const authBody = displaySettingsAuthMode === 'pin' ? (displayPinOrQrRef?.buildPinOrQrPayload?.() ?? null) : null;
 		if (!authBody) {
-			displaySettingsError = 'Authorize with PIN or QR first.';
-			displaySettingsStep = 'auth';
+			displaySettingsError = displaySettingsAuthMode === 'pin' ? 'Enter a 6-digit PIN to apply changes.' : 'Use "Show QR for supervisor to scan" to apply changes.';
 			return;
 		}
 		displaySettingsSaving = true;
 		try {
+			const prog = effectiveCurrentProgram;
+			if (!prog?.id) {
+				displaySettingsError = 'No program selected.';
+				return;
+			}
 			const body = {
-				...authBody, // { pin } or { qr_scan_token }
+				program_id: prog.id,
+				...authBody,
 				enable_display_hid_barcode: displaySettingsProgramHid,
 				enable_display_camera_scanner: displaySettingsCameraScanner,
 				display_audio_muted: displaySettingsMuted,
@@ -254,29 +335,21 @@ let stationTtsByName = $state({});
 			if (res.status === 401) {
 				displaySettingsError = data.message || 'Authorization failed.';
 				toaster.error({ title: data.message || 'Authorization failed.' });
-				displaySettingsStep = 'auth';
-				displaySettingsAuthPayload = null;
 				return;
 			}
 			if (res.status === 403) {
 				displaySettingsError = data.message || 'Not authorized for this program.';
 				toaster.error({ title: data.message || 'Not authorized for this program.' });
-				displaySettingsStep = 'auth';
-				displaySettingsAuthPayload = null;
 				return;
 			}
 			if (res.status === 429) {
 				displaySettingsError = data.message || 'Too many attempts. Try again later.';
 				toaster.error({ title: data.message || 'Too many attempts. Try again later.' });
-				displaySettingsStep = 'auth';
-				displaySettingsAuthPayload = null;
 				return;
 			}
 			if (!res.ok) {
 				displaySettingsError = data.message || 'Failed to save.';
 				toaster.error({ title: data.message || 'Failed to save.' });
-				displaySettingsStep = 'auth';
-				displaySettingsAuthPayload = null;
 				return;
 			}
 			toaster.success({ title: 'Display settings saved.' });
@@ -284,19 +357,278 @@ let stationTtsByName = $state({});
 			displayAudioVolume = Math.max(0, Math.min(1, Number(data.display_audio_volume ?? 1)));
 			enableDisplayHidBarcode = !!data.enable_display_hid_barcode;
 			if (typeof data.enable_display_camera_scanner === 'boolean') enableDisplayCameraScanner = data.enable_display_camera_scanner;
-			// Apply device-local settings only after successful, authenticated save.
 			setLocalAllowHidOnThisDevice('display', displaySettingsLocalAllowHid);
+			setLocalPersistentHidOnThisDevice('display', displaySettingsLocalPersistentHid);
+			localPersistentHid = displaySettingsLocalPersistentHid;
 			setLocalAllowCameraOnThisDevice('display', displaySettingsLocalAllowCamera);
 			localAllowCameraScanner = displaySettingsLocalAllowCamera;
 			displaySettingsPin = '';
 			displaySettingsQrScanToken = '';
-			displaySettingsAuthPayload = null;
-			displaySettingsStep = 'auth';
 			showDisplaySettingsModal = false;
 		} finally {
 			displaySettingsSaving = false;
 		}
 	}
+
+	const DISPLAY_SETTINGS_REQUEST_QR_PREFIX = 'flexiqueue:display_settings_request:';
+
+	async function createDisplaySettingsRequest() {
+		const prog = effectiveCurrentProgram;
+		if (!prog?.id || displaySettingsSaving) return;
+		displaySettingsSaving = true;
+		displaySettingsError = '';
+		try {
+			const body = {
+				program_id: prog.id,
+				display_audio_muted: displaySettingsMuted,
+				display_audio_volume: displaySettingsVolume,
+				enable_display_hid_barcode: displaySettingsProgramHid,
+				enable_display_camera_scanner: displaySettingsCameraScanner,
+			};
+			const res = await fetch('/api/public/display-settings-requests', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-CSRF-TOKEN': getCsrfToken(),
+					'X-Requested-With': 'XMLHttpRequest',
+				},
+				credentials: 'same-origin',
+				body: JSON.stringify(body),
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				displaySettingsError = (data).message || 'Failed to create request.';
+				toaster.error({ title: displaySettingsError });
+				return;
+			}
+			displaySettingsRequestId = data.id;
+			displaySettingsRequestToken = data.request_token;
+			displaySettingsRequestState = 'waiting';
+			const id = data.id;
+			const token = data.request_token;
+			displaySettingsPollIntervalId = setInterval(async () => {
+				try {
+					const r = await fetch(`/api/public/display-settings-requests/${id}?token=${encodeURIComponent(token)}`, { credentials: 'same-origin' });
+					const d = await r.json().catch(() => ({}));
+					if (d.status === 'approved') {
+						if (displaySettingsPollIntervalId) clearInterval(displaySettingsPollIntervalId);
+						displaySettingsPollIntervalId = null;
+						displaySettingsRequestId = null;
+						displaySettingsRequestToken = null;
+						displaySettingsRequestState = 'idle';
+						setLocalAllowHidOnThisDevice('display', displaySettingsLocalAllowHid);
+						setLocalPersistentHidOnThisDevice('display', displaySettingsLocalPersistentHid);
+						localPersistentHid = displaySettingsLocalPersistentHid;
+						setLocalAllowCameraOnThisDevice('display', displaySettingsLocalAllowCamera);
+						localAllowCameraScanner = displaySettingsLocalAllowCamera;
+						toaster.success({ title: 'Settings applied.' });
+						showDisplaySettingsModal = false;
+						refreshBoardData();
+					} else if (d.status === 'rejected' || d.status === 'cancelled') {
+						if (displaySettingsPollIntervalId) clearInterval(displaySettingsPollIntervalId);
+						displaySettingsPollIntervalId = null;
+						displaySettingsRequestState = 'idle';
+						displaySettingsRequestId = null;
+						displaySettingsRequestToken = null;
+						toaster.warning({ title: d.status === 'rejected' ? 'Request was rejected.' : 'Request was cancelled.' });
+					}
+				} catch {
+					// ignore poll errors
+				}
+			}, 2000);
+		} finally {
+			displaySettingsSaving = false;
+		}
+	}
+
+	function cancelDisplaySettingsRequest() {
+		displaySettingsRequestState = 'idle';
+		displaySettingsRequestId = null;
+		displaySettingsRequestToken = null;
+		if (displaySettingsPollIntervalId) {
+			clearInterval(displaySettingsPollIntervalId);
+			displaySettingsPollIntervalId = null;
+		}
+	}
+
+	/** Cancel pending display-settings or unlock request on leave (avoid orphan entries). */
+	async function cancelPendingRequestsOnLeave() {
+		if (displaySettingsRequestId != null && displaySettingsRequestToken) {
+			try {
+				await fetch(`/api/public/display-settings-requests/${displaySettingsRequestId}/cancel`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': getCsrfToken(), 'Accept': 'application/json' },
+					credentials: 'include',
+					body: JSON.stringify({ request_token: displaySettingsRequestToken }),
+				});
+			} catch {
+				// ignore
+			}
+		}
+		if (unlockRequestId != null && unlockRequestToken) {
+			try {
+				await fetch(`/api/public/device-unlock-requests/${unlockRequestId}/cancel`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': getCsrfToken(), 'Accept': 'application/json' },
+					credentials: 'include',
+					body: JSON.stringify({ request_token: unlockRequestToken }),
+				});
+			} catch {
+				// ignore
+			}
+		}
+	}
+
+	const DEVICE_UNLOCK_REQUEST_QR_PREFIX = 'flexiqueue:device_unlock_request:';
+
+	async function createUnlockRequest() {
+		if (!effectiveCurrentProgram?.id || !chooseUrl || unlockLoading) return;
+		unlockLoading = true;
+		unlockRequestState = 'idle';
+		unlockRequestId = null;
+		unlockRequestToken = null;
+		if (unlockPollIntervalId) {
+			clearInterval(unlockPollIntervalId);
+			unlockPollIntervalId = null;
+		}
+		try {
+			const res = await fetch('/api/public/device-unlock-requests', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-CSRF-TOKEN': getCsrfToken(),
+					'X-Requested-With': 'XMLHttpRequest',
+				},
+				credentials: 'include',
+				body: JSON.stringify({ program_id: effectiveCurrentProgram.id }),
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				toaster.error({ title: data.message || 'Failed to create unlock request.' });
+				return;
+			}
+			unlockRequestId = data.id;
+			unlockRequestToken = data.request_token;
+			unlockRequestState = 'waiting';
+			const id = data.id;
+			const token = data.request_token;
+			unlockPollIntervalId = setInterval(async () => {
+				try {
+					const r = await fetch(`/api/public/device-unlock-requests/${id}?token=${encodeURIComponent(token)}`, { credentials: 'include' });
+					const d = await r.json().catch(() => ({}));
+					if (d.status === 'approved') {
+						if (unlockPollIntervalId) clearInterval(unlockPollIntervalId);
+						unlockPollIntervalId = null;
+						unlockRequestId = null;
+						unlockRequestToken = null;
+						showUnlockModal = false;
+						unlockRequestState = 'idle';
+						toaster.success({ title: 'Device unlocked.' });
+						const consumeRes = await fetch(`/api/public/device-unlock-requests/${id}/consume`, {
+							method: 'POST',
+							credentials: 'include',
+							headers: {
+								'X-CSRF-TOKEN': getCsrfToken(),
+								'Content-Type': 'application/json',
+								Accept: 'application/json',
+							},
+							body: JSON.stringify({ request_token: token }),
+						});
+						const consumeData = await consumeRes.json().catch(() => ({}));
+						if (consumeRes.ok && consumeData.redirect_url) {
+							sessionStorage.removeItem('device_lock_redirect_url');
+							router.visit(consumeData.redirect_url, { replace: true });
+						} else {
+							router.visit(chooseUrl, { replace: true });
+						}
+					} else if (d.status === 'rejected' || d.status === 'cancelled') {
+						if (unlockPollIntervalId) clearInterval(unlockPollIntervalId);
+						unlockPollIntervalId = null;
+						unlockRequestId = null;
+						unlockRequestToken = null;
+						unlockRequestState = 'idle';
+						toaster.warning({ title: d.status === 'rejected' ? 'Request was rejected.' : 'Request was cancelled.' });
+					}
+				} catch {
+					// ignore
+				}
+			}, 2000);
+		} finally {
+			unlockLoading = false;
+		}
+	}
+
+	function cancelUnlockRequest() {
+		unlockRequestState = 'idle';
+		unlockRequestId = null;
+		unlockRequestToken = null;
+		unlockAuthMode = 'pin';
+		unlockPin = '';
+		if (unlockPollIntervalId) {
+			clearInterval(unlockPollIntervalId);
+			unlockPollIntervalId = null;
+		}
+		showUnlockModal = false;
+	}
+
+	async function submitUnlockWithPin() {
+		const trimmed = unlockPin.replace(/\D/g, '').slice(0, 6);
+		if (trimmed.length !== 6) {
+			toaster.warning({ title: 'Enter a 6-digit PIN.' });
+			return;
+		}
+		unlockLoading = true;
+		try {
+			const res = await fetch('/api/public/device-unlock-with-auth', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-CSRF-TOKEN': getCsrfToken(),
+					'X-Requested-With': 'XMLHttpRequest',
+				},
+				credentials: 'include',
+				body: JSON.stringify({ pin: trimmed }),
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				toaster.error({ title: data.message || 'Unlock failed.' });
+				return;
+			}
+			toaster.success({ title: 'Device unlocked.' });
+			sessionStorage.removeItem('device_lock_redirect_url');
+			if (data.redirect_url) {
+				showUnlockModal = false;
+				router.visit(data.redirect_url, { replace: true });
+			}
+		} catch {
+			toaster.error({ title: 'Network error. Try again.' });
+		} finally {
+			unlockLoading = false;
+		}
+	}
+
+	let beforeUnloadHandler = $state(null);
+	let footerPointerDownCleanup = $state(null);
+	onDestroy(() => {
+		cancelPendingRequestsOnLeave();
+		if (footerScrollableTimeoutId != null) clearTimeout(footerScrollableTimeoutId);
+		if (typeof document !== 'undefined' && footerPointerDownCleanup) footerPointerDownCleanup();
+		if (typeof window !== 'undefined' && beforeUnloadHandler) {
+			window.removeEventListener('beforeunload', beforeUnloadHandler);
+		}
+	});
+
+	onMount(() => {
+		localAllowCameraScanner = shouldAllowCameraScanner('display');
+		localPersistentHid = getLocalPersistentHidOnThisDevice('display');
+		beforeUnloadHandler = () => cancelPendingRequestsOnLeave();
+		window.addEventListener('beforeunload', beforeUnloadHandler);
+		document.addEventListener('pointerdown', handleFooterPointerDownOutside, true);
+		footerPointerDownCleanup = () => document.removeEventListener('pointerdown', handleFooterPointerDownOutside, true);
+	});
 
 	async function openDisplaySettingsModal() {
 		displaySettingsProgramHid = enableDisplayHidBarcode;
@@ -304,13 +636,19 @@ let stationTtsByName = $state({});
 		displaySettingsMuted = displayAudioMuted;
 		displaySettingsVolume = displayAudioVolume;
 		displaySettingsLocalAllowHid = getLocalAllowHidOnThisDevice('display') === true;
+		displaySettingsLocalPersistentHid = getLocalPersistentHidOnThisDevice('display');
 		displaySettingsLocalAllowCamera = shouldAllowCameraScanner('display');
 		displaySettingsAuthMode = 'pin';
 		displaySettingsPin = '';
 		displaySettingsQrScanToken = '';
 		displaySettingsError = '';
-		displaySettingsStep = 'auth';
-		displaySettingsAuthPayload = null;
+		displaySettingsRequestId = null;
+		displaySettingsRequestToken = null;
+		displaySettingsRequestState = 'idle';
+		if (displaySettingsPollIntervalId) {
+			clearInterval(displaySettingsPollIntervalId);
+			displaySettingsPollIntervalId = null;
+		}
 		showDisplaySettingsModal = true;
 		try {
 			const res = await fetch('/api/public/tts/voices', { credentials: 'same-origin' });
@@ -320,6 +658,13 @@ let stationTtsByName = $state({});
 			availableTtsVoices = [];
 		}
 	}
+
+	/** Actions that actually change the displayed queue state — gate full reload on these only (per docs/necessary-fix.md). */
+	const QUEUE_CHANGING_ACTIONS = new Set([
+		'bind', 'call', 'serve', 'transfer', 'complete',
+		'cancel', 'hold', 'resume', 'no_show', 'enqueue_back',
+		'force_complete', 'override'
+	]);
 
 	/** A.5: Subscribe to program-scoped channels only (display.activity.{programId}, queue.{programId}). No legacy channels. */
 	function setupEcho(programId) {
@@ -349,7 +694,10 @@ let stationTtsByName = $state({});
 					})
 				);
 			}
-			refreshBoardData();
+			// Only reload if this action changes queue state (note, staff_availability, etc. — no reload)
+			if (QUEUE_CHANGING_ACTIONS.has(e.action_type)) {
+				refreshBoardData();
+			}
 		};
 		const leaves = [];
 		const programActivity = echo.channel(`display.activity.${programId}`);
@@ -359,6 +707,7 @@ let stationTtsByName = $state({});
 		});
 		programActivity.listen('.program_status', (e) => {
 			programIsPaused = !!e.program_is_paused;
+			if (typeof e.program_is_active === 'boolean') programIsActive = e.program_is_active;
 		});
 		programActivity.listen('.display_settings', (e) => {
 			displayAudioMuted = !!e.display_audio_muted;
@@ -413,20 +762,19 @@ let stationTtsByName = $state({});
 		}
 		scanCountdown = 0;
 		showScanner = false;
-		if (shouldFocusHidInput(enableDisplayHidBarcode, 'display')) displayBarcodeInputEl?.focus();
+		if (localPersistentHid && shouldFocusHidInput(enableDisplayHidBarcode, 'display')) displayBarcodeInputEl?.focus();
 	}
 
-	/** Add one full timeout period to the scanner modal countdown (extension time from program settings). */
 	function extendScannerCountdown() {
 		const extra = Math.max(0, Number(display_scan_timeout_seconds) || 20);
 		scanCountdown += extra;
 	}
 
-	/** Refocus hidden barcode input every 2s when camera modal is closed. Both program and device-local must allow (per plan). */
+	/** Refocus hidden barcode input every 2s when scan modal is closed and persistent HID is on. */
 	$effect(() => {
-		if (showScanner || !shouldFocusHidInput(enableDisplayHidBarcode, 'display')) return;
+		if (showScanner || !localPersistentHid || !shouldFocusHidInput(enableDisplayHidBarcode, 'display')) return;
 		const id = setInterval(() => {
-			if (shouldFocusHidInput(enableDisplayHidBarcode, 'display')) displayBarcodeInputEl?.focus();
+			if (!showScanner && localPersistentHid && shouldFocusHidInput(enableDisplayHidBarcode, 'display')) displayBarcodeInputEl?.focus();
 		}, 2000);
 		return () => clearInterval(id);
 	});
@@ -461,12 +809,23 @@ let stationTtsByName = $state({});
 	function handleQrScan(decodedText) {
 		if (scanHandled) return;
 		scanHandled = true;
-		const raw = decodedText.trim();
-		// If QR contains a URL path (e.g. .../display/status/HASH), use the last segment as qr_hash
-		const qrHash = raw.includes('/') ? raw.split('/').pop() ?? raw : raw;
-		if (qrHash) {
+		const raw = (typeof decodedText === 'string' ? decodedText : '').trim();
+		// If QR contains full URL (e.g. .../display/status/SITE_ID/HASH or .../display/status/HASH), use pathname so site-scoped and legacy both work
+		if (raw.includes('/display/status/')) {
+			try {
+				const pathname = new URL(raw, window.location.origin).pathname;
+				showScanner = false;
+				router.visit(pathname);
+			} catch {
+				const qrHash = raw.split('/').pop() ?? raw;
+				if (qrHash) {
+					showScanner = false;
+					router.visit(`/display/status/${encodeURIComponent(qrHash)}`);
+				}
+			}
+		} else if (raw) {
 			showScanner = false;
-			router.visit(`/display/status/${encodeURIComponent(qrHash)}`);
+			router.visit(`/display/status/${encodeURIComponent(raw)}`);
 		}
 	}
 
@@ -508,12 +867,14 @@ let stationTtsByName = $state({});
 	const staffForBar = $derived.by(() => {
 		const seen = new Set();
 		const list = [];
-		for (const row of staff_at_stations ?? []) {
-			for (const s of row.staff ?? []) {
-				const key = (s.name ?? '') + (s.availability_status ?? '');
+		const rows = Array.isArray(staff_at_stations) ? staff_at_stations : [];
+		for (const row of rows) {
+			const staffList = Array.isArray(row?.staff) ? row.staff : [];
+			for (const s of staffList) {
+				const key = (s?.name ?? '') + (s?.availability_status ?? '');
 				if (seen.has(key)) continue;
 				seen.add(key);
-				list.push({ ...s, station_name: row.station_name });
+				list.push({ ...s, station_name: row?.station_name });
 			}
 		}
 		return list;
@@ -529,7 +890,7 @@ let stationTtsByName = $state({});
 	<div class="relative">
 		{#if !showBoardContent}
 			<!-- A.2.4: Program selector / empty state — per 07-UI-UX-SPECS empty-state pattern and PublicStart "not available" (neutral surface, no warning/error). -->
-			<div class="flex flex-col gap-6 max-w-4xl mx-auto pb-28 px-4">
+			<div class="flex flex-col gap-6 max-w-4xl mx-auto pb-28 px-3 sm:px-4">
 				{#if program_not_found}
 					<div
 						role="status"
@@ -559,7 +920,7 @@ let stationTtsByName = $state({});
 									<button
 										type="button"
 										class="card bg-surface-50 border border-surface-200 rounded-container shadow-sm w-full flex flex-col items-center justify-center p-6 min-h-[120px] touch-target-h text-center hover:border-primary-300 hover:bg-primary-50/50 focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors"
-										onclick={() => router.visit(`/display?program=${prog.id}`)}
+										onclick={() => router.visit(`${displayBase}?program=${prog.id}`)}
 									>
 										<div class="bg-surface-100 p-3 rounded-full text-surface-500 mb-3" aria-hidden="true">
 											<Monitor class="w-6 h-6" />
@@ -586,7 +947,17 @@ let stationTtsByName = $state({});
 				{/if}
 			</div>
 		{:else}
-		{#if programIsPaused}
+		{#if !programIsActive}
+			<div
+				class="absolute inset-0 z-10 flex items-center justify-center bg-surface-950/80 rounded-container min-h-[280px]"
+				aria-live="polite"
+			>
+				<div class="card bg-surface-50 border border-surface-200 rounded-container shadow-lg p-8 max-w-md mx-4 text-center">
+					<p class="text-xl font-semibold text-surface-950">Program is not currently running.</p>
+					<p class="text-surface-600 mt-2">Please check back later or scan the QR again.</p>
+				</div>
+			</div>
+		{:else if programIsPaused}
 			<div
 				class="absolute inset-0 z-10 flex items-center justify-center bg-surface-950/80 rounded-container min-h-[280px]"
 				aria-live="polite"
@@ -597,7 +968,13 @@ let stationTtsByName = $state({});
 				</div>
 			</div>
 		{/if}
-		<div class="flex flex-col gap-6 max-w-4xl mx-auto pb-28">
+		<div class="flex flex-col gap-6 max-w-4xl mx-auto pb-28 px-3 sm:px-4">
+			{#if publicView}
+				<div class="flex items-center justify-end gap-3 flex-wrap">
+					<span class="text-sm text-surface-500 dark:text-slate-400 font-medium">View only</span>
+					<ThemeToggle />
+				</div>
+			{/if}
 			<!-- Station routing: how clients are sent to stations (per flexiqueue-syam). -->
 			{#if program_name && station_selection_mode}
 				{@const sel = station_selection_mode}
@@ -635,18 +1012,19 @@ let stationTtsByName = $state({});
 				</section>
 			{/if}
 
-			<!-- Scan section: HID barcode input and/or camera scanner CTA. Section always visible for Settings. -->
+			<!-- Scan section: HID barcode input and/or camera scanner CTA. Hidden in public (view-only) mode. -->
+		{#if !publicView}
 		<section>
 			<div class="flex items-center justify-between gap-2 mb-3 flex-wrap">
 				<h2 class="text-xl font-bold text-surface-950">CHECK YOUR STATUS</h2>
 				<div class="flex items-center gap-2">
-					{#if programs && programs.length > 1}
+					{#if chooseUrl}
 						<button
 							type="button"
 							class="btn preset-tonal text-sm touch-target-h"
-							onclick={() => router.visit('/display')}
+							onclick={() => (showUnlockModal = true)}
 						>
-							Change program
+							Change device type
 						</button>
 					{/if}
 				<button
@@ -699,150 +1077,92 @@ let stationTtsByName = $state({});
 							<Camera class="w-6 h-6" />
 						</button>
 					{/if}
+					{#if shouldFocusHidInput(enableDisplayHidBarcode, 'display')}
+						<button
+							type="button"
+							class="btn btn-sm preset-tonal shrink-0 touch-target-h"
+							aria-label="Open scan modal for barcode"
+							title="Scan with barcode scanner"
+							onclick={() => {
+								showScanner = true;
+								scanHandled = false;
+							}}
+						>
+							Scan with barcode
+						</button>
+					{/if}
 				</div>
 			{/if}
 		</section>
+		{/if}
 
-		<!-- Camera scan modal: camera-only QrScanner, countdown, Cancel -->
-		<Modal open={showScanner} title="Scan QR via Device" onClose={closeScanner} wide={true}>
-			{#snippet children()}
-				<div class="flex flex-col gap-3 w-full min-w-[20rem] mx-auto">
-					{#if showScanner}
-						<QrScanner active={showScanner} cameraOnly={true} onScan={handleQrScan} />
-					{/if}
-					{#if scanCountdown > 0}
-						<div class="flex flex-wrap items-center justify-center gap-2">
-							<p class="text-sm text-surface-600" aria-live="polite">Closing in {scanCountdown}s</p>
-							<button
-								type="button"
-								class="btn preset-tonal text-sm py-1.5 px-3"
-								onclick={extendScannerCountdown}
-							>
-								Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)
-							</button>
-						</div>
-					{/if}
-					<button
-						type="button"
-						class="w-full py-3 text-base font-semibold rounded-container border-2 border-surface-300 bg-surface-50 text-surface-950 shadow-md hover:bg-surface-200 focus:ring-2 focus:ring-offset-2 focus:ring-surface-400"
-						onclick={closeScanner}
-					>
-						Cancel
-					</button>
-				</div>
+		<!-- Scan modal: same HID + camera layout as mobile footer and triage (ScanModal). -->
+		<ScanModal
+			open={showScanner}
+			title="Scan QR via Camera"
+			onClose={closeScanner}
+			allowHid={shouldFocusHidInput(enableDisplayHidBarcode, 'display')}
+			allowCamera={!!effectiveAllowCameraScanner}
+			onScan={handleQrScan}
+			wide={true}
+			inputModeNone={shouldUseInputModeNone(enableDisplayHidBarcode, 'display')}
+		>
+			{#snippet extra()}
+				{#if scanCountdown > 0}
+					<div class="flex flex-wrap items-center justify-center gap-2">
+						<p class="text-sm text-surface-600" aria-live="polite">Closing in {scanCountdown}s</p>
+						<button
+							type="button"
+							class="btn preset-tonal text-sm py-1.5 px-3"
+							onclick={extendScannerCountdown}
+						>
+							Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)
+						</button>
+					</div>
+				{/if}
 			{/snippet}
-		</Modal>
+		</ScanModal>
 
-		<!-- Display settings modal: PIN + program HID/volume + device-local (per plan) -->
-		<Modal open={showDisplaySettingsModal} title="Display settings" onClose={() => (showDisplaySettingsModal = false)}>
+		<!-- Display settings modal: view/edit anytime; apply only on Save with PIN/QR -->
+		<Modal open={showDisplaySettingsModal} title="Display settings" onClose={() => { cancelDisplaySettingsRequest(); showDisplaySettingsModal = false; }}>
 			{#snippet children()}
 				<div class="flex flex-col gap-6">
-					<p class="text-sm text-surface-950/70">Changes to program settings require supervisor or admin authorization.</p>
-					<div class="flex flex-col gap-3">
-						<div class="flex flex-col gap-2">
-							<div class="label"><span class="label-text">Authorize with</span></div>
-							<AuthChoiceButtons
-								includeRequest={false}
-								disabled={displaySettingsSaving}
-								bind:mode={displaySettingsAuthMode}
-							/>
-						</div>
-						<PinOrQrInput
-							bind:this={displayPinOrQrRef}
-							disabled={displaySettingsSaving}
-							mode={displaySettingsAuthMode}
-							bind:pin={displaySettingsPin}
-							bind:qrScanToken={displaySettingsQrScanToken}
-						/>
-						{#if displaySettingsError}
-							<p id="display-settings-pin-error" class="text-sm text-error-600">{displaySettingsError}</p>
-						{/if}
-					</div>
-					{#if displaySettingsStep === 'auth'}
-						<div class="flex flex-wrap gap-2 justify-end pt-1">
-							<button
-								type="button"
-								class="btn preset-filled-primary-500"
-								onclick={() => {
-									displaySettingsError = '';
-									const authBody = displayPinOrQrRef?.buildPinOrQrPayload?.() ?? null;
-									if (!authBody) {
-										displaySettingsError =
-											displaySettingsAuthMode === 'pin'
-												? 'Enter a 6-digit PIN.'
-												: 'Scan QR first.';
-										return;
-									}
-									displaySettingsAuthPayload = authBody;
-									displaySettingsStep = 'settings';
-								}}
-								disabled={displaySettingsSaving}
-							>
-								Continue
-							</button>
-						</div>
-					{:else}
+					<p class="text-sm text-surface-950/70">You can view and change settings below. Changes are applied only when you save; saving requires PIN or QR (admin scan).</p>
 					<div class="flex flex-col gap-4">
 						<h3 class="text-sm font-semibold text-surface-950">Program settings</h3>
 						<p class="text-xs text-surface-950/60">Apply to all displays.</p>
 						<label class="flex items-center gap-2 cursor-pointer">
-							<input
-								type="checkbox"
-								class="checkbox"
-								bind:checked={displaySettingsProgramHid}
-								disabled={displaySettingsSaving}
-							/>
+							<input type="checkbox" class="checkbox" bind:checked={displaySettingsProgramHid} disabled={displaySettingsSaving} />
 							<span class="text-sm text-surface-950">Allow HID barcode scanner</span>
 						</label>
 						<label class="flex items-center gap-2 cursor-pointer">
-							<input
-								type="checkbox"
-								class="checkbox"
-								bind:checked={displaySettingsCameraScanner}
-								disabled={displaySettingsSaving}
-							/>
+							<input type="checkbox" class="checkbox" bind:checked={displaySettingsCameraScanner} disabled={displaySettingsSaving} />
 							<span class="text-sm text-surface-950">Allow camera/QR scanner</span>
 						</label>
 						<label class="flex items-center gap-2 cursor-pointer">
-							<input
-								type="checkbox"
-								class="checkbox"
-								bind:checked={displaySettingsMuted}
-								disabled={displaySettingsSaving}
-							/>
+							<input type="checkbox" class="checkbox" bind:checked={displaySettingsMuted} disabled={displaySettingsSaving} />
 							<span class="text-sm text-surface-950">Mute</span>
 						</label>
 						<label class="flex flex-col gap-2">
 							<span class="text-sm font-medium text-surface-950">Volume</span>
-							<input
-								type="range"
-								min="0"
-								max="1"
-								step="0.1"
-								class="range range-sm w-full max-w-xs"
-								bind:value={displaySettingsVolume}
-								disabled={displaySettingsSaving || displaySettingsMuted}
-							/>
+							<input type="range" min="0" max="1" step="0.1" class="range range-sm w-full max-w-xs" bind:value={displaySettingsVolume} disabled={displaySettingsSaving || displaySettingsMuted} />
 						</label>
-						<!-- TTS source/voice are now global; display uses pre-generated/server/browser automatically. -->
 					</div>
 					<div class="border-t border-surface-200 pt-4 flex flex-col gap-2">
 						<h3 class="text-sm font-semibold text-surface-950">This device</h3>
 						<p class="text-xs text-surface-950/60">On this device only — not saved to server.</p>
 						<label class="flex items-center gap-2 cursor-pointer">
-							<input
-								type="checkbox"
-								class="checkbox"
-								bind:checked={displaySettingsLocalAllowHid}
-							/>
+							<input type="checkbox" class="checkbox" bind:checked={displaySettingsLocalAllowHid} />
 							<span class="text-sm text-surface-950">Allow HID scanner on this device</span>
 						</label>
+						{#if displaySettingsLocalAllowHid}
+							<label class="flex items-center gap-2 cursor-pointer pl-6">
+								<input type="checkbox" class="checkbox" bind:checked={displaySettingsLocalPersistentHid} />
+								<span class="text-sm text-surface-950">Keep HID ready when scan modal is closed</span>
+							</label>
+						{/if}
 						<label class="flex items-center gap-2 cursor-pointer">
-							<input
-								type="checkbox"
-								class="checkbox"
-								bind:checked={displaySettingsLocalAllowCamera}
-							/>
+							<input type="checkbox" class="checkbox" bind:checked={displaySettingsLocalAllowCamera} />
 							<span class="text-sm text-surface-950">Allow camera/QR scanner on this device</span>
 						</label>
 						<div class="flex items-center justify-between gap-3 pt-2">
@@ -853,30 +1173,124 @@ let stationTtsByName = $state({});
 							<ThemeToggle />
 						</div>
 					</div>
+					<div class="border-t border-surface-200 pt-4 flex flex-col gap-2">
+						<h3 class="text-sm font-semibold text-surface-950">Apply changes</h3>
+						<p class="text-xs text-surface-950/60">Authorize with PIN or show QR for supervisor to scan. Settings above are applied only when you save.</p>
+						<AuthChoiceButtons includeRequest={true} disabled={displaySettingsSaving || displaySettingsRequestState === 'waiting'} bind:mode={displaySettingsAuthMode} />
+						{#if displaySettingsRequestState === 'waiting' && displaySettingsRequestId != null && displaySettingsRequestToken != null}
+							<div class="flex flex-col items-center gap-3 py-4">
+								<p class="text-sm font-medium text-surface-950">Waiting for approval…</p>
+								<p class="text-xs text-surface-950/60 text-center">Ask the program supervisor or admin to scan this QR on the Track overrides page.</p>
+								<img class="rounded-container border border-surface-200 bg-white p-2" alt="QR for supervisor to scan" width="200" height="200" src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(DISPLAY_SETTINGS_REQUEST_QR_PREFIX + displaySettingsRequestId + ':' + displaySettingsRequestToken)}`} />
+								<button type="button" class="btn preset-tonal btn-sm touch-target-h" onclick={cancelDisplaySettingsRequest}>Cancel request</button>
+							</div>
+						{:else if displaySettingsAuthMode === 'request'}
+							<button type="button" class="btn preset-filled-primary-500" onclick={createDisplaySettingsRequest} disabled={displaySettingsSaving || !effectiveCurrentProgram?.id}>
+								{displaySettingsSaving ? 'Creating…' : 'Show QR for supervisor to scan'}
+							</button>
+						{:else}
+							<PinOrQrInput bind:this={displayPinOrQrRef} disabled={displaySettingsSaving} mode={displaySettingsAuthMode} bind:pin={displaySettingsPin} bind:qrScanToken={displaySettingsQrScanToken} />
+						{/if}
+						{#if displaySettingsError}
+							<p id="display-settings-pin-error" class="text-sm text-error-600">{displaySettingsError}</p>
+						{/if}
+					</div>
 					<div class="flex flex-wrap gap-2 justify-end pt-2">
-						<button
-							type="button"
-							class="btn preset-tonal"
-							onclick={() => (showDisplaySettingsModal = false)}
-							disabled={displaySettingsSaving}
-						>
+						<button type="button" class="btn preset-tonal" onclick={() => { cancelDisplaySettingsRequest(); showDisplaySettingsModal = false; }} disabled={displaySettingsSaving}>Cancel</button>
+						{#if displaySettingsAuthMode === 'request'}
+							<!-- Apply via QR request above -->
+						{:else}
+							<button type="button" class="btn preset-filled-primary-500" onclick={saveDisplaySettings} disabled={displaySettingsSaving}>{displaySettingsSaving ? 'Saving…' : 'Save'}</button>
+						{/if}
+					</div>
+				</div>
+			{/snippet}
+		</Modal>
+
+		<Modal open={showUnlockModal} title="Unlock device" onClose={cancelUnlockRequest}>
+			{#snippet children()}
+				<div class="flex flex-col gap-4">
+					<p class="text-sm text-surface-600 dark:text-slate-400">
+						Use the same PIN or QR as when entering. Enter supervisor PIN or show QR for them to scan.
+					</p>
+					{#if unlockRequestState === 'waiting' && unlockRequestId != null && unlockRequestToken}
+						<p class="text-sm font-medium text-surface-950">Waiting for approval…</p>
+						<div class="flex justify-center">
+							<img
+								class="rounded-container border border-surface-200 bg-white p-2"
+								alt="QR for supervisor to scan"
+								width="200"
+								height="200"
+								src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(DEVICE_UNLOCK_REQUEST_QR_PREFIX + unlockRequestId + ':' + unlockRequestToken)}`}
+							/>
+						</div>
+						<button type="button" class="btn preset-tonal btn-sm touch-target-h" onclick={cancelUnlockRequest}>
+							Cancel request
+						</button>
+					{:else}
+						<div class="flex gap-2">
+							<button
+								type="button"
+								class="btn btn-sm flex-1 touch-target-h {unlockAuthMode === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+								onclick={() => (unlockAuthMode = 'pin')}
+							>
+								PIN
+							</button>
+							<button
+								type="button"
+								class="btn btn-sm flex-1 touch-target-h {unlockAuthMode === 'request' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+								onclick={() => (unlockAuthMode = 'request')}
+							>
+								QR
+							</button>
+						</div>
+						{#if unlockAuthMode === 'pin'}
+							<form
+								class="flex flex-col gap-3"
+								onsubmit={(e) => {
+									e.preventDefault();
+									submitUnlockWithPin();
+								}}
+							>
+								<label class="block">
+									<span class="text-sm font-medium text-surface-700 dark:text-slate-300">Supervisor PIN</span>
+									<input
+										type="password"
+										inputmode="numeric"
+										pattern="[0-9]*"
+										maxlength="6"
+										autocomplete="one-time-code"
+										class="input w-full mt-1"
+										placeholder="6-digit PIN"
+										bind:value={unlockPin}
+										disabled={unlockLoading}
+									/>
+								</label>
+								<button type="submit" class="btn preset-filled-primary-500" disabled={unlockLoading}>
+									{unlockLoading ? 'Unlocking…' : 'Unlock'}
+								</button>
+							</form>
+						{:else}
+							<button
+								type="button"
+								class="btn preset-filled-primary-500"
+								disabled={unlockLoading}
+								onclick={createUnlockRequest}
+							>
+								{unlockLoading ? 'Creating…' : 'Show QR for supervisor to scan'}
+							</button>
+						{/if}
+					{/if}
+					{#if unlockRequestState !== 'waiting'}
+						<button type="button" class="btn preset-tonal" onclick={cancelUnlockRequest}>
 							Cancel
 						</button>
-						<button
-							type="button"
-							class="btn preset-filled-primary-500"
-							onclick={saveDisplaySettings}
-							disabled={displaySettingsSaving}
-						>
-							{displaySettingsSaving ? 'Saving…' : 'Save'}
-						</button>
-					</div>
 					{/if}
 				</div>
 			{/snippet}
 		</Modal>
 
-		<!-- Now Serving -->
+		<!-- Now Serving: mobile horizontal scroll with snap; desktop grid -->
 		<section>
 			<div class="flex flex-wrap items-center justify-between gap-2 mb-3">
 				<h2 class="text-xl font-bold text-surface-950">NOW SERVING</h2>
@@ -885,9 +1299,9 @@ let stationTtsByName = $state({});
 				{/if}
 			</div>
 			{#if now_serving.length > 0}
-				<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+				<div class="flex flex-nowrap overflow-x-auto gap-3 pb-2 snap-x snap-mandatory md:grid md:grid-cols-2 md:lg:grid-cols-3 md:overflow-visible md:pb-0">
 					{#each now_serving as entry}
-						<div class="card bg-surface-50 border border-surface-200 rounded-container shadow-sm">
+						<div class="card bg-surface-50 border border-surface-200 rounded-container shadow-sm snap-start shrink-0 w-[min(100%,280px)] md:w-auto">
 							<div class="p-4 text-center">
 								<div class="text-4xl font-bold text-primary-500">{entry.alias}</div>
 								<div class="text-sm text-surface-950/80">{entry.station_name}</div>
@@ -917,8 +1331,8 @@ let stationTtsByName = $state({});
 		<section>
 			<h2 class="text-xl font-bold text-surface-950 mb-3">CURRENTLY WAITING</h2>
 			{#if waiting_by_station.length > 0}
-				<!-- Mobile: single-row horizontal scroll; Desktop: multi-column grid -->
-				<div class="flex gap-4 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:block">
+				<!-- Mobile: single-row horizontal scroll with snap; Desktop: multi-column grid -->
+				<div class="flex flex-nowrap overflow-x-auto gap-4 pb-2 snap-x snap-mandatory -mx-3 px-3 sm:mx-0 sm:px-0 sm:block sm:overflow-visible sm:pb-0">
 					<!-- Desktop/grid wrapper -->
 					<div class="hidden sm:grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 w-full">
 						{#each waiting_by_station as row (row.station_name)}
@@ -958,10 +1372,10 @@ let stationTtsByName = $state({});
 						{/each}
 					</div>
 
-					<!-- Mobile: horizontally scrollable cards, no wrapping -->
-					<div class="flex sm:hidden gap-4">
+					<!-- Mobile: horizontally scrollable cards with snap (same treatment as Now Serving) -->
+					<div class="flex flex-nowrap sm:hidden gap-4">
 						{#each waiting_by_station as row (row.station_name)}
-							<div class="card bg-surface-50 border border-surface-200 rounded-container shadow-sm flex flex-col flex-shrink-0 min-w-[260px] max-w-[280px]">
+							<div class="card bg-surface-50 border border-surface-200 rounded-container shadow-sm flex flex-col shrink-0 w-[min(100%,280px)] snap-start">
 								<div class="p-4 py-3 shrink-0">
 									<h3 class="font-semibold text-surface-950 truncate">{row.station_name}</h3>
 									<div class="flex flex-wrap items-center gap-2 mt-1">
@@ -1015,12 +1429,12 @@ let stationTtsByName = $state({});
 			{#if activityFeed.length > 0}
 				<div class="card bg-surface-50 border border-surface-200 rounded-container overflow-hidden">
 					<ul class="divide-y divide-surface-200 max-h-[12rem] overflow-y-auto" aria-label="Recent activity">
-						{#each visibleActivity as item, i (String(i) + (item.created_at ?? '') + (item.alias ?? '') + (item.station_name ?? ''))}
+						{#each visibleActivity as item, i (String(i) + (item?.created_at ?? '') + (item?.alias ?? '') + (item?.station_name ?? ''))}
 							<li class="px-4 py-2 flex justify-between items-center gap-2">
 								<span class="text-surface-950/90">
-									<span class="font-semibold text-surface-950">{item.station_name}:</span> {item.message}
+									<span class="font-semibold text-surface-950">{item?.station_name ?? '—'}:</span> {item?.message ?? ''}
 								</span>
-								<span class="text-xs text-surface-950/60 shrink-0">{formatActivityTime(item.created_at)}</span>
+								<span class="text-xs text-surface-950/60 shrink-0">{formatActivityTime(item?.created_at)}</span>
 							</li>
 						{/each}
 					</ul>
@@ -1040,16 +1454,71 @@ let stationTtsByName = $state({});
 	<!-- Fixed footer: staff and availability only when a program is selected. -->
 	{#if showBoardContent}
 	<footer
+		bind:this={footerStaffRef}
+		tabindex="-1"
 		class="display-footer fixed bottom-0 left-0 right-0 z-30 px-4 py-3 bg-surface-800 text-surface-100 shadow-[0_-4px_12px_rgba(0,0,0,0.08)]"
 		aria-label="Staff on duty"
+		onfocusout={handleFooterFocusOut}
 	>
 		<div class="flex items-center gap-4 min-w-0">
 			<span class="text-xs font-semibold uppercase tracking-wider text-surface-300 shrink-0 self-center">Staff on duty</span>
 			{#if staffForBar.length > 0}
-				<!-- Footer-only: custom [chips][gap][chips][gap] track (not shared Marquee). Reduces loop flicker for this layout. -->
-				<div class="display-footer__marquee flex-1 min-w-0 overflow-hidden" aria-label="Staff availability">
-					<div class="fq-marquee-track display-footer__marquee-inner flex items-center gap-3" style="animation-duration: 25s; width: max-content;">
-						<div class="flex items-center gap-3 shrink-0">
+				<!-- Two modes: marquee (default) or scrollable. Click → scrollable; after idle → back to marquee with opacity transition. Min-height so absolute children have a visible area (container has no in-flow content). -->
+				<div class="display-footer__marquee flex-1 min-w-0 min-h-10 relative" aria-label="Staff availability">
+					<!-- Marquee layer: auto-scroll; click switches to scrollable -->
+					<div
+						class="absolute inset-0 overflow-hidden transition-opacity duration-300 {footerStaffMode === 'marquee' ? 'opacity-100' : 'opacity-0 pointer-events-none'}"
+						role="button"
+						tabindex="0"
+						aria-label="Staff on duty — tap to scroll manually"
+						onclick={setFooterToScrollable}
+						onkeydown={(e) => e.key === 'Enter' && setFooterToScrollable()}
+					>
+						<div class="fq-marquee-track display-footer__marquee-inner flex items-center gap-3 h-full" style="animation-duration: 25s; width: max-content;">
+							<div class="flex items-center gap-3 shrink-0">
+								{#each staffForBar as s ((s.name ?? '') + (s.station_name ?? '') + (s.availability_status ?? ''))}
+									<div
+										class="display-footer__chip inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-700/80 text-surface-100 shrink-0"
+										title="{s.name} — {availabilityLabel(s.availability_status)}"
+									>
+										<UserAvatar user={s} size="sm" />
+										<span
+											class="w-2 h-2 rounded-full shrink-0 {availabilityDotClass(s.availability_status)}"
+											aria-label="{availabilityLabel(s.availability_status)}"
+										></span>
+										<span class="text-sm max-w-[6rem] truncate">{s.name}</span>
+									</div>
+								{/each}
+							</div>
+							<span class="display-footer__marquee-gap shrink-0 w-8" aria-hidden="true"></span>
+							<div class="flex items-center gap-3 shrink-0">
+								{#each staffForBar as s ((s.name ?? '') + (s.station_name ?? '') + (s.availability_status ?? ''))}
+									<div
+										class="display-footer__chip inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-700/80 text-surface-100 shrink-0"
+										title="{s.name} — {availabilityLabel(s.availability_status)}"
+									>
+										<UserAvatar user={s} size="sm" />
+										<span
+											class="w-2 h-2 rounded-full shrink-0 {availabilityDotClass(s.availability_status)}"
+											aria-label="{availabilityLabel(s.availability_status)}"
+										></span>
+										<span class="text-sm max-w-[6rem] truncate">{s.name}</span>
+									</div>
+								{/each}
+							</div>
+							<span class="display-footer__marquee-gap shrink-0 w-8" aria-hidden="true"></span>
+						</div>
+					</div>
+					<!-- Scrollable layer: ScrollBooster drag-to-scroll; scrollbar hidden; idle/blur/click-outside returns to marquee -->
+					<div
+						role="region"
+						class="display-footer__scrollable-bar absolute inset-0 overflow-x-auto overflow-y-hidden flex items-center transition-opacity duration-300 {footerStaffMode === 'scrollable' ? 'opacity-100' : 'opacity-0 pointer-events-none'}"
+						aria-label="Staff on duty — scroll to browse; stops scrolling after a moment"
+						use:scrollBooster
+						onpointerdown={resetFooterScrollableIdle}
+						onscroll={resetFooterScrollableIdle}
+					>
+						<div class="flex items-center gap-3 shrink-0 w-max px-px">
 							{#each staffForBar as s ((s.name ?? '') + (s.station_name ?? '') + (s.availability_status ?? ''))}
 								<div
 									class="display-footer__chip inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-700/80 text-surface-100 shrink-0"
@@ -1064,23 +1533,6 @@ let stationTtsByName = $state({});
 								</div>
 							{/each}
 						</div>
-						<span class="display-footer__marquee-gap shrink-0 w-8" aria-hidden="true"></span>
-						<div class="flex items-center gap-3 shrink-0">
-							{#each staffForBar as s ((s.name ?? '') + (s.station_name ?? '') + (s.availability_status ?? ''))}
-								<div
-									class="display-footer__chip inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-700/80 text-surface-100 shrink-0"
-									title="{s.name} — {availabilityLabel(s.availability_status)}"
-								>
-									<UserAvatar user={s} size="sm" />
-									<span
-										class="w-2 h-2 rounded-full shrink-0 {availabilityDotClass(s.availability_status)}"
-										aria-label="{availabilityLabel(s.availability_status)}"
-									></span>
-									<span class="text-sm max-w-[6rem] truncate">{s.name}</span>
-								</div>
-							{/each}
-						</div>
-						<span class="display-footer__marquee-gap shrink-0 w-8" aria-hidden="true"></span>
 					</div>
 				</div>
 			{:else}

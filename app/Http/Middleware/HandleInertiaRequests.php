@@ -6,6 +6,7 @@ use App\Http\Controllers\StationPageController;
 use App\Models\Program;
 use App\Models\Station;
 use App\Services\TtsService;
+use App\Support\DeviceLock;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -49,14 +50,18 @@ class HandleInertiaRequests extends Middleware
             ],
             'auth' => [
                 'user' => $user,
+                'can_approve_requests' => $user && ($user->isAdmin() || $user->isSuperAdmin() || $user->isSupervisorForAnyProgram()),
             ],
             'server_tts_configured' => $user?->role === 'admin'
                 ? app(TtsService::class)->isEnabled()
                 : null,
+            'device_locked' => DeviceLock::isLocked($request),
+            'device_locked_redirect_url' => self::deviceLockedRedirectUrl($request),
         ];
 
         // Per central-edge A.2.5 / A.4.1: admin routes receive programs (all active); currentProgram only (A.4.4: program alias removed).
         // Per central-edge B.4: admin programs list is site-scoped; empty if user has no site_id.
+        // Share first active non-paused program as currentProgram so StatusFooter chip is clickable when any program is active (not only on Programs page).
         if ($request->routeIs('admin.*')) {
             try {
                 $siteId = $user?->site_id;
@@ -66,10 +71,19 @@ class HandleInertiaRequests extends Middleware
                     ->orderBy('name')
                     ->get(['id', 'name'])
                     ->toArray();
+                $firstActive = Program::query()
+                    ->forSite($siteId)
+                    ->where('is_active', true)
+                    ->where(fn ($q) => $q->where('is_paused', false)->orWhereNull('is_paused'))
+                    ->orderBy('name')
+                    ->first(['id', 'name', 'is_active', 'is_paused']);
+                $base['currentProgram'] = $firstActive
+                    ? ['id' => $firstActive->id, 'name' => $firstActive->name, 'is_active' => (bool) $firstActive->is_active, 'is_paused' => (bool) $firstActive->is_paused]
+                    : null;
             } catch (\Throwable) {
                 $base['programs'] = [];
+                $base['currentProgram'] = null;
             }
-            $base['currentProgram'] = null;
 
             return $base;
         }
@@ -185,5 +199,15 @@ class HandleInertiaRequests extends Middleware
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /**
+     * When device is locked, return the URL to redirect to (for client-side back/cache guard). Null when not locked.
+     */
+    private static function deviceLockedRedirectUrl(Request $request): ?string
+    {
+        $lock = DeviceLock::decode($request);
+
+        return $lock !== null ? DeviceLock::redirectUrlForLock($lock) : null;
     }
 }

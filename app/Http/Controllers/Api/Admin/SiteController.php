@@ -8,6 +8,7 @@ use App\Http\Requests\UpdateSiteRequest;
 use App\Models\AdminActionLog;
 use App\Models\Site;
 use App\Services\SiteApiKeyService;
+use App\Support\SiteResolver;
 use App\Validation\EdgeSettingsValidator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -120,9 +121,37 @@ class SiteController extends Controller
         if (array_key_exists('edge_settings', $validated)) {
             $site->edge_settings = $this->edgeSettingsValidator->validate($validated['edge_settings']);
         }
+        if (array_key_exists('settings', $validated) && is_array($validated['settings'])) {
+            $allowed = ['public_access_key', 'landing_hero_title', 'landing_hero_description', 'landing_sections', 'landing_show_stats'];
+            $current = $site->settings ?? [];
+            foreach ($allowed as $key) {
+                if (array_key_exists($key, $validated['settings'])) {
+                    $current[$key] = $validated['settings'][$key];
+                }
+            }
+            $site->settings = $current;
+        }
         $site->save();
 
         AdminActionLog::log($request->user()->id, 'site_updated', 'Site', $site->id, ['slug' => $site->slug]);
+
+        return response()->json(['site' => $this->siteResource($site)]);
+    }
+
+    /**
+     * Set this site as the default for the deployment (public display/triage). Super_admin only.
+     */
+    public function setDefault(Request $request, Site $site): JsonResponse
+    {
+        if (! $request->user()->isSuperAdmin()) {
+            abort(403, 'Only a super admin can set the default site.');
+        }
+
+        Site::query()->update(['is_default' => false]);
+        $site->update(['is_default' => true]);
+        SiteResolver::clearDefaultCache();
+
+        AdminActionLog::log($request->user()->id, 'site_set_default', 'Site', $site->id, ['slug' => $site->slug]);
 
         return response()->json(['site' => $this->siteResource($site)]);
     }
@@ -146,6 +175,7 @@ class SiteController extends Controller
             'id' => $site->id,
             'name' => $site->name,
             'slug' => $site->slug,
+            'is_default' => (bool) ($site->is_default ?? false),
             'settings' => $site->settings ?? [],
             'edge_settings' => $site->edge_settings ?? [],
             'created_at' => $site->created_at?->toIso8601String(),

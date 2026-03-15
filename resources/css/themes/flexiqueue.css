@@ -44,18 +44,18 @@
 	--shadow-raised: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.07);
 	--shadow-modal: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
 
-	/* Primary: Emerald/teal green — matches public/ui-kit-preview-branded.html */
-	--color-primary-50: #ecfdf5;
-	--color-primary-100: #d1fae5;
-	--color-primary-200: #a7f3d0;
-	--color-primary-300: #6ee7b7;
-	--color-primary-400: #34d399;
-	--color-primary-500: #10b981;
-	--color-primary-600: #059669;
-	--color-primary-700: #047857;
-	--color-primary-800: #065f46;
-	--color-primary-900: #064e3b;
-	--color-primary-950: #022c22;
+	/* Primary: brand green #00b45d */
+	--color-primary-50: #e6f9f0;
+	--color-primary-100: #ccf3e0;
+	--color-primary-200: #99e7c1;
+	--color-primary-300: #66dba3;
+	--color-primary-400: #33cf84;
+	--color-primary-500: #00b45d;
+	--color-primary-600: #00994e;
+	--color-primary-700: #007f40;
+	--color-primary-800: #006431;
+	--color-primary-900: #004a23;
+	--color-primary-950: #002f16;
 	--color-primary-contrast-dark: var(--color-primary-950);
 	--color-primary-contrast-light: var(--color-primary-50);
 	--color-primary-contrast-50: var(--color-primary-contrast-dark);
@@ -200,7 +200,7 @@
 	--color-error-contrast-900: var(--color-error-contrast-light);
 	--color-error-contrast-950: var(--color-error-contrast-light);
 
-	/* Surface — base backgrounds; matches ui-kit-preview-branded (cool gray base, white cards) */
+	/* Surface — Light theme: cool gray base, white cards */
 	--color-surface-50: #f8fafc;
 	--color-surface-100: #ffffff;
 	--color-surface-200: #f1f5f9;
@@ -227,7 +227,22 @@
 	--color-surface-contrast-950: var(--color-surface-contrast-light);
 }
 
-/* Dark mode overrides — swap background/font and surface palette per Skeleton data-mode strategy */
+/* FlexiQueue theme — mint/ice surfaces + brand text #313131 (no pure black/gray) */
+[data-theme='flexiqueue'][data-mode='flexiqueue'] {
+	color-scheme: light;
+	--color-surface-50: #dffef2;
+	--color-surface-100: #e0f7f7;
+	--color-surface-200: #d0f0eb;
+	--color-surface-950: #313131;
+	--color-surface-900: #313131;
+	--color-surface-800: #454545;
+	--color-surface-700: #5a5a5a;
+	--color-surface-600: #6b6b6b;
+	--base-font-color: #313131;
+	--heading-font-color: #313131;
+}
+
+/* Dark theme overrides — swap background/font and surface palette per Skeleton data-mode strategy */
 [data-theme='flexiqueue'][data-mode='dark'] {
 	color-scheme: dark;
 	--base-font-color: var(--base-font-color-dark);
@@ -269,7 +284,7 @@
 	}
 }
 
-/* Light mode: form controls — soft, low-contrast (avoid harsh dark-on-light) */
+/* Light / FlexiQueue: form controls use theme surface (not strict white) */
 [data-theme='flexiqueue']:not([data-mode='dark']) .input,
 [data-theme='flexiqueue']:not([data-mode='dark']) .select,
 [data-theme='flexiqueue']:not([data-mode='dark']) .textarea,
@@ -280,14 +295,14 @@
 [data-theme='flexiqueue']:not([data-mode='dark']) input[type="number"],
 [data-theme='flexiqueue']:not([data-mode='dark']) select,
 [data-theme='flexiqueue']:not([data-mode='dark']) textarea {
-	background-color: #ffffff !important;
-	color: #0f172a !important;
-	border-color: #e2e8f0;
+	background-color: var(--color-surface-100) !important;
+	color: var(--color-surface-950) !important;
+	border-color: var(--color-surface-300);
 }
-/* Light mode: dropdown options — explicit so open list is readable (browser-dependent) */
+/* Light / FlexiQueue: dropdown options use theme surface */
 [data-theme='flexiqueue']:not([data-mode='dark']) select option {
-	background-color: #ffffff;
-	color: #0f172a;
+	background-color: var(--color-surface-100);
+	color: var(--color-surface-950);
 }
 [data-theme='flexiqueue']:not([data-mode='dark']) .input::placeholder,
 [data-theme='flexiqueue']:not([data-mode='dark']) input::placeholder,
@@ -296,8 +311,8 @@
 }
 [data-theme='flexiqueue']:not([data-mode='dark']) .checkbox,
 [data-theme='flexiqueue']:not([data-mode='dark']) input[type="checkbox"] {
-	background-color: #ffffff;
-	border-color: #cbd5e1;
+	background-color: var(--color-surface-100);
+	border-color: var(--color-surface-400);
 }
 [data-theme='flexiqueue']:not([data-mode='dark']) .checkbox:checked,
 [data-theme='flexiqueue']:not([data-mode='dark']) input[type="checkbox"]:checked {
@@ -340,16 +355,16 @@
 	color: var(--color-surface-950);
 }
 
-/* Themed select — guaranteed readable dropdown regardless of parent (use on every <select>) */
+/* Themed select — use theme surface (Light + FlexiQueue) */
 [data-theme='flexiqueue']:not([data-mode='dark']) .select-theme,
 [data-theme='flexiqueue']:not([data-mode='dark']) select.select-theme {
-	background-color: #ffffff !important;
-	color: #0f172a !important;
+	background-color: var(--color-surface-100) !important;
+	color: var(--color-surface-950) !important;
 }
 [data-theme='flexiqueue']:not([data-mode='dark']) .select-theme option,
 [data-theme='flexiqueue']:not([data-mode='dark']) select.select-theme option {
-	background-color: #ffffff;
-	color: #0f172a;
+	background-color: var(--color-surface-100);
+	color: var(--color-surface-950);
 }
 [data-theme='flexiqueue'][data-mode='dark'] .select-theme,
 [data-theme='flexiqueue'][data-mode='dark'] select.select-theme {
@@ -594,7 +609,7 @@
 	color: #94a3b8;
 }
 
-/* Hero secondary CTA (Staff Login): always dark translucent + light text */
+/* Hero secondary CTA (Login): always dark translucent + light text */
 .home-hero-cta-secondary {
 	background-color: rgba(51, 65, 85, 0.5);
 	border-color: rgba(71, 85, 105, 0.6);
@@ -742,10 +757,28 @@
 /* Display footer staff bar only: custom track to avoid loop flicker. Do not reuse for other marquees. */
 .display-footer__marquee {
 	transform: translateZ(0);
+	min-height: 2.5rem; /* ensure visible height when content is absolute (no in-flow content) */
 }
 .display-footer__marquee-inner {
 	backface-visibility: hidden;
 	contain: layout style paint;
+}
+
+/* Hide horizontal scrollbar in display footer scroll mode (ScrollBooster handles drag-to-scroll). */
+.display-footer__scrollable-bar {
+	scrollbar-width: none;
+	-ms-overflow-style: none;
+}
+.display-footer__scrollable-bar::-webkit-scrollbar {
+	display: none;
+}
+
+/* Reusable ScrollBooster action: cursor for any viewport using use:scrollBooster */
+.scroll-booster-viewport {
+	cursor: grab;
+}
+.scroll-booster-viewport.scroll-booster-grabbing {
+	cursor: grabbing;
 }
 
 /* White text on green — subtle shadow for legibility, separates text from brand green */
@@ -762,6 +795,63 @@
 [data-theme='flexiqueue'] .bg-success-500.text-white,
 [data-theme='flexiqueue'] .bg-success-500.text-primary-contrast-500 {
 	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+/* Per ui-ux-tasks-checklist: status badges app-wide — softer green/primary so they don’t surpass brand (tonal style). Only non-buttons (badges, pills). */
+[data-theme='flexiqueue'] .badge.preset-filled-success-500,
+[data-theme='flexiqueue'] .badge.token-card-badge-success,
+[data-theme='flexiqueue'] .preset-filled-success-500:not(.btn):not(button):not(a) {
+	background-color: var(--color-success-100);
+	color: var(--color-success-800);
+	border: 1px solid var(--color-success-200);
+	text-shadow: none;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .badge.preset-filled-success-500,
+[data-theme='flexiqueue'][data-mode='dark'] .badge.token-card-badge-success,
+[data-theme='flexiqueue'][data-mode='dark'] .preset-filled-success-500:not(.btn):not(button):not(a) {
+	background-color: var(--color-success-900);
+	color: var(--color-success-200);
+	border-color: var(--color-success-700);
+}
+[data-theme='flexiqueue'] .badge.preset-filled-primary-500,
+[data-theme='flexiqueue'] .badge.token-card-badge-primary,
+[data-theme='flexiqueue'] .preset-filled-primary-500:not(.btn):not(button):not(a) {
+	background-color: var(--color-primary-100);
+	color: var(--color-primary-800);
+	border: 1px solid var(--color-primary-200);
+	text-shadow: none;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .badge.preset-filled-primary-500,
+[data-theme='flexiqueue'][data-mode='dark'] .badge.token-card-badge-primary,
+[data-theme='flexiqueue'][data-mode='dark'] .preset-filled-primary-500:not(.btn):not(button):not(a) {
+	background-color: var(--color-primary-900);
+	color: var(--color-primary-200);
+	border-color: var(--color-primary-700);
+}
+
+/* Per ui-ux-tasks-checklist: error/destructive buttons app-wide — softer red, not overpowering theme */
+[data-theme='flexiqueue'] .btn.preset-filled-error-500,
+[data-theme='flexiqueue'] .btn.btn-token-delete {
+	background-color: var(--color-error-100);
+	color: var(--color-error-700);
+	border: 1px solid var(--color-error-200);
+}
+[data-theme='flexiqueue'] .btn.preset-filled-error-500:hover:not(:disabled),
+[data-theme='flexiqueue'] .btn.btn-token-delete:hover:not(:disabled) {
+	background-color: var(--color-error-200);
+	color: var(--color-error-800);
+	border-color: var(--color-error-300);
+}
+[data-theme='flexiqueue'][data-mode='dark'] .btn.preset-filled-error-500,
+[data-theme='flexiqueue'][data-mode='dark'] .btn.btn-token-delete {
+	background-color: var(--color-error-900);
+	color: var(--color-error-300);
+	border-color: var(--color-error-700);
+}
+[data-theme='flexiqueue'][data-mode='dark'] .btn.preset-filled-error-500:hover:not(:disabled),
+[data-theme='flexiqueue'][data-mode='dark'] .btn.btn-token-delete:hover:not(:disabled) {
+	background-color: var(--color-error-800);
+	color: var(--color-error-200);
 }
 
 /* Touch targets — 48px minimum per stack convention (mobile a11y) */
@@ -883,63 +973,97 @@
 	box-shadow: var(--shadow-modal);
 }
 
-/* Table container — consistent wrapper for data tables (rounded, elevation, bg) */
+/* Table container — full opacity, solid border; scroll when content is wide */
 [data-theme='flexiqueue'] .table-container {
-	background-color: transparent !important;
+	background-color: var(--color-surface-50) !important;
 	border-radius: var(--radius-container);
 	overflow-x: auto;
 	box-shadow: none !important;
+	border: 1px solid var(--color-surface-300);
+	width: max-content;
+	max-width: 100%;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .table-container {
+	background-color: var(--color-surface-50) !important;
+	border-color: var(--color-surface-400);
 }
 [data-theme='flexiqueue'] .table-container .table {
 	background-color: transparent !important;
+	/* Width from content so columns don’t stretch and create large gaps */
+	width: max-content;
 }
 
-/* Header — opaque band so it clearly separates from frosted rows */
+/* Generous cell padding — less compact, easier to scan */
+[data-theme='flexiqueue'] .fq-admin-table th,
+[data-theme='flexiqueue'] .fq-admin-table td {
+	padding: 0.75rem 1rem !important;
+}
+[data-theme='flexiqueue'] .fq-admin-table td {
+	font-size: 0.9375rem;
+	line-height: 1.4;
+}
+
+/* Alignment: first column left, last (actions) centered; middle columns inherit from th */
+[data-theme='flexiqueue'] .fq-admin-table th,
+[data-theme='flexiqueue'] .fq-admin-table td {
+	text-align: left;
+	vertical-align: middle;
+}
+[data-theme='flexiqueue'] .fq-admin-table th:last-child,
+[data-theme='flexiqueue'] .fq-admin-table td:last-child {
+	text-align: center !important;
+}
+
+/* Table header — pronounced, full opacity */
 [data-theme='flexiqueue'] .table-container .table thead th {
-	background-color: #ffffff !important;
+	background-color: var(--color-surface-200) !important;
 	color: var(--color-surface-950);
-	font-weight: 600;
-	font-size: 0.8125rem;
+	font-weight: 700;
+	font-size: 0.875rem;
 	text-transform: none;
 	letter-spacing: 0;
 	white-space: nowrap;
-	border-bottom: 1px solid rgba(15, 23, 42, 0.08) !important;
+	border-bottom: 2px solid var(--color-surface-300) !important;
 }
 [data-theme='flexiqueue'][data-mode='dark'] .table-container .table thead th {
-	background-color: #0f172a !important;
-	border-bottom-color: rgba(255, 255, 255, 0.06) !important;
+	background-color: var(--color-surface-200) !important;
+	color: var(--color-surface-600) !important;
+	border-bottom-color: var(--color-surface-400) !important;
 }
 
-/* Translucent data rows — allow AppBackground to show through.
- * Targeting `td` to ensure we override any framework cell backgrounds. */
+/* Data rows — full opacity */
 [data-theme='flexiqueue'] .fq-admin-table tbody tr td {
-	background-color: rgba(255, 255, 255, 0.03); /* very light frosting */
+	background-color: var(--color-surface-50);
 	transition: background-color 0.12s ease-out;
 }
 [data-theme='flexiqueue'][data-mode='dark'] .fq-admin-table tbody tr td {
-	background-color: rgba(15, 23, 42, 0.16);
+	background-color: var(--color-surface-50);
+	color: var(--color-surface-600);
 }
 
-/* Zebra stripping — slightly more opaque for even rows */
+/* Zebra — full opacity, subtle difference */
 [data-theme='flexiqueue']:not([data-mode='dark']) .fq-admin-table tbody tr:nth-child(even) td {
-	background-color: rgba(255, 255, 255, 0.07);
+	background-color: var(--color-surface-100);
 }
 [data-theme='flexiqueue'][data-mode='dark'] .fq-admin-table tbody tr:nth-child(even) td {
-	background-color: rgba(255, 255, 255, 0.03);
+	background-color: var(--color-surface-100);
 }
 
 /* Hover feedback */
 [data-theme='flexiqueue'] .fq-admin-table tbody tr:hover td {
-	background-color: rgba(255, 255, 255, 0.13) !important;
+	background-color: var(--color-surface-200) !important;
 }
 [data-theme='flexiqueue'][data-mode='dark'] .fq-admin-table tbody tr:hover td {
-	background-color: rgba(255, 255, 255, 0.07) !important;
+	background-color: var(--color-surface-200) !important;
 }
 
-/* Ensure the trailing Actions column header is visually centered in admin tables,
- * even when Skeleton's table defaults try to left-align headers. */
-[data-theme='flexiqueue'] .fq-admin-table thead tr th:last-child {
-	text-align: center !important;
+/* Compact tables (e.g. Users, Clients) keep slightly smaller text and padding */
+[data-theme='flexiqueue'] .fq-admin-table.table-compact th,
+[data-theme='flexiqueue'] .fq-admin-table.table-compact td {
+	padding: 0.5rem 0.75rem !important;
+}
+[data-theme='flexiqueue'] .fq-admin-table.table-compact td {
+	font-size: 0.875rem;
 }
 
 /* Form labels and help text — ensure dark text in main content and dialogs */
@@ -987,12 +1111,29 @@
 	color: var(--color-surface-950) !important;
 }
 
-/* Table text — explicit dark color for light theme readability */
+/* Per ui-ux-tasks-checklist: badges/status readability — lighter background for dark text in light mode */
+[data-theme='flexiqueue']:not([data-mode='dark']) .badge.preset-tonal,
+[data-theme='flexiqueue']:not([data-mode='dark']) span.badge.preset-tonal {
+	background-color: var(--color-surface-100) !important;
+}
+/* Dark mode: use dark bg + light text (surface palette is swapped, so 200/300 are dark) */
+[data-theme='flexiqueue'][data-mode='dark'] .badge.preset-tonal,
+[data-theme='flexiqueue'][data-mode='dark'] span.badge.preset-tonal {
+	background-color: var(--color-surface-200) !important;
+	color: var(--color-surface-900) !important;
+}
+
+/* Table text — theme colors; header uses theme surface */
 [data-theme='flexiqueue'] .table th,
 [data-theme='flexiqueue'] .table td {
 	color: var(--color-surface-950);
 }
-[data-theme='flexiqueue'] .table thead th {
+[data-theme='flexiqueue']:not([data-mode='dark']) .table thead th {
+	background-color: var(--color-surface-100);
+	color: var(--color-surface-600);
+}
+[data-theme='flexiqueue'][data-mode='dark'] .table thead th {
+	background-color: var(--color-surface-50);
 	color: var(--color-surface-600);
 }
 

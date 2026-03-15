@@ -76,7 +76,7 @@
 			inputmode="numeric"
 			autocomplete="off"
 			maxlength="6"
-			class="input input-sm bg-surface-50 border border-surface-300 rounded-container font-mono w-full max-w-[8rem]"
+			class="input input-sm bg-surface-50 border border-surface-300 rounded-container font-mono w-full md:max-w-[8rem]"
 			placeholder="000000"
 			bind:value={pin}
 			oninput={(e) => { pin = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }}
@@ -121,4 +121,3 @@
 		</div>
 	{/snippet}
 </Modal>
-

@@ -107,7 +107,7 @@ final class ProgramSettings
         return (int) max(500, min(10000, $v));
     }
 
-    /** Per plan: allow public self-serve triage at GET /triage/start. Default false. */
+    /** Per plan: allow public self-serve triage at GET /public-triage. Default false. */
     public function getAllowPublicTriage(): bool
     {
         return (bool) ($this->settings['allow_public_triage'] ?? false);
@@ -137,10 +137,11 @@ final class ProgramSettings
         return (bool) ($this->settings['enable_public_triage_camera_scanner'] ?? true);
     }
 
+    /** Per IDENTITY-BINDING-FINAL-IMPLEMENTATION-PLAN: only disabled | required; optional washed out. */
     public function getIdentityBindingMode(): string
     {
         $mode = $this->settings['identity_binding_mode'] ?? 'disabled';
-        $allowed = ['disabled', 'optional', 'required'];
+        $allowed = ['disabled', 'required'];
 
         return in_array($mode, $allowed, true) ? $mode : 'disabled';
     }
@@ -150,23 +151,19 @@ final class ProgramSettings
         return $this->getIdentityBindingMode() === 'disabled';
     }
 
-    public function isBindingOptional(): bool
-    {
-        return $this->getIdentityBindingMode() === 'optional';
-    }
-
     public function isBindingRequired(): bool
     {
         return $this->getIdentityBindingMode() === 'required';
     }
 
+    /** When true, public triage can bind token (with or without identity). Only for mode 'required'. */
     public function allowsPublicBinding(): bool
     {
         if (! $this->getAllowPublicTriage()) {
             return false;
         }
 
-        return $this->isBindingOptional() || $this->isBindingRequired();
+        return $this->isBindingRequired();
     }
 
     public function requiresPublicBinding(): bool
@@ -194,6 +191,44 @@ final class ProgramSettings
         $allowed = ['en', 'fil', 'ilo'];
 
         return in_array($lang, $allowed, true) ? $lang : 'en';
+    }
+
+    /** Per addition-to-public-site-plan: program key for private program access. Null = public within site. */
+    public function getPublicAccessKey(): ?string
+    {
+        $v = $this->settings['public_access_key'] ?? null;
+
+        return $v === null || $v === '' ? null : (string) $v;
+    }
+
+    /** Per addition-to-public-site-plan: hours until program-access cookie expires. Min 1, max 168 (1 week). */
+    public function getPublicAccessExpiryHours(): int
+    {
+        $v = $this->settings['public_access_expiry_hours'] ?? 24;
+
+        return (int) max(1, min(168, (int) $v));
+    }
+
+    /** Per addition-to-public-site-plan: short public-facing description on program info page. */
+    public function getPageDescription(): ?string
+    {
+        $v = $this->settings['page_description'] ?? null;
+
+        return $v === null || $v === '' ? null : (string) $v;
+    }
+
+    /** Per addition-to-public-site-plan: ephemeral notice on program info page. */
+    public function getPageAnnouncement(): ?string
+    {
+        $v = $this->settings['page_announcement'] ?? null;
+
+        return $v === null || $v === '' ? null : (string) $v;
+    }
+
+    /** Per addition-to-public-site-plan: true when program requires key entry (public_access_key set). */
+    public function isPrivate(): bool
+    {
+        return $this->getPublicAccessKey() !== null;
     }
 }
 

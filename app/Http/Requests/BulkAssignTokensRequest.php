@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Validator;
 
 /**
  * Per central-edge C.3.2: POST /api/admin/programs/{program}/tokens/bulk
@@ -32,6 +33,31 @@ class BulkAssignTokensRequest extends FormRequest
                 'max:'.self::PATTERN_MAX_LENGTH,
             ],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $v): void {
+            if ($v->errors()->has('pattern')) {
+                return;
+            }
+
+            $raw = (string) $this->input('pattern', '');
+            $trimmed = trim($raw);
+            if ($trimmed === '') {
+                return;
+            }
+
+            // If, after trimming, the pattern consists only of wildcard characters,
+            // reject it to avoid "match everything" bulk assignments.
+            $nonWildcard = preg_replace('/[\*\%\_]+/', '', $trimmed);
+            if ($nonWildcard === '') {
+                $v->errors()->add(
+                    'pattern',
+                    'The pattern must include at least one non-wildcard character.'
+                );
+            }
+        });
     }
 
     /**

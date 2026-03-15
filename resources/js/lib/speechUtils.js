@@ -141,3 +141,26 @@ export function speakSample(text, voiceName, volume = 1) {
 	if (voice) u.voice = voice;
 	window.speechSynthesis.speak(u);
 }
+
+/**
+ * Speak text with browser TTS and return a Promise that resolves when done (or on error).
+ * Same voice/rate behaviour as displays so admin preview matches token playback when API is unavailable.
+ * @param {string} text - Phrase to speak.
+ * @param {string | null} voiceName - SpeechSynthesisVoice.name or null for default.
+ * @param {number} [volume=1] - Volume 0–1.
+ * @param {number} [rate] - Speech rate (e.g. 0.84). Uses TTS_DEFAULT_RATE if omitted.
+ * @returns {Promise<void>}
+ */
+export function speakSampleAsync(text, voiceName, volume = 1, rate = TTS_DEFAULT_RATE) {
+	if (typeof window === 'undefined' || !window.speechSynthesis || !text) return Promise.resolve();
+	const u = new SpeechSynthesisUtterance(String(text));
+	u.rate = Math.max(0.1, Math.min(10, Number(rate) || TTS_DEFAULT_RATE));
+	u.volume = Math.max(0, Math.min(1, Number(volume)));
+	const voice = getVoiceForTts(voiceName || null);
+	if (voice) u.voice = voice;
+	return new Promise((resolve) => {
+		u.onend = () => resolve();
+		u.onerror = () => resolve();
+		window.speechSynthesis.speak(u);
+	});
+}

@@ -15,6 +15,7 @@ class PermissionRequest extends Model
         'action_type',
         'requester_user_id',
         'status',
+        'request_token',
         'target_station_id', // deprecated: use target_track_id + custom_steps (TRACK-OVERRIDES-REFACTOR)
         'target_track_id',
         'custom_steps',
@@ -36,6 +37,8 @@ class PermissionRequest extends Model
     public const STATUS_APPROVED = 'approved';
 
     public const STATUS_REJECTED = 'rejected';
+
+    public const STATUS_CANCELLED = 'cancelled';
 
     public const ACTION_OVERRIDE = 'override';
 

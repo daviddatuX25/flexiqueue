@@ -3,6 +3,7 @@
 namespace Tests\Feature\Api\Admin;
 
 use App\Events\TokenTtsStatusUpdated;
+use App\Models\Site;
 use App\Models\User;
 use App\Repositories\TokenTtsSettingRepository;
 use App\Models\Token;
@@ -19,11 +20,29 @@ class TokenTtsSettingsTest extends TestCase
 {
     use RefreshDatabase;
 
+    private ?Site $site = null;
+
+    private function site(): Site
+    {
+        if ($this->site === null) {
+            $this->site = Site::create([
+                'name' => 'Default Site',
+                'slug' => 'default',
+                'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+                'settings' => [],
+                'edge_settings' => [],
+            ]);
+        }
+
+        return $this->site;
+    }
+
     private function createToken(bool $ttsPreGenerateEnabled = false, ?string $ttsStatus = null): Token
     {
         $token = new Token;
         $token->qr_code_hash = hash('sha256', Str::random(32).'T'.Str::random(8));
         $token->physical_id = 'T'.Str::random(4);
+        $token->site_id = $this->site()->id;
         $token->status = 'available';
         $token->tts_pre_generate_enabled = $ttsPreGenerateEnabled;
         $token->tts_status = $ttsStatus;
@@ -32,9 +51,14 @@ class TokenTtsSettingsTest extends TestCase
         return $token;
     }
 
+    private function admin(): User
+    {
+        return User::factory()->admin()->create(['site_id' => $this->site()->id]);
+    }
+
     public function test_show_returns_default_settings(): void
     {
-        $admin = User::factory()->admin()->create();
+        $admin = $this->admin();
 
         $response = $this->actingAs($admin)->getJson('/api/admin/token-tts-settings');
 
@@ -46,7 +70,7 @@ class TokenTtsSettingsTest extends TestCase
 
     public function test_update_saves_settings(): void
     {
-        $admin = User::factory()->admin()->create();
+        $admin = $this->admin();
         $this->app->make(TokenTtsSettingRepository::class)->getInstance();
 
         $this->actingAs($admin);
@@ -66,7 +90,7 @@ class TokenTtsSettingsTest extends TestCase
 
     public function test_update_includes_requires_regeneration_flag_based_on_changes_and_tokens(): void
     {
-        $admin = User::factory()->admin()->create();
+        $admin = $this->admin();
         $settings = $this->app->make(TokenTtsSettingRepository::class)->getInstance();
         $settings->update([
             'voice_id' => 'voice-1',
@@ -97,7 +121,7 @@ class TokenTtsSettingsTest extends TestCase
 
     public function test_regenerate_tts_endpoint_queues_tokens_when_enabled(): void
     {
-        $admin = User::factory()->admin()->create();
+        $admin = $this->admin();
         $this->app['config']->set('tts.driver', 'elevenlabs');
         $this->app['config']->set('tts.elevenlabs.api_key', 'fake-key');
 
@@ -132,7 +156,7 @@ class TokenTtsSettingsTest extends TestCase
 
     public function test_regenerate_tts_with_token_ids_queues_only_those_tokens(): void
     {
-        $admin = User::factory()->admin()->create();
+        $admin = $this->admin();
         $this->app['config']->set('tts.driver', 'elevenlabs');
         $this->app['config']->set('tts.elevenlabs.api_key', 'fake-key');
 
@@ -176,7 +200,7 @@ class TokenTtsSettingsTest extends TestCase
 
     public function test_regenerate_tts_endpoint_returns_503_when_server_tts_disabled(): void
     {
-        $admin = User::factory()->admin()->create();
+        $admin = $this->admin();
         $this->app['config']->set('tts.driver', 'null');
 
         $response = $this->actingAs($admin)->postJson('/api/admin/tokens/regenerate-tts');
@@ -187,7 +211,7 @@ class TokenTtsSettingsTest extends TestCase
 
     public function test_sample_phrase_returns_ilocano_phonetics_for_letter_a(): void
     {
-        $admin = User::factory()->admin()->create();
+        $admin = $this->admin();
 
         $response = $this->actingAs($admin)->getJson(
             '/api/admin/tts/sample-phrase?lang=ilo&alias=A1&pronounce_as=letters'
@@ -202,7 +226,7 @@ class TokenTtsSettingsTest extends TestCase
 
     public function test_sample_phrase_with_pre_phrase_returns_combined_text(): void
     {
-        $admin = User::factory()->admin()->create();
+        $admin = $this->admin();
 
         $response = $this->actingAs($admin)->getJson(
             '/api/admin/tts/sample-phrase?lang=en&pre_phrase=Calling&alias=A1&pronounce_as=letters'

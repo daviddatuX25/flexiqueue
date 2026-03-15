@@ -17,11 +17,17 @@ class StoreClientRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['required', 'string', 'max:150'],
-            'birth_year' => ['required', 'integer', 'min:1900', 'max:'.now()->year],
-            'id_document' => ['nullable', 'array'],
-            'id_document.id_type' => ['required_with:id_document', 'string', 'max:50'],
-            'id_document.id_number' => ['required_with:id_document', 'string', 'max:255'],
+            'first_name' => ['required', 'string', 'max:100'],
+            'middle_name' => ['nullable', 'string', 'max:100'],
+            'last_name' => ['required', 'string', 'max:100'],
+            'birth_date' => ['required', 'date', 'before_or_equal:today', 'after:'.now()->subYears(120)->format('Y-m-d')],
+            'address_line_1' => ['nullable', 'string', 'max:255'],
+            'address_line_2' => ['nullable', 'string', 'max:255'],
+            'city' => ['nullable', 'string', 'max:100'],
+            'state' => ['nullable', 'string', 'max:100'],
+            'postal_code' => ['nullable', 'string', 'max:20'],
+            'country' => ['nullable', 'string', 'max:100'],
+            'mobile' => ['nullable', 'string', 'max:30'],
         ];
     }
 }

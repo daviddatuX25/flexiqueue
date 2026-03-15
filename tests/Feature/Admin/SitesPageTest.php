@@ -40,16 +40,12 @@ class SitesPageTest extends TestCase
         ], $attrs));
     }
 
+    /** Per plan: site-scoped admin is redirected from /admin/sites to dashboard (no Sites nav). */
     public function test_site_admin_can_access_sites_index_sees_only_own_site(): void
     {
         $response = $this->actingAs($this->admin)->get(route('admin.sites'));
 
-        $response->assertStatus(200);
-        $response->assertInertia(fn ($page) => $page
-            ->component('Admin/Sites/Index')
-            ->has('sites', 1)
-            ->where('sites.0.id', $this->site->id)
-            ->where('auth_is_super_admin', false));
+        $response->assertRedirect(route('admin.dashboard'));
     }
 
     public function test_site_admin_cannot_access_sites_create_returns_403(): void

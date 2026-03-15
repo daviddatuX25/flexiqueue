@@ -11,24 +11,11 @@ class SystemStorageService
 {
     /**
      * Return a snapshot of disk and key app storage areas.
+     * Per site-scoping-migration-spec §2: when $siteId provided, TTS referenced/orphaned are scoped to that site's tokens.
      *
-     * Shape:
-     * [
-     *   'disk' => [
-     *     'total_bytes' => int,
-     *     'free_bytes' => int,
-     *     'used_bytes' => int,
-     *     'used_percent' => float,
-     *   ],
-     *   'categories' => [
-     *     'tts_audio' => ['bytes' => int, 'file_count' => int, 'orphaned_bytes' => int, 'orphaned_file_count' => int],
-     *     'profile_avatars' => ['bytes' => int, 'file_count' => int],
-     *     ...
-     *   ],
-     *   'generated_at' => string (ISO 8601),
-     * ]
+     * @param  int|null  $siteId  Scope TTS token references to this site; null = all tokens.
      */
-    public function getStorageSummary(): array
+    public function getStorageSummary(?int $siteId = null): array
     {
         $storageRoot = storage_path();
 
@@ -39,7 +26,7 @@ class SystemStorageService
 
         $ttsDirs = $this->getTtsStorageDirs();
         $ttsTotal = $this->sumDirectories($ttsDirs);
-        $referenced = $this->getReferencedTtsPaths();
+        $referenced = $this->getReferencedTtsPaths($siteId);
         $orphaned = $this->computeTtsOrphaned($ttsDirs, $referenced);
 
         $categories = [
@@ -86,15 +73,20 @@ class SystemStorageService
 
     /**
      * All TTS paths currently referenced by Token or Station (relative to default disk).
-     * Used to detect orphaned files on disk.
+     * Per site-scoping-migration-spec §2: when $siteId provided, only tokens in that site.
      *
+     * @param  int|null  $siteId  Scope to this site's tokens; null = all tokens.
      * @return array<string>
      */
-    private function getReferencedTtsPaths(): array
+    private function getReferencedTtsPaths(?int $siteId = null): array
     {
         $paths = [];
 
-        foreach (Token::query()->get() as $token) {
+        $tokenQuery = Token::query();
+        if ($siteId !== null) {
+            $tokenQuery->forSite($siteId);
+        }
+        foreach ($tokenQuery->get() as $token) {
             if (! empty($token->tts_audio_path)) {
                 $paths[] = ltrim(str_replace('\\', '/', (string) $token->tts_audio_path), '/');
             }
@@ -200,14 +192,15 @@ class SystemStorageService
 
     /**
      * Delete only orphan TTS files (not referenced by any Token or Station). Does not modify DB.
-     * Uses same logic as computeTtsOrphaned: config cache dir files and app/private files not in referenced set.
+     * Per site-scoping-migration-spec §2: when $siteId provided, "referenced" = only that site's tokens.
      *
+     * @param  int|null  $siteId  Scope referenced paths to this site's tokens; null = all.
      * @return array{bytes: int, file_count: int}
      */
-    public function clearOrphanedTtsOnly(): array
+    public function clearOrphanedTtsOnly(?int $siteId = null): array
     {
         $dirs = $this->getTtsStorageDirs();
-        $referenced = $this->getReferencedTtsPaths();
+        $referenced = $this->getReferencedTtsPaths($siteId);
         $referencedSet = array_fill_keys($referenced, true);
         $appPrivateRoot = rtrim(str_replace('\\', '/', storage_path('app/private')), '/');
         $cachePath = rtrim(str_replace('\\', '/', (string) storage_path((string) config('tts.cache_path', 'app/tts'))), '/');
@@ -324,35 +317,96 @@ class SystemStorageService
 
     /**
      * Clear a storage category (delete files, then null DB references for tts_audio).
-     * Only whitelisted categories are allowed. Paths are resolved server-side; no user paths.
+     * Per site-scoping-migration-spec §2: when $siteId provided for tts_audio, only null refs and delete files for that site's tokens.
      *
+     * @param  int|null  $siteId  For tts_audio: scope to this site's tokens; null = all tokens (legacy/super_admin).
      * @return array{bytes: int, file_count: int}
      */
-    public function clearCategory(string $category): array
+    public function clearCategory(string $category, ?int $siteId = null): array
     {
         if ($category !== 'tts_audio') {
             return ['bytes' => 0, 'file_count' => 0];
         }
 
-        $dirs = $this->getTtsStorageDirs();
-
-        $storageRoot = realpath(storage_path()) ?: storage_path();
-        $totalBytes = 0;
-        $totalFiles = 0;
-
-        foreach ($dirs as $dir) {
-            $resolved = is_dir($dir) ? realpath($dir) : false;
-            if ($resolved === false || ! str_starts_with($resolved, $storageRoot)) {
-                continue;
+        if ($siteId === null) {
+            // Legacy/super_admin: full clear (clean dirs, null all tokens and stations).
+            $dirs = $this->getTtsStorageDirs();
+            $storageRoot = realpath(storage_path()) ?: storage_path();
+            $totalBytes = 0;
+            $totalFiles = 0;
+            foreach ($dirs as $dir) {
+                $resolved = is_dir($dir) ? realpath($dir) : false;
+                if ($resolved === false || ! str_starts_with($resolved, $storageRoot)) {
+                    continue;
+                }
+                $size = $this->directorySize($resolved);
+                $totalBytes += $size['bytes'] ?? 0;
+                $totalFiles += $size['file_count'] ?? 0;
+                File::cleanDirectory($dir);
             }
-            $size = $this->directorySize($resolved);
-            $totalBytes += $size['bytes'] ?? 0;
-            $totalFiles += $size['file_count'] ?? 0;
-            File::cleanDirectory($dir);
+            Token::query()->each(function (Token $token): void {
+                $token->tts_audio_path = null;
+                $token->tts_status = null;
+                $settings = $token->tts_settings ?? [];
+                if (isset($settings['languages']) && is_array($settings['languages'])) {
+                    foreach (array_keys($settings['languages']) as $lang) {
+                        if (is_array($settings['languages'][$lang])) {
+                            $settings['languages'][$lang]['audio_path'] = null;
+                            $settings['languages'][$lang]['status'] = null;
+                        }
+                    }
+                    $token->tts_settings = $settings;
+                }
+                $token->save();
+            });
+            Station::query()->each(function (Station $station): void {
+                $settings = $station->settings ?? [];
+                if (isset($settings['tts']['languages']) && is_array($settings['tts']['languages'])) {
+                    foreach (array_keys($settings['tts']['languages']) as $lang) {
+                        if (is_array($settings['tts']['languages'][$lang])) {
+                            $settings['tts']['languages'][$lang]['audio_path'] = null;
+                            $settings['tts']['languages'][$lang]['status'] = null;
+                        }
+                    }
+                    $station->settings = $settings;
+                    $station->save();
+                }
+            });
+
+            return ['bytes' => $totalBytes, 'file_count' => $totalFiles];
         }
 
-        // Null Token TTS paths and clear generation status so app does not reference deleted files.
-        Token::query()->each(function (Token $token): void {
+        // Site-scoped: only delete files for this site's tokens and null their refs.
+        $tokenQuery = Token::query()->forSite($siteId);
+        $tokens = $tokenQuery->get();
+        $pathsToDelete = [];
+        foreach ($tokens as $token) {
+            if (! empty($token->tts_audio_path)) {
+                $pathsToDelete[] = ltrim(str_replace('\\', '/', (string) $token->tts_audio_path), '/');
+            }
+            $settings = $token->tts_settings ?? [];
+            if (isset($settings['languages']) && is_array($settings['languages'])) {
+                foreach ($settings['languages'] as $config) {
+                    if (! empty($config['audio_path'])) {
+                        $pathsToDelete[] = ltrim(str_replace('\\', '/', (string) $config['audio_path']), '/');
+                    }
+                }
+            }
+        }
+        $appPrivateRoot = rtrim(str_replace('\\', '/', storage_path('app/private')), '/');
+        $totalBytes = 0;
+        $totalFiles = 0;
+        foreach ($pathsToDelete as $relPath) {
+            $fullPath = $appPrivateRoot.'/'.$relPath;
+            if (is_file($fullPath)) {
+                $size = @filesize($fullPath) ?: 0;
+                if (@unlink($fullPath)) {
+                    $totalBytes += $size;
+                    $totalFiles++;
+                }
+            }
+        }
+        foreach ($tokens as $token) {
             $token->tts_audio_path = null;
             $token->tts_status = null;
             $settings = $token->tts_settings ?? [];
@@ -366,22 +420,7 @@ class SystemStorageService
                 $token->tts_settings = $settings;
             }
             $token->save();
-        });
-
-        // Null Station TTS paths.
-        Station::query()->each(function (Station $station): void {
-            $settings = $station->settings ?? [];
-            if (isset($settings['tts']['languages']) && is_array($settings['tts']['languages'])) {
-                foreach (array_keys($settings['tts']['languages']) as $lang) {
-                    if (is_array($settings['tts']['languages'][$lang])) {
-                        $settings['tts']['languages'][$lang]['audio_path'] = null;
-                        $settings['tts']['languages'][$lang]['status'] = null;
-                    }
-                }
-                $station->settings = $settings;
-                $station->save();
-            }
-        });
+        }
 
         return ['bytes' => $totalBytes, 'file_count' => $totalFiles];
     }

@@ -3,48 +3,112 @@
 namespace App\Services;
 
 use App\Models\Client;
+use App\Services\MobileCryptoService;
+use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 class ClientService
 {
-    public function createClient(string $name, int $birthYear): Client
-    {
-        return Client::create([
-            'name' => $name,
-            'birth_year' => $birthYear,
-        ]);
+    public function __construct(
+        private MobileCryptoService $mobileCrypto,
+    ) {}
+
+    /**
+     * Create a client. Per site-scoping-migration-spec §3: set site_id when provided.
+     * Per PRIVACY-BY-DESIGN-IDENTITY-BINDING: optional mobile is encrypted/hashed before storing.
+     *
+     * @param  array{address_line_1?: string, address_line_2?: string, city?: string, state?: string, postal_code?: string, country?: string}  $address
+     */
+    public function createClient(
+        string $firstName,
+        string $lastName,
+        Carbon|string $birthDate,
+        ?int $siteId = null,
+        ?string $mobile = null,
+        ?string $middleName = null,
+        ?array $address = null,
+    ): Client {
+        $attrs = [
+            'first_name' => $firstName,
+            'middle_name' => $middleName,
+            'last_name' => $lastName,
+            'birth_date' => $birthDate instanceof Carbon ? $birthDate->toDateString() : $birthDate,
+        ];
+        if ($siteId !== null) {
+            $attrs['site_id'] = $siteId;
+        }
+        if ($mobile !== null && trim($mobile) !== '') {
+            $attrs['mobile_encrypted'] = $this->mobileCrypto->encrypt($mobile);
+            $attrs['mobile_hash'] = $this->mobileCrypto->hash($mobile);
+        }
+        if ($address !== null) {
+            foreach (['address_line_1', 'address_line_2', 'city', 'state', 'postal_code', 'country'] as $key) {
+                if (isset($address[$key]) && $address[$key] !== null && $address[$key] !== '') {
+                    $attrs[$key] = $address[$key];
+                }
+            }
+        }
+
+        return Client::create($attrs);
     }
 
     /**
-     * Search clients by name (and optional birth year). Name is tokenized by whitespace:
-     * each token must appear in the client's name (in any order). Returns paginated results
-     * with has_id_document flag. Per plan: triage search shows 3 nearest matches per page.
+     * Search by phone. Exact hash match only; never fuzzy.
+     * When $siteId is provided, only returns a client for that site.
+     */
+    public function searchClientsByPhone(string $mobile, ?int $siteId = null): ?Client
+    {
+        $hash = $this->mobileCrypto->hash($mobile);
+
+        $query = Client::where('mobile_hash', $hash);
+        if ($siteId !== null) {
+            $query->where('site_id', $siteId);
+        }
+
+        return $query->first();
+    }
+
+    /**
+     * Search clients by name (and optional birth date). Per site-scoping-migration-spec §3:
+     * scope by site_id when provided. Name is tokenized by whitespace; each token must appear
+     * in at least one of first_name, middle_name, last_name.
      *
-     * @param  array{name: string, birth_year: ?int, per_page: int, page: int}  $params
+     * @param  array{name: string, birth_date: ?string, per_page: int, page: int, site_id: ?int}  $params
      */
     public function searchClients(array $params): LengthAwarePaginator
     {
         $name = trim($params['name']);
         $tokens = array_values(array_filter(array_map('trim', preg_split('/\s+/', $name))));
+        $siteId = $params['site_id'] ?? null;
 
-        $query = Client::query()->orderBy('name')->withCount('idDocuments');
+        $query = Client::query()->orderBy('last_name')->orderBy('first_name');
+
+        $query->forSite($siteId);
 
         if ($tokens === []) {
             $query->whereRaw('1 = 0');
         } else {
             foreach ($tokens as $token) {
-                $query->where('name', 'like', '%' . $token . '%');
+                $query->where(function ($q) use ($token) {
+                    $q->where('first_name', 'like', '%' . $token . '%')
+                        ->orWhere('middle_name', 'like', '%' . $token . '%')
+                        ->orWhere('last_name', 'like', '%' . $token . '%');
+                });
             }
         }
 
-        if ($params['birth_year'] !== null) {
-            $query->where('birth_year', $params['birth_year']);
+        if (isset($params['birth_date']) && $params['birth_date'] !== null && $params['birth_date'] !== '') {
+            $query->whereDate('birth_date', $params['birth_date']);
         }
 
         return $query->paginate(
             perPage: $params['per_page'],
             page: $params['page'],
-            columns: ['id', 'name', 'birth_year']
+            columns: [
+                'id', 'first_name', 'middle_name', 'last_name', 'birth_date',
+                'address_line_1', 'address_line_2', 'city', 'state', 'postal_code', 'country',
+                'mobile_encrypted',
+            ]
         );
     }
 }

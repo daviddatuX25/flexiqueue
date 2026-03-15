@@ -26,24 +26,25 @@
 	>
 		PIN
 	</button>
-	<button
-		type="button"
-		class="btn btn-sm flex-1 touch-target-h {mode === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-		disabled={disabled}
-		onclick={() => (mode = 'qr')}
-		title="Scan QR"
-	>
-		QR
-	</button>
 	{#if includeRequest}
 		<button
 			type="button"
 			class="btn btn-sm flex-1 touch-target-h {mode === 'request' ? 'preset-filled-primary-500' : 'preset-tonal'}"
 			disabled={disabled}
 			onclick={() => (mode = 'request')}
-			title="Request supervisor approval"
+			title="Show QR for supervisor to scan"
 		>
-			Request
+			QR
+		</button>
+	{:else}
+		<button
+			type="button"
+			class="btn btn-sm flex-1 touch-target-h {mode === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+			disabled={disabled}
+			onclick={() => (mode = 'qr')}
+			title="Scan QR"
+		>
+			QR
 		</button>
 	{/if}
 </div>

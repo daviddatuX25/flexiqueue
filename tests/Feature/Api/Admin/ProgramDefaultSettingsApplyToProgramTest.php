@@ -2,9 +2,12 @@
 
 namespace Tests\Feature\Api\Admin;
 
+use App\Models\DeviceAuthorization;
 use App\Models\Program;
 use App\Models\Site;
 use App\Models\User;
+use App\Services\DeviceAuthorizationService;
+use App\Support\DeviceLock;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -108,7 +111,16 @@ class ProgramDefaultSettingsApplyToProgramTest extends TestCase
         // Verify downstream public triage page props now reflect updated settings.
         DB::table('programs')->where('id', $program->id)->update(['is_active' => true]);
 
-        $response = $this->get('/public/triage/'.$program->id);
+        $service = app(DeviceAuthorizationService::class);
+        $result = $service->authorize($program, 'test-device-'.$program->id, DeviceAuthorization::SCOPE_SESSION);
+        $cookieName = DeviceAuthorizationService::cookieNameForProgram($program);
+        $site = $program->site;
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_TRIAGE, null);
+        $knownSitesValue = json_encode([['slug' => $site->slug, 'name' => $site->name]]);
+        $response = $this->withUnencryptedCookie('known_sites', $knownSitesValue)
+            ->withCookie($cookieName, $result['cookie_value'])
+            ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockCookie->getValue())
+            ->get('/site/'.$site->slug.'/public-triage/'.$program->slug);
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
             ->component('Triage/PublicStart')

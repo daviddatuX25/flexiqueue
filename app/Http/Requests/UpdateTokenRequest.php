@@ -23,6 +23,7 @@ class UpdateTokenRequest extends FormRequest
         return [
             'status' => ['sometimes', 'required', 'string', 'in:available,deactivated'],
             'pronounce_as' => ['sometimes', 'required', 'string', 'in:letters,word'],
+            'is_global' => ['sometimes', 'boolean'],
             'tts' => ['sometimes', 'array'],
             'tts.en' => ['sometimes', 'array'],
             'tts.en.voice_id' => ['nullable', 'string', 'max:200'],

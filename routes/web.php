@@ -19,19 +19,30 @@ use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\Admin\AnalyticsController as AdminAnalyticsController;
 use App\Http\Controllers\Api\Admin\ElevenLabsIntegrationController;
 use App\Http\Controllers\Api\Admin\SystemController as AdminSystemController;
-use App\Http\Controllers\Api\Admin\ClientIdDocumentRevealController;
 use App\Http\Controllers\Api\Admin\ClientAdminController;
-use App\Http\Controllers\Api\Admin\ClientIdDocumentAdminController;
 use App\Http\Controllers\Api\Admin\SiteController as AdminSiteController;
+use App\Http\Controllers\Api\Admin\SiteHeroImageController;
+use App\Http\Controllers\Api\Admin\SiteSettingsController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\DeviceAuthorizationRequestController;
+use App\Http\Controllers\Api\DeviceAuthorizeController;
 use App\Http\Controllers\Api\CheckStatusController;
+use App\Http\Controllers\Api\HomeStatsController;
+use App\Http\Controllers\Api\PublicSiteKeyController;
+use App\Http\Controllers\Api\PublicSiteStatsController;
+use App\Http\Controllers\Api\PublicDeviceAuthorizationRequestController;
+use App\Http\Controllers\Api\DisplaySettingsRequestController;
 use App\Http\Controllers\Api\PublicDisplaySettingsController;
+use App\Http\Controllers\Api\PublicDeviceLockController;
+use App\Http\Controllers\Api\PublicDisplaySettingsRequestController;
 use App\Http\Controllers\Api\PublicTriageController;
 use App\Http\Controllers\Api\SessionController as ApiSessionController;
 use App\Http\Controllers\Api\ClientController as ApiClientController;
 use App\Http\Controllers\Api\IdentityRegistrationController;
 use App\Http\Controllers\Api\TtsController;
+use App\Http\Controllers\Api\DeviceUnlockRequestController;
 use App\Http\Controllers\Api\PermissionRequestController;
+use App\Http\Controllers\Api\PublicDeviceUnlockRequestController;
 use App\Http\Controllers\Api\StationController as ApiStationController;
 use App\Http\Controllers\Api\StationNoteController;
 use App\Http\Controllers\Api\AuthorizationsController;
@@ -67,6 +78,12 @@ Route::middleware(['auth', 'role:admin'])->prefix('api/admin')->group(function (
     Route::get('/programs/{program}/diagram', [ProgramDiagramController::class, 'show']);
     Route::put('/programs/{program}/diagram', [ProgramDiagramController::class, 'update']);
     Route::post('/programs/{program}/diagram/image', [ProgramDiagramController::class, 'storeImage']);
+    Route::post('/programs/{program}/generate-qr', [\App\Http\Controllers\Api\Admin\ShortLinkController::class, 'storeForProgram']);
+    Route::get('/programs/{program}/access-tokens', [\App\Http\Controllers\Api\Admin\ProgramAccessTokenController::class, 'index']);
+    Route::delete('/programs/{program}/access-tokens', [\App\Http\Controllers\Api\Admin\ProgramAccessTokenController::class, 'destroyAll']);
+    Route::delete('/programs/{program}/access-tokens/{token}', [\App\Http\Controllers\Api\Admin\ProgramAccessTokenController::class, 'destroy']);
+    Route::post('/programs/{program}/banner-image', [\App\Http\Controllers\Api\Admin\ProgramBannerImageController::class, 'store']);
+    Route::delete('/programs/{program}/banner-image', [\App\Http\Controllers\Api\Admin\ProgramBannerImageController::class, 'destroy']);
     Route::post('/programs/{program}/regenerate-station-tts', [AdminProgramController::class, 'regenerateStationTts']);
     Route::post('/programs/{program}/activate', [AdminProgramController::class, 'activate'])->name('api.admin.programs.activate');
     Route::post('/programs/{program}/deactivate', [AdminProgramController::class, 'deactivate'])->name('api.admin.programs.deactivate');
@@ -123,6 +140,8 @@ Route::middleware(['auth', 'role:admin'])->prefix('api/admin')->group(function (
     Route::get('/analytics/busiest-hours', [AdminAnalyticsController::class, 'busiestHours']);
     Route::get('/analytics/drop-off-funnel', [AdminAnalyticsController::class, 'dropOffFunnel']);
     Route::get('/analytics/token-tts-health', [AdminAnalyticsController::class, 'tokenTtsHealth']);
+    // Deprecated: use PUT /api/admin/sites/{site} for site and settings.
+    Route::patch('/site/settings', [SiteSettingsController::class, 'update'])->name('api.admin.site.settings');
 });
 
 // Per SUPER-ADMIN-VS-ADMIN-SPEC: integrations API is super_admin only.
@@ -147,21 +166,21 @@ Route::middleware(['auth', 'role:admin,super_admin'])->prefix('api/admin')->grou
     Route::post('/users/{user}/assign-station', [AdminUserController::class, 'assignStation']);
     Route::post('/users/{user}/unassign-station', [AdminUserController::class, 'unassignStation']);
     Route::delete('/clients/{client}', [ClientAdminController::class, 'destroy']);
-    Route::delete('/client-id-documents/{client_id_document}', [ClientIdDocumentAdminController::class, 'destroy']);
-    Route::post('/client-id-documents/{client_id_document}/reassign', [ClientIdDocumentAdminController::class, 'reassign']);
     Route::get('/system/storage', [AdminSystemController::class, 'storage']);
     Route::post('/system/storage/clear', [AdminSystemController::class, 'clearStorage']);
     Route::post('/system/storage/clear-orphaned-tts', [AdminSystemController::class, 'clearOrphanedTts']);
     Route::get('/logs/program-sessions', [AdminReportController::class, 'programSessions']);
     Route::get('/logs/audit', [AdminReportController::class, 'audit']);
     Route::get('/logs/audit/export', [AdminReportController::class, 'auditExport']);
-    Route::post('/client-id-documents/{client_id_document}/reveal', [ClientIdDocumentRevealController::class, 'reveal'])
-        ->middleware('throttle:5,1');
     Route::get('/sites', [AdminSiteController::class, 'index']);
     Route::post('/sites', [AdminSiteController::class, 'store']);
     Route::get('/sites/{site}', [AdminSiteController::class, 'show']);
     Route::put('/sites/{site}', [AdminSiteController::class, 'update']);
+    Route::patch('/sites/{site}/default', [AdminSiteController::class, 'setDefault'])->name('api.admin.sites.set-default');
     Route::post('/sites/{site}/regenerate-key', [AdminSiteController::class, 'regenerateKey']);
+    Route::post('/sites/{site}/hero-image', [SiteHeroImageController::class, 'store']);
+    Route::delete('/sites/{site}/hero-image', [SiteHeroImageController::class, 'destroy']);
+    Route::post('/sites/{site}/generate-qr', [\App\Http\Controllers\Api\Admin\ShortLinkController::class, 'storeForSite']);
 });
 
 // Per 08-API-SPEC-PHASE1 §6.1: Dashboard API (admin, supervisor)
@@ -205,22 +224,32 @@ Route::middleware(['auth', 'role:admin,supervisor,staff'])->prefix('api')->group
     Route::post('/permission-requests', [PermissionRequestController::class, 'store']);
     Route::post('/permission-requests/{permission_request}/approve', [PermissionRequestController::class, 'approve']);
     Route::post('/permission-requests/{permission_request}/reject', [PermissionRequestController::class, 'reject']);
+    Route::post('/permission-requests/{permission_request}/cancel', [PermissionRequestController::class, 'cancel']);
+    Route::post('/display-settings-requests/{display_settings_request}/approve', [DisplaySettingsRequestController::class, 'approve']);
+    Route::post('/device-authorization-requests/{device_authorization_request}/approve', [DeviceAuthorizationRequestController::class, 'approve']);
+    Route::post('/device-unlock-requests/{device_unlock_request}/approve', [DeviceUnlockRequestController::class, 'approve']);
+});
+
+// Per PRIVACY-BY-DESIGN-IDENTITY-BINDING: reveal-phone is admin only
+Route::middleware(['auth', 'role:admin'])->prefix('api')->group(function (): void {
+    Route::post('/clients/{client}/reveal-phone', [ApiClientController::class, 'revealPhone']);
 });
 
 // Per 08-API-SPEC-PHASE1 §3–4: Session and station endpoints (any staff)
 Route::middleware(['auth', 'role:admin,supervisor,staff'])->prefix('api')->group(function (): void {
     Route::get('/clients/search', [ApiClientController::class, 'search'])
         ->middleware('throttle:60,1');
-    Route::post('/clients/lookup-by-id', [ApiClientController::class, 'lookupById'])
+    Route::post('/clients/search-by-phone', [ApiClientController::class, 'searchByPhone'])
         ->middleware('throttle:60,1');
     Route::post('/clients', [ApiClientController::class, 'store']);
-    Route::post('/clients/{client}/id-documents', [ApiClientController::class, 'attachIdDocument']);
+    Route::put('/clients/{client}/mobile', [ApiClientController::class, 'updateMobile']);
     Route::get('/identity-registrations', [IdentityRegistrationController::class, 'index']);
     Route::post('/identity-registrations/direct', [IdentityRegistrationController::class, 'direct']);
     Route::get('/identity-registrations/{identityRegistration}/possible-matches', [IdentityRegistrationController::class, 'possibleMatches']);
-    Route::post('/identity-registrations/{identityRegistration}/verify-id', [IdentityRegistrationController::class, 'verifyId']);
     Route::post('/identity-registrations/{identityRegistration}/accept', [IdentityRegistrationController::class, 'accept']);
+    Route::post('/identity-registrations/{identityRegistration}/reveal-phone', [IdentityRegistrationController::class, 'revealPhone']);
     Route::post('/identity-registrations/{identityRegistration}/reject', [IdentityRegistrationController::class, 'reject']);
+    Route::post('/identity-registrations/{identityRegistration}/confirm-bind', [IdentityRegistrationController::class, 'confirmBind']);
     Route::post('/sessions/bind', [ApiSessionController::class, 'bind']);
     Route::get('/sessions/token-lookup', [ApiSessionController::class, 'tokenLookup']);
     Route::post('/sessions/{session}/call', [ApiSessionController::class, 'call']);
@@ -260,30 +289,80 @@ Route::post('/api/sync/test-site-auth', function (\Illuminate\Http\Request $requ
 
 // Per 08-API-SPEC-PHASE1 §2.1 & 05-SECURITY-CONTROLS §2.4: public (no auth)
 Route::get('/api/check-status/{qr_hash}', [CheckStatusController::class, 'show']);
+Route::get('/api/check-status/{site_id}/{qr_hash}', [CheckStatusController::class, 'showWithSite']);
 
-// Per 09-UI-ROUTES: client-facing informant display (no auth)
-Route::get('/display', [DisplayController::class, 'board'])->name('display');
+// Per public-site plan: homepage global stats (no auth, throttle 60/min)
+Route::get('/api/home-stats', [HomeStatsController::class, 'index'])->middleware('throttle:60,1');
+
+// Per public-site plan: site key validation (no auth, throttle 10/min per IP)
+Route::post('/api/public/site-key', [PublicSiteKeyController::class, 'store'])->middleware('throttle:10,1');
+
+// Per addition-to-public-site-plan Part 5.1: program key validation (no auth, throttle 10/min per IP)
+Route::post('/api/public/program-key', [\App\Http\Controllers\Api\PublicProgramKeyController::class, 'store'])->middleware('throttle:10,1');
+
+// Per public-site plan: site-scoped stats for landing (no auth, throttle 60/min)
+Route::get('/api/public/site-stats/{site:slug}', [PublicSiteStatsController::class, 'show'])->middleware('throttle:60,1');
+
+// Per addition-to-public-site-plan Part 6.2: opaque short link resolver (no auth)
+Route::get('/go/{code}', [\App\Http\Controllers\ShortLinkResolverController::class, 'resolve'])->name('short_link.resolve');
+
+// Per 09-UI-ROUTES: client-facing informant display (no auth). Per public-site plan: no redirect by cookie; home/display always reachable.
+Route::get('/', [HomeController::class, 'index'])->name('home');
+Route::get('/display', [DisplayController::class, 'showScanQrMessage'])->name('display');
+Route::get('/public-triage', [DisplayController::class, 'triageStartRedirect'])->name('public.triage');
 Route::get('/display/station/{station}', [DisplayController::class, 'stationBoard'])->name('display.station');
+Route::get('/display/status/{site_id}/{qr_hash}', [DisplayController::class, 'statusWithSite'])->name('display.status.site');
 Route::get('/display/status/{qr_hash}', [DisplayController::class, 'status'])->name('display.status');
 
+// Per public-site plan: site routes require known_sites cookie (key-gated). Public view + program info require program access when private.
+Route::prefix('site')->middleware(['require.site.access'])->group(function (): void {
+    Route::get('{site:slug}', [DisplayController::class, 'siteLanding'])->name('site.landing');
+    Route::get('{site:slug}/program/{program_slug}/view', [DisplayController::class, 'publicDisplay'])
+        ->middleware('require.program.access')->name('site.program.public-view');
+    Route::get('{site:slug}/program/{program_slug}/info', [DisplayController::class, 'programInfo'])
+        ->middleware('require.program.access')->name('site.program.info');
+    Route::get('{site:slug}/display', [DisplayController::class, 'boardWithSite'])->name('display.site');
+    Route::get('{site:slug}/display/station/{station}', [DisplayController::class, 'stationBoardWithSite'])->name('display.site.station');
+    Route::get('{site:slug}/display/status/{qr_hash}', [DisplayController::class, 'statusWithSiteSlug'])->name('display.site.status');
+    Route::get('{site:slug}/program/{program_slug}', [DisplayController::class, 'programPage'])->name('site.program');
+    Route::get('{site:slug}/program/{program_slug}/devices', [DisplayController::class, 'chooseDeviceType'])->name('display.site.devices');
+    Route::get('{site:slug}/public-triage', [DisplayController::class, 'triageStartWithSite'])->name('public.triage.site');
+    Route::get('{site:slug}/public-triage/{program_slug}', [DisplayController::class, 'publicTriageWithSite'])->name('public.triage.site.program');
+});
+
 // Per plan: public self-serve triage (no auth; 403 when program allow_public_triage is false)
-// A.2.3: Canonical URL is /public/triage/{program}; /triage/start redirects for backward compat.
+// /public/triage/{program} kept for backward compat (program by id).
 Route::get('/public/triage/{program}', [DisplayController::class, 'publicTriage'])->name('triage.public');
-Route::get('/triage/start', [DisplayController::class, 'triageStartRedirect'])->name('triage.start');
 Route::get('/api/public/token-lookup', [PublicTriageController::class, 'tokenLookup']);
 Route::post('/api/public/sessions/bind', [PublicTriageController::class, 'bind']);
-Route::post('/api/public/clients/lookup-by-id', [PublicTriageController::class, 'publicLookupById'])
-    ->middleware('throttle:10,1');
+Route::post('/api/public/verify-identity', [PublicTriageController::class, 'verifyIdentity'])->middleware('throttle:20,1');
+// Per plan Step 5: device authorization (PIN/QR) for public display/triage
+Route::post('/api/public/device-authorize', [DeviceAuthorizeController::class, 'store'])->middleware('throttle:20,1');
+Route::post('/api/public/device-authorization-requests', [PublicDeviceAuthorizationRequestController::class, 'store'])->middleware('throttle:10,1');
+Route::get('/api/public/device-authorization-requests/{id}', [PublicDeviceAuthorizationRequestController::class, 'show'])->middleware('throttle:30,1');
+// Per plan: set device lock cookie after choosing device type (display/triage/station)
+Route::post('/api/public/device-lock', [PublicDeviceLockController::class, 'store'])->middleware('throttle:30,1');
+Route::post('/api/public/device-lock/clear', [PublicDeviceLockController::class, 'destroy'])->middleware('throttle:60,1');
+Route::post('/api/public/device-unlock-with-auth', [PublicDeviceUnlockRequestController::class, 'unlockWithAuth'])->middleware('throttle:20,1');
+Route::post('/api/public/device-unlock-requests', [PublicDeviceUnlockRequestController::class, 'store'])->middleware('throttle:10,1');
+Route::get('/api/public/device-unlock-requests/{id}', [PublicDeviceUnlockRequestController::class, 'show'])->middleware('throttle:30,1');
+Route::post('/api/public/device-unlock-requests/{id}/cancel', [PublicDeviceUnlockRequestController::class, 'cancel'])->middleware('throttle:30,1');
+Route::post('/api/public/device-unlock-requests/{id}/consume', [PublicDeviceUnlockRequestController::class, 'consume'])->middleware('throttle:30,1');
 // Per plan: public display/triage settings (PIN required); rate limit 10/min by IP
 Route::post('/api/public/display-settings', [PublicDisplaySettingsController::class, 'update'])
     ->middleware('throttle:10,1');
+Route::post('/api/public/display-settings-requests', [PublicDisplaySettingsRequestController::class, 'store'])
+    ->middleware('throttle:10,1');
+Route::get('/api/public/display-settings-requests/{id}', [PublicDisplaySettingsRequestController::class, 'show'])
+    ->middleware('throttle:30,1');
+Route::post('/api/public/display-settings-requests/{id}/cancel', [PublicDisplaySettingsRequestController::class, 'cancel'])
+    ->middleware('throttle:30,1');
+Route::post('/api/public/device-authorization-requests/{id}/cancel', [PublicDeviceAuthorizationRequestController::class, 'cancel'])
+    ->middleware('throttle:30,1');
 // Per plan: server-side TTS — stream audio (public, rate-limited); voices list for admin
 Route::get('/api/public/tts', [TtsController::class, 'stream'])->middleware('throttle:60,1');
 Route::get('/api/public/tts/voices', [TtsController::class, 'voices']);
 Route::get('/api/public/tts/token/{token}', [TtsController::class, 'token']);
-
-// Per HOMEPAGE-PLAN: public landing + auth strip (Option B). No auth required.
-Route::get('/', [HomeController::class, 'index'])->name('home');
 
 // Per 05-SECURITY-CONTROLS §3.4: admin UI shared by admin and super_admin (dashboard, users, logs, settings, sites).
 Route::middleware(['auth', 'role:admin,super_admin'])->prefix('admin')->name('admin.')->group(function (): void {
@@ -313,18 +392,19 @@ Route::middleware(['auth', 'role:admin,staff'])->prefix('admin')->name('admin.')
     Route::get('/clients/{client}', [ClientPageController::class, 'show'])->name('clients.show');
 });
 
-// All staff (admin, supervisor, staff): station, triage, program-overrides, profile, dashboard
+// All staff (admin, supervisor, staff): station, triage, track-overrides, profile, dashboard
 Route::middleware(['auth', 'role:admin,supervisor,staff'])->group(function (): void {
     Route::get('/dashboard', \App\Http\Controllers\StaffDashboardController::class)->name('dashboard');
     Route::get('/station/{station?}', StationPageController::class)->name('station');
     Route::get('/triage', TriagePageController::class)->name('triage');
-    Route::redirect('/authorize', '/program-overrides', 302)->name('authorize');
+    Route::get('/devices', [DisplayController::class, 'devicesForStaff'])->name('devices');
+    Route::redirect('/authorize', '/track-overrides', 302)->name('authorize');
 
-    // Canonical: Program Overrides
-    Route::get('/program-overrides', ProgramOverridesPageController::class)->name('program-overrides');
+    // Canonical: Track overrides (pending permission requests, scan QR to approve)
+    Route::get('/track-overrides', ProgramOverridesPageController::class)->name('track-overrides');
 
     // Backwards compatibility: old URL redirects to canonical
-    Route::redirect('/track-overrides', '/program-overrides', 302);
+    Route::redirect('/program-overrides', '/track-overrides', 302);
     Route::get('/profile', fn () => Inertia::render('Profile/Index'))->name('profile');
 });
 

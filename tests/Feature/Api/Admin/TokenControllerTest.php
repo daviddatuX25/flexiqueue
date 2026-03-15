@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Api\Admin;
 
+use App\Models\Program;
+use App\Models\Site;
 use App\Models\Token;
 use App\Models\User;
 use App\Jobs\GenerateTokenTtsJob;
@@ -14,7 +16,7 @@ use Tests\TestCase;
 
 /**
  * Per 08-API-SPEC-PHASE1 §5.5: GET /api/admin/tokens, POST /api/admin/tokens/batch, PUT /api/admin/tokens/{id}.
- * All require role:admin.
+ * All require role:admin. Per site-scoping-migration-spec §2: admin and tokens scoped by site_id.
  */
 class TokenControllerTest extends TestCase
 {
@@ -22,10 +24,19 @@ class TokenControllerTest extends TestCase
 
     private User $admin;
 
+    private Site $site;
+
     protected function setUp(): void
     {
         parent::setUp();
-        $this->admin = User::factory()->admin()->create();
+        $this->site = Site::create([
+            'name' => 'Default Site',
+            'slug' => 'default',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $this->admin = User::factory()->admin()->create(['site_id' => $this->site->id]);
     }
 
     private function createToken(string $physicalId = 'A1', string $status = 'available'): Token
@@ -33,6 +44,7 @@ class TokenControllerTest extends TestCase
         $token = new Token;
         $token->qr_code_hash = hash('sha256', Str::random(32).$physicalId);
         $token->physical_id = $physicalId;
+        $token->site_id = $this->site->id;
         $token->status = $status;
         $token->save();
 
@@ -61,8 +73,8 @@ class TokenControllerTest extends TestCase
         $t2 = $this->createToken('A2', 'available');
         $this->createToken('A3', 'available');
         // Create session to make A2 in_use
-        $user = User::factory()->create();
-        $program = \App\Models\Program::create(['name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
+        $user = User::factory()->create(['site_id' => $this->site->id]);
+        $program = \App\Models\Program::create(['site_id' => $this->site->id, 'name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
         $station = \App\Models\Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
         $track = \App\Models\ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
         \App\Models\TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);
@@ -102,6 +114,138 @@ class TokenControllerTest extends TestCase
         $this->assertContains('A1', $ids);
         $this->assertContains('A10', $ids);
         $this->assertNotContains('B10', $ids);
+    }
+
+    public function test_index_returns_assigned_programs_when_token_assigned(): void
+    {
+        $user = User::factory()->create(['site_id' => $this->site->id]);
+        $program = Program::create([
+            'site_id' => $this->site->id,
+            'name' => 'Program Alpha',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $t1 = $this->createToken('A1', 'available');
+        $t2 = $this->createToken('A2', 'available');
+        $program->tokens()->attach($t1->id);
+
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/tokens');
+
+        $response->assertStatus(200);
+        $tokens = $response->json('tokens');
+        $a1 = collect($tokens)->firstWhere('physical_id', 'A1');
+        $this->assertNotNull($a1);
+        $this->assertArrayHasKey('assigned_programs', $a1);
+        $this->assertCount(1, $a1['assigned_programs']);
+        $this->assertSame($program->id, $a1['assigned_programs'][0]['id']);
+        $this->assertSame('Program Alpha', $a1['assigned_programs'][0]['name']);
+        $a2 = collect($tokens)->firstWhere('physical_id', 'A2');
+        $this->assertNotNull($a2);
+        $this->assertEmpty($a2['assigned_programs'] ?? []);
+    }
+
+    public function test_index_filter_by_prefix(): void
+    {
+        $this->createToken('A1', 'available');
+        $this->createToken('A2', 'available');
+        $this->createToken('B1', 'available');
+
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/tokens?prefix=A');
+
+        $response->assertStatus(200);
+        $tokens = $response->json('tokens');
+        $this->assertCount(2, $tokens);
+        $ids = collect($tokens)->pluck('physical_id')->all();
+        $this->assertContains('A1', $ids);
+        $this->assertContains('A2', $ids);
+        $this->assertNotContains('B1', $ids);
+    }
+
+    public function test_index_filter_by_assignment_unassigned(): void
+    {
+        $user = User::factory()->create(['site_id' => $this->site->id]);
+        $program = Program::create([
+            'site_id' => $this->site->id,
+            'name' => 'P',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $t1 = $this->createToken('A1', 'available');
+        $t2 = $this->createToken('A2', 'available');
+        $program->tokens()->attach($t1->id);
+
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/tokens?assignment=unassigned');
+
+        $response->assertStatus(200);
+        $tokens = $response->json('tokens');
+        $this->assertCount(1, $tokens);
+        $this->assertSame('A2', $tokens[0]['physical_id']);
+    }
+
+    public function test_index_filter_by_assignment_global(): void
+    {
+        $t1 = $this->createToken('A1', 'available');
+        $t2 = $this->createToken('A2', 'available');
+        $t1->update(['is_global' => true]);
+
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/tokens?assignment=global');
+
+        $response->assertStatus(200);
+        $tokens = $response->json('tokens');
+        $this->assertCount(1, $tokens);
+        $this->assertSame('A1', $tokens[0]['physical_id']);
+    }
+
+    public function test_index_filter_by_assignment_program_id(): void
+    {
+        $user = User::factory()->create(['site_id' => $this->site->id]);
+        $program = Program::create([
+            'site_id' => $this->site->id,
+            'name' => 'P',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $t1 = $this->createToken('A1', 'available');
+        $t2 = $this->createToken('A2', 'available');
+        $program->tokens()->attach($t1->id);
+
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/tokens?assignment=program_id:'.$program->id);
+
+        $response->assertStatus(200);
+        $tokens = $response->json('tokens');
+        $this->assertCount(1, $tokens);
+        $this->assertSame('A1', $tokens[0]['physical_id']);
+    }
+
+    public function test_index_filter_by_is_global(): void
+    {
+        $t1 = $this->createToken('A1', 'available');
+        $t2 = $this->createToken('A2', 'available');
+        $t1->update(['is_global' => true]);
+
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/tokens?is_global=1');
+
+        $response->assertStatus(200);
+        $tokens = $response->json('tokens');
+        $this->assertCount(1, $tokens);
+        $this->assertSame('A1', $tokens[0]['physical_id']);
+    }
+
+    public function test_index_filter_by_tts_status(): void
+    {
+        $t1 = $this->createToken('A1', 'available');
+        $t2 = $this->createToken('A2', 'available');
+        $t1->update(['tts_status' => 'pre_generated']);
+
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/tokens?tts_status=pre_generated');
+
+        $response->assertStatus(200);
+        $tokens = $response->json('tokens');
+        $this->assertCount(1, $tokens);
+        $this->assertSame('A1', $tokens[0]['physical_id']);
     }
 
     public function test_batch_create_returns_201_with_created_tokens(): void
@@ -175,6 +319,36 @@ class TokenControllerTest extends TestCase
         $this->assertDatabaseHas('tokens', ['physical_id' => 'B1', 'pronounce_as' => 'word']);
     }
 
+    public function test_batch_create_with_is_global_true_sets_global_on_tokens(): void
+    {
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/tokens/batch', [
+            'prefix' => 'G',
+            'count' => 2,
+            'start_number' => 1,
+            'is_global' => true,
+        ]);
+
+        $response->assertStatus(201);
+        $ids = collect($response->json('tokens'))->pluck('id')->all();
+        foreach ($ids as $id) {
+            $this->assertDatabaseHas('tokens', ['id' => $id, 'is_global' => true]);
+        }
+    }
+
+    public function test_batch_create_with_is_global_false_sets_non_global(): void
+    {
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/tokens/batch', [
+            'prefix' => 'N',
+            'count' => 1,
+            'start_number' => 1,
+            'is_global' => false,
+        ]);
+
+        $response->assertStatus(201);
+        $id = $response->json('tokens.0.id');
+        $this->assertDatabaseHas('tokens', ['id' => $id, 'is_global' => false]);
+    }
+
     public function test_batch_create_rejects_invalid_pronounce_as(): void
     {
         $response = $this->actingAs($this->admin)->postJson('/api/admin/tokens/batch', [
@@ -225,8 +399,8 @@ class TokenControllerTest extends TestCase
     public function test_destroy_token_in_use_returns_409(): void
     {
         $token = $this->createToken('A1', 'available');
-        $user = User::factory()->create();
-        $program = \App\Models\Program::create(['name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
+        $user = User::factory()->create(['site_id' => $this->site->id]);
+        $program = \App\Models\Program::create(['site_id' => $this->site->id, 'name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
         $station = \App\Models\Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
         $track = \App\Models\ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
         \App\Models\TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);
@@ -291,8 +465,8 @@ class TokenControllerTest extends TestCase
     {
         $t1 = $this->createToken('A1', 'available');
         $t2 = $this->createToken('A2', 'available');
-        $user = User::factory()->create();
-        $program = \App\Models\Program::create(['name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
+        $user = User::factory()->create(['site_id' => $this->site->id]);
+        $program = \App\Models\Program::create(['site_id' => $this->site->id, 'name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
         $station = \App\Models\Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
         $track = \App\Models\ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
         \App\Models\TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);
@@ -344,8 +518,8 @@ class TokenControllerTest extends TestCase
     public function test_update_in_use_to_deactivated_returns_409(): void
     {
         $token = $this->createToken('A1', 'available');
-        $user = User::factory()->create();
-        $program = \App\Models\Program::create(['name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
+        $user = User::factory()->create(['site_id' => $this->site->id]);
+        $program = \App\Models\Program::create(['site_id' => $this->site->id, 'name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
         $station = \App\Models\Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
         $track = \App\Models\ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
         \App\Models\TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);

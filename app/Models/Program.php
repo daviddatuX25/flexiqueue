@@ -8,15 +8,22 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Str;
 
 class Program extends Model
 {
+    protected $attributes = [
+        'slug' => 'program',
+    ];
+
     protected $fillable = [
         'site_id',
         'name',
+        'slug',
         'description',
         'is_active',
         'is_paused',
+        'is_published',
         'settings',
         'created_by',
     ];
@@ -26,6 +33,7 @@ class Program extends Model
         return [
             'is_active' => 'boolean',
             'is_paused' => 'boolean',
+            'is_published' => 'boolean',
             'settings' => 'array',
         ];
     }
@@ -137,7 +145,7 @@ class Program extends Model
         return $this->settings()->getDisplayTtsRepeatDelayMs();
     }
 
-    /** Per plan: allow public self-serve triage at GET /triage/start. Default false. */
+    /** Per plan: allow public self-serve triage at GET /public-triage. Default false. */
     /** @deprecated Use `$program->settings()->getAllowPublicTriage()` */
     public function getAllowPublicTriage(): bool
     {
@@ -207,9 +215,37 @@ class Program extends Model
         return $this->hasOne(ProgramDiagram::class);
     }
 
+    protected static function booted(): void
+    {
+        static::creating(function (Program $program): void {
+            $base = Str::slug($program->name) ?: 'program';
+            $program->slug = $base;
+            $siteId = $program->site_id;
+            while (static::where('site_id', $siteId)->where('slug', $program->slug)->exists()) {
+                $program->slug = $base.'-'.Str::random(5);
+            }
+        });
+    }
+
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
+    }
+
+    /** Per addition-to-public-site-plan: programs visible on site landing (published and public within site). */
+    public function scopePublished($query)
+    {
+        return $query->where('is_published', true);
+    }
+
+    public function programAccessTokens(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(ProgramAccessToken::class);
+    }
+
+    public function shortLinks(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(SiteShortLink::class, 'program_id');
     }
 
     /**

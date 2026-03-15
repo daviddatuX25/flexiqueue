@@ -12,13 +12,18 @@ use Illuminate\Support\Collection;
 class CheckStatusService
 {
     /**
-     * Get status for a token by qr_code_hash. Returns array suitable for API or Inertia props.
+     * Get status for a token by qr_code_hash. Optionally scope by site_id so tokens are unambiguous across sites.
      *
+     * @param  int|null  $siteId  When set, token must belong to this site (prevents cross-site recognition).
      * @return array{result: 'not_found'|'unavailable'|'available'|'in_use', error?: string, alias?: string, status?: string, ...}
      */
-    public function getStatus(string $qrHash): array
+    public function getStatus(string $qrHash, ?int $siteId = null): array
     {
-        $token = Token::where('qr_code_hash', $qrHash)->first();
+        $query = Token::where('qr_code_hash', $qrHash);
+        if ($siteId !== null) {
+            $query->where('site_id', $siteId);
+        }
+        $token = $query->first();
 
         if (! $token) {
             return [

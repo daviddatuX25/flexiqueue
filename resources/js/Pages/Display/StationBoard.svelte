@@ -3,14 +3,18 @@
 	 * Display/StationBoard.svelte — station-specific informant display (no auth).
 	 * Mute/volume from server and /station/*; real-time via .display_station_settings.
 	 */
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { router } from '@inertiajs/svelte';
+	import Modal from '../../Components/Modal.svelte';
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
 	import { prepareDisplayTts, cancelCurrentAnnouncement, playSegmentAQueued } from '../../lib/displayTts.js';
 	import { toaster } from '../../lib/toaster.js';
 
 let {
 	program_name = null,
+	program_id = null,
+	program_slug = null,
+	site_slug = null,
 	date = '',
 	station_name = '',
 	station_id = 0,
@@ -38,6 +42,174 @@ let connectorPhrase = $state(null);
 	let stationPhrase = $state(null);
 	/** Recent activity: from props + real-time .station_activity; max 20, newest first. */
 	let activityFeed = $state([]);
+	/** Choose device type page URL (for unlock flow). */
+	const chooseUrl = $derived(site_slug && program_slug ? `/site/${site_slug}/program/${program_slug}/devices` : null);
+	let showUnlockModal = $state(false);
+	let unlockAuthMode = $state('pin');
+	let unlockPin = $state('');
+	let unlockRequestId = $state(null);
+	let unlockRequestToken = $state(null);
+	let unlockRequestState = $state('idle');
+	let unlockPollIntervalId = null;
+	let unlockLoading = $state(false);
+	let beforeUnloadHandler = null;
+
+	function getCsrfToken() {
+		const meta = typeof document !== 'undefined' ? document.querySelector('meta[name="csrf-token"]') : null;
+		return (meta && meta.getAttribute('content')) || '';
+	}
+	const DEVICE_UNLOCK_REQUEST_QR_PREFIX = 'flexiqueue:device_unlock_request:';
+
+	async function cancelUnlockRequestOnLeave() {
+		if (unlockRequestId != null && unlockRequestToken) {
+			try {
+				await fetch(`/api/public/device-unlock-requests/${unlockRequestId}/cancel`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': getCsrfToken(), Accept: 'application/json' },
+					credentials: 'include',
+					body: JSON.stringify({ request_token: unlockRequestToken }),
+				});
+			} catch {}
+		}
+	}
+
+	async function createUnlockRequest() {
+		if (!program_id || !chooseUrl || unlockLoading) return;
+		unlockLoading = true;
+		unlockRequestState = 'idle';
+		unlockRequestId = null;
+		unlockRequestToken = null;
+		if (unlockPollIntervalId) {
+			clearInterval(unlockPollIntervalId);
+			unlockPollIntervalId = null;
+		}
+		try {
+			const res = await fetch('/api/public/device-unlock-requests', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-CSRF-TOKEN': getCsrfToken(),
+					'X-Requested-With': 'XMLHttpRequest',
+				},
+				credentials: 'include',
+				body: JSON.stringify({ program_id }),
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				toaster.error({ title: data.message || 'Failed to create unlock request.' });
+				return;
+			}
+			unlockRequestId = data.id;
+			unlockRequestToken = data.request_token;
+			unlockRequestState = 'waiting';
+			const id = data.id;
+			const token = data.request_token;
+			unlockPollIntervalId = setInterval(async () => {
+				try {
+					const r = await fetch(`/api/public/device-unlock-requests/${id}?token=${encodeURIComponent(token)}`, { credentials: 'include' });
+					const d = await r.json().catch(() => ({}));
+					if (d.status === 'approved') {
+						if (unlockPollIntervalId) clearInterval(unlockPollIntervalId);
+						unlockPollIntervalId = null;
+						unlockRequestId = null;
+						unlockRequestToken = null;
+						showUnlockModal = false;
+						unlockRequestState = 'idle';
+						toaster.success({ title: 'Device unlocked.' });
+						const consumeRes = await fetch(`/api/public/device-unlock-requests/${id}/consume`, {
+							method: 'POST',
+							credentials: 'include',
+							headers: {
+								'X-CSRF-TOKEN': getCsrfToken(),
+								'Content-Type': 'application/json',
+								Accept: 'application/json',
+							},
+							body: JSON.stringify({ request_token: token }),
+						});
+						const consumeData = await consumeRes.json().catch(() => ({}));
+						if (consumeRes.ok && consumeData.redirect_url) {
+							sessionStorage.removeItem('device_lock_redirect_url');
+							router.visit(consumeData.redirect_url, { replace: true });
+						} else {
+							router.visit(chooseUrl, { replace: true });
+						}
+					} else if (d.status === 'rejected' || d.status === 'cancelled') {
+						if (unlockPollIntervalId) clearInterval(unlockPollIntervalId);
+						unlockPollIntervalId = null;
+						unlockRequestId = null;
+						unlockRequestToken = null;
+						unlockRequestState = 'idle';
+						toaster.warning({ title: d.status === 'rejected' ? 'Request was rejected.' : 'Request was cancelled.' });
+					}
+				} catch {}
+			}, 2000);
+		} finally {
+			unlockLoading = false;
+		}
+	}
+
+	function cancelUnlockRequest() {
+		unlockRequestState = 'idle';
+		unlockRequestId = null;
+		unlockRequestToken = null;
+		unlockAuthMode = 'pin';
+		unlockPin = '';
+		if (unlockPollIntervalId) {
+			clearInterval(unlockPollIntervalId);
+			unlockPollIntervalId = null;
+		}
+		showUnlockModal = false;
+	}
+
+	async function submitUnlockWithPin() {
+		const trimmed = unlockPin.replace(/\D/g, '').slice(0, 6);
+		if (trimmed.length !== 6) {
+			toaster.warning({ title: 'Enter a 6-digit PIN.' });
+			return;
+		}
+		unlockLoading = true;
+		try {
+			const res = await fetch('/api/public/device-unlock-with-auth', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-CSRF-TOKEN': getCsrfToken(),
+					'X-Requested-With': 'XMLHttpRequest',
+				},
+				credentials: 'include',
+				body: JSON.stringify({ pin: trimmed }),
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				toaster.error({ title: data.message || 'Unlock failed.' });
+				return;
+			}
+			toaster.success({ title: 'Device unlocked.' });
+			sessionStorage.removeItem('device_lock_redirect_url');
+			if (data.redirect_url) {
+				showUnlockModal = false;
+				router.visit(data.redirect_url, { replace: true });
+			}
+		} catch {
+			toaster.error({ title: 'Network error. Try again.' });
+		} finally {
+			unlockLoading = false;
+		}
+	}
+
+	onDestroy(() => {
+		cancelUnlockRequestOnLeave();
+		if (typeof window !== 'undefined' && beforeUnloadHandler) {
+			window.removeEventListener('beforeunload', beforeUnloadHandler);
+		}
+	});
+
+	onMount(() => {
+		beforeUnloadHandler = () => cancelUnlockRequestOnLeave();
+		window.addEventListener('beforeunload', beforeUnloadHandler);
+	});
 
 	$effect(() => {
 		muted = !!display_audio_muted;
@@ -77,9 +249,19 @@ let connectorPhrase = $state(null);
 		});
 	}
 
+	/** Actions that actually change the displayed queue state — gate full reload on these only (per docs/necessary-fix.md). */
+	const QUEUE_CHANGING_ACTIONS = new Set([
+		'bind', 'call', 'serve', 'transfer', 'complete',
+		'cancel', 'hold', 'resume', 'no_show', 'enqueue_back',
+		'force_complete', 'override'
+	]);
+
 	function handleStationActivity(e) {
 		if (Number(e?.station_id) !== Number(station_id)) {
-			refreshStationData();
+			// Different station — only reload if queue-relevant
+			if (QUEUE_CHANGING_ACTIONS.has(e?.action_type)) {
+				refreshStationData();
+			}
 			return;
 		}
 		const item = {
@@ -100,10 +282,13 @@ let connectorPhrase = $state(null);
 				},
 			});
 		}
-		refreshStationData();
+		// Only reload for queue-changing events
+		if (QUEUE_CHANGING_ACTIONS.has(e?.action_type)) {
+			refreshStationData();
+		}
 	}
 
-	onMount(() => {
+onMount(() => {
 		prepareDisplayTts();
 		if (typeof window === 'undefined' || !window.Echo || !station_id) {
 			if (typeof window !== 'undefined') {
@@ -128,10 +313,23 @@ let connectorPhrase = $state(null);
 	});
 </script>
 
+<svelte:head>
+	<title>{station_name ? station_name + ' — FlexiQueue' : 'Station Display — FlexiQueue'}</title>
+</svelte:head>
+
 <DisplayLayout programName={program_name} {date}>
 	<div class="flex flex-col gap-6 max-w-4xl mx-auto">
-		<header>
+		<header class="flex items-center justify-between gap-2">
 			<h1 class="text-2xl font-bold text-surface-950">{station_name}</h1>
+			{#if chooseUrl}
+				<button
+					type="button"
+					class="btn preset-tonal text-sm touch-target-h"
+					onclick={() => (showUnlockModal = true)}
+				>
+					Change device type
+				</button>
+			{/if}
 		</header>
 
 		<!-- Balance mode: how queue is served at this station (per flexiqueue-syam). -->
@@ -317,4 +515,87 @@ let connectorPhrase = $state(null);
 			</div>
 		{/if}
 	</div>
+
+	<Modal open={showUnlockModal} title="Unlock device" onClose={cancelUnlockRequest}>
+		{#snippet children()}
+			<div class="flex flex-col gap-4">
+				<p class="text-sm text-surface-600 dark:text-slate-400">
+					Use the same PIN or QR as when entering. Enter supervisor PIN or show QR for them to scan.
+				</p>
+				{#if unlockRequestState === 'waiting' && unlockRequestId != null && unlockRequestToken}
+					<p class="text-sm font-medium text-surface-950">Waiting for approval…</p>
+					<div class="flex justify-center">
+						<img
+							class="rounded-container border border-surface-200 bg-white p-2"
+							alt="QR for supervisor to scan"
+							width="200"
+							height="200"
+							src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(DEVICE_UNLOCK_REQUEST_QR_PREFIX + unlockRequestId + ':' + unlockRequestToken)}`}
+						/>
+					</div>
+					<button type="button" class="btn preset-tonal btn-sm touch-target-h" onclick={cancelUnlockRequest}>
+						Cancel request
+					</button>
+				{:else}
+					<div class="flex gap-2">
+						<button
+							type="button"
+							class="btn btn-sm flex-1 touch-target-h {unlockAuthMode === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+							onclick={() => (unlockAuthMode = 'pin')}
+						>
+							PIN
+						</button>
+						<button
+							type="button"
+							class="btn btn-sm flex-1 touch-target-h {unlockAuthMode === 'request' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+							onclick={() => (unlockAuthMode = 'request')}
+						>
+							QR
+						</button>
+					</div>
+					{#if unlockAuthMode === 'pin'}
+						<form
+							class="flex flex-col gap-3"
+							onsubmit={(e) => {
+								e.preventDefault();
+								submitUnlockWithPin();
+							}}
+						>
+							<label class="block">
+								<span class="text-sm font-medium text-surface-700 dark:text-slate-300">Supervisor PIN</span>
+								<input
+									type="password"
+									inputmode="numeric"
+									pattern="[0-9]*"
+									maxlength="6"
+									autocomplete="one-time-code"
+									class="input w-full mt-1"
+									placeholder="6-digit PIN"
+									bind:value={unlockPin}
+									disabled={unlockLoading}
+								/>
+							</label>
+							<button type="submit" class="btn preset-filled-primary-500" disabled={unlockLoading}>
+								{unlockLoading ? 'Unlocking…' : 'Unlock'}
+							</button>
+						</form>
+					{:else}
+						<button
+							type="button"
+							class="btn preset-filled-primary-500"
+							disabled={unlockLoading}
+							onclick={createUnlockRequest}
+						>
+							{unlockLoading ? 'Creating…' : 'Show QR for supervisor to scan'}
+						</button>
+					{/if}
+				{/if}
+				{#if unlockRequestState !== 'waiting'}
+					<button type="button" class="btn preset-tonal" onclick={cancelUnlockRequest}>
+						Cancel
+					</button>
+				{/if}
+			</div>
+		{/snippet}
+	</Modal>
 </DisplayLayout>

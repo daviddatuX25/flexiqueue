@@ -29,7 +29,8 @@ class TokenPrintController extends Controller
     public function __invoke(Request $request): Response
     {
         $tokens = $this->resolveTokens($request);
-        $saved = $this->printSettingRepository->getInstance();
+        $siteId = $request->user()?->site_id;
+        $saved = $this->printSettingRepository->getInstance($siteId);
 
         $cardsPerPage = $request->has('cards_per_page')
             ? max(4, min(8, (int) $request->query('cards_per_page', 6)))
@@ -79,16 +80,32 @@ class TokenPrintController extends Controller
         ]);
     }
 
+    /**
+     * Per site-scoping-migration-spec §2: token list for print scoped by auth user's site_id.
+     */
     private function resolveTokens(Request $request): Collection
     {
+        $user = $request->user();
+        $siteId = $user->site_id;
+        if ($siteId === null && ! $user->isSuperAdmin()) {
+            return collect();
+        }
+
+        $query = Token::query()->orderBy('physical_id');
+        if ($siteId !== null) {
+            $query->forSite($siteId);
+        }
+
         $ids = $request->query('ids');
         if (is_string($ids) && $ids !== '') {
             $idList = array_map('intval', array_filter(explode(',', $ids)));
             if ($idList !== []) {
-                return Token::query()->whereIn('id', $idList)->orderBy('physical_id')->get();
+                $query->whereIn('id', $idList);
+
+                return $query->get();
             }
         }
 
-        return Token::query()->orderBy('physical_id')->limit(50)->get();
+        return $query->limit(50)->get();
     }
 }

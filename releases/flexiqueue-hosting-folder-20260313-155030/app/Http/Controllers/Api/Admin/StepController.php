@@ -1,0 +1,151 @@
+<?php
+
+namespace App\Http\Controllers\Api\Admin;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\ReorderTrackStepsRequest;
+use App\Http\Requests\StoreTrackStepRequest;
+use App\Http\Requests\UpdateTrackStepRequest;
+use App\Models\Session;
+use App\Models\ServiceTrack;
+use App\Models\TrackStep;
+use Illuminate\Http\JsonResponse;
+
+/**
+ * Per 08-API-SPEC-PHASE1 §5.4: Track Step CRUD + reorder. Steps ordered by step_order; contiguous (1,2,3...).
+ */
+class StepController extends Controller
+{
+    /**
+     * List steps for track (ordered).
+     */
+    public function index(ServiceTrack $track): JsonResponse
+    {
+        $steps = $track->trackSteps()->get()->map(fn (TrackStep $s) => $this->stepResource($s));
+
+        return response()->json(['steps' => $steps]);
+    }
+
+    /**
+     * Add step. If step_order omitted, append at end. Enforces contiguous step_order after.
+     */
+    public function store(StoreTrackStepRequest $request, ServiceTrack $track): JsonResponse
+    {
+        $data = $request->validated();
+        if (! isset($data['step_order'])) {
+            $max = $track->trackSteps()->max('step_order') ?? 0;
+            $data['step_order'] = $max + 1;
+        }
+        $step = $track->trackSteps()->create($data);
+        $this->normalizeStepOrder($track);
+
+        return response()->json(['step' => $this->stepResource($step->fresh())], 201);
+    }
+
+    /**
+     * Update step. Re-normalize step_order if changed.
+     */
+    public function update(UpdateTrackStepRequest $request, TrackStep $step): JsonResponse
+    {
+        $step->update($request->validated());
+        $this->normalizeStepOrder($step->serviceTrack);
+
+        return response()->json(['step' => $this->stepResource($step->fresh())]);
+    }
+
+    /**
+     * Delete step and reorder remaining to contiguous 1,2,3...
+     */
+    public function destroy(TrackStep $step): JsonResponse
+    {
+        $track = $step->serviceTrack;
+        $step->delete();
+        $this->normalizeStepOrder($track);
+
+        return response()->json(null, 204);
+    }
+
+    /**
+     * Reorder by step_ids array; new step_order = index+1.
+     * Use temporary offset to avoid unique (track_id, step_order) constraint during update.
+     *
+     * If migrate_sessions=true and track has active sessions, remap each session's
+     * current_step_order to the new step that has their current_station_id.
+     */
+    public function reorder(ReorderTrackStepsRequest $request, ServiceTrack $track): JsonResponse
+    {
+        $validated = $request->validated();
+        $stepIds = $validated['step_ids'];
+        $migrateSessions = (bool) ($validated['migrate_sessions'] ?? false);
+
+        $offset = 10000;
+        foreach ($track->trackSteps as $step) {
+            $step->update(['step_order' => $offset + $step->id]);
+        }
+        foreach ($stepIds as $i => $id) {
+            TrackStep::where('id', $id)->where('track_id', $track->id)->update(['step_order' => $i + 1]);
+        }
+
+        if ($migrateSessions) {
+            $this->migrateSessionsToNewOrder($track);
+        }
+
+        $steps = $track->trackSteps()->get()->map(fn (TrackStep $s) => $this->stepResource($s));
+
+        return response()->json(['steps' => $steps]);
+    }
+
+    /**
+     * Remap active sessions' current_step_order to match new step order.
+     * Per PROCESS-STATION-REFACTOR: session keeps current_station_id; map to step whose process includes that station.
+     */
+    private function migrateSessionsToNewOrder(ServiceTrack $track): void
+    {
+        // Build station_id => step_order map via station_process pivot
+        $stepsByStation = [];
+        $rows = \Illuminate\Support\Facades\DB::table('track_steps')
+            ->join('station_process', 'track_steps.process_id', '=', 'station_process.process_id')
+            ->where('track_steps.track_id', $track->id)
+            ->select('track_steps.step_order', 'station_process.station_id')
+            ->get();
+        foreach ($rows as $row) {
+            $stepsByStation[(int) $row->station_id] = (int) $row->step_order;
+        }
+
+        Session::active()
+            ->where('track_id', $track->id)
+            ->each(function (Session $session) use ($stepsByStation): void {
+                $stepOrder = $stepsByStation[(int) $session->current_station_id] ?? null;
+                if ($stepOrder !== null) {
+                    $session->update(['current_step_order' => $stepOrder]);
+                }
+            });
+    }
+
+    private function stepResource(TrackStep $step): array
+    {
+        $step->load('process');
+
+        return [
+            'id' => $step->id,
+            'track_id' => $step->track_id,
+            'process_id' => $step->process_id,
+            'process_name' => $step->process?->name,
+            'step_order' => $step->step_order,
+            'is_required' => $step->is_required,
+            'estimated_minutes' => $step->estimated_minutes,
+            'created_at' => $step->created_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Make step_order contiguous (1, 2, 3...) for the track.
+     */
+    private function normalizeStepOrder(ServiceTrack $track): void
+    {
+        $steps = $track->trackSteps()->orderBy('step_order')->get();
+        foreach ($steps as $i => $s) {
+            $s->update(['step_order' => $i + 1]);
+        }
+    }
+}

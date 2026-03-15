@@ -44,7 +44,10 @@ class TokenPrintService
             }
 
             try {
-                $url = $baseUrl.'/display/status/'.$hash;
+                // Per site-scoping: encode site_id in QR URL so token is unambiguous across sites.
+                $url = $token->site_id !== null
+                    ? $baseUrl.'/display/status/'.(int) $token->site_id.'/'.$hash
+                    : $baseUrl.'/display/status/'.$hash;
                 $qrDataUri = $this->generateQrDataUri($url);
             } catch (\Throwable $e) {
                 $skipReasons[$token->id] = 'qr_generation_failed';

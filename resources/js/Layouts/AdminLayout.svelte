@@ -21,6 +21,7 @@
         ShieldCheck,
         IdCard,
         Building2,
+        ChevronDown,
     } from "lucide-svelte";
     import StatusFooter from "./StatusFooter.svelte";
     import FlexiQueueToaster from "../Components/FlexiQueueToaster.svelte";
@@ -29,8 +30,13 @@
     import OfflineBanner from "../Components/OfflineBanner.svelte";
     import UserAvatar from "../Components/UserAvatar.svelte";
     import AppBackground from "../Components/AppBackground.svelte";
+    import LogoutConfirm from "../Components/LogoutConfirm.svelte";
 
     let { children } = $props();
+    let showLogoutConfirm = $state(false);
+    /** Sidebar user menu: drop-up with Profile and Log out (per ui-ux-tasks-checklist) */
+    let userMenuOpen = $state(false);
+    let userMenuWrapEl = $state(null);
 
     const pageStore = usePage();
     const user = $derived($pageStore.props?.auth?.user ?? null);
@@ -59,11 +65,40 @@
         { href: "/admin/sites", label: "Sites", icon: Building2 },
         { href: "/admin/logs", label: "Audit log", icon: BarChart3 },
         { href: "/admin/analytics", label: "Analytics", icon: PieChart },
-        { href: "/admin/settings", label: "System", icon: Settings },
+        { href: "/admin/settings", label: "Configuration", icon: Settings },
     ];
+    // Super-admin sees full nav including Sites index; site-scoped admin gets a single "Site settings" link to their own site show page.
     const navItems = $derived(
-        isSuperAdmin ? allNavItems.filter((item) => superAdminNavHrefs.includes(item.href)) : allNavItems,
+        isSuperAdmin
+            ? allNavItems.filter((item) => superAdminNavHrefs.includes(item.href))
+            : (() => {
+                const baseItems = allNavItems.filter((item) => item.href !== '/admin/sites');
+                if (user?.site_id != null) {
+                    const siteSettingsItem = { href: `/admin/sites/${user.site_id}`, label: 'Site settings', icon: Building2 };
+                    const staffIndex = baseItems.findIndex((item) => item.href === '/admin/users');
+                    const insertAt = staffIndex >= 0 ? staffIndex + 1 : baseItems.length;
+                    return [...baseItems.slice(0, insertAt), siteSettingsItem, ...baseItems.slice(insertAt)];
+                }
+                return baseItems;
+            })(),
     );
+
+    /** Close user menu on click outside */
+    $effect(() => {
+        if (!userMenuOpen || typeof document === 'undefined') return;
+        const fn = (e) => {
+            if (userMenuWrapEl && !userMenuWrapEl.contains(e.target)) userMenuOpen = false;
+        };
+        document.addEventListener('click', fn, true);
+        return () => document.removeEventListener('click', fn, true);
+    });
+    /** Close user menu on Escape */
+    $effect(() => {
+        if (!userMenuOpen || typeof document === 'undefined') return;
+        const fn = (e) => { if (e.key === 'Escape') userMenuOpen = false; };
+        document.addEventListener('keydown', fn);
+        return () => document.removeEventListener('keydown', fn);
+    });
 </script>
 
 <div class="flex flex-col h-screen overflow-hidden bg-transparent">
@@ -87,8 +122,10 @@
                 class="fixed inset-0 bg-black/50 z-30 lg:hidden"
                 aria-label="Close sidebar"
             ></label>
+            <!-- h-full so sidebar fills height; pb-20 so avatar+name sits above fixed StatusFooter (mobile + desktop) -->
+            <!-- Per ui-ux-tasks-checklist: sidebar — no unintended gray tint; theme vars only, solid on desktop -->
             <aside
-                class="relative z-40 w-72 min-h-full flex flex-col bg-surface-50/70 dark:bg-slate-900/80 backdrop-blur-xl md:backdrop-blur-none md:bg-surface-50/95 md:dark:bg-slate-900/95 border-r border-surface-200 shadow-sm"
+                class="relative z-40 w-72 h-full min-h-0 flex flex-col bg-surface-50 dark:bg-slate-900 border-r border-surface-200 shadow-sm pb-20 md:bg-surface-50 md:dark:bg-slate-900"
             >
                 <!-- Brand header -->
                 <div
@@ -118,9 +155,9 @@
                     </label>
                 </div>
 
-                <!-- Nav -->
+                <!-- Nav — padding so sidebar content doesn't overlap footer; scrollbar hidden -->
                 <nav
-                    class="flex-1 overflow-y-auto p-4 space-y-1"
+                    class="fq-sidebar-nav flex-1 overflow-y-auto p-4 pb-8 space-y-1"
                     aria-label="Main"
                 >
                     <p
@@ -148,46 +185,63 @@
                     {/each}
                 </nav>
 
-                <!-- User footer -->
+                <!-- User footer: photo + name; click opens drop-up with Profile and Log out. Top bar kept separate. -->
                 <div
-                    class="p-4 border-t border-surface-200 flex flex-col gap-3 shrink-0"
+                    class="relative p-4 border-t border-surface-200 shrink-0"
+                    bind:this={userMenuWrapEl}
                 >
-                    <div class="flex items-center gap-3 px-2 py-1.5 rounded-xl">
+                    <button
+                        type="button"
+                        class="w-full flex items-center gap-3 px-2 py-2 rounded-xl text-surface-700 hover:bg-surface-200 hover:text-surface-950 dark:hover:bg-slate-700 dark:hover:text-slate-100 font-medium transition-colors touch-target-h border-0 bg-transparent cursor-pointer text-left"
+                        onclick={() => (userMenuOpen = !userMenuOpen)}
+                        aria-haspopup="menu"
+                        aria-expanded={userMenuOpen}
+                        aria-label="User menu"
+                    >
                         <UserAvatar {user} size="md" />
                         <div class="flex-1 min-w-0">
-                            <p
-                                class="text-sm font-semibold text-surface-950 truncate"
-                            >
+                            <p class="text-sm font-semibold text-surface-950 dark:text-slate-100 truncate">
                                 {user?.name ?? "—"}
                             </p>
-                            <p class="text-xs text-surface-600 truncate">
+                            <p class="text-xs text-surface-600 dark:text-slate-400 truncate">
                                 {user?.email ?? ""}
                             </p>
                         </div>
-                    </div>
-                    <div class="flex flex-col gap-1.5">
-                        <Link
-                            href="/profile"
-                            class="flex items-center gap-3 px-4 py-2.5 rounded-xl text-surface-700 hover:bg-surface-200 hover:text-surface-950 font-medium transition-colors touch-target-h"
+                        <ChevronDown
+                            class="w-4 h-4 shrink-0 text-surface-500 transition-transform {userMenuOpen ? 'rotate-180' : ''}"
+                            aria-hidden="true"
+                        />
+                    </button>
+                    {#if userMenuOpen}
+                        <ul
+                            role="menu"
+                            class="absolute left-2 right-2 bottom-full mb-1 py-1 rounded-lg border border-surface-200 dark:border-slate-600 bg-surface-50 dark:bg-slate-800 shadow-lg z-[60]"
+                            aria-label="User menu"
                         >
-                            <User
-                                class="w-5 h-5 shrink-0 opacity-70"
-                                aria-hidden="true"
-                            />
-                            <span>Profile</span>
-                        </Link>
-                        <button
-                            type="button"
-                            class="flex items-center gap-3 px-4 py-2.5 rounded-xl text-surface-700 hover:bg-surface-200 hover:text-surface-950 font-medium transition-colors touch-target-h w-full text-left border-0 bg-transparent cursor-pointer"
-                            onclick={() => router.post("/logout")}
-                        >
-                            <LogOut
-                                class="w-5 h-5 shrink-0 opacity-70"
-                                aria-hidden="true"
-                            />
-                            <span>Log out</span>
-                        </button>
-                    </div>
+                            <li role="none">
+                                <Link
+                                    href="/profile"
+                                    role="menuitem"
+                                    class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-surface-700 dark:text-slate-200 hover:bg-surface-200 dark:hover:bg-slate-700 font-medium transition-colors touch-target-h no-underline w-full text-left"
+                                    onclick={() => (userMenuOpen = false)}
+                                >
+                                    <User class="w-5 h-5 shrink-0 opacity-70" aria-hidden="true" />
+                                    <span>Profile</span>
+                                </Link>
+                            </li>
+                            <li role="none">
+                                <button
+                                    type="button"
+                                    role="menuitem"
+                                    class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-surface-700 dark:text-slate-200 hover:bg-surface-200 dark:hover:bg-slate-700 font-medium transition-colors touch-target-h w-full text-left border-0 bg-transparent cursor-pointer"
+                                    onclick={() => { userMenuOpen = false; showLogoutConfirm = true; }}
+                                >
+                                    <LogOut class="w-5 h-5 shrink-0 opacity-70" aria-hidden="true" />
+                                    <span>Log out</span>
+                                </button>
+                            </li>
+                        </ul>
+                    {/if}
                 </div>
             </aside>
         </div>
@@ -226,19 +280,11 @@
                         />
                         <span class="capitalize">{roleLabel}</span>
                     </span>
-                    <button
-                        type="button"
-                        class="flex items-center gap-2 px-3 py-2 rounded-lg text-surface-700 hover:bg-surface-200 hover:text-surface-950 font-medium transition-colors touch-target-h border-0 bg-transparent cursor-pointer"
-                        onclick={() => router.post("/logout")}
-                        title="Log out"
-                    >
-                        <LogOut class="w-5 h-5 shrink-0 opacity-70" aria-hidden="true" />
-                        <span class="hidden sm:inline">Log out</span>
-                    </button>
                 </div>
             </header>
 
-            <main class="flex-1 min-h-0 overflow-y-auto p-6 pb-24 max-w-7xl">
+            <!-- Per ui-ux-tasks-checklist: consistent margins — same vertical/horizontal rhythm across admin pages -->
+            <main class="fq-main-scroll flex-1 min-h-0 overflow-y-scroll py-6 px-4 sm:px-6 lg:px-8 pb-24 max-w-7xl mx-auto w-full">
                 {#if children}
                     {@render children()}
                 {/if}
@@ -248,6 +294,7 @@
         </div>
     </div>
 
+    <LogoutConfirm open={showLogoutConfirm} onClose={() => (showLogoutConfirm = false)} />
     <FlexiQueueToaster />
     <FlashToToast />
 </div>

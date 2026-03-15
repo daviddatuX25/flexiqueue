@@ -40,7 +40,7 @@ class UpdateProgramDefaultSettingsRequest extends FormRequest
             'settings.display_tts_repeat_delay_ms' => ['sometimes', 'integer', 'min:500', 'max:10000'],
             'settings.allow_public_triage' => ['sometimes', 'boolean'],
             'settings.allow_unverified_entry' => ['sometimes', 'boolean'],
-            'settings.identity_binding_mode' => ['sometimes', 'string', 'in:disabled,optional,required'],
+            'settings.identity_binding_mode' => ['sometimes', 'string', 'in:disabled,required'],
             'settings.enable_display_hid_barcode' => ['sometimes', 'boolean'],
             'settings.enable_public_triage_hid_barcode' => ['sometimes', 'boolean'],
             'settings.enable_display_camera_scanner' => ['sometimes', 'boolean'],

@@ -598,6 +598,7 @@ class SessionController extends Controller
         // Per flexiqueue-i87: When program has require_permission_before_override OFF, accept reason only (no PIN/QR).
         $session->loadMissing('program');
         $program = $session->program;
+        $customSteps = $this->sanitizeCustomSteps($request->validated('custom_steps'));
         if ($program && ! $program->settings()->getRequirePermissionBeforeOverride()) {
             try {
                 $result = $this->sessionService->overrideByTrack(
@@ -606,7 +607,30 @@ class SessionController extends Controller
                     $request->validated('reason') ?? '',
                     $staffUserId,
                     $staffUserId,
-                    $this->sanitizeCustomSteps($request->validated('custom_steps'))
+                    $customSteps
+                );
+            } catch (\InvalidArgumentException $e) {
+                $code = $e->getCode() ?: 409;
+
+                return response()->json(['message' => $e->getMessage()], (int) $code);
+            }
+
+            return response()->json([
+                'session' => SessionResource::make($result['session'])->resolve(),
+                'override' => $result['override'],
+            ]);
+        }
+
+        // Predefined track (no custom path): staff can override without reason or PIN/QR/Request.
+        if ($program && $request->filled('target_track_id') && ($customSteps === null || count($customSteps) === 0)) {
+            try {
+                $result = $this->sessionService->overrideByTrack(
+                    $session,
+                    (int) $request->validated('target_track_id'),
+                    $request->validated('reason') ?? '',
+                    $staffUserId,
+                    $staffUserId,
+                    $customSteps
                 );
             } catch (\InvalidArgumentException $e) {
                 $code = $e->getCode() ?: 409;
@@ -675,14 +699,16 @@ class SessionController extends Controller
 
     /**
      * Look up token by physical_id or qr_hash for triage entry. Returns physical_id, qr_hash, status.
+     * Per site-scoping: when user has site_id, only tokens from that site are returned.
      * Per ISSUES-ELABORATION §11: logs each scan attempt to triage_scan_log (result not_found = potentially fabricated).
      */
     public function tokenLookup(Request $request): JsonResponse
     {
         $physicalId = $request->query('physical_id');
         $qrHash = $request->query('qr_hash');
+        $siteId = $request->user()?->site_id;
 
-        $token = $this->tokenService->lookupByPhysicalOrHash($physicalId, $qrHash);
+        $token = $this->tokenService->lookupByPhysicalOrHash($physicalId, $qrHash, $siteId);
 
         $shouldLog = (is_string($physicalId) && $physicalId !== '') || (is_string($qrHash) && $qrHash !== '');
 

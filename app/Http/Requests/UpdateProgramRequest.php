@@ -42,7 +42,7 @@ class UpdateProgramRequest extends FormRequest
             'settings.allow_public_triage' => ['sometimes', 'boolean'],
             // Per identity-registration plan: when true, public triage may create a session alongside an identity registration (unverified). Default false.
             'settings.allow_unverified_entry' => ['sometimes', 'boolean'],
-            'settings.identity_binding_mode' => ['sometimes', 'string', 'in:disabled,optional,required'],
+            'settings.identity_binding_mode' => ['sometimes', 'string', 'in:disabled,required'],
             'settings.enable_display_hid_barcode' => ['sometimes', 'boolean'],
             'settings.enable_public_triage_hid_barcode' => ['sometimes', 'boolean'],
             'settings.enable_display_camera_scanner' => ['sometimes', 'boolean'],
@@ -63,6 +63,12 @@ class UpdateProgramRequest extends FormRequest
             'settings.tts.connector.languages.ilo.voice_id' => ['nullable', 'string', 'max:200'],
             'settings.tts.connector.languages.ilo.rate' => ['nullable', 'numeric', 'between:0.5,2.0'],
             'settings.tts.connector.languages.ilo.connector_phrase' => ['nullable', 'string', 'max:255'],
+            // Per addition-to-public-site-plan: public page and program key
+            'is_published' => ['sometimes', 'boolean'],
+            'settings.public_access_key' => ['sometimes', 'nullable', 'string', 'max:20', 'regex:/^[a-zA-Z0-9\-]+$/'],
+            'settings.public_access_expiry_hours' => ['sometimes', 'integer', 'min:1', 'max:168'],
+            'settings.page_description' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'settings.page_announcement' => ['sometimes', 'nullable', 'string', 'max:200'],
         ];
     }
 }

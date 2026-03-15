@@ -13,12 +13,11 @@ class ClientIdAuditLog extends Model
 
     protected $fillable = [
         'client_id',
-        'client_id_document_id',
+        'identity_registration_id',
         'staff_user_id',
         'action',
+        'mobile_last2',
         'reason',
-        'id_type',
-        'id_last4',
         'created_at',
     ];
 
@@ -27,9 +26,9 @@ class ClientIdAuditLog extends Model
         return $this->belongsTo(Client::class);
     }
 
-    public function document(): BelongsTo
+    public function identityRegistration(): BelongsTo
     {
-        return $this->belongsTo(ClientIdDocument::class, 'client_id_document_id');
+        return $this->belongsTo(IdentityRegistration::class);
     }
 
     public function staffUser(): BelongsTo

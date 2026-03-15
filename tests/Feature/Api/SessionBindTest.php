@@ -4,7 +4,6 @@ namespace Tests\Feature\Api;
 
 use App\Events\StationActivity;
 use App\Models\Client;
-use App\Models\ClientIdDocument;
 use App\Models\Process;
 use App\Models\Program;
 use App\Models\ServiceTrack;
@@ -192,13 +191,12 @@ class SessionBindTest extends TestCase
 
     public function test_bind_returns_409_when_client_already_has_active_session(): void
     {
-        $client = Client::factory()->create();
-        $idDocument = ClientIdDocument::create([
-            'client_id' => $client->id,
-            'id_type' => 'PhilHealth',
-            'id_number_encrypted' => encrypt('1234567890'),
-            'id_number_hash' => 'hash',
-        ]);
+        $clientService = app(\App\Services\ClientService::class);
+        $site = \App\Models\Site::firstOrCreate(
+            ['slug' => 'default'],
+            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make('key'), 'settings' => [], 'edge_settings' => []]
+        );
+        $client = $clientService->createClient('Juan', 'Cruz', '1985-01-01', $site->id, '09171234567');
 
         $firstToken = new Token;
         $firstToken->qr_code_hash = hash('sha256', Str::random(32).'B1');
@@ -232,8 +230,7 @@ class SessionBindTest extends TestCase
             'client_category' => 'Regular',
             'client_binding' => [
                 'client_id' => $client->id,
-                'source' => 'existing_id_document',
-                'id_document_id' => $idDocument->id,
+                'source' => 'phone_match',
             ],
         ]);
 

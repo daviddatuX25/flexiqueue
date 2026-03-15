@@ -1,14 +1,17 @@
 <script lang="ts">
     import AdminLayout from "../../../Layouts/AdminLayout.svelte";
+    import AdminTable from "../../../Components/AdminTable.svelte";
     import Modal from "../../../Components/Modal.svelte";
     import ConfirmModal from "../../../Components/ConfirmModal.svelte";
     import FlowDiagram from "../../../Components/FlowDiagram.svelte";
+    import QrDisplay from "../../../Components/QrDisplay.svelte";
     import DiagramCanvas from "../../../Components/ProgramDiagram/DiagramCanvas.svelte";
     import { get } from "svelte/store";
     import { onMount } from "svelte";
     import { Link, router, usePage } from "@inertiajs/svelte";
     import { toaster } from "../../../lib/toaster.js";
-    import { ensureVoicesLoaded, speakSample } from "../../../lib/speechUtils.js";
+    import { compressImage, HERO_BANNER_PRESET } from "../../../lib/imageUtils.js";
+    import { ensureVoicesLoaded, speakSample, speakSampleAsync } from "../../../lib/speechUtils.js";
 
     import {
         Plus,
@@ -39,11 +42,13 @@
         ChevronRight,
         Volume2,
         Key,
+        XCircle,
     } from "lucide-svelte";
 
     interface ProgramItem {
         id: number;
         name: string;
+        slug?: string;
         description: string | null;
         is_active: boolean;
         is_paused?: boolean;
@@ -68,19 +73,27 @@
             display_tts_repeat_count?: number;
             /** Delay between repeated announcements in ms (500–10000). Default 2000. */
             display_tts_repeat_delay_ms?: number;
-            /** Per plan: allow public self-serve triage at /triage/start. */
+            /** Per plan: allow public self-serve triage at /public-triage. */
             allow_public_triage?: boolean;
             /** Per identity-registration plan: when true, public triage may create a session alongside an identity registration (unverified). Default false. */
             allow_unverified_entry?: boolean;
             /** Per flexiqueue-xm2o: per-program identity binding mode. */
-            identity_binding_mode?: "disabled" | "optional" | "required";
+            identity_binding_mode?: "disabled" | "required";
             /** Per barcode-hid: enable HID barcode on Display board. Default true. */
             enable_display_hid_barcode?: boolean;
             /** Per barcode-hid: enable HID barcode on Public triage. Default true. */
             enable_public_triage_hid_barcode?: boolean;
             /** Per plan: enable camera/QR scanner on Display board. Default true. */
             enable_display_camera_scanner?: boolean;
+            /** Per addition-to-public-site-plan: public page and program key. */
+            public_access_key?: string | null;
+            public_access_expiry_hours?: number;
+            page_description?: string | null;
+            page_announcement?: string | null;
+            page_banner_image_url?: string | null;
         };
+        is_published?: boolean;
+        short_links?: { type: string; code: string; url: string; has_embedded_key?: boolean }[];
     }
 
     interface StepItem {
@@ -138,11 +151,14 @@
         };
     }
 
-    /** Per Phase C: token assigned to program (from GET .../tokens). */
+    /** Per Phase C: token assigned to program or global (from GET .../tokens). */
     interface TokenItem {
         id: number;
         physical_id: string;
         status?: string;
+        is_global?: boolean;
+        source?: "assigned" | "global";
+        can_unassign?: boolean;
     }
 
     interface ProgramStats {
@@ -161,15 +177,19 @@
             active_sessions: 0,
             completed_sessions: 0,
         },
+        site_slug = null,
+        app_url = "",
     }: {
         program?: ProgramItem | null;
         tracks?: TrackItem[];
         processes?: ProcessItem[];
         stations?: StationItem[];
         stats?: ProgramStats;
+        site_slug?: string | null;
+        app_url?: string;
     } = $props();
 
-    const VALID_TABS = ["overview", "processes", "stations", "staff", "tokens", "tracks", "diagram", "settings"] as const;
+    const VALID_TABS = ["overview", "public-page", "processes", "stations", "staff", "tokens", "tracks", "diagram", "settings"] as const;
     type TabId = (typeof VALID_TABS)[number];
     const TAB_STORAGE_KEY = (programId: number) =>
         `flexiqueue:admin-program-tab-${programId}`;
@@ -246,6 +266,14 @@
             if (panel) (panel as HTMLElement).focus();
         });
     });
+
+    $effect(() => {
+        if (activeTab === "public-page" && publicPagePrivate && program?.id) {
+            fetchAccessTokens();
+            const t = setInterval(fetchAccessTokens, 30000);
+            return () => clearInterval(t);
+        }
+    });
     let showCreateModal = $state(false);
     let editTrack = $state<TrackItem | null>(null);
     let createName = $state("");
@@ -257,6 +285,7 @@
     let editIsDefault = $state(false);
     let editColorCode = $state("");
     let showCreateStationModal = $state(false);
+    let showCreateProcessModal = $state(false);
     let editStation = $state<StationItem | null>(null);
     let createStationName = $state("");
     let createStationCapacity = $state(1);
@@ -354,23 +383,31 @@
     let showStationTtsRegenerateConfirm = $state(false);
     let programTtsRegenerating = $state(false);
     let stationTtsRegenerating = $state(false);
+    /** Public Page tab state. */
+    let publicPagePublished = $state(true);
+    let publicPagePrivate = $state(false);
+    let publicPageKey = $state("");
+    let publicPageExpiryHours = $state(24);
+    let publicPageDescription = $state("");
+    let publicPageAnnouncement = $state("");
+    let publicPageBannerUrl = $state<string | null>(null);
+    let publicPageSaving = $state(false);
+    let publicPageSavingQr = $state(false);
+    let accessTokensCount = $state(0);
+    let accessTokensList = $state<{ id: number; token_ref: string; issued_at: string; expires_at: string }[]>([]);
     /** Station ID currently triggering TTS regeneration (for button loading state). */
     let stationRegeneratingId = $state<number | null>(null);
-    /** Per plan: allow public self-serve triage at /triage/start. */
+    /** Per plan: allow public self-serve triage at /public-triage. */
     let allowPublicTriage = $state(false);
     /**
-     * Identity policy at triage (derived from identity_binding_mode + allow_unverified_entry).
-     * - "none"               => no ID at triage
-     * - "required"           => ID or registration required before starting visit
-     * - "optional_unverified"=> identity optional; unverified registrations may start visits (public triage)
+     * Identity policy at triage. Per IDENTITY-BINDING-FINAL-IMPLEMENTATION-PLAN: only none | required; optional washed out.
+     * When "required", allow_unverified_entry controls whether public triage can start a visit before staff verification.
      */
-    let identityPolicy = $state<"none" | "required" | "optional_unverified">(
-        "none",
-    );
-    /** Underlying identity binding mode enum used by backend (disabled | optional | required). */
-    let identityBindingMode = $state<"disabled" | "optional" | "required">(
-        "disabled",
-    );
+    let identityPolicy = $state<"none" | "required">("none");
+    /** When identityPolicy === "required", allow unverified registrations to start visits from public triage. */
+    let allowUnverifiedEntry = $state(false);
+    /** Underlying identity binding mode (disabled | required). */
+    let identityBindingMode = $state<"disabled" | "required">("disabled");
     /** Per barcode-hid: enable HID barcode on Display board. Default true. */
     let enableDisplayHidBarcode = $state(true);
     /** Per barcode-hid: enable HID barcode on Public triage. Default true. */
@@ -426,19 +463,11 @@
             if (rawMode === "disabled" || !rawMode) {
                 identityPolicy = "none";
                 identityBindingMode = "disabled";
-            } else if (rawMode === "required") {
+                allowUnverifiedEntry = false;
+            } else {
                 identityPolicy = "required";
                 identityBindingMode = "required";
-            } else {
-                // rawMode === "optional"
-                if (allowUnverified) {
-                    identityPolicy = "optional_unverified";
-                    identityBindingMode = "optional";
-                } else {
-                    // Legacy optional + allow_unverified_entry=false; treat as stricter required policy.
-                    identityPolicy = "required";
-                    identityBindingMode = "required";
-                }
+                allowUnverifiedEntry = allowUnverified;
             }
             enableDisplayHidBarcode = (s.enable_display_hid_barcode ?? true) === true;
             enablePublicTriageHidBarcode = (s.enable_public_triage_hid_barcode ?? true) === true;
@@ -470,6 +499,14 @@
                     },
                 };
             }
+            publicPagePublished = (program as { is_published?: boolean }).is_published !== false;
+            const pk = (s as { public_access_key?: string | null }).public_access_key;
+            publicPagePrivate = pk != null && pk !== "";
+            publicPageKey = pk ?? "";
+            publicPageExpiryHours = Math.max(1, Math.min(168, Number((s as { public_access_expiry_hours?: number }).public_access_expiry_hours ?? 24)));
+            publicPageDescription = (s as { page_description?: string | null }).page_description ?? "";
+            publicPageAnnouncement = (s as { page_announcement?: string | null }).page_announcement ?? "";
+            publicPageBannerUrl = (s as { page_banner_image_url?: string | null }).page_banner_image_url ?? null;
         }
     });
 
@@ -551,9 +588,10 @@
         };
     });
 
-    // Tokens tab: fetch program tokens when tab is selected (Phase C.3)
+    // Tokens tab: fetch program tokens when tab is selected (Phase C.3). Assigned only, paginated.
     $effect(() => {
         if (activeTab !== "tokens" || !program?.id) return;
+        const page = tokenPage;
         let cancelled = false;
         tokensLoading = true;
         const check419 = (r: Response) => {
@@ -563,7 +601,12 @@
             }
             return r.json().catch(() => ({}));
         };
-        fetch(`/api/admin/programs/${program.id}/tokens`, {
+        const params = new URLSearchParams({
+            per_page: String(TOKENS_PER_PAGE),
+            page: String(page),
+            assigned_only: "1",
+        });
+        fetch(`/api/admin/programs/${program.id}/tokens?${params.toString()}`, {
             headers: {
                 Accept: "application/json",
                 "X-CSRF-TOKEN": getCsrfToken(),
@@ -572,13 +615,15 @@
             credentials: "same-origin",
         })
             .then(check419)
-            .then((data: { tokens?: TokenItem[] }) => {
+            .then((data: { tokens?: TokenItem[]; meta?: { current_page: number; last_page: number; total: number; per_page: number } }) => {
                 if (cancelled) return;
                 programTokens = (data?.tokens ?? []) as TokenItem[];
+                tokenMeta = data?.meta ?? null;
             })
             .catch(() => {
                 if (!cancelled) {
                     programTokens = [];
+                    tokenMeta = null;
                     toaster.error({ title: MSG_NETWORK_ERROR });
                 }
             })
@@ -654,14 +699,12 @@
     let staffAssigningUserId = $state<number | null>(null);
     let staffAssigningStationId = $state<number | null>(null);
 
-    // Tokens tab state (Phase C.3)
+    // Tokens tab state (Phase C.3 — read-only list; assign/unassign from Tokens page)
     let programTokens = $state<TokenItem[]>([]);
     let tokensLoading = $state(false);
-    let tokenAssignIdInput = $state("");
-    let tokenPatternInput = $state("");
-    let tokenAssigning = $state(false);
-    let tokenUnassigningId = $state<number | null>(null);
-    let bulkAssigning = $state(false);
+    let tokenPage = $state(1);
+    const TOKENS_PER_PAGE = 10;
+    let tokenMeta = $state<{ current_page: number; last_page: number; total: number; per_page: number } | null>(null);
 
     /** One row per (station, slot) for multiple staff per station. Per bead flexiqueue-bci. */
     const staffStationSlots = $derived(
@@ -959,6 +1002,7 @@
         showCreateModal = false;
         editTrack = null;
         showCreateStationModal = false;
+        showCreateProcessModal = false;
         editStation = null;
     }
 
@@ -1207,7 +1251,8 @@
                 return;
             }
             if (!ttsRes.ok) {
-                toaster.error({ title: "TTS sample unavailable." });
+                ensureVoicesLoaded();
+                await speakSampleAsync(phraseData.text, null, 1, config.rate);
                 return;
             }
             const blob = await ttsRes.blob();
@@ -1321,9 +1366,7 @@
         creatingProcess = false;
         submitting = false;
         if (ok) {
-            createProcessName = "";
-            createProcessDescription = "";
-            createProcessExpectedTimeMmSs = "";
+            closeCreateProcessModal();
             router.reload();
         } else {
             const d = data as {
@@ -1337,6 +1380,20 @@
                 title: firstErr ?? d?.message ?? message ?? "Failed to create process.",
             });
         }
+    }
+
+    function openCreateProcessModal() {
+        createProcessName = "";
+        createProcessDescription = "";
+        createProcessExpectedTimeMmSs = "";
+        showCreateProcessModal = true;
+    }
+
+    function closeCreateProcessModal() {
+        showCreateProcessModal = false;
+        createProcessName = "";
+        createProcessDescription = "";
+        createProcessExpectedTimeMmSs = "";
     }
 
     function openEditProcessModal(proc: ProcessItem) {
@@ -1662,15 +1719,11 @@
 
     async function handleSaveSettings() {
         submitting = true;
-        let effectiveIdentityMode: "disabled" | "optional" | "required" =
-            "disabled";
+        let effectiveIdentityMode: "disabled" | "required" = "disabled";
         let effectiveAllowUnverified = false;
         if (identityPolicy === "required") {
             effectiveIdentityMode = "required";
-            effectiveAllowUnverified = false;
-        } else if (identityPolicy === "optional_unverified" && allowPublicTriage) {
-            effectiveIdentityMode = "optional";
-            effectiveAllowUnverified = true;
+            effectiveAllowUnverified = allowUnverifiedEntry;
         }
         const { ok, data, message } = await api(
             "PUT",
@@ -1807,17 +1860,11 @@
         if (rawMode === "disabled" || !rawMode) {
             identityPolicy = "none";
             identityBindingMode = "disabled";
-        } else if (rawMode === "required") {
+            allowUnverifiedEntry = false;
+        } else {
             identityPolicy = "required";
             identityBindingMode = "required";
-        } else {
-            if (allowUnverified) {
-                identityPolicy = "optional_unverified";
-                identityBindingMode = "optional";
-            } else {
-                identityPolicy = "required";
-                identityBindingMode = "required";
-            }
+            allowUnverifiedEntry = allowUnverified;
         }
         enableDisplayHidBarcode = (s as { enable_display_hid_barcode?: boolean })
             .enable_display_hid_barcode !== false;
@@ -1829,6 +1876,100 @@
         const tts = (s as { tts?: { active_language?: string } }).tts;
         const lang = (tts?.active_language as string | undefined) ?? "en";
         ttsActiveLanguage = (["en", "fil", "ilo"].includes(lang) ? lang : "en") as TtsLangKey;
+    }
+
+    async function savePublicPage() {
+        if (!program) return;
+        publicPageSaving = true;
+        const current = (program.settings ?? {}) as Record<string, unknown>;
+        const { ok, message: msg } = await api("PUT", `/api/admin/programs/${program.id}`, {
+            name: program.name,
+            description: program.description,
+            is_published: publicPagePublished,
+            settings: {
+                ...current,
+                public_access_key: publicPagePrivate ? (publicPageKey || null) : null,
+                public_access_expiry_hours: publicPageExpiryHours,
+                page_description: publicPageDescription || null,
+                page_announcement: publicPageAnnouncement || null,
+            },
+        });
+        publicPageSaving = false;
+        if (ok) {
+            toaster.success({ title: "Public page settings saved." });
+            router.reload();
+        } else toaster.error({ title: msg ?? "Failed to save." });
+    }
+
+    async function generateQr(type: "public" | "private_prompt" | "private_scannable") {
+        if (!program) return;
+        publicPageSavingQr = true;
+        const { ok, data } = await api("POST", `/api/admin/programs/${program.id}/generate-qr`, { type });
+        publicPageSavingQr = false;
+        if (ok && data) {
+            toaster.success({ title: "QR link generated." });
+            router.reload();
+        } else toaster.error({ title: "Failed to generate QR." });
+    }
+
+    function copyShortUrl(url: string) {
+        navigator.clipboard?.writeText(url).then(() => toaster.success({ title: "Link copied." })).catch(() => {});
+    }
+
+    async function handleBannerUpload(e: Event) {
+        const input = (e.target as HTMLInputElement);
+        const file = input?.files?.[0];
+        if (!file || !program) return;
+        const compressed = await compressImage(file, HERO_BANNER_PRESET);
+        const fd = new FormData();
+        fd.append("image", compressed);
+        const res = await fetch(`/api/admin/programs/${program.id}/banner-image`, { method: "POST", body: fd, credentials: "same-origin", headers: { "X-Requested-With": "XMLHttpRequest", "Accept": "application/json" } });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data?.url) {
+            publicPageBannerUrl = data.url;
+            router.reload();
+        } else toaster.error({ title: "Upload failed." });
+        input.value = "";
+    }
+
+    async function handleBannerReplace(e: Event) {
+        await handleBannerUpload(e);
+    }
+
+    async function handleBannerRemove() {
+        if (!program) return;
+        const { ok } = await api("DELETE", `/api/admin/programs/${program.id}/banner-image`);
+        if (ok) {
+            publicPageBannerUrl = null;
+            router.reload();
+        } else toaster.error({ title: "Failed to remove." });
+    }
+
+    async function fetchAccessTokens() {
+        if (!program) return;
+        const { ok, data } = await api("GET", `/api/admin/programs/${program.id}/access-tokens`);
+        if (ok && data && typeof (data as { active_count?: number }).active_count === "number") {
+            const d = data as { active_count: number; tokens: { id: number; token_ref: string; issued_at: string; expires_at: string }[] };
+            accessTokensCount = d.active_count;
+            accessTokensList = d.tokens ?? [];
+        }
+    }
+
+    async function revokeToken(id: number) {
+        if (!program) return;
+        const { ok } = await api("DELETE", `/api/admin/programs/${program.id}/access-tokens/${id}`);
+        if (ok) {
+            await fetchAccessTokens();
+        } else toaster.error({ title: "Failed to revoke." });
+    }
+
+    async function revokeAllTokens() {
+        if (!program || !confirm("Revoke all tokens? All devices will need to re-enter the program key.")) return;
+        const { ok } = await api("DELETE", `/api/admin/programs/${program.id}/access-tokens`);
+        if (ok) {
+            toaster.success({ title: "All tokens revoked." });
+            await fetchAccessTokens();
+        } else toaster.error({ title: "Failed to revoke." });
     }
 
     async function handleAssignStaff(userId: number, stationId: number | null) {
@@ -1955,107 +2096,6 @@
         } else toaster.error({ title: msg ?? "Failed to remove supervisor." });
     }
 
-    /** Phase C.3.1: Assign one or more tokens to the program (POST .../tokens). */
-    async function handleAssignToken() {
-        const trimmed = tokenAssignIdInput.trim();
-        if (!trimmed || !program?.id) return;
-        const ids = trimmed
-            .split(/[\s,]+/)
-            .map((s) => parseInt(s, 10))
-            .filter((n) => Number.isInteger(n) && n > 0);
-        if (ids.length === 0) {
-            toaster.error({ title: "Enter at least one valid token ID (number)." });
-            return;
-        }
-        tokenAssigning = true;
-        try {
-            const body = ids.length === 1 ? { token_id: ids[0] } : { token_ids: ids };
-            const { ok, data, message: msg } = await api(
-                "POST",
-                `/api/admin/programs/${program.id}/tokens`,
-                body,
-            );
-            if (ok) {
-                tokenAssignIdInput = "";
-                toaster.success({
-                    title: ids.length === 1 ? "Token assigned." : `${ids.length} tokens assigned.`,
-                });
-                // Refresh token list
-                const res = await fetch(`/api/admin/programs/${program.id}/tokens`, {
-                    headers: {
-                        Accept: "application/json",
-                        "X-CSRF-TOKEN": getCsrfToken(),
-                        "X-Requested-With": "XMLHttpRequest",
-                    },
-                    credentials: "same-origin",
-                });
-                if (res.ok) {
-                    const json = await res.json().catch(() => ({}));
-                    programTokens = (json?.tokens ?? []) as TokenItem[];
-                }
-            } else toaster.error({ title: msg ?? "Failed to assign token(s)." });
-        } finally {
-            tokenAssigning = false;
-        }
-    }
-
-    /** Phase C.3.1: Unassign token from program (DELETE .../tokens/{tokenId}). */
-    async function handleUnassignToken(tokenId: number) {
-        if (!program?.id) return;
-        tokenUnassigningId = tokenId;
-        try {
-            const { ok, message: msg } = await api(
-                "DELETE",
-                `/api/admin/programs/${program.id}/tokens/${tokenId}`,
-            );
-            if (ok) {
-                programTokens = programTokens.filter((t) => t.id !== tokenId);
-                toaster.success({ title: "Token unassigned." });
-            } else toaster.error({ title: msg ?? "Failed to unassign token." });
-        } finally {
-            tokenUnassigningId = null;
-        }
-    }
-
-    /** Phase C.3.2: Bulk assign by pattern (POST .../tokens/bulk). */
-    async function handleBulkAssignToken() {
-        const pattern = tokenPatternInput.trim();
-        if (!pattern || !program?.id) {
-            toaster.error({ title: "Enter a pattern (e.g. A* or A%)." });
-            return;
-        }
-        bulkAssigning = true;
-        try {
-            const { ok, data, message: msg } = await api(
-                "POST",
-                `/api/admin/programs/${program.id}/tokens/bulk`,
-                { pattern },
-            );
-            if (ok) {
-                const added = (data as { added_count?: number })?.added_count ?? 0;
-                tokenPatternInput = "";
-                toaster.success({
-                    title: added === 1 ? "1 token assigned." : `${added} tokens assigned.`,
-                });
-                // Refresh token list
-                const res = await fetch(`/api/admin/programs/${program.id}/tokens`, {
-                    headers: {
-                        Accept: "application/json",
-                        "X-CSRF-TOKEN": getCsrfToken(),
-                        "X-Requested-With": "XMLHttpRequest",
-                    },
-                    credentials: "same-origin",
-                });
-                if (res.ok) {
-                    const json = await res.json().catch(() => ({}));
-                    programTokens = (json?.tokens ?? []) as TokenItem[];
-                }
-            } else toaster.error({ title: msg ?? "Failed to bulk assign tokens." });
-        } finally {
-            bulkAssigning = false;
-        }
-    }
-
     function formatDate(iso: string | null): string {
         if (!iso) return "";
         try {
@@ -2081,7 +2121,7 @@
             </Link>
         </div>
     {:else}
-    <div class="flex flex-col gap-6">
+    <div class="flex flex-col gap-4">
         <!-- Back link -->
         <div>
             <Link
@@ -2238,46 +2278,47 @@
             </div>
         {/if}
 
-        <!-- Tab navigation: no scrollbar; pulsating arrows when more to scroll (per sketch) -->
+        <!-- Tab navigation: one slim row; scroll arrows in left/right gutter, vertically centered (gray, match StatusFooter). -->
         <nav
             aria-label="Program sections"
-            class="sticky top-0 z-20 -mx-4 px-4 py-0.5 bg-surface-50 border border-surface-200 shadow-sm rounded-container sm:relative sm:mx-0 sm:px-0 sm:py-0 sm:border sm:border-surface-200 sm:bg-surface-100/80 sm:mt-4"
+            class="sticky top-0 z-20 -mx-4 pl-4 pr-4 sm:mx-0 sm:px-0 py-0.5 bg-surface-50 border border-surface-200 shadow-sm rounded-container sm:border sm:border-surface-200 sm:bg-surface-100/80 -mt-2"
         >
-            <div class="relative flex items-center gap-0 w-full">
+            <div class="relative flex items-center w-full">
                 {#if canScrollLeft}
                     <button
                         type="button"
                         aria-label="Scroll tabs left"
-                        class="absolute left-0 z-10 flex items-center justify-center w-10 h-full min-h-[40px] rounded-l-lg text-primary-100 animate-pulse shrink-0"
+                        class="absolute left-0 inset-y-0 z-10 flex items-center justify-center w-10 rounded-l-lg bg-surface-100/95 text-surface-700 hover:bg-surface-200/90 transition-colors shrink-0 animate-pulse border border-surface-200/80 border-r-0"
                         onclick={() => scrollTabList("left")}
                     >
-                        <ChevronLeft class="w-5 h-5 drop-shadow-[0_0_6px_rgba(0,0,0,0.9)]" />
+                        <ChevronLeft class="w-5 h-5 drop-shadow-sm" />
                     </button>
                 {/if}
                 <div
                     role="tablist"
                     tabindex="-1"
                     bind:this={tabListEl}
-                    class="flex gap-1 overflow-x-auto overflow-y-hidden flex-nowrap w-full max-w-full py-0 sm:py-0.5 sm:px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    class="flex gap-1 overflow-x-auto overflow-y-hidden flex-nowrap w-full max-w-full min-h-0 py-0.5 sm:px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                     onkeydown={handleTabKeydown}
                 >
-                    <button type="button" role="tab" id="tab-overview" tabindex={activeTab === 'overview' ? 0 : -1} aria-selected={activeTab === 'overview'} aria-controls="tabpanel-overview" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'overview' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "overview")}>Overview</button>
-                    <button type="button" role="tab" id="tab-processes" tabindex={activeTab === 'processes' ? 0 : -1} aria-selected={activeTab === 'processes'} aria-controls="tabpanel-processes" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'processes' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "processes")}>Processes</button>
-                    <button type="button" role="tab" id="tab-stations" tabindex={activeTab === 'stations' ? 0 : -1} aria-selected={activeTab === 'stations'} aria-controls="tabpanel-stations" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'stations' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "stations")}>Stations</button>
-                    <button type="button" role="tab" id="tab-staff" tabindex={activeTab === 'staff' ? 0 : -1} aria-selected={activeTab === 'staff'} aria-controls="tabpanel-staff" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'staff' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "staff")}>Staff</button>
-                    <button type="button" role="tab" id="tab-tokens" tabindex={activeTab === 'tokens' ? 0 : -1} aria-selected={activeTab === 'tokens'} aria-controls="tabpanel-tokens" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'tokens' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "tokens")}>Tokens</button>
-                    <button type="button" role="tab" id="tab-tracks" tabindex={activeTab === 'tracks' ? 0 : -1} aria-selected={activeTab === 'tracks'} aria-controls="tabpanel-tracks" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'tracks' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "tracks")}>Track</button>
-                    <button type="button" role="tab" id="tab-diagram" tabindex={activeTab === 'diagram' ? 0 : -1} aria-selected={activeTab === 'diagram'} aria-controls="tabpanel-diagram" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'diagram' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "diagram")}>Diagram</button>
-                    <button type="button" role="tab" id="tab-settings" tabindex={activeTab === 'settings' ? 0 : -1} aria-selected={activeTab === 'settings'} aria-controls="tabpanel-settings" class="tab flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 touch-target-h flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'settings' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "settings")}>Settings</button>
+                    <button type="button" role="tab" id="tab-overview" tabindex={activeTab === 'overview' ? 0 : -1} aria-selected={activeTab === 'overview'} aria-controls="tabpanel-overview" class="tab flex-shrink-0 whitespace-nowrap px-3 py-1 flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'overview' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "overview")}>Overview</button>
+                    <button type="button" role="tab" id="tab-public-page" tabindex={activeTab === 'public-page' ? 0 : -1} aria-selected={activeTab === 'public-page'} aria-controls="tabpanel-public-page" class="tab flex-shrink-0 whitespace-nowrap px-3 py-1 flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'public-page' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "public-page")}>Public Page</button>
+                    <button type="button" role="tab" id="tab-processes" tabindex={activeTab === 'processes' ? 0 : -1} aria-selected={activeTab === 'processes'} aria-controls="tabpanel-processes" class="tab flex-shrink-0 whitespace-nowrap px-3 py-1 flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'processes' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "processes")}>Processes</button>
+                    <button type="button" role="tab" id="tab-stations" tabindex={activeTab === 'stations' ? 0 : -1} aria-selected={activeTab === 'stations'} aria-controls="tabpanel-stations" class="tab flex-shrink-0 whitespace-nowrap px-3 py-1 flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'stations' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "stations")}>Stations</button>
+                    <button type="button" role="tab" id="tab-staff" tabindex={activeTab === 'staff' ? 0 : -1} aria-selected={activeTab === 'staff'} aria-controls="tabpanel-staff" class="tab flex-shrink-0 whitespace-nowrap px-3 py-1 flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'staff' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "staff")}>Staff</button>
+                    <button type="button" role="tab" id="tab-tokens" tabindex={activeTab === 'tokens' ? 0 : -1} aria-selected={activeTab === 'tokens'} aria-controls="tabpanel-tokens" class="tab flex-shrink-0 whitespace-nowrap px-3 py-1 flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'tokens' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "tokens")}>Tokens</button>
+                    <button type="button" role="tab" id="tab-tracks" tabindex={activeTab === 'tracks' ? 0 : -1} aria-selected={activeTab === 'tracks'} aria-controls="tabpanel-tracks" class="tab flex-shrink-0 whitespace-nowrap px-3 py-1 flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'tracks' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "tracks")}>Track</button>
+                    <button type="button" role="tab" id="tab-diagram" tabindex={activeTab === 'diagram' ? 0 : -1} aria-selected={activeTab === 'diagram'} aria-controls="tabpanel-diagram" class="tab flex-shrink-0 whitespace-nowrap px-3 py-1 flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'diagram' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "diagram")}>Diagram</button>
+                    <button type="button" role="tab" id="tab-settings" tabindex={activeTab === 'settings' ? 0 : -1} aria-selected={activeTab === 'settings'} aria-controls="tabpanel-settings" class="tab flex-shrink-0 whitespace-nowrap px-3 py-1 flex items-center justify-center rounded-lg font-medium text-sm transition-colors {activeTab === 'settings' ? 'bg-primary-500 text-primary-contrast-500 shadow-sm' : 'bg-transparent text-surface-700 hover:bg-surface-200/80'}" onclick={() => (activeTab = "settings")}>Settings</button>
                 </div>
                 {#if canScrollRight}
                     <button
                         type="button"
                         aria-label="Scroll tabs right"
-                        class="absolute right-0 z-10 flex items-center justify-center w-10 h-full min-h-[40px] rounded-r-lg text-primary-100 animate-pulse shrink-0"
+                        class="absolute right-0 inset-y-0 z-10 flex items-center justify-center w-10 rounded-r-lg bg-surface-100/95 text-surface-700 hover:bg-surface-200/90 transition-colors shrink-0 animate-pulse border border-surface-200/80 border-l-0"
                         onclick={() => scrollTabList("right")}
                     >
-                        <ChevronRight class="w-5 h-5 drop-shadow-[0_0_6px_rgba(0,0,0,0.9)]" />
+                        <ChevronRight class="w-5 h-5 drop-shadow-sm" />
                     </button>
                 {/if}
             </div>
@@ -2351,6 +2392,116 @@
                     <FlowDiagram {tracks} />
                 </section>
             </div>
+        {:else if activeTab === "public-page"}
+            <div id="tabpanel-public-page" role="tabpanel" aria-labelledby="tab-public-page" tabindex="-1" class="space-y-8 max-w-3xl">
+                <section class="rounded-container bg-surface-50 border border-surface-200 shadow-sm p-5 space-y-4">
+                    <h2 class="text-lg font-semibold text-surface-950">Visibility</h2>
+                    <label class="flex items-center gap-2">
+                        <input type="checkbox" class="checkbox" bind:checked={publicPagePublished} />
+                        <span class="text-sm text-surface-700">Published (show on site landing)</span>
+                    </label>
+                    {#if !publicPagePublished}
+                        <p class="text-sm text-warning-700 dark:text-warning-400">This program will not appear on the site landing page.</p>
+                    {/if}
+                    <label class="flex items-center gap-2">
+                        <input type="checkbox" class="checkbox" bind:checked={publicPagePrivate} />
+                        <span class="text-sm text-surface-700">Private (require program key)</span>
+                    </label>
+                    {#if publicPagePrivate}
+                        <div class="form-control">
+                            <label class="label text-sm text-surface-600">Program key</label>
+                            <input type="text" class="input input-md max-w-xs" maxlength="20" placeholder="e.g. AICS-PRIV" bind:value={publicPageKey} />
+                            <p class="text-xs text-surface-500 mt-1">Clients must enter this key to access the program. It will not appear on the site landing.</p>
+                        </div>
+                        <div class="form-control">
+                            <label class="label text-sm text-surface-600">Access expiry</label>
+                            <select class="select select-theme select-md max-w-xs" bind:value={publicPageExpiryHours}>
+                                <option value={8}>8 hours</option>
+                                <option value={24}>24 hours</option>
+                                <option value={48}>48 hours</option>
+                                <option value={72}>72 hours</option>
+                                <option value={168}>1 week</option>
+                            </select>
+                        </div>
+                    {/if}
+                </section>
+                <section class="rounded-container bg-surface-50 border border-surface-200 shadow-sm p-5 space-y-4">
+                    <h2 class="text-lg font-semibold text-surface-950">Page content</h2>
+                    <div class="form-control">
+                        <label class="label text-sm text-surface-600">Description (public program info page)</label>
+                        <textarea class="textarea textarea-md max-h-32" maxlength="500" placeholder="Short description" bind:value={publicPageDescription}></textarea>
+                    </div>
+                    <div class="form-control">
+                        <label class="label text-sm text-surface-600">Announcement (prominent, time-sensitive)</label>
+                        <textarea class="textarea textarea-md max-h-24" maxlength="200" placeholder="e.g. Open until 4PM today" bind:value={publicPageAnnouncement}></textarea>
+                    </div>
+                    <div class="form-control">
+                        <label class="label text-sm text-surface-600">Banner image</label>
+                        {#if publicPageBannerUrl}
+                            <div class="flex items-center gap-3">
+                                <img src={publicPageBannerUrl} alt="" class="h-20 w-auto rounded object-cover" />
+                                <div class="flex gap-2">
+                                    <label class="btn variant-outline btn-sm cursor-pointer"><input type="file" accept="image/jpeg,image/png,image/webp" class="sr-only" onchange={(e) => handleBannerReplace(e)} /> Replace</label>
+                                    <button type="button" class="btn variant-ghost-error btn-sm" onclick={handleBannerRemove}>Remove</button>
+                                </div>
+                            </div>
+                        {:else}
+                            <label class="btn variant-outline btn-sm cursor-pointer"><input type="file" accept="image/jpeg,image/png,image/webp" class="sr-only" onchange={(e) => handleBannerUpload(e)} /> Upload banner</label>
+                        {/if}
+                        <p class="text-xs text-surface-500 mt-1">Images are compressed for web.</p>
+                    </div>
+                </section>
+                <section class="rounded-container bg-surface-50 border border-surface-200 shadow-sm p-5 space-y-4">
+                    <h2 class="text-lg font-semibold text-surface-950">QR codes</h2>
+                    {#if publicPagePublished && !publicPagePrivate}
+                        {@const publicLink = program?.short_links?.find((l: { type: string }) => l.type === 'program_public')}
+                        {#if publicLink}
+                            <QrDisplay url={publicLink.url} label="Public program" />
+                        {:else}
+                            <button type="button" class="btn preset-filled-primary-500 btn-sm" onclick={() => generateQr('public')} disabled={publicPageSavingQr}>Generate public QR</button>
+                        {/if}
+                    {/if}
+                    {#if publicPagePrivate}
+                        {@const promptLink = program?.short_links?.find((l: { type: string; has_embedded_key?: boolean }) => l.type === 'program_private' && !l.has_embedded_key)}
+                        {@const scannableLink = program?.short_links?.find((l: { type: string; has_embedded_key?: boolean }) => l.type === 'program_private' && l.has_embedded_key)}
+                        <p class="text-sm text-surface-600 font-medium">Key-entry QR (user types key after scan)</p>
+                        {#if promptLink}
+                            <QrDisplay url={promptLink.url} label="Key-entry QR" />
+                        {:else}
+                            <button type="button" class="btn variant-outline btn-sm" onclick={() => generateQr('private_prompt')} disabled={publicPageSavingQr}>Generate QR with key prompt</button>
+                        {/if}
+                        <p class="text-sm text-surface-600 font-medium mt-4">Scannable key QR (immediate access)</p>
+                        <p class="text-xs text-warning-700">Anyone who scans this gets immediate access. Treat it like a physical key.</p>
+                        {#if scannableLink}
+                            <QrDisplay url={scannableLink.url} label="Scannable key QR" />
+                        {:else}
+                            <button type="button" class="btn variant-outline btn-sm" onclick={() => generateQr('private_scannable')} disabled={publicPageSavingQr}>Generate scannable key QR</button>
+                        {/if}
+                    {/if}
+                </section>
+                {#if publicPagePrivate}
+                    <section class="rounded-container bg-surface-50 border border-surface-200 shadow-sm p-5 space-y-4">
+                        <h2 class="text-lg font-semibold text-surface-950">Active access tokens</h2>
+                        <p class="text-sm text-surface-600">{accessTokensCount} active token(s)</p>
+                        {#if accessTokensList.length > 0}
+                            <ul class="space-y-2">
+                                {#each accessTokensList as token (token.id)}
+                                    <li class="flex items-center justify-between gap-2 text-sm">
+                                        <span>…{token.token_ref} — expires {token.expires_at}</span>
+                                        <button type="button" class="btn variant-ghost-error btn-xs" onclick={() => revokeToken(token.id)}>Revoke</button>
+                                    </li>
+                                {/each}
+                            </ul>
+                            <button type="button" class="btn variant-outline-error btn-sm" onclick={revokeAllTokens}>Revoke all</button>
+                        {:else}
+                            <p class="text-sm text-surface-500">No active tokens. Devices will need to enter the program key to gain access.</p>
+                        {/if}
+                    </section>
+                {/if}
+                <div class="flex justify-end">
+                    <button type="button" class="btn preset-filled-primary-500" onclick={savePublicPage} disabled={publicPageSaving}>Save</button>
+                </div>
+            </div>
         {:else if activeTab === "diagram"}
             <div id="tabpanel-diagram" role="tabpanel" aria-labelledby="tab-diagram" tabindex="-1" class="space-y-4">
                 <section>
@@ -2378,59 +2529,13 @@
                         Release). Each track step references a process. Create
                         processes before adding steps to tracks.
                     </p>
-                    <div class="flex flex-wrap items-end gap-3 mb-6">
-                        <div class="form-control min-w-[200px]">
-                            <label for="create-process-name" class="label py-0"
-                                ><span class="label-text text-xs">Name</span
-                                ></label
-                            >
-                            <input
-                                id="create-process-name"
-                                type="text"
-                                class="input rounded-container border border-surface-200 px-3 py-2 w-full"
-                                placeholder="e.g. Verification"
-                                bind:value={createProcessName}
-                                maxlength="50"
-                            />
-                        </div>
-                        <div class="form-control min-w-[200px]">
-                            <label for="create-process-desc" class="label py-0"
-                                ><span class="label-text text-xs"
-                                    >Description (optional)</span
-                                ></label
-                            >
-                            <input
-                                id="create-process-desc"
-                                type="text"
-                                class="input rounded-container border border-surface-200 px-3 py-2 w-full"
-                                placeholder="Optional"
-                                bind:value={createProcessDescription}
-                            />
-                        </div>
-                        <div class="form-control min-w-[120px]">
-                            <label for="create-process-expected-time" class="label py-0"
-                                ><span class="label-text text-xs">Expected time (mm:ss)</span></label
-                            >
-                            <input
-                                id="create-process-expected-time"
-                                type="text"
-                                class="input rounded-container border border-surface-200 px-3 py-2 w-full"
-                                placeholder="0:00"
-                                bind:value={createProcessExpectedTimeMmSs}
-                            />
-                        </div>
+                    <div class="flex flex-wrap items-center gap-3 mb-6">
                         <button
                             type="button"
                             class="btn preset-filled-primary-500 flex items-center gap-2"
-                            disabled={submitting || !createProcessName.trim()}
-                            onclick={handleCreateProcess}
+                            onclick={openCreateProcessModal}
                         >
-                            {#if submitting && creatingProcess}
-                                <span class="loading-spinner loading-sm"></span>
-                                Adding...
-                            {:else}
-                                <Plus class="w-4 h-4" /> Add Process
-                            {/if}
+                            <Plus class="w-4 h-4" /> Add Process
                         </button>
                     </div>
                     {#if processes.length === 0}
@@ -2443,43 +2548,42 @@
                     {:else}
                         <div class="flex flex-wrap gap-2">
                             {#each processes as proc (proc.id)}
-                                <span
-                                    class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-100 border border-surface-200 text-sm font-medium text-surface-950"
+                                <div
+                                    class="inline-flex items-start gap-2 px-3 py-2 rounded-lg bg-surface-100 border border-surface-200 text-sm text-surface-950"
                                 >
-                                    <span
-                                        >{proc.name}
-                                        {#if proc.expected_time_seconds != null && proc.expected_time_seconds > 0}
-                                            <span class="text-surface-500 text-xs ml-1"
-                                                >— {secondsToMmSs(proc.expected_time_seconds)}</span
-                                            >
-                                        {/if}
+                                    <div class="flex flex-col gap-0.5 min-w-0">
+                                        <div class="flex items-center gap-2 flex-wrap">
+                                            <span class="font-medium">{proc.name}</span>
+                                            {#if proc.expected_time_seconds != null && proc.expected_time_seconds > 0}
+                                                <span class="text-surface-500 text-xs">{secondsToMmSs(proc.expected_time_seconds)}</span>
+                                            {/if}
+                                        </div>
                                         {#if proc.description}
-                                            <span
-                                                class="text-surface-500 text-xs ml-2"
-                                                >— {proc.description}</span
-                                            >
-                                        {/if}</span
-                                    >
-                                    <button
-                                        type="button"
-                                        class="btn btn-ghost btn-sm p-1 min-h-0 h-7"
-                                        onclick={() => openEditProcessModal(proc)}
-                                        disabled={submitting}
-                                        aria-label="Edit process"
-                                    >
-                                        <Edit2 class="w-4 h-4" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="btn btn-ghost btn-sm p-1 min-h-0 h-7 text-error-500"
-                                        onclick={() =>
-                                            openDeleteProcessConfirm(proc)}
-                                        disabled={submitting}
-                                        aria-label="Delete process"
-                                    >
-                                        <Trash2 class="w-4 h-4" />
-                                    </button>
-                                </span>
+                                            <span class="text-surface-500 text-xs">{proc.description}</span>
+                                        {/if}
+                                    </div>
+                                    <div class="flex items-center gap-0.5 shrink-0">
+                                        <button
+                                            type="button"
+                                            class="btn btn-ghost btn-sm p-1 min-h-0 h-7"
+                                            onclick={() => openEditProcessModal(proc)}
+                                            disabled={submitting}
+                                            aria-label="Edit process"
+                                        >
+                                            <Edit2 class="w-4 h-4" />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn btn-ghost btn-sm p-1 min-h-0 h-7 text-error-500"
+                                            onclick={() =>
+                                                openDeleteProcessConfirm(proc)}
+                                            disabled={submitting}
+                                            aria-label="Delete process"
+                                        >
+                                            <Trash2 class="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </div>
                             {/each}
                         </div>
                     {/if}
@@ -2517,7 +2621,7 @@
             </div>
             {#if serverTtsConfigured === false}
                 <div class="rounded-container border border-warning-200 bg-warning-50 p-3 mb-4 text-sm text-warning-900" role="alert">
-                    Add an ElevenLabs account in <Link href="/admin/settings?tab=integrations" class="font-semibold text-warning-800 underline hover:text-warning-950">Settings → Integrations</Link> before generating station TTS.
+                    Add an ElevenLabs account in <Link href="/admin/settings?tab=integrations" class="font-semibold text-warning-800 underline hover:text-warning-950">Configuration → Integrations</Link> before generating station TTS.
                 </div>
             {/if}
             {#if localStations.length === 0}
@@ -2550,7 +2654,7 @@
                 <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {#each localStations as station (station.id)}
                         <div
-                            class="bg-surface-50 rounded-container elevation-card transition-all hover:shadow-[var(--shadow-raised)] flex flex-col h-full border border-surface-200/50"
+                            class="bg-surface-100/80 md:bg-surface-50 rounded-container elevation-card transition-all hover:shadow-[var(--shadow-raised)] flex flex-col h-full border border-surface-200/60"
                         >
                             <div class="p-5 flex-grow flex flex-col gap-3">
                                 <div
@@ -2563,7 +2667,7 @@
                                             <Monitor class="w-5 h-5" />
                                         </div>
                                         <h3
-                                            class="text-lg font-bold text-surface-950 line-clamp-1"
+                                            class="text-base sm:text-lg font-bold text-surface-950 line-clamp-2 sm:line-clamp-1"
                                         >
                                             {station.name}
                                         </h3>
@@ -2571,17 +2675,25 @@
                                     <div class="shrink-0 mt-1">
                                         {#if station.is_active}
                                             <span
-                                                class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded preset-filled-success-500 shadow-sm flex items-center gap-1"
+                                                class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded flex items-center gap-1.5 text-success-700 sm:bg-success-50 sm:shadow-sm"
                                             >
                                                 <span
-                                                    class="w-1.5 h-1.5 rounded-full bg-surface-950/80 shrink-0 animate-pulse"
-                                                ></span> Active
+                                                    class="w-2.5 h-2.5 rounded-full bg-success-500 shrink-0 animate-pulse"
+                                                ></span>
+                                                <span class="hidden sm:inline">
+                                                    Active
+                                                </span>
                                             </span>
                                         {:else}
                                             <span
-                                                class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded preset-tonal text-surface-600 shadow-sm"
+                                                class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded flex items-center gap-1.5 text-error-700 sm:bg-error-50 sm:shadow-sm"
                                             >
-                                                Inactive
+                                                <span
+                                                    class="w-2.5 h-2.5 rounded-full bg-error-500 shrink-0 animate-pulse"
+                                                ></span>
+                                                <span class="hidden sm:inline">
+                                                    Inactive
+                                                </span>
                                             </span>
                                         {/if}
                                     </div>
@@ -2617,76 +2729,75 @@
                                 </div>
                             </div>
                             <div
-                                class="px-5 py-3 border-t border-surface-100 flex items-center justify-between gap-2 flex-wrap bg-surface-50/50 rounded-b-container"
+                                class="px-5 py-3 border-t border-surface-100 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-surface-50/50 rounded-b-container"
                             >
-                                <div class="flex items-center gap-2 flex-wrap">
-                                    <button
-                                        type="button"
-                                        class="text-xs font-medium transition-colors hover:text-surface-900 flex items-center gap-1.5 {station.is_active
-                                            ? 'text-error-600 hover:text-error-700'
-                                            : 'text-success-600 hover:text-success-700'}"
-                                        onclick={() =>
-                                            handleToggleStationActive(station)}
-                                        disabled={submitting}
-                                    >
-                                        {#if station.is_active}
-                                            <Power class="w-3.5 h-3.5" /> Deactivate
-                                        {:else}
-                                            <Power class="w-3.5 h-3.5" /> Activate
-                                        {/if}
-                                    </button>
-                                    {#if getStationTtsStatus(station) === "ready"}
-                                        <span class="text-[10px] uppercase tracking-wider font-medium px-2 py-0.5 rounded preset-filled-success-500/20 text-success-700">TTS ready</span>
-                                    {:else if getStationTtsStatus(station) === "failed"}
-                                        <span class="text-[10px] uppercase tracking-wider font-medium px-2 py-0.5 rounded preset-filled-error-500/20 text-error-700">TTS failed</span>
-                                    {:else}
-                                        <span class="text-[10px] uppercase tracking-wider font-medium px-2 py-0.5 rounded preset-tonal text-surface-500">TTS —</span>
-                                    {/if}
-                                    <button
-                                        type="button"
-                                        class="btn btn-xs preset-tonal"
-                                        onclick={() => regenerateStationTts(station)}
-                                        disabled={submitting || getStationTtsStatus(station) !== "failed" || stationRegeneratingId !== null}
-                                        title={getStationTtsStatus(station) === "failed" ? "Regenerate TTS" : "Only available when TTS has failed"}
-                                    >
-                                        {stationRegeneratingId === station.id ? "Starting…" : "Generate TTS"}
-                                    </button>
+                                <!-- Status + TTS actions: grid on mobile for predictable wrapping -->
+                                <div class="w-full md:w-auto">
+                                    <div class="grid grid-cols-2 gap-2 w-full">
+                                        <button
+                                            type="button"
+                                            class="text-xs font-medium transition-colors hover:text-surface-900 flex items-center justify-center md:justify-start gap-1.5 w-full {station.is_active
+                                                ? 'text-error-600 hover:text-error-700'
+                                                : 'text-success-600 hover:text-success-700'}"
+                                            onclick={() =>
+                                                handleToggleStationActive(station)}
+                                            disabled={submitting}
+                                        >
+                                            {#if station.is_active}
+                                                <Power class="w-3.5 h-3.5" /> Deactivate
+                                            {:else}
+                                                <Power class="w-3.5 h-3.5" /> Activate
+                                            {/if}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn btn-xs preset-tonal w-full justify-center md:w-auto"
+                                            onclick={() => regenerateStationTts(station)}
+                                            disabled={submitting || getStationTtsStatus(station) !== "failed" || stationRegeneratingId !== null}
+                                            title={getStationTtsStatus(station) === "failed" ? "Regenerate TTS" : "Only available when TTS has failed"}
+                                        >
+                                            {stationRegeneratingId === station.id ? "Starting…" : "Generate TTS"}
+                                        </button>
+                                    </div>
                                 </div>
-                                <div class="flex items-center gap-1">
-                                    <button
-                                        type="button"
-                                        class="btn preset-tonal btn-sm p-2"
-                                        onclick={() => openEditStationTtsModal(station)}
-                                        disabled={submitting}
-                                        title="Station TTS"
-                                    >
-                                        <Volume2
-                                            class="w-4 h-4 text-surface-600"
-                                        />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="btn preset-tonal btn-sm p-2"
-                                        onclick={() => openEditStation(station)}
-                                        disabled={submitting}
-                                        title="Edit Station"
-                                    >
-                                        <Edit2
-                                            class="w-4 h-4 text-surface-600"
-                                        />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="btn preset-tonal btn-sm p-2 hover:bg-error-50"
-                                        onclick={() =>
-                                            openDeleteStationConfirm(station)}
-                                        disabled={submitting}
-                                        title="Delete Station"
-                                    >
-                                        <Trash2
-                                            class="w-4 h-4 text-error-500"
-                                        />
-                                    </button>
+                                <!-- Per-station controls: Volume / Edit / Delete in grid on mobile -->
+                                <div class="w-full md:w-auto">
+                                    <div class="grid grid-cols-3 gap-2 w-full md:w-auto">
+                                        <button
+                                            type="button"
+                                            class="btn preset-tonal p-2 w-full justify-center"
+                                            onclick={() => openEditStationTtsModal(station)}
+                                            disabled={submitting}
+                                            title="Station TTS"
+                                        >
+                                            <Volume2
+                                                class="w-5 h-5 text-surface-600"
+                                            />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn preset-tonal p-2 w-full justify-center"
+                                            onclick={() => openEditStation(station)}
+                                            disabled={submitting}
+                                            title="Edit Station"
+                                        >
+                                            <Edit2
+                                                class="w-5 h-5 text-surface-600"
+                                            />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn preset-tonal p-2 hover:bg-error-50 w-full justify-center"
+                                            onclick={() =>
+                                                openDeleteStationConfirm(station)}
+                                            disabled={submitting}
+                                            title="Delete Station"
+                                        >
+                                            <Trash2
+                                                class="w-5 h-5 text-error-500"
+                                            />
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -2913,15 +3024,18 @@
                 </section>
             </div>
         {:else if activeTab === "tokens"}
-            <!-- Tokens tab: Phase C.3 — assign/unassign tokens to program -->
-            <div id="tabpanel-tokens" role="tabpanel" aria-labelledby="tab-tokens" tabindex="-1" class="space-y-8">
+            <!-- Tokens tab: read-only list of assigned tokens only; assign/unassign on Tokens page -->
+            <div id="tabpanel-tokens" role="tabpanel" aria-labelledby="tab-tokens" tabindex="-1" class="space-y-6">
                 <section>
-                    <h2 class="text-lg font-semibold text-surface-950 mb-4">
-                        Tokens assigned to this program
-                    </h2>
-                    <p class="text-sm text-surface-950/70 mb-4">
-                        Tokens (e.g. QR/barcode identifiers) that can be used for this program. Assign individually by ID or in bulk by pattern.
-                    </p>
+                    <div class="mb-4">
+                        <h2 class="text-lg font-semibold text-surface-950">
+                            Tokens assigned to this program
+                        </h2>
+                        <p class="text-sm text-surface-950/70 mt-0.5">
+                            Assigned tokens only. To assign or unassign, use the <Link href="/admin/tokens" class="font-semibold text-primary-600 hover:text-primary-700 underline">Tokens</Link> page.
+                        </p>
+                    </div>
+
                     {#if tokensLoading}
                         <div
                             class="rounded-container bg-surface-50 border border-surface-200 p-12 flex flex-col items-center justify-center text-center shadow-sm"
@@ -2940,97 +3054,82 @@
                             </div>
                             <h3 class="text-lg font-semibold text-surface-950">No tokens assigned</h3>
                             <p class="text-surface-600 max-w-sm mt-2">
-                                Assign tokens below by ID or use bulk assign with a pattern (e.g. A* or A%).
+                                Assign tokens from the Tokens page.
                             </p>
                         </div>
                     {:else}
-                        <div class="table-container">
-                            <table class="table table-zebra">
-                                <thead>
+                        <!-- Desktop: read-only table (content width, no scrollable) -->
+                        <AdminTable class="hidden lg:block w-max max-w-full" tableClass="text-sm">
+                            {#snippet head()}
+                                <tr>
+                                    <th class="w-36 py-2 px-3 text-center text-surface-600 font-medium">Physical ID</th>
+                                    <th class="w-32 py-2 px-3 text-center text-surface-600 font-medium">Status</th>
+                                </tr>
+                            {/snippet}
+                            {#snippet body()}
+                                {#each programTokens as token (token.id)}
                                     <tr>
-                                        <th>Physical ID</th>
-                                        <th>Status</th>
-                                        <th>Actions</th>
+                                        <td class="py-2 px-3 align-middle">
+                                            <span class="font-mono font-semibold text-surface-900">{token.physical_id}</span>
+                                        </td>
+                                        <td class="py-2 px-3 align-middle">
+                                            {token.status ?? "—"}
+                                        </td>
                                     </tr>
-                                </thead>
-                                <tbody>
-                                    {#each programTokens as token (token.id)}
-                                        <tr>
-                                            <td class="font-medium">{token.physical_id}</td>
-                                            <td>{token.status ?? "—"}</td>
-                                            <td>
-                                                <button
-                                                    type="button"
-                                                    class="btn preset-tonal btn-sm touch-target-h min-h-[48px]"
-                                                    aria-label="Unassign {token.physical_id}"
-                                                    disabled={tokenUnassigningId === token.id}
-                                                    onclick={() => handleUnassignToken(token.id)}
-                                                >
-                                                    Unassign
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    {/each}
-                                </tbody>
-                            </table>
+                                {/each}
+                            {/snippet}
+                        </AdminTable>
+
+                        <!-- Mobile/tablet: read-only card grid -->
+                        <div class="mt-2 lg:hidden grid grid-cols-2 md:grid-cols-3 gap-3">
+                            {#each programTokens as token (token.id)}
+                                <div
+                                    class="card bg-surface-50 border border-surface-200 shadow-sm rounded-container flex flex-col gap-2 p-3 max-h-[10rem] min-h-0"
+                                >
+                                    <span class="font-mono font-semibold text-surface-900 text-sm truncate min-w-0">
+                                        {token.physical_id}
+                                    </span>
+                                    <div class="shrink-0 text-xs text-surface-600">
+                                        {token.status ?? "—"}
+                                    </div>
+                                </div>
+                            {/each}
                         </div>
+
+                        <!-- Pagination (match Tokens page styling) -->
+                        {#if tokenMeta && tokenMeta.last_page > 1}
+                            {@const totalPages = tokenMeta.last_page}
+                            <div
+                                class="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6 mb-4 px-2"
+                            >
+                                <span class="text-sm font-medium text-surface-600">
+                                    Showing page
+                                    <span class="text-surface-950 font-semibold">{tokenMeta.current_page}</span>
+                                    of
+                                    <span class="text-surface-950 font-semibold">{totalPages}</span>
+                                    ({tokenMeta.total} tokens)
+                                </span>
+                                <div class="flex gap-2">
+                                    <button
+                                        type="button"
+                                        class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-4 py-1.5 transition-colors disabled:opacity-50 touch-target-h"
+                                        disabled={tokenMeta.current_page <= 1}
+                                        onclick={() => (tokenPage = tokenMeta!.current_page - 1)}
+                                    >
+                                        Previous
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-4 py-1.5 transition-colors disabled:opacity-50 touch-target-h"
+                                        disabled={tokenMeta.current_page >= totalPages}
+                                        onclick={() => (tokenPage = tokenMeta!.current_page + 1)}
+                                    >
+                                        Next
+                                    </button>
+                                </div>
+                            </div>
+                        {/if}
                     {/if}
-                </section>
-
-                <section>
-                    <h2 class="text-lg font-semibold text-surface-950 mb-4">Assign by token ID</h2>
-                    <p class="text-sm text-surface-950/70 mb-4">
-                        Enter one token ID or several separated by commas or spaces.
-                    </p>
-                    <div class="flex flex-wrap items-end gap-3">
-                        <label for="token-assign-id-input" class="flex flex-col gap-1 min-w-[200px]">
-                            <span class="label-text">Token ID(s)</span>
-                            <input
-                                id="token-assign-id-input"
-                                type="text"
-                                class="input rounded-container border border-surface-200 px-3 py-2 touch-target-h"
-                                placeholder="e.g. 1 or 1, 2, 3"
-                                bind:value={tokenAssignIdInput}
-                                disabled={tokenAssigning}
-                            />
-                        </label>
-                        <button
-                            type="button"
-                            class="btn preset-filled-primary-500 touch-target-h min-h-[48px]"
-                            disabled={!tokenAssignIdInput.trim() || tokenAssigning}
-                            onclick={handleAssignToken}
-                        >
-                            Assign
-                        </button>
-                    </div>
-                </section>
-
-                <section>
-                    <h2 class="text-lg font-semibold text-surface-950 mb-4">Bulk assign by pattern</h2>
-                    <p class="text-sm text-surface-950/70 mb-4">
-                        Assign all tokens whose physical ID matches a pattern (e.g. <code class="px-1 py-0.5 rounded bg-surface-200 text-sm">A*</code> or <code class="px-1 py-0.5 rounded bg-surface-200 text-sm">A%</code>).
-                    </p>
-                    <div class="flex flex-wrap items-end gap-3">
-                        <label for="token-bulk-pattern-input" class="flex flex-col gap-1 min-w-[200px]">
-                            <span class="label-text">Pattern</span>
-                            <input
-                                id="token-bulk-pattern-input"
-                                type="text"
-                                class="input rounded-container border border-surface-200 px-3 py-2 touch-target-h"
-                                placeholder="e.g. A* or A%"
-                                bind:value={tokenPatternInput}
-                                disabled={bulkAssigning}
-                            />
-                        </label>
-                        <button
-                            type="button"
-                            class="btn preset-filled-primary-500 touch-target-h min-h-[48px]"
-                            disabled={!tokenPatternInput.trim() || bulkAssigning}
-                            onclick={handleBulkAssignToken}
-                        >
-                            Bulk assign
-                        </button>
-                    </div>
                 </section>
             </div>
         {:else if activeTab === "tracks"}
@@ -3430,7 +3529,7 @@
                                     Public self-serve triage
                                 </h3>
                                 <p class="text-xs text-surface-500 mt-1">
-                                    When enabled, clients can open /triage/start (no login) to scan their token and choose a track to start their visit.
+                                    When enabled, clients can open /public-triage (no login) to scan their token and choose a track to start their visit.
                                 </p>
                             </div>
                             <div class="sm:w-2/3 form-control pt-1">
@@ -3455,25 +3554,26 @@
                             </div>
                         </div>
 
-                        <!-- Identity at triage (flexiqueue-xm2o + identity-registration plan) -->
+                        <!-- Publish to display and public triage (site-level visibility) -->
+                        <!-- Allow in-triage verification/registration (mother) + sub-switches -->
                         <div
                             class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
                         >
                             <div class="sm:w-1/3 shrink-0">
                                 <h3 class="font-medium text-surface-950 flex items-center gap-2">
-                                    Identity at triage
+                                    In-triage verification / registration
                                 </h3>
                                 <p class="text-xs text-surface-500 mt-1 space-y-1">
                                     <span class="block">
-                                        Turn this on to show ID / registration tools on staff and public triage.
+                                        Turn this on to show verification and registration tools on staff and public triage (phone-based identity).
                                     </span>
                                     <span class="block">
-                                        You can then choose whether ID or registration is <strong>required before starting a visit</strong>, and whether visits may <strong>start with unverified ID</strong> (public triage only).
+                                        Then choose: <strong>allow unverified to proceed to queue</strong>, or <strong>require verification to proceed</strong>.
                                     </span>
                                 </p>
                                 {#if !allowPublicTriage}
                                     <p class="text-[11px] text-surface-500 mt-2">
-                                        Public triage is currently disabled; identity settings apply to staff triage only until public triage is enabled.
+                                        Public triage is currently disabled; these settings apply to staff triage until public triage is enabled.
                                     </p>
                                 {:else}
                                     <p class="text-[11px] text-surface-500 mt-2">
@@ -3485,77 +3585,45 @@
                                 <label
                                     class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors items-center"
                                 >
-                                    <input
-                                        type="checkbox"
-                                        class="checkbox"
-                                        checked={identityPolicy !== "none"}
-                                        onclick={() => {
-                                            if (identityPolicy === "none") {
-                                                identityPolicy = "required";
-                                            } else {
-                                                identityPolicy = "none";
-                                            }
-                                        }}
-                                    />
+                                    <div class="relative inline-block w-11 h-5">
+                                        <input
+                                            type="checkbox"
+                                            class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300"
+                                            checked={identityPolicy !== "none"}
+                                            onchange={() => {
+                                                if (identityPolicy === "none") {
+                                                    identityPolicy = "required";
+                                                } else {
+                                                    identityPolicy = "none";
+                                                }
+                                            }}
+                                        />
+                                        <span
+                                            class="absolute top-0 left-0 w-5 h-5 bg-surface-950 rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none"
+                                            aria-hidden="true"
+                                        ></span>
+                                    </div>
                                     <span class="label-text text-surface-950 font-medium">
-                                        Use ID / registration at triage
+                                        Allow in-triage verification / registration
                                     </span>
                                 </label>
                                 {#if identityPolicy !== "none"}
-                                    <div class="ml-7 space-y-3">
+                                    <div class="ml-7">
                                         <label
                                             class="flex items-start gap-3 cursor-pointer hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors"
                                         >
                                             <input
-                                                type="radio"
-                                                class="radio radio-sm mt-0.5"
-                                                name="identity-policy"
-                                                value="required"
-                                                checked={identityPolicy === "required"}
-                                                onclick={() => {
-                                                    identityPolicy = "required";
-                                                }}
-                                            />
-                                            <span class="text-sm text-surface-950">
-                                                <span class="font-medium text-surface-950"
-                                                    >Require ID or registration before starting
-                                                    visit</span
-                                                >
-                                                <span class="block text-surface-500 text-xs">
-                                                    When selected, staff and public triage cannot complete
-                                                    until an ID is linked or a registration request is
-                                                    submitted.
-                                                </span>
-                                            </span>
-                                        </label>
-                                        <label
-                                            class="flex items-start gap-3 cursor-pointer hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors"
-                                        >
-                                            <input
-                                                type="radio"
-                                                class="radio radio-sm mt-0.5"
-                                                name="identity-policy"
-                                                value="optional_unverified"
-                                                checked={identityPolicy === "optional_unverified"}
-                                                onclick={() => {
-                                                    identityPolicy = "optional_unverified";
-                                                }}
+                                                type="checkbox"
+                                                class="checkbox checkbox-sm mt-0.5"
+                                                bind:checked={allowUnverifiedEntry}
                                                 disabled={!allowPublicTriage}
                                             />
                                             <span class="text-sm text-surface-950">
                                                 <span class="font-medium text-surface-950"
-                                                    >Don't require; allow unverified visits to
-                                                    start</span
+                                                    >Allow unverified to proceed to queue</span
                                                 >
                                                 <span class="block text-surface-500 text-xs">
-                                                    When selected, identity is optional and public triage
-                                                    can create a
-                                                    <span class="font-semibold">queue session</span> from an
-                                                    identity registration that has not been verified yet;
-                                                    the session is marked unverified until staff accept it.
-                                                    When off, public triage only records the registration
-                                                    and does <span class="font-semibold">not</span> start a
-                                                    session.
+                                                    Public triage can create a queue session from a registration that is not yet verified; session is marked unverified until staff accept. When unchecked, visitors must verify identity or submit a registration for staff to process first.
                                                 </span>
                                             </span>
                                         </label>
@@ -3613,7 +3681,7 @@
                                     <Users class="w-4 h-4 text-surface-500" /> HID barcode (Public triage)
                                 </h3>
                                 <p class="text-xs text-surface-500 mt-1">
-                                    When on, the public triage page (/triage/start) keeps focus on the hidden barcode input for hardware scanners.
+                                    When on, the public triage page (/public-triage) keeps focus on the hidden barcode input for hardware scanners.
                                 </p>
                             </div>
                             <div class="sm:w-2/3 form-control pt-1">
@@ -4236,6 +4304,78 @@
                         processes.length === 0}
                 >
                     {submitting ? "Creating…" : "Create"}
+                </button>
+            </div>
+        </form>
+    {/snippet}
+</Modal>
+
+<Modal open={showCreateProcessModal} title="Add Process" onClose={closeCreateProcessModal}>
+    {#snippet children()}
+        <form
+            onsubmit={(e) => {
+                e.preventDefault();
+                handleCreateProcess();
+            }}
+            class="flex flex-col gap-4"
+        >
+            <div class="form-control w-full">
+                <label for="create-process-name" class="label"
+                    ><span class="label-text">Name</span></label
+                >
+                <input
+                    id="create-process-name"
+                    type="text"
+                    class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                    placeholder="e.g. Verification"
+                    bind:value={createProcessName}
+                    maxlength="50"
+                    required
+                />
+            </div>
+            <div class="form-control w-full">
+                <label for="create-process-desc" class="label"
+                    ><span class="label-text">Description (optional)</span></label
+                >
+                <input
+                    id="create-process-desc"
+                    type="text"
+                    class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                    placeholder="Optional"
+                    bind:value={createProcessDescription}
+                />
+            </div>
+            <div class="form-control w-full">
+                <label for="create-process-expected-time" class="label"
+                    ><span class="label-text">Expected time (mm:ss)</span></label
+                >
+                <input
+                    id="create-process-expected-time"
+                    type="text"
+                    class="input rounded-container border border-surface-200 px-3 py-2 w-full"
+                    placeholder="e.g. 0:00 or 5:30"
+                    bind:value={createProcessExpectedTimeMmSs}
+                />
+            </div>
+            <div class="flex justify-end gap-2">
+                <button
+                    type="button"
+                    class="btn preset-tonal"
+                    onclick={closeCreateProcessModal}
+                >
+                    Cancel
+                </button>
+                <button
+                    type="submit"
+                    class="btn preset-filled-primary-500"
+                    disabled={submitting || !createProcessName.trim()}
+                >
+                    {#if submitting && creatingProcess}
+                        <span class="loading-spinner loading-sm"></span>
+                        Adding...
+                    {:else}
+                        Create
+                    {/if}
                 </button>
             </div>
         </form>

@@ -33,11 +33,11 @@ class OverrideSessionRequest extends FormRequest
                     ['nullable', 'string']
                 ),
             ],
-            'auth_type' => ['nullable', 'string', 'in:preset_pin,preset_qr,temp_pin,temp_qr,pin,qr'],
+            'auth_type' => ['nullable', 'string', 'in:preset_pin,preset_qr,pin,qr'],
             'supervisor_user_id' => ['nullable', 'required_if:auth_type,preset_pin', 'integer', 'exists:users,id'],
             'supervisor_pin' => ['nullable', 'required_if:auth_type,preset_pin', 'string', 'size:6'],
-            'temp_code' => ['nullable', 'required_if:auth_type,temp_pin', 'required_if:auth_type,pin', 'string', 'size:6', 'regex:/^\d{6}$/'],
-            'qr_scan_token' => ['nullable', 'required_if:auth_type,temp_qr', 'required_if:auth_type,qr', 'required_if:auth_type,preset_qr', 'string', 'min:1', 'max:128'],
+            'temp_code' => ['nullable', 'required_if:auth_type,pin', 'string', 'size:6', 'regex:/^\d{6}$/'],
+            'qr_scan_token' => ['nullable', 'required_if:auth_type,qr', 'required_if:auth_type,preset_qr', 'string', 'min:1', 'max:128'],
         ];
     }
 }

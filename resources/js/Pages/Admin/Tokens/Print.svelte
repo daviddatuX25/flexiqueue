@@ -190,16 +190,16 @@
 		<div class="flex flex-wrap items-center gap-3">
 			<Link
 				href="/admin/tokens"
-				class="btn preset-tonal btn-sm"
+				class="btn preset-tonal"
 			>
 				← Back to Tokens
 			</Link>
-			<button type="button" class="btn preset-filled-primary-500 btn-sm" onclick={printPage}>
+			<button type="button" class="btn preset-filled-primary-500" onclick={printPage}>
 				Print
 			</button>
 			<button
 				type="button"
-				class="btn preset-tonal btn-sm"
+				class="btn preset-tonal"
 				aria-expanded={showInstructions}
 				aria-controls="print-instructions"
 				onclick={() => (showInstructions = !showInstructions)}
@@ -246,7 +246,7 @@
 			{/if}
 			<Link
 				href="/admin/tokens"
-				class="btn preset-filled-primary-500 flex items-center gap-2 touch-target-h"
+				class="btn preset-filled-primary-500 touch-target-h"
 			>
 				Go to Tokens
 			</Link>

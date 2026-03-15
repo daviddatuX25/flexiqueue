@@ -2,10 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Models\DeviceAuthorization;
 use App\Models\Program;
 use App\Models\Site;
 use App\Models\Station;
 use App\Models\User;
+use App\Services\DeviceAuthorizationService;
+use App\Support\DeviceLock;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -59,9 +62,17 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
 
     public function test_staff_visiting_station_page_receives_current_program_from_controller(): void
     {
-        $admin = User::factory()->admin()->create();
-        $staff = User::factory()->create(['role' => 'staff']);
+        $site = Site::create([
+            'name' => 'Default',
+            'slug' => 'default',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
         $program = Program::create([
+            'site_id' => $site->id,
             'name' => 'Station Program',
             'description' => null,
             'is_active' => true,
@@ -205,9 +216,17 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
     /** Per A.4.1 / A.4.4: triage page receives shared currentProgram when staff has assigned station. */
     public function test_triage_page_shared_data_has_current_program(): void
     {
-        $admin = User::factory()->admin()->create();
-        $staff = User::factory()->create(['role' => 'staff']);
+        $site = Site::create([
+            'name' => 'Default',
+            'slug' => 'default',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
         $program = Program::create([
+            'site_id' => $site->id,
             'name' => 'Triage Program',
             'description' => null,
             'is_active' => true,
@@ -230,18 +249,41 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         );
     }
 
-    /** Per A.4.1 / A.4.4: display board (unauthenticated) with ?program= receives shared currentProgram. */
+    /** Per public-site plan: known_sites cookie required for /site/* routes. */
+    private function withKnownSiteCookie(Site $site): static
+    {
+        $value = json_encode([['slug' => $site->slug, 'name' => $site->name]]);
+
+        return $this->withUnencryptedCookie('known_sites', $value);
+    }
+
+    /** Per A.4.1 / A.4.4: display board (unauthenticated) with ?program= on per-site URL receives shared currentProgram. */
     public function test_display_board_with_program_query_receives_shared_current_program(): void
     {
-        $admin = User::factory()->admin()->create();
+        $site = Site::create([
+            'name' => 'Default',
+            'slug' => 'default',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
         $program = Program::create([
+            'site_id' => $site->id,
             'name' => 'Display Program',
             'description' => null,
             'is_active' => true,
             'created_by' => $admin->id,
         ]);
+        $service = app(DeviceAuthorizationService::class);
+        $auth = $service->authorize($program, 'test-device-'.$program->id, DeviceAuthorization::SCOPE_SESSION);
+        $cookieName = DeviceAuthorizationService::cookieNameForProgram($program);
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_DISPLAY, null);
 
-        $response = $this->get(route('display').'?program='.$program->id);
+        $response = $this->withKnownSiteCookie($site)
+            ->withCookie($cookieName, $auth['cookie_value'])
+            ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockCookie->getValue())
+            ->get('/site/'.$site->slug.'/display?program='.$program->id);
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -251,10 +293,15 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         );
     }
 
-    /** Per A.4.1 / A.4.4: display board without program param has null currentProgram in shared data. */
+    /** Per A.4.1 / A.4.4: display board without program param on per-site URL has null currentProgram in shared data. */
     public function test_display_board_without_program_param_has_null_current_program(): void
     {
-        $response = $this->get(route('display'));
+        $site = Site::firstOrCreate(
+            ['slug' => 'default'],
+            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
+        );
+
+        $response = $this->withKnownSiteCookie($site)->get('/site/'.$site->slug.'/display');
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page

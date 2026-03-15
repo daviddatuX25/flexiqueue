@@ -8,9 +8,10 @@ use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 
 /**
- * Broadcast program paused/resumed to display.activity.{programId} so the public
- * display board can show or hide the "Program is paused" overlay in real time.
+ * Broadcast program paused/resumed/closed to display.activity.{programId} so the public
+ * display board can show "Program is paused" or "Program is not currently running."
  * Per central-edge-v2-final Phase A: program-scoped channel only.
+ * Per plan Step 5: program_is_active false when program is closed (deactivated).
  */
 class ProgramStatusChanged implements ShouldBroadcastNow
 {
@@ -18,7 +19,8 @@ class ProgramStatusChanged implements ShouldBroadcastNow
 
     public function __construct(
         public int $programId,
-        public bool $programIsPaused
+        public bool $programIsPaused,
+        public bool $programIsActive = true
     ) {}
 
     /**
@@ -43,6 +45,7 @@ class ProgramStatusChanged implements ShouldBroadcastNow
     {
         return [
             'program_is_paused' => $this->programIsPaused,
+            'program_is_active' => $this->programIsActive,
         ];
     }
 }

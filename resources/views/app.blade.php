@@ -5,7 +5,7 @@
         (function(){
             try{
                 var t=localStorage.getItem('flexiqueue-theme');
-                if(t==='dark'||t==='light')document.documentElement.setAttribute('data-mode',t);
+                if(t==='dark'||t==='light'||t==='flexiqueue')document.documentElement.setAttribute('data-mode',t);
             }catch(e){}
         })();
     </script>

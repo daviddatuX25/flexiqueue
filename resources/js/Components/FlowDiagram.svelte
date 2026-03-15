@@ -46,20 +46,32 @@
 			{#if sortedSteps(track).length === 0}
 				<p class="text-sm text-surface-950/60">No steps defined.</p>
 			{:else}
-				<div class="flex flex-wrap items-center gap-1 touch-target-h">
-					{#each sortedSteps(track) as step, i (step.id)}
-						<span
-							class="inline-flex items-center px-3 py-1.5 rounded-lg bg-surface-100 text-sm font-medium text-surface-950"
-						>
-							{step.process_name}
-							{#if step.is_required}
-								<span class="text-surface-950/50 text-xs ml-1">*</span>
-							{/if}
-						</span>
-						{#if i < sortedSteps(track).length - 1}
-							<span class="text-surface-950/40 font-bold" aria-hidden="true">→</span>
-						{/if}
-					{/each}
+				<div class="mt-1 -mx-1 overflow-x-auto overflow-y-hidden">
+					<div
+						class="flex items-stretch gap-2 px-1 pb-1 touch-target-h"
+						aria-label="Track flow sequence"
+					>
+						{#each sortedSteps(track) as step, i (step.id)}
+							<div
+								class="flex items-center gap-2 rounded-container bg-surface-100 border border-surface-200/80 px-3 py-1.5 text-sm font-medium text-surface-950 shadow-[0_1px_3px_rgba(15,23,42,0.08)]"
+							>
+								<span class="whitespace-nowrap">
+									{step.process_name}
+									{#if step.is_required}
+										<span class="text-surface-950/50 text-xs ml-1">*</span>
+									{/if}
+								</span>
+								{#if i < sortedSteps(track).length - 1}
+									<span
+										class="text-surface-400 text-xs font-semibold select-none"
+										aria-hidden="true"
+									>
+										→
+									</span>
+								{/if}
+							</div>
+						{/each}
+					</div>
 				</div>
 			{/if}
 		</div>

@@ -4,7 +4,6 @@ namespace App\Http\Requests;
 
 use App\Support\ClientBindingSource;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 /**
  * Per 08-API-SPEC-PHASE1 §3.1: POST /api/sessions/bind — qr_hash, track_id, client_category.
@@ -30,20 +29,19 @@ class BindSessionRequest extends FormRequest
             'client_binding' => ['nullable', 'array'],
             'client_binding.client_id' => ['required_with:client_binding', 'integer', 'exists:clients,id'],
             'client_binding.source' => ClientBindingSource::validationRules(),
-            'client_binding.id_document_id' => [
-                'nullable',
-                'integer',
-                'exists:client_id_documents,id',
-                Rule::requiredIf(fn () => ClientBindingSource::requiresIdDocument(
-                    (string) $this->input('client_binding.source', '')
-                )),
-            ],
             'identity_registration_request' => ['nullable', 'array'],
-            'identity_registration_request.name' => ['nullable', 'string', 'max:150'],
-            'identity_registration_request.birth_year' => ['nullable', 'integer', 'min:1900', 'max:2100'],
+            'identity_registration_request.first_name' => ['nullable', 'string', 'max:100'],
+            'identity_registration_request.middle_name' => ['nullable', 'string', 'max:100'],
+            'identity_registration_request.last_name' => ['nullable', 'string', 'max:100'],
+            'identity_registration_request.birth_date' => ['nullable', 'date'],
+            'identity_registration_request.address_line_1' => ['nullable', 'string', 'max:255'],
+            'identity_registration_request.address_line_2' => ['nullable', 'string', 'max:255'],
+            'identity_registration_request.city' => ['nullable', 'string', 'max:100'],
+            'identity_registration_request.state' => ['nullable', 'string', 'max:100'],
+            'identity_registration_request.postal_code' => ['nullable', 'string', 'max:20'],
+            'identity_registration_request.country' => ['nullable', 'string', 'max:100'],
             'identity_registration_request.client_category' => ['nullable', 'string', 'max:50'],
-            'identity_registration_request.id_type' => ['nullable', 'string', 'max:50'],
-            'identity_registration_request.id_number' => ['nullable', 'string', 'max:255'],
+            'identity_registration_request.mobile' => ['nullable', 'string', 'max:30'],
         ];
     }
 

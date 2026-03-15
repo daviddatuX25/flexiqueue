@@ -5,9 +5,11 @@ namespace Tests\Feature\Auth;
 use App\Models\Program;
 use App\Models\ProgramStationAssignment;
 use App\Models\ServiceTrack;
+use App\Models\Site;
 use App\Models\Station;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -83,9 +85,14 @@ class RoleAccessTest extends TestCase
 
     public function test_staff_can_access_station_and_triage(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
-        $admin = User::factory()->admin()->create();
+        $site = Site::firstOrCreate(
+            ['slug' => 'default'],
+            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
+        );
+        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
         $program = Program::create([
+            'site_id' => $site->id,
             'name' => 'Test',
             'description' => null,
             'is_active' => true,
@@ -105,16 +112,22 @@ class RoleAccessTest extends TestCase
 
     public function test_station_route_with_explicit_station_uses_station_program_when_multiple_active_programs(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
-        $admin = User::factory()->admin()->create();
+        $site = Site::firstOrCreate(
+            ['slug' => 'default'],
+            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
+        );
+        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
 
         $programA = Program::create([
+            'site_id' => $site->id,
             'name' => 'Program A',
             'description' => null,
             'is_active' => true,
             'created_by' => $admin->id,
         ]);
         $programB = Program::create([
+            'site_id' => $site->id,
             'name' => 'Program B',
             'description' => null,
             'is_active' => true,
@@ -161,9 +174,14 @@ class RoleAccessTest extends TestCase
 
     public function test_staff_with_program_station_assignment_sees_station_on_station_page(): void
     {
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
-        $admin = User::factory()->admin()->create();
+        $site = Site::firstOrCreate(
+            ['slug' => 'default'],
+            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
+        );
+        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null, 'site_id' => $site->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
         $program = Program::create([
+            'site_id' => $site->id,
             'name' => 'Relief Distribution',
             'description' => null,
             'is_active' => true,
@@ -195,8 +213,13 @@ class RoleAccessTest extends TestCase
 
     public function test_admin_can_access_station_and_triage(): void
     {
-        $admin = User::factory()->admin()->create();
+        $site = Site::firstOrCreate(
+            ['slug' => 'default'],
+            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
+        );
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
         $program = Program::create([
+            'site_id' => $site->id,
             'name' => 'Test',
             'description' => null,
             'is_active' => true,

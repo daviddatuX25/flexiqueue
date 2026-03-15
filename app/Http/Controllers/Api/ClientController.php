@@ -2,36 +2,83 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Exceptions\DuplicateClientIdDocumentException;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\AttachClientIdDocumentRequest;
-use App\Http\Requests\ClientLookupByIdRequest;
+use App\Http\Controllers\StationPageController;
 use App\Http\Requests\ClientSearchRequest;
 use App\Http\Requests\StoreClientRequest;
 use App\Models\Client;
-use App\Services\ClientIdDocumentService;
+use App\Models\ClientIdAuditLog;
+use App\Models\Program;
 use App\Services\ClientService;
+use App\Services\MobileCryptoService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 class ClientController extends Controller
 {
     public function __construct(
         private ClientService $clientService,
-        private ClientIdDocumentService $clientIdDocumentService,
+        private MobileCryptoService $mobileCrypto,
     ) {
+    }
+
+    /**
+     * Resolve site_id for client operations. Per site-scoping-migration-spec §3:
+     * triage context uses program.site_id; otherwise user.site_id.
+     */
+    private function resolveSiteId(Request $request): ?int
+    {
+        $user = $request->user();
+        $programId = $request->query('program_id') ?? $request->input('program_id');
+        if ($programId !== null) {
+            $program = Program::query()->find((int) $programId);
+            if ($program) {
+                return $program->site_id;
+            }
+        }
+        if ($user->assignedStation?->program) {
+            return $user->assignedStation->program->site_id;
+        }
+        $sessionProgramId = $request->session()->get(StationPageController::SESSION_KEY_PROGRAM_ID);
+        if ($sessionProgramId) {
+            $program = Program::query()->find((int) $sessionProgramId);
+            if ($program) {
+                return $program->site_id;
+            }
+        }
+
+        return $user->site_id;
     }
 
     public function search(ClientSearchRequest $request): JsonResponse
     {
+        $siteId = $this->resolveSiteId($request);
+        if ($siteId === null) {
+            return response()->json(['message' => 'No program or site context for client search.'], 422);
+        }
         $params = $request->validatedSearchParams();
+        $params['site_id'] = $siteId;
         $paginator = $this->clientService->searchClients($params);
 
         $data = $paginator->map(function ($client) {
+            $mobileMasked = $client->mobile_encrypted
+                ? $this->mobileCrypto->mask($this->mobileCrypto->decrypt($client->mobile_encrypted))
+                : null;
+
             return [
                 'id' => $client->id,
-                'name' => $client->name,
-                'birth_year' => $client->birth_year,
-                'has_id_document' => $client->id_documents_count > 0,
+                'first_name' => $client->first_name,
+                'middle_name' => $client->middle_name,
+                'last_name' => $client->last_name,
+                'birth_date' => $client->birth_date?->format('Y-m-d'),
+                'address_line_1' => $client->address_line_1,
+                'address_line_2' => $client->address_line_2,
+                'city' => $client->city,
+                'state' => $client->state,
+                'postal_code' => $client->postal_code,
+                'country' => $client->country,
+                'mobile_masked' => $mobileMasked,
             ];
         })->values()->all();
 
@@ -46,148 +93,183 @@ class ClientController extends Controller
         ]);
     }
 
-    public function lookupById(ClientLookupByIdRequest $request): JsonResponse
+    public function searchByPhone(Request $request): JsonResponse
     {
-        $data = $request->validated();
-        $idType = isset($data['id_type']) && $data['id_type'] !== '' && $data['id_type'] !== null
-            ? $data['id_type']
-            : null;
-        $idNumber = $data['id_number'];
+        $request->validate([
+            'mobile' => ['required', 'string', 'max:30'],
+            'program_id' => ['nullable', 'integer', 'exists:programs,id'],
+        ]);
 
-        if ($idType !== null) {
-            $result = $this->clientIdDocumentService->lookupById($idType, $idNumber);
-            if (! $result['client'] || ! $result['id_document']) {
-                return response()->json([
-                    'match_status' => 'not_found',
-                    'client' => null,
-                ]);
-            }
-            $idLast4 = $this->clientIdDocumentService->getIdLast4FromDocument($result['id_document']);
-
-            return response()->json([
-                'match_status' => 'existing',
-                'client' => [
-                    'id' => $result['client']->id,
-                    'name' => $result['client']->name,
-                    'birth_year' => $result['client']->birth_year,
-                ],
-                'id_document' => [
-                    'id' => $result['id_document']->id,
-                    'id_type' => $result['id_document']->id_type,
-                    'id_last4' => $idLast4,
-                ],
-            ]);
+        $siteId = $this->resolveSiteId($request);
+        if ($siteId === null) {
+            return response()->json(['message' => 'No program or site context for client search.'], 422);
         }
 
-        $result = $this->clientIdDocumentService->lookupByIdNumberOnly($idNumber);
-        if ($result['match_status'] === 'ambiguous') {
+        $client = $this->clientService->searchClientsByPhone($request->input('mobile'), $siteId);
+        if (! $client) {
             return response()->json([
-                'match_status' => 'ambiguous',
-                'message' => 'Can\'t auto-detect. Please select ID type first.',
-                'id_types' => $result['id_types'],
+                'match_status' => 'not_found',
+                'client' => null,
             ]);
         }
-        if ($result['match_status'] === 'not_found') {
+        if ($client->site_id !== $siteId) {
             return response()->json([
                 'match_status' => 'not_found',
                 'client' => null,
             ]);
         }
 
-        $idLast4 = $this->clientIdDocumentService->getIdLast4FromDocument($result['id_document']);
+        $mobileMasked = $client->mobile_encrypted
+            ? $this->mobileCrypto->mask($this->mobileCrypto->decrypt($client->mobile_encrypted))
+            : null;
 
         return response()->json([
             'match_status' => 'existing',
             'client' => [
-                'id' => $result['client']->id,
-                'name' => $result['client']->name,
-                'birth_year' => $result['client']->birth_year,
-            ],
-            'id_document' => [
-                'id' => $result['id_document']->id,
-                'id_type' => $result['id_document']->id_type,
-                'id_last4' => $idLast4,
+                'id' => $client->id,
+                'first_name' => $client->first_name,
+                'middle_name' => $client->middle_name,
+                'last_name' => $client->last_name,
+                'birth_date' => $client->birth_date?->format('Y-m-d'),
+                'address_line_1' => $client->address_line_1,
+                'address_line_2' => $client->address_line_2,
+                'city' => $client->city,
+                'state' => $client->state,
+                'postal_code' => $client->postal_code,
+                'country' => $client->country,
+                'mobile_masked' => $mobileMasked,
             ],
         ]);
     }
 
     public function store(StoreClientRequest $request): JsonResponse
     {
+        $siteId = $this->resolveSiteId($request);
+        if ($siteId === null) {
+            return response()->json(['message' => 'No program or site context for client creation.'], 403);
+        }
         $data = $request->validated();
+
+        $address = null;
+        if (! empty(array_filter([
+            $data['address_line_1'] ?? null,
+            $data['address_line_2'] ?? null,
+            $data['city'] ?? null,
+            $data['state'] ?? null,
+            $data['postal_code'] ?? null,
+            $data['country'] ?? null,
+        ]))) {
+            $address = [
+                'address_line_1' => $data['address_line_1'] ?? null,
+                'address_line_2' => $data['address_line_2'] ?? null,
+                'city' => $data['city'] ?? null,
+                'state' => $data['state'] ?? null,
+                'postal_code' => $data['postal_code'] ?? null,
+                'country' => $data['country'] ?? null,
+            ];
+        }
 
         $client = $this->clientService->createClient(
-            $data['name'],
-            (int) $data['birth_year'],
+            $data['first_name'],
+            $data['last_name'],
+            $data['birth_date'],
+            $siteId,
+            $data['mobile'] ?? null,
+            $data['middle_name'] ?? null,
+            $address,
         );
 
-        $idDocumentPayload = $data['id_document'] ?? null;
-        $idDocument = null;
-
-        if (is_array($idDocumentPayload)) {
-            try {
-                $idDocument = $this->clientIdDocumentService->createForClient(
-                    $client,
-                    $idDocumentPayload['id_type'],
-                    $idDocumentPayload['id_number'],
-                );
-            } catch (DuplicateClientIdDocumentException $e) {
-                return response()->json([
-                    'message' => $e->getMessage(),
-                    'error_code' => 'id_document_duplicate',
-                    'hint' => 'Use the lookup-by-id endpoint to attach this ID to the existing client instead of creating a new client.',
-                ], 409);
-            }
-        }
-
-        $response = [
-            'client' => [
-                'id' => $client->id,
-                'name' => $client->name,
-                'birth_year' => $client->birth_year,
-            ],
-        ];
-
-        if ($idDocument) {
-            $idLast4 = $this->clientIdDocumentService->getIdLast4FromDocument($idDocument);
-
-            $response['id_document'] = [
-                'id' => $idDocument->id,
-                'id_type' => $idDocument->id_type,
-                'id_last4' => $idLast4,
-            ];
-        } else {
-            $response['id_document'] = null;
-        }
-
-        return response()->json($response, 201);
-    }
-
-    public function attachIdDocument(AttachClientIdDocumentRequest $request, Client $client): JsonResponse
-    {
-        $data = $request->validated();
-
-        try {
-            $doc = $this->clientIdDocumentService->createForClient(
-                $client,
-                $data['id_type'],
-                $data['id_number'],
-            );
-        } catch (DuplicateClientIdDocumentException $e) {
-            return response()->json([
-                'message' => $e->getMessage(),
-                'error_code' => 'id_document_duplicate',
-            ], 409);
-        }
-
-        $idLast4 = $this->clientIdDocumentService->getIdLast4FromDocument($doc);
+        $mobileMasked = $client->mobile_encrypted
+            ? $this->mobileCrypto->mask($this->mobileCrypto->decrypt($client->mobile_encrypted))
+            : null;
 
         return response()->json([
-            'id_document' => [
-                'id' => $doc->id,
-                'id_type' => $doc->id_type,
-                'id_last4' => $idLast4,
+            'client' => [
+                'id' => $client->id,
+                'first_name' => $client->first_name,
+                'middle_name' => $client->middle_name,
+                'last_name' => $client->last_name,
+                'birth_date' => $client->birth_date?->format('Y-m-d'),
+                'address_line_1' => $client->address_line_1,
+                'address_line_2' => $client->address_line_2,
+                'city' => $client->city,
+                'state' => $client->state,
+                'postal_code' => $client->postal_code,
+                'country' => $client->country,
+                'mobile_masked' => $mobileMasked,
             ],
         ], 201);
     }
-}
 
+    public function revealPhone(Request $request, Client $client): JsonResponse
+    {
+        $siteId = $this->resolveSiteId($request);
+        if ($siteId === null || $client->site_id !== $siteId) {
+            abort(404);
+        }
+        if (! $client->mobile_encrypted) {
+            return response()->json(['message' => 'Client has no stored mobile number.'], 422);
+        }
+
+        $request->validate([
+            'reason' => ['required', 'string', 'max:500'],
+            'confirm' => ['required', 'accepted'],
+        ]);
+
+        $mobile = $this->mobileCrypto->decrypt($client->mobile_encrypted);
+        $last2 = substr($mobile, -2);
+
+        ClientIdAuditLog::create([
+            'client_id' => $client->id,
+            'staff_user_id' => $request->user()->id,
+            'action' => 'phone_reveal',
+            'mobile_last2' => $last2,
+            'reason' => $request->input('reason'),
+        ]);
+
+        return response()->json(['mobile' => $mobile]);
+    }
+
+    public function updateMobile(Request $request, Client $client): JsonResponse
+    {
+        $siteId = $this->resolveSiteId($request);
+        if ($siteId === null || $client->site_id !== $siteId) {
+            abort(404);
+        }
+
+        $data = $request->validate([
+            'mobile' => ['required', 'string', 'max:30'],
+            'reason' => ['required', 'string', 'max:500'],
+        ]);
+
+        $normalized = \App\Support\MobileNormalizer::normalize($data['mobile']);
+        if ($normalized === '') {
+            throw ValidationException::withMessages(['mobile' => ['Invalid mobile number.']]);
+        }
+
+        $hash = $this->mobileCrypto->hash($normalized);
+        $existing = Client::where('mobile_hash', $hash)->where('id', '!=', $client->id)->first();
+        if ($existing) {
+            return response()->json(['message' => 'Another client already has this mobile number.'], 409);
+        }
+
+        $last2 = substr($normalized, -2);
+
+        ClientIdAuditLog::create([
+            'client_id' => $client->id,
+            'staff_user_id' => $request->user()->id,
+            'action' => 'phone_update',
+            'mobile_last2' => $last2,
+            'reason' => $data['reason'],
+        ]);
+
+        $client->update([
+            'mobile_encrypted' => $this->mobileCrypto->encrypt($normalized),
+            'mobile_hash' => $hash,
+        ]);
+
+        return response()->json([
+            'mobile_masked' => $this->mobileCrypto->mask($normalized),
+        ]);
+    }
+}

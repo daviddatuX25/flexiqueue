@@ -5,13 +5,22 @@
     import { Link, router, usePage } from "@inertiajs/svelte";
     import { get } from "svelte/store";
     import { toaster } from "../../../lib/toaster.js";
+    import { clientDisplayName } from "../../../lib/clientDisplayName.js";
     import { Users as UsersIcon, Search as SearchIcon, Eye, Trash2 } from "lucide-svelte";
 
     interface ClientListItem {
         id: number;
-        name: string;
-        birth_year: number | null;
-        id_documents_count: number;
+        first_name: string;
+        middle_name: string | null;
+        last_name: string;
+        birth_date: string | null;
+        address_line_1?: string | null;
+        address_line_2?: string | null;
+        city?: string | null;
+        state?: string | null;
+        postal_code?: string | null;
+        country?: string | null;
+        mobile_masked: string | null;
         created_at: string | null;
     }
 
@@ -149,9 +158,8 @@
                     Clients
                 </h1>
                 <p class="mt-2 text-surface-600 max-w-3xl leading-relaxed">
-                    Search and inspect client records and attached ID documents. ID
-                    numbers are always redacted here; full values require an
-                    explicit admin-only reveal flow.
+                    Search and inspect client records. Phone numbers are masked; full
+                    values require an explicit admin-only reveal flow.
                 </p>
             </div>
             <form
@@ -217,53 +225,52 @@
             </p>
         </div>
         {:else}
-        <!-- Desktop table -->
-        <AdminTable class="mt-6 hidden md:block" compact={true}>
+        <!-- Table: visible from lg breakpoint -->
+        <AdminTable class="mt-6 hidden lg:block" compact={true}>
             {#snippet head()}
                 <tr>
                     <th>Name</th>
-                    <th>Birth year</th>
-                    <th>ID documents</th>
+                    <th>Birth date</th>
+                    <th>Phone</th>
                     <th>Created</th>
-                    <th class="text-center">Actions</th>
+                    <th class="py-2 px-3 text-center text-surface-600 font-medium whitespace-nowrap">Actions</th>
                 </tr>
             {/snippet}
             {#snippet body()}
                 {#each clients as client (client.id)}
                     <tr>
                         <td class="font-medium text-surface-900">
-                            {client.name}
+                            {clientDisplayName(client)}
                         </td>
                         <td class="text-surface-700">
-                            {client.birth_year ?? "—"}
+                            {client.birth_date ?? "—"}
                         </td>
                         <td class="text-surface-700">
-                            {client.id_documents_count}
+                            {client.mobile_masked ?? '—'}
                         </td>
                         <td class="text-surface-700">
                             {formatDate(client.created_at)}
                         </td>
-                        <td class="text-center">
+                        <td class="py-2 px-3 text-center align-middle">
                             <div
-                                class="flex justify-center items-center gap-2 flex-wrap"
+                                class="flex items-center justify-center gap-1.5 flex-wrap"
                             >
                                 <Link
                                     href={`/admin/clients/${client.id}`}
-                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 flex items-center gap-1.5 shadow-sm px-3 py-1.5 whitespace-nowrap"
+                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
-                                    <Eye class="w-3.5 h-3.5" />
-                                    View
+                                    <Eye class="w-3.5 h-3.5" /> View
                                 </Link>
                                 {#if isAdmin}
                                     <button
                                         type="button"
-                                        class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center justify-center w-10 shrink-0 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                                        class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                         onclick={() => openDelete(client)}
                                         data-testid={"admin-client-delete-" + client.id}
                                         aria-label="Delete client"
                                         title="Delete client"
                                     >
-                                        <Trash2 class="w-4 h-4" />
+                                        <Trash2 class="w-3.5 h-3.5" />
                                     </button>
                                 {/if}
                             </div>
@@ -273,64 +280,54 @@
             {/snippet}
         </AdminTable>
 
-        <!-- Mobile cards -->
-        <div class="grid grid-cols-1 gap-4 mt-4 md:hidden">
+        <!-- Card layout: 1 col mobile, 2 col tablet; hidden on lg where table shows -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 lg:hidden">
             {#each clients as client (client.id)}
                 <div
                     class="card bg-surface-50 border border-surface-200 shadow-sm p-4 flex flex-col gap-3"
                 >
-                    <div
-                        class="flex items-start justify-between gap-3 flex-wrap"
-                    >
-                        <div>
-                            <span
-                                class="font-semibold text-surface-950 block text-base"
-                                >{client.name}</span
-                            >
-                            <span class="text-xs text-surface-500 block mt-0.5">
-                                Created {formatDate(client.created_at)}
-                            </span>
-                        </div>
-                        <div class="flex flex-col items-end gap-1 text-sm">
-                            <span class="text-surface-600">
-                                Birth year:
-                                <span class="font-medium text-surface-950">
-                                    {client.birth_year ?? "—"}
-                                </span>
-                            </span>
-                            <span class="text-surface-600">
-                                ID documents:
-                                <span class="font-medium text-surface-950">
-                                    {client.id_documents_count}
-                                </span>
-                            </span>
-                        </div>
-                    </div>
-                    <div
-                        class="pt-2 border-t border-surface-200 flex justify-end"
-                    >
-                        <div
-                            class="flex items-center gap-2 w-full xs:w-auto"
+                    <div class="space-y-2">
+                        <span
+                            class="font-semibold text-surface-950 block text-base"
+                            >{clientDisplayName(client)}</span
                         >
-                            <Link
-                                href={`/admin/clients/${client.id}`}
-                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 flex items-center justify-center gap-1.5 shadow-sm flex-1 xs:flex-none"
+                        <span class="text-xs text-surface-500 block">
+                            Created {formatDate(client.created_at)}
+                        </span>
+                        <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm items-baseline">
+                            <dt class="text-surface-500">Birth date</dt>
+                            <dd class="font-medium text-surface-950">
+                                {client.birth_date ?? "—"}
+                            </dd>
+                            <dt class="text-surface-500">Phone</dt>
+                            <dd class="font-medium text-surface-950 truncate min-w-0">
+                                {client.mobile_masked ?? "—"}
+                            </dd>
+                        </dl>
+                    </div>
+                    <!-- Per UI/UX checklist: on mobile, View Details and Delete buttons equal size -->
+                    <div
+                        class="pt-2 border-t border-surface-200 grid gap-2 {isAdmin ? 'grid-cols-2' : 'grid-cols-1'}"
+                    >
+                        <Link
+                            href={`/admin/clients/${client.id}`}
+                            class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 flex items-center justify-center gap-1.5 shadow-sm w-full min-w-0"
+                        >
+                            <Eye class="w-3.5 h-3.5 shrink-0" />
+                            View details
+                        </Link>
+                        {#if isAdmin}
+                            <button
+                                type="button"
+                                class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center justify-center gap-1.5 shadow-sm w-full min-w-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                                onclick={() => openDelete(client)}
+                                data-testid={"admin-client-delete-mobile-" + client.id}
+                                aria-label="Delete client"
                             >
-                                <Eye class="w-3.5 h-3.5" />
-                                View details
-                            </Link>
-                            {#if isAdmin}
-                                <button
-                                    type="button"
-                                    class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center justify-center touch-target-h w-10 shrink-0 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                                    onclick={() => openDelete(client)}
-                                    data-testid={"admin-client-delete-mobile-" + client.id}
-                                    aria-label="Delete client"
-                                >
-                                    <Trash2 class="w-4 h-4" />
-                                </button>
-                            {/if}
-                        </div>
+                                <Trash2 class="w-3.5 h-3.5 shrink-0" />
+                                Delete
+                            </button>
+                        {/if}
                     </div>
                 </div>
             {/each}
@@ -342,7 +339,7 @@
             {#if deleteTarget}
                 <div class="space-y-3">
                     <p class="text-sm text-surface-700">
-                        Delete client <span class="font-semibold">{deleteTarget.name}</span>? This cannot be undone.
+                        Delete client <span class="font-semibold">{clientDisplayName(deleteTarget)}</span>? This cannot be undone.
                     </p>
                     {#if deleteErrorMessage}
                         <p class="text-sm text-error-700">{deleteErrorMessage}</p>

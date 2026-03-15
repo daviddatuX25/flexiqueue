@@ -16,9 +16,16 @@ class PrintSettingsController extends Controller
         private PrintSettingRepository $printSettingRepository
     ) {}
 
-    public function show(): JsonResponse
+    /**
+     * Per site-scoping-migration-spec §4: scope by user.site_id; 403 if null (site admin must have site).
+     */
+    public function show(\Illuminate\Http\Request $request): JsonResponse
     {
-        $settings = $this->printSettingRepository->getInstance();
+        $siteId = $request->user()?->site_id;
+        if ($siteId === null) {
+            abort(403, 'Site admin must have an assigned site to view print settings.');
+        }
+        $settings = $this->printSettingRepository->getInstance($siteId);
 
         return response()->json([
             'print_settings' => [
@@ -36,7 +43,11 @@ class PrintSettingsController extends Controller
 
     public function update(UpdatePrintSettingsRequest $request): JsonResponse
     {
-        $settings = $this->printSettingRepository->getInstance();
+        $siteId = $request->user()?->site_id;
+        if ($siteId === null) {
+            abort(403, 'Site admin must have an assigned site to update print settings.');
+        }
+        $settings = $this->printSettingRepository->getInstance($siteId);
         $settings->update($request->validated());
 
         return response()->json([
@@ -55,10 +66,15 @@ class PrintSettingsController extends Controller
 
     /**
      * Upload an image for the token print template (logo/background).
-     * Stores on the public disk and updates the singleton PrintSetting.
+     * Stores on the public disk and updates the site-scoped PrintSetting.
      */
     public function upload(UploadPrintImageRequest $request): JsonResponse
     {
+        $siteId = $request->user()?->site_id;
+        if ($siteId === null) {
+            abort(403, 'Site admin must have an assigned site to upload print images.');
+        }
+
         $file = $request->file('image');
         $type = $request->validated('type') ?? 'logo';
 
@@ -74,7 +90,7 @@ class PrintSettingsController extends Controller
 
         $url = Storage::disk('public')->url($path);
 
-        $settings = $this->printSettingRepository->getInstance();
+        $settings = $this->printSettingRepository->getInstance($siteId);
         if ($type === 'background') {
             $settings->bg_image_url = $url;
         } else {

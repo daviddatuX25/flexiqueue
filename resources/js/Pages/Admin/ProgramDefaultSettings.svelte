@@ -66,9 +66,7 @@
 	let displayTtsRepeatCount = $state(1);
 	let displayTtsRepeatDelaySec = $state(2);
 	let allowPublicTriage = $state(false);
-	let identityBindingMode = $state<"disabled" | "optional" | "required">(
-		"disabled",
-	);
+	let identityBindingMode = $state<"disabled" | "required">("disabled");
 	let allowUnverifiedEntry = $state(false);
 	let enableDisplayHidBarcode = $state(true);
 	let enablePublicTriageHidBarcode = $state(true);
@@ -141,8 +139,9 @@
 			),
 		);
 		allowPublicTriage = (s as { allow_public_triage?: boolean }).allow_public_triage === true;
-		identityBindingMode = ((s as { identity_binding_mode?: string }).identity_binding_mode ??
-			"disabled") as "disabled" | "optional" | "required";
+		identityBindingMode = ((s as { identity_binding_mode?: string }).identity_binding_mode === "required"
+			? "required"
+			: "disabled") as "disabled" | "required";
 		allowUnverifiedEntry = (s as { allow_unverified_entry?: boolean }).allow_unverified_entry === true;
 		enableDisplayHidBarcode = (s as { enable_display_hid_barcode?: boolean })
 			.enable_display_hid_barcode !== false;
@@ -422,7 +421,6 @@
 								>
 									<option value="disabled">No ID at triage</option>
 									<option value="required">ID or registration required</option>
-									<option value="optional">ID optional (staff decides)</option>
 								</select>
 								<div class="form-control pt-1">
 									<label class="label cursor-pointer justify-start gap-3 w-fit text-xs">
@@ -430,7 +428,7 @@
 											type="checkbox"
 											class="checkbox checkbox-xs"
 											bind:checked={allowUnverifiedEntry}
-											disabled={!allowPublicTriage || identityBindingMode !== "optional"}
+											disabled={!allowPublicTriage || identityBindingMode !== "required"}
 										/>
 										<span class="label-text">
 											Allow unverified registrations to start visits from public triage

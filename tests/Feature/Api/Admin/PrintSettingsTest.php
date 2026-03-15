@@ -2,21 +2,36 @@
 
 namespace Tests\Feature\Api\Admin;
 
+use App\Models\Site;
 use App\Repositories\PrintSettingRepository;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class PrintSettingsTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function createAdminWithSite(): User
+    {
+        $site = Site::create([
+            'name' => 'Test Site',
+            'slug' => 'test-site',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+
+        return User::factory()->admin()->create(['site_id' => $site->id]);
+    }
+
     public function test_show_returns_default_settings(): void
     {
-        $admin = User::factory()->admin()->create();
+        $admin = $this->createAdminWithSite();
 
         $response = $this->actingAs($admin)->getJson('/api/admin/print-settings');
 
@@ -30,8 +45,8 @@ class PrintSettingsTest extends TestCase
 
     public function test_update_saves_settings(): void
     {
-        $admin = User::factory()->admin()->create();
-        $this->app->make(PrintSettingRepository::class)->getInstance();
+        $admin = $this->createAdminWithSite();
+        $this->app->make(PrintSettingRepository::class)->getInstance($admin->site_id);
 
         $this->actingAs($admin);
         Session::start();
@@ -74,8 +89,8 @@ class PrintSettingsTest extends TestCase
     public function test_admin_can_upload_logo_image(): void
     {
         Storage::fake('public');
-        $admin = User::factory()->admin()->create();
-        $this->app->make(PrintSettingRepository::class)->getInstance();
+        $admin = $this->createAdminWithSite();
+        $this->app->make(PrintSettingRepository::class)->getInstance($admin->site_id);
 
         $this->actingAs($admin);
         Session::start();
@@ -90,15 +105,15 @@ class PrintSettingsTest extends TestCase
         $response->assertJsonPath('type', 'logo');
         $this->assertNotEmpty($response->json('url'));
 
-        $settings = $this->app->make(PrintSettingRepository::class)->getInstance();
+        $settings = $this->app->make(PrintSettingRepository::class)->getInstance($admin->site_id);
         $this->assertNotNull($settings->logo_url);
     }
 
     public function test_admin_can_upload_background_image(): void
     {
         Storage::fake('public');
-        $admin = User::factory()->admin()->create();
-        $this->app->make(PrintSettingRepository::class)->getInstance();
+        $admin = $this->createAdminWithSite();
+        $this->app->make(PrintSettingRepository::class)->getInstance($admin->site_id);
 
         $this->actingAs($admin);
         Session::start();
@@ -113,7 +128,7 @@ class PrintSettingsTest extends TestCase
         $response->assertJsonPath('type', 'background');
         $this->assertNotEmpty($response->json('url'));
 
-        $settings = $this->app->make(PrintSettingRepository::class)->getInstance();
+        $settings = $this->app->make(PrintSettingRepository::class)->getInstance($admin->site_id);
         $this->assertNotNull($settings->bg_image_url);
     }
 }

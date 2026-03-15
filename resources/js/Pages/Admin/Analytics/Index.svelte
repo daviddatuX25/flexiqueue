@@ -14,6 +14,8 @@
         Layers,
         AlertTriangle,
         Filter,
+        ChevronDown,
+        ChevronUp,
     } from "lucide-svelte";
     import { onMount } from "svelte";
     import { get } from "svelte/store";
@@ -71,6 +73,7 @@
     let customTo = $state(toYMD(new Date()));
     let programId = $state<string>("");
     let trackId = $state<string>("");
+    let filtersExpanded = $state(true);
 
     let from = $derived.by(() => {
         if (dateRangeKey === "today") return today;
@@ -101,6 +104,15 @@
 
     /** Non-reactive so the scheduleFetch effect does not depend on it (avoids effect_update_depth_exceeded). */
     let debounceTimerRef: ReturnType<typeof setTimeout> | null = null;
+
+    /** Per ui-ux-tasks-checklist: chart text contrast — readable axis/legend (dark gray on light bg) */
+    function withChartTheme<T extends Record<string, unknown>>(opts: T): T {
+        return {
+            ...opts,
+            chart: { foreColor: "#334155", ...((opts.chart as Record<string, unknown>) || {}) },
+            grid: { borderColor: "#e2e8f0", ...((opts.grid as Record<string, unknown>) || {}) },
+        } as T;
+    }
 
     function queryParams(): string {
         const p = new URLSearchParams();
@@ -303,46 +315,71 @@
             </div>
         </div>
 
-        <!-- Zone 2 — Filter Bar (Sticky): date range, program, track; debounced re-fetch; all charts react -->
+        <!-- Zone 2 — Filter Bar (Sticky, expand/collapse): date range, program, track -->
         <div
             id="analytics-filter-bar"
-            class="sticky top-0 z-10 rounded-container border border-surface-200 bg-surface-50 shadow-sm p-4 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-4"
+            class="sticky top-0 z-10 rounded-container border border-surface-200 bg-surface-50 shadow-sm overflow-hidden"
         >
+            <button
+                type="button"
+                class="w-full flex items-center justify-between gap-2 p-4 text-left hover:bg-surface-100/80 transition-colors touch-target-h"
+                onclick={() => (filtersExpanded = !filtersExpanded)}
+                aria-expanded={filtersExpanded}
+                aria-controls="analytics-filter-controls"
+            >
+                <span class="text-sm font-medium text-surface-700 flex items-center gap-2">
+                    <Filter class="w-4 h-4 text-surface-500" />
+                    Filters
+                </span>
+                <span class="text-surface-500" aria-hidden="true">
+                    {#if filtersExpanded}
+                        <ChevronUp class="w-4 h-4" />
+                    {:else}
+                        <ChevronDown class="w-4 h-4" />
+                    {/if}
+                </span>
+            </button>
+            <div
+                id="analytics-filter-controls"
+                class="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-4 px-4 pb-4 pt-0 border-t border-surface-200/80"
+                class:hidden={!filtersExpanded}
+            >
             <div class="flex flex-wrap items-center gap-3">
                 <span class="text-sm font-medium text-surface-700">Date range</span>
-                <div class="flex rounded-lg border border-surface-200 overflow-hidden [&_button]:px-3 [&_button]:py-2 [&_button]:text-sm [&_button]:font-medium">
+                <!-- Per ui-ux-tasks-checklist: selected date range = green text only, no colored background -->
+                <div class="flex rounded-lg border border-surface-200 dark:border-slate-600 overflow-hidden [&_button]:px-3 [&_button]:py-2 [&_button]:text-sm [&_button]:font-medium [&_button]:transition-colors">
                     <button
                         type="button"
-                        class="touch-target-h {dateRangeKey === 'today'
-                            ? 'bg-primary-500 text-white'
-                            : 'bg-surface-50 text-surface-700 hover:bg-surface-100'} transition-colors"
+                        class="touch-target-h bg-surface-50 dark:bg-slate-800/50 {dateRangeKey === 'today'
+                            ? 'text-primary-600 dark:text-primary-400 font-semibold'
+                            : 'text-surface-700 dark:text-slate-300 hover:bg-surface-100 dark:hover:bg-slate-700/50'}"
                         onclick={() => (dateRangeKey = "today")}
                     >
                         Today
                     </button>
                     <button
                         type="button"
-                        class="touch-target-h {dateRangeKey === '7'
-                            ? 'bg-primary-500 text-white'
-                            : 'bg-surface-50 text-surface-700 hover:bg-surface-100'} transition-colors border-l border-surface-200"
+                        class="touch-target-h border-l border-surface-200 dark:border-slate-600 bg-surface-50 dark:bg-slate-800/50 {dateRangeKey === '7'
+                            ? 'text-primary-600 dark:text-primary-400 font-semibold'
+                            : 'text-surface-700 dark:text-slate-300 hover:bg-surface-100 dark:hover:bg-slate-700/50'}"
                         onclick={() => (dateRangeKey = "7")}
                     >
                         Last 7 Days
                     </button>
                     <button
                         type="button"
-                        class="touch-target-h {dateRangeKey === '30'
-                            ? 'bg-primary-500 text-white'
-                            : 'bg-surface-50 text-surface-700 hover:bg-surface-100'} transition-colors border-l border-surface-200"
+                        class="touch-target-h border-l border-surface-200 dark:border-slate-600 bg-surface-50 dark:bg-slate-800/50 {dateRangeKey === '30'
+                            ? 'text-primary-600 dark:text-primary-400 font-semibold'
+                            : 'text-surface-700 dark:text-slate-300 hover:bg-surface-100 dark:hover:bg-slate-700/50'}"
                         onclick={() => (dateRangeKey = "30")}
                     >
                         Last 30 Days
                     </button>
                     <button
                         type="button"
-                        class="touch-target-h {dateRangeKey === 'custom'
-                            ? 'bg-primary-500 text-white'
-                            : 'bg-surface-50 text-surface-700 hover:bg-surface-100'} transition-colors border-l border-surface-200"
+                        class="touch-target-h border-l border-surface-200 dark:border-slate-600 bg-surface-50 dark:bg-slate-800/50 {dateRangeKey === 'custom'
+                            ? 'text-primary-600 dark:text-primary-400 font-semibold'
+                            : 'text-surface-700 dark:text-slate-300 hover:bg-surface-100 dark:hover:bg-slate-700/50'}"
                         onclick={() => (dateRangeKey = "custom")}
                     >
                         Custom
@@ -395,6 +432,7 @@
                     {/each}
                 </select>
             </div>
+            </div>
         </div>
 
         {#if !loadingSummary && !loadingCharts && !summary}
@@ -418,7 +456,7 @@
                 <button
                     type="button"
                     class="btn preset-filled-primary-500 flex items-center gap-2 touch-target-h"
-                    onclick={() => document.getElementById('analytics-filter-bar')?.scrollIntoView({ behavior: 'smooth' })}
+                    onclick={() => { filtersExpanded = true; document.getElementById('analytics-filter-bar')?.scrollIntoView({ behavior: 'smooth' }); }}
                 >
                     <Filter class="w-4 h-4" /> Change filters
                 </button>
@@ -518,7 +556,7 @@
                 {:else if throughput.length > 0}
                     <ApexChart
                         chartLib={chartLib}
-                        options={{
+                        options={withChartTheme({
                             chart: { type: "area", toolbar: { show: false }, zoom: { enabled: false } },
                             dataLabels: { enabled: false },
                             stroke: { curve: "smooth", width: 2 },
@@ -535,7 +573,7 @@
                                 { name: "Completed", data: throughput.map((r) => r.completed) },
                                 { name: "Cancelled / No-show", data: throughput.map((r) => r.cancelled) },
                             ],
-                        }}
+                        })}
                         height="320"
                     />
                 {:else}
@@ -553,7 +591,7 @@
                 {:else if waitDist?.buckets?.length}
                     <ApexChart
                         chartLib={chartLib}
-                        options={{
+                        options={withChartTheme({
                             chart: { type: "bar", toolbar: { show: false } },
                             plotOptions: {
                                 bar: { horizontal: false, columnWidth: "70%", borderRadius: 4 },
@@ -562,7 +600,7 @@
                             yaxis: { title: { text: "Clients" } },
                             colors: ["#22c55e", "#84cc16", "#eab308", "#f97316", "#ef4444"],
                             series: [{ name: "Clients", data: waitDist.buckets.map((b) => b.count) }],
-                        }}
+                        })}
                         height="280"
                     />
                 {:else}
@@ -580,7 +618,7 @@
                 {:else if stationUtil?.stations?.length}
                     <ApexChart
                         chartLib={chartLib}
-                        options={{
+                        options={withChartTheme({
                             chart: { type: "bar", stacked: true, toolbar: { show: false } },
                             plotOptions: {
                                 bar: { horizontal: true, barHeight: "60%", borderRadius: 2 },
@@ -593,7 +631,7 @@
                                 { name: "Busy", data: stationUtil.stations.map((s) => Math.round(s.busy_minutes)) },
                                 { name: "Idle", data: stationUtil.stations.map((s) => Math.round(s.idle_minutes)) },
                             ],
-                        }}
+                        })}
                         height="280"
                     />
                 {:else}
@@ -611,7 +649,7 @@
                 {:else if trackPerf?.tracks?.length}
                     <ApexChart
                         chartLib={chartLib}
-                        options={{
+                        options={withChartTheme({
                             chart: { type: "bar", toolbar: { show: false } },
                             plotOptions: {
                                 bar: { horizontal: false, columnWidth: "60%", borderRadius: 4 },
@@ -628,7 +666,7 @@
                                 },
                                 { name: "Completion %", data: trackPerf.tracks.map((t) => t.completion_rate) },
                             ],
-                        }}
+                        })}
                         height="280"
                     />
                 {:else}
@@ -658,7 +696,7 @@
                     }))}
                     <ApexChart
                         chartLib={chartLib}
-                        options={{
+                        options={withChartTheme({
                             chart: { type: "heatmap", toolbar: { show: false } },
                             plotOptions: {
                                 heatmap: {
@@ -679,7 +717,7 @@
                             legend: { show: false },
                             tooltip: { y: { formatter: (v: number) => `${v} sessions` } },
                             series: heatmapSeries,
-                        }}
+                        })}
                         height="280"
                     />
                 {:else if busiestHours?.heatmap?.length}
@@ -691,14 +729,14 @@
                     {@const counts = hours.map((_, i) => byHour[i] ?? 0)}
                     <ApexChart
                         chartLib={chartLib}
-                        options={{
+                        options={withChartTheme({
                             chart: { type: "bar", toolbar: { show: false } },
                             plotOptions: { bar: { borderRadius: 2 } },
                             xaxis: { categories: hours },
                             yaxis: { title: { text: "Sessions started" } },
                             colors: ["#0ea5e9"],
                             series: [{ name: "Sessions", data: counts }],
-                        }}
+                        })}
                         height="280"
                     />
                 {:else}
@@ -716,14 +754,14 @@
                 {:else if funnel?.steps?.length}
                     <ApexChart
                         chartLib={chartLib}
-                        options={{
+                        options={withChartTheme({
                             chart: { type: "bar", toolbar: { show: false } },
                             plotOptions: { bar: { horizontal: true, barHeight: "70%", borderRadius: 4 } },
                             xaxis: { categories: funnel.steps.map((s) => s.step) },
                             yaxis: { title: { text: "Count" } },
                             colors: ["#22c55e", "#84cc16", "#eab308", "#22c55e", "#f97316", "#eab308"],
                             series: [{ name: "Count", data: funnel.steps.map((s) => s.count) }],
-                        }}
+                        })}
                         height="240"
                     />
                 {:else}
@@ -745,13 +783,13 @@
                             {#if tokenTts.by_status.length > 0}
                                 <ApexChart
                                     chartLib={chartLib}
-                                    options={{
+                                    options={withChartTheme({
                                         chart: { type: "donut" },
                                         labels: tokenTts.by_status.map((s) => s.status),
                                         series: tokenTts.by_status.map((s) => s.count),
                                         legend: { position: "bottom" },
                                         colors: ["#22c55e", "#0ea5e9", "#94a3b8"],
-                                    }}
+                                    })}
                                     height="200"
                                 />
                             {:else}
@@ -763,13 +801,13 @@
                             {#if tokenTts.by_tts_status.length > 0}
                                 <ApexChart
                                     chartLib={chartLib}
-                                    options={{
+                                    options={withChartTheme({
                                         chart: { type: "donut" },
                                         labels: tokenTts.by_tts_status.map((s) => s.tts_status),
                                         series: tokenTts.by_tts_status.map((s) => s.count),
                                         legend: { position: "bottom" },
                                         colors: ["#22c55e", "#0ea5e9", "#eab308", "#ef4444", "#94a3b8"],
-                                    }}
+                                    })}
                                     height="200"
                                 />
                             {:else}

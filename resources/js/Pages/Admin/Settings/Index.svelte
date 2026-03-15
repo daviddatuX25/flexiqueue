@@ -7,6 +7,9 @@
     import { onMount } from "svelte";
     import { usePage } from "@inertiajs/svelte";
     import { toaster } from "../../../lib/toaster.js";
+    import ProgramDefaultsTab from "./ProgramDefaultsTab.svelte";
+    import PrintSettingsTab from "./PrintSettingsTab.svelte";
+    import TokenTtsSettingsTab from "./TokenTtsSettingsTab.svelte";
     import {
         HardDrive,
         Database,
@@ -21,6 +24,8 @@
         Plus,
         Pencil,
         Check,
+        Printer,
+        FolderKanban,
     } from "lucide-svelte";
 
     interface StorageCategory {
@@ -78,7 +83,7 @@
     let showClearOrphanedTtsConfirm = $state(false);
     let clearOrphanedTtsLoading = $state(false);
 
-    type SettingsTab = "storage" | "integrations";
+    type SettingsTab = "storage" | "integrations" | "program-defaults" | "print" | "token-tts";
     let activeTab = $state<SettingsTab>("storage");
 
     interface TtsAccountApi {
@@ -357,6 +362,11 @@
             fetchElevenLabsStatus();
             fetchUsage();
         }
+        if (typeof window !== "undefined") {
+            const url = new URL(window.location.href);
+            url.searchParams.set("tab", tab);
+            window.history.replaceState({}, "", url.pathname + "?" + url.searchParams.toString());
+        }
     }
 
     async function fetchUsage() {
@@ -599,16 +609,19 @@
     onMount(() => {
         fetchSummary();
         const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-        if (params?.get("tab") === "integrations" && canManageIntegrations) {
+        const tab = params?.get("tab");
+        if (tab === "integrations" && canManageIntegrations) {
             activeTab = "integrations";
             fetchElevenLabsStatus();
             fetchUsage();
+        } else if (tab === "program-defaults" || tab === "print" || tab === "token-tts") {
+            activeTab = tab;
         }
     });
 </script>
 
 <svelte:head>
-    <title>System Settings — FlexiQueue</title>
+    <title>Configuration — FlexiQueue</title>
 </svelte:head>
 
 <AdminLayout>
@@ -619,10 +632,10 @@
                     class="text-2xl font-bold text-surface-950 flex items-center gap-2"
                 >
                     <HardDrive class="w-6 h-6 text-primary-500" />
-                    System Settings
+                    Configuration
                 </h1>
                 <p class="mt-1 text-sm text-surface-600 max-w-2xl">
-                    Monitor storage, integrations, and system configuration.
+                    Storage, integrations, program defaults, print and TTS settings.
                 </p>
             </div>
             <button
@@ -664,6 +677,36 @@
                     Integrations
                 </button>
             {/if}
+            <button
+                type="button"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors touch-target-h {activeTab === 'program-defaults'
+                    ? 'bg-primary-500 text-primary-contrast-500 shadow-sm'
+                    : 'text-surface-700 hover:bg-surface-200 hover:text-surface-950'}"
+                onclick={() => selectTab("program-defaults")}
+            >
+                <FolderKanban class="w-4 h-4 shrink-0" />
+                Program defaults
+            </button>
+            <button
+                type="button"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors touch-target-h {activeTab === 'print'
+                    ? 'bg-primary-500 text-primary-contrast-500 shadow-sm'
+                    : 'text-surface-700 hover:bg-surface-200 hover:text-surface-950'}"
+                onclick={() => selectTab("print")}
+            >
+                <Printer class="w-4 h-4 shrink-0" />
+                Print settings
+            </button>
+            <button
+                type="button"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors touch-target-h {activeTab === 'token-tts'
+                    ? 'bg-primary-500 text-primary-contrast-500 shadow-sm'
+                    : 'text-surface-700 hover:bg-surface-200 hover:text-surface-950'}"
+                onclick={() => selectTab("token-tts")}
+            >
+                <AudioLines class="w-4 h-4 shrink-0" />
+                Token TTS
+            </button>
         </div>
 
         {#if activeTab === "storage"}
@@ -1290,6 +1333,21 @@
                 Only platform administrators can manage integrations.
             </p>
         {/if}
+        {:else if activeTab === "program-defaults"}
+        <section class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6">
+            <h2 class="text-base font-semibold text-surface-950 mb-2 flex items-center gap-2"><FolderKanban class="w-5 h-5 text-primary-500" />Program default settings</h2>
+            <ProgramDefaultsTab />
+        </section>
+        {:else if activeTab === "print"}
+        <section class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6">
+            <h2 class="text-base font-semibold text-surface-950 mb-2 flex items-center gap-2"><Printer class="w-5 h-5 text-primary-500" />Print settings</h2>
+            <PrintSettingsTab />
+        </section>
+        {:else if activeTab === "token-tts"}
+        <section class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6">
+            <h2 class="text-base font-semibold text-surface-950 mb-2 flex items-center gap-2"><AudioLines class="w-5 h-5 text-primary-500" />Token TTS settings</h2>
+            <TokenTtsSettingsTab />
+        </section>
         {/if}
     </div>
 

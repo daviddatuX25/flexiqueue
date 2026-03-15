@@ -38,6 +38,10 @@ class DatabaseSeeder extends Seeder
 
         $defaultSite = Site::where('slug', 'default')->firstOrFail();
 
+        if (env('SEED_LGU_MIRROR', false)) {
+            $this->call(LguMirrorSiteSeeder::class);
+        }
+
         $password = Hash::make('password');
         $defaultPin = Hash::make('123456');
 

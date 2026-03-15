@@ -9,6 +9,7 @@ import { setContext } from 'svelte';
 	import type { Node, Edge } from '@xyflow/svelte';
 	import { useViewport, useSvelteFlow } from '@xyflow/svelte';
 	import { toaster } from '../../lib/toaster.js';
+	import { compressImage, HERO_BANNER_PRESET } from '../../lib/imageUtils.js';
 	import { CheckCircle2, CircleAlert, Eraser, Image as ImageIcon, Maximize2, Minimize2 } from 'lucide-svelte';
 	import StationNode from './nodes/StationNode.svelte';
 	import TrackNode from './nodes/TrackNode.svelte';
@@ -748,8 +749,9 @@ import ProcessHandleNode from './nodes/ProcessHandleNode.svelte';
 				(typeof document !== 'undefined' &&
 					(document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content) ||
 				'';
+			const compressed = await compressImage(file, HERO_BANNER_PRESET);
 			const form = new FormData();
-			form.append('image', file);
+			form.append('image', compressed);
 			const res = await fetch(`/api/admin/programs/${programId}/diagram/image`, {
 				method: 'POST',
 				headers: {

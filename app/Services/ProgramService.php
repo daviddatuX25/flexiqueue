@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Events\ProgramStatusChanged;
 use App\Models\Program;
+use App\Services\DeviceAuthorizationService;
 use App\Models\ProgramAuditLog;
 use App\Models\ProgramStationAssignment;
 use App\Models\User;
@@ -163,7 +164,7 @@ class ProgramService
 
         $program->update(['is_paused' => true]);
 
-        broadcast(new ProgramStatusChanged($program->id, true));
+        broadcast(new ProgramStatusChanged($program->id, true, true));
 
         return $program->fresh();
     }
@@ -179,7 +180,7 @@ class ProgramService
 
         $program->update(['is_paused' => false]);
 
-        broadcast(new ProgramStatusChanged($program->id, false));
+        broadcast(new ProgramStatusChanged($program->id, false, true));
 
         return $program->fresh();
     }
@@ -197,6 +198,8 @@ class ProgramService
 
         $program->update(['is_active' => false, 'is_paused' => false]);
 
+        broadcast(new ProgramStatusChanged($program->id, false, false));
+
         $staffUserId = Auth::id();
         if ($staffUserId) {
             ProgramAuditLog::create([
@@ -211,6 +214,7 @@ class ProgramService
 
     /**
      * Delete program. Fails if any sessions exist (any status).
+     * Per plan Step 5: invalidate all device authorizations for this program.
      */
     public function delete(Program $program): void
     {
@@ -218,6 +222,7 @@ class ProgramService
             throw new \InvalidArgumentException('Cannot delete: program has sessions.');
         }
 
+        app(DeviceAuthorizationService::class)->revokeForProgram($program);
         $program->delete();
     }
 }

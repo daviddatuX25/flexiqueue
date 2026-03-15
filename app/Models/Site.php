@@ -13,6 +13,7 @@ class Site extends Model
         'api_key_hash',
         'settings',
         'edge_settings',
+        'is_default',
     ];
 
     protected function casts(): array
@@ -20,6 +21,7 @@ class Site extends Model
         return [
             'settings' => 'array',
             'edge_settings' => 'array',
+            'is_default' => 'boolean',
         ];
     }
 
@@ -31,6 +33,12 @@ class Site extends Model
     public function users(): HasMany
     {
         return $this->hasMany(User::class);
+    }
+
+    /** Per addition-to-public-site-plan: short links for site/program QR codes. */
+    public function shortLinks(): HasMany
+    {
+        return $this->hasMany(\App\Models\SiteShortLink::class);
     }
 }
 

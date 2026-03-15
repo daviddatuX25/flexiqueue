@@ -18,12 +18,16 @@
 	let stats = $state<DashboardStats | null>(null);
 	let stations = $state<DashboardStation[]>([]);
 	let loading = $state(true);
-	let refreshIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
+	let refreshIntervalId: ReturnType<typeof setInterval> | null = null;
 
 	const MSG_SESSION_EXPIRED = "Session expired. Please refresh and try again.";
 	const MSG_NETWORK_ERROR = "Network error. Please try again.";
 
 	const page = usePage();
+	/** First program from shared props (site-scoped) — used so dashboard stats/stations show live data */
+	const programs = $derived((get(page).props as { programs?: { id: number; name: string }[] })?.programs ?? []);
+	const firstProgramId = $derived(programs.length > 0 ? programs[0].id : null);
+
 	function getCsrfToken(): string {
 		const p = get(page);
 		const fromProps = (p?.props as { csrf_token?: string } | undefined)?.csrf_token;
@@ -36,7 +40,8 @@
 	}
 
 	async function fetchStats(): Promise<DashboardStats | null> {
-		const res = await fetch('/api/dashboard/stats', {
+		const url = firstProgramId != null ? `/api/dashboard/stats?program_id=${firstProgramId}` : '/api/dashboard/stats';
+		const res = await fetch(url, {
 			headers: {
 				Accept: 'application/json',
 				'X-CSRF-TOKEN': getCsrfToken(),
@@ -53,7 +58,8 @@
 	}
 
 	async function fetchStations(): Promise<DashboardStation[]> {
-		const res = await fetch('/api/dashboard/stations', {
+		const url = firstProgramId != null ? `/api/dashboard/stations?program_id=${firstProgramId}` : '/api/dashboard/stations';
+		const res = await fetch(url, {
 			headers: {
 				Accept: 'application/json',
 				'X-CSRF-TOKEN': getCsrfToken(),
@@ -95,9 +101,33 @@
 
 	onMount(() => {
 		refresh();
-		refreshIntervalId = setInterval(refresh, 10000);
+
+		function startPolling() {
+			refreshIntervalId = setInterval(refresh, 60000); // 60s not 10s — per docs/necessary-fix.md
+		}
+		function stopPolling() {
+			if (refreshIntervalId) {
+				clearInterval(refreshIntervalId);
+				refreshIntervalId = null;
+			}
+		}
+
+		startPolling();
+
+		// Pause when tab is hidden, resume when visible
+		function handleVisibility() {
+			if (document.hidden) {
+				stopPolling();
+			} else {
+				refresh(); // immediate refresh on return
+				startPolling();
+			}
+		}
+		document.addEventListener('visibilitychange', handleVisibility);
+
 		return () => {
-			if (refreshIntervalId) clearInterval(refreshIntervalId);
+			stopPolling();
+			document.removeEventListener('visibilitychange', handleVisibility);
 		};
 	});
 </script>

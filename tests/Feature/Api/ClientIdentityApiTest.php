@@ -3,63 +3,67 @@
 namespace Tests\Feature\Api;
 
 use App\Models\Client;
-use App\Models\ClientIdDocument;
 use App\Models\Process;
 use App\Models\Program;
 use App\Models\ServiceTrack;
 use App\Models\Session;
+use App\Models\Site;
 use App\Models\Station;
 use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\TransactionLog;
 use App\Models\User;
-use App\Support\ClientIdNumberHasher;
+use App\Services\ClientService;
+use App\Services\MobileCryptoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
+/**
+ * Per PRIVACY-BY-DESIGN-IDENTITY-BINDING: phone-based client identity.
+ */
 class ClientIdentityApiTest extends TestCase
 {
     use RefreshDatabase;
 
     private User $staff;
 
+    private Site $site;
+
     protected function setUp(): void
     {
         parent::setUp();
-        $this->staff = User::factory()->create(['role' => 'staff']);
+        $this->site = Site::create([
+            'name' => 'Default',
+            'slug' => 'default',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make('key'),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $this->staff = User::factory()->create(['role' => 'staff', 'site_id' => $this->site->id]);
     }
 
-    public function test_lookup_by_id_existing_returns_client_and_last4_only(): void
+    public function test_search_by_phone_existing_returns_client_and_masked(): void
     {
-        $client = Client::factory()->create();
-        $raw = '12-3456-7890';
-        $doc = ClientIdDocument::factory()->create([
-            'client_id' => $client->id,
-            'id_type' => 'PhilHealth',
-            'id_number_encrypted' => Crypt::encryptString($raw),
-            'id_number_hash' => ClientIdNumberHasher::hash('PhilHealth', $raw),
-        ]);
+        $mobileCrypto = app(MobileCryptoService::class);
+        $clientService = app(ClientService::class);
+        $client = $clientService->createClient('Juan', 'Cruz', '1985-01-01', $this->site->id, '09171234567', 'Dela');
 
-        $response = $this->actingAs($this->staff)->postJson('/api/clients/lookup-by-id', [
-            'id_type' => $doc->id_type,
-            'id_number' => $raw,
+        $response = $this->actingAs($this->staff)->postJson('/api/clients/search-by-phone', [
+            'mobile' => '09171234567',
         ]);
 
         $response->assertStatus(200);
         $response->assertJsonPath('match_status', 'existing');
         $response->assertJsonPath('client.id', $client->id);
-        $response->assertJsonPath('id_document.id', $doc->id);
-        $response->assertJsonPath('id_document.id_last4', '7890');
-        $this->assertArrayNotHasKey('id_number', $response->json('id_document') ?? []);
+        $response->assertJsonPath('client.mobile_masked', '0917-***-**67');
+        $this->assertArrayNotHasKey('mobile', $response->json('client') ?? []);
     }
 
-    public function test_lookup_by_id_not_found_returns_not_found(): void
+    public function test_search_by_phone_not_found_returns_not_found(): void
     {
-        $response = $this->actingAs($this->staff)->postJson('/api/clients/lookup-by-id', [
-            'id_type' => 'PhilHealth',
-            'id_number' => 'XX-0000-9999',
+        $response = $this->actingAs($this->staff)->postJson('/api/clients/search-by-phone', [
+            'mobile' => '09170000000',
         ]);
 
         $response->assertStatus(200);
@@ -67,103 +71,36 @@ class ClientIdentityApiTest extends TestCase
         $this->assertNull($response->json('client'));
     }
 
-    public function test_lookup_by_id_number_only_single_match_returns_existing(): void
+    public function test_search_by_phone_normalizes_input(): void
     {
-        $client = Client::factory()->create();
-        $raw = '12-3456-7890';
-        ClientIdDocument::factory()->create([
-            'client_id' => $client->id,
-            'id_type' => 'PhilHealth',
-            'id_number_encrypted' => Crypt::encryptString($raw),
-            'id_number_hash' => ClientIdNumberHasher::hash('PhilHealth', $raw),
-        ]);
+        $clientService = app(ClientService::class);
+        $client = $clientService->createClient('Maria', 'Santos', '1990-01-01', $this->site->id, '09171234567');
 
-        $response = $this->actingAs($this->staff)->postJson('/api/clients/lookup-by-id', [
-            'id_number' => $raw,
+        $response = $this->actingAs($this->staff)->postJson('/api/clients/search-by-phone', [
+            'mobile' => '+639171234567',
         ]);
 
         $response->assertStatus(200);
         $response->assertJsonPath('match_status', 'existing');
         $response->assertJsonPath('client.id', $client->id);
-        $response->assertJsonPath('id_document.id_type', 'PhilHealth');
     }
 
-    public function test_lookup_by_id_number_only_ambiguous_returns_ambiguous_with_id_types(): void
+    public function test_create_client_with_mobile_persists_and_returns_masked(): void
     {
-        $client1 = Client::factory()->create();
-        $client2 = Client::factory()->create();
-        $raw = '99-8888-7777';
-        ClientIdDocument::factory()->create([
-            'client_id' => $client1->id,
-            'id_type' => 'PhilHealth',
-            'id_number_encrypted' => Crypt::encryptString($raw),
-            'id_number_hash' => ClientIdNumberHasher::hash('PhilHealth', $raw),
-        ]);
-        ClientIdDocument::factory()->create([
-            'client_id' => $client2->id,
-            'id_type' => 'SSS',
-            'id_number_encrypted' => Crypt::encryptString($raw),
-            'id_number_hash' => ClientIdNumberHasher::hash('SSS', $raw),
-        ]);
-
-        $response = $this->actingAs($this->staff)->postJson('/api/clients/lookup-by-id', [
-            'id_number' => $raw,
-        ]);
-
-        $response->assertStatus(200);
-        $response->assertJsonPath('match_status', 'ambiguous');
-        $response->assertJsonPath('message', 'Can\'t auto-detect. Please select ID type first.');
-        $idTypes = $response->json('id_types');
-        $this->assertIsArray($idTypes);
-        $this->assertCount(2, $idTypes);
-        $this->assertTrue(in_array('PhilHealth', $idTypes, true));
-        $this->assertTrue(in_array('SSS', $idTypes, true));
-        $this->assertNull($response->json('client'));
-    }
-
-    public function test_lookup_by_id_number_only_not_found_returns_not_found(): void
-    {
-        $response = $this->actingAs($this->staff)->postJson('/api/clients/lookup-by-id', [
-            'id_number' => '00-0000-0000',
-        ]);
-
-        $response->assertStatus(200);
-        $response->assertJsonPath('match_status', 'not_found');
-        $this->assertNull($response->json('client'));
-    }
-
-    public function test_create_client_with_id_document_persists_encrypted_and_rejects_duplicate_with_hint(): void
-    {
-        $existing = ClientIdDocument::factory()->create();
-        $raw = Crypt::decryptString($existing->id_number_encrypted);
-
         $response = $this->actingAs($this->staff)->postJson('/api/clients', [
-            'name' => 'Juan Dela Cruz',
-            'birth_year' => 1985,
-            'id_document' => [
-                'id_type' => $existing->id_type,
-                'id_number' => $raw,
-            ],
+            'first_name' => 'Juan',
+            'middle_name' => 'Dela',
+            'last_name' => 'Cruz',
+            'birth_date' => '1985-01-01',
+            'mobile' => '09171234567',
         ]);
 
-        $response->assertStatus(409);
-        $response->assertJsonPath('error_code', 'id_document_duplicate');
-        $this->assertStringContainsString('lookup-by-id', $response->json('hint') ?? '');
-    }
-
-    public function test_attach_id_document_duplicate_returns_409_with_error_code(): void
-    {
-        $client = Client::factory()->create();
-        $existing = ClientIdDocument::factory()->create();
-        $raw = Crypt::decryptString($existing->id_number_encrypted);
-
-        $response = $this->actingAs($this->staff)->postJson("/api/clients/{$client->id}/id-documents", [
-            'id_type' => $existing->id_type,
-            'id_number' => $raw,
-        ]);
-
-        $response->assertStatus(409);
-        $response->assertJsonPath('error_code', 'id_document_duplicate');
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('clients', ['first_name' => 'Juan', 'last_name' => 'Cruz']);
+        $client = Client::where('first_name', 'Juan')->where('last_name', 'Cruz')->first();
+        $this->assertNotNull($client->mobile_hash);
+        $this->assertNotNull($client->mobile_encrypted);
+        $response->assertJsonPath('client.mobile_masked', '0917-***-**67');
     }
 
     public function test_staff_bind_required_mode_missing_binding_returns_422_with_client_binding_error(): void
@@ -174,145 +111,7 @@ class ClientIdentityApiTest extends TestCase
             'description' => null,
             'is_active' => true,
             'created_by' => $staff->id,
-            'settings' => [
-                'identity_binding_mode' => 'required',
-            ],
-        ]);
-        $station = Station::create([
-            'program_id' => $program->id,
-            'name' => 'First Station',
-            'capacity' => 1,
-            'is_active' => true,
-        ]);
-        $staff->update(['assigned_station_id' => $station->id]);
-        $process = Process::create(['program_id' => $program->id, 'name' => 'P1', 'description' => null]);
-        \Illuminate\Support\Facades\DB::table('station_process')->insert([
-            'station_id' => $station->id,
-            'process_id' => $process->id,
-        ]);
-        $track = ServiceTrack::create([
-            'program_id' => $program->id,
-            'name' => 'Default',
-            'is_default' => true,
-            'color_code' => '#333',
-        ]);
-        TrackStep::create([
-            'track_id' => $track->id,
-            'process_id' => $process->id,
-            'step_order' => 1,
-            'is_required' => true,
-        ]);
-        $token = new Token;
-        $token->qr_code_hash = hash('sha256', Str::random(32).'A1');
-        $token->physical_id = 'A1';
-        $token->status = 'available';
-        $token->save();
-
-        $response = $this->actingAs($staff)->postJson('/api/sessions/bind', [
-            'qr_hash' => $token->qr_code_hash,
-            'track_id' => $track->id,
-            'client_category' => 'PWD',
-        ]);
-
-        $response->assertStatus(422);
-        $response->assertJsonPath('errors.client_binding.0', 'Client identity binding is required for this program.');
-        $this->assertDatabaseMissing('queue_sessions', ['alias' => 'A1']);
-    }
-
-    public function test_staff_bind_required_mode_with_binding_sets_client_id_and_writes_identity_bind_log(): void
-    {
-        $staff = $this->staff;
-        $program = Program::create([
-            'name' => 'Test Program',
-            'description' => null,
-            'is_active' => true,
-            'created_by' => $staff->id,
-            'settings' => [
-                'identity_binding_mode' => 'required',
-            ],
-        ]);
-        $station = Station::create([
-            'program_id' => $program->id,
-            'name' => 'First Station',
-            'capacity' => 1,
-            'is_active' => true,
-        ]);
-        $staff->update(['assigned_station_id' => $station->id]);
-        $process = Process::create(['program_id' => $program->id, 'name' => 'P1', 'description' => null]);
-        \Illuminate\Support\Facades\DB::table('station_process')->insert([
-            'station_id' => $station->id,
-            'process_id' => $process->id,
-        ]);
-        $track = ServiceTrack::create([
-            'program_id' => $program->id,
-            'name' => 'Default',
-            'is_default' => true,
-            'color_code' => '#333',
-        ]);
-        TrackStep::create([
-            'track_id' => $track->id,
-            'process_id' => $process->id,
-            'step_order' => 1,
-            'is_required' => true,
-        ]);
-        $token = new Token;
-        $token->qr_code_hash = hash('sha256', Str::random(32).'A1');
-        $token->physical_id = 'A1';
-        $token->status = 'available';
-        $token->save();
-
-        $client = Client::factory()->create();
-        $raw = '12-3456-7890';
-        $doc = ClientIdDocument::factory()->create([
-            'client_id' => $client->id,
-            'id_type' => 'PhilHealth',
-            'id_number_encrypted' => Crypt::encryptString($raw),
-            'id_number_hash' => ClientIdNumberHasher::hash('PhilHealth', $raw),
-        ]);
-
-        $response = $this->actingAs($staff)->postJson('/api/sessions/bind', [
-            'qr_hash' => $token->qr_code_hash,
-            'track_id' => $track->id,
-            'client_category' => 'PWD',
-            'client_binding' => [
-                'client_id' => $client->id,
-                'source' => 'existing_id_document',
-                'id_document_id' => $doc->id,
-            ],
-        ]);
-
-        $response->assertStatus(201);
-        $sessionId = $response->json('session.id');
-        $this->assertNotNull($sessionId);
-        $this->assertDatabaseHas('queue_sessions', [
-            'id' => $sessionId,
-            'client_id' => $client->id,
-        ]);
-
-        /** @var TransactionLog|null $log */
-        $log = TransactionLog::where('session_id', $sessionId)
-            ->where('action_type', 'identity_bind')
-            ->first();
-        $this->assertNotNull($log);
-        $metadata = $log->metadata;
-        $this->assertSame($client->id, $metadata['client_id'] ?? null);
-        $this->assertSame('required', $metadata['binding_mode'] ?? null);
-        $this->assertSame('staff_triage', $metadata['binding_source'] ?? null);
-        $this->assertSame('existing_id_document', $metadata['binding_request_source'] ?? null);
-        $this->assertSame('PhilHealth', $metadata['id_type'] ?? null);
-        $this->assertSame('7890', $metadata['id_last4'] ?? null);
-        $this->assertTrue($metadata['matched_existing_client'] ?? false);
-        $this->assertArrayNotHasKey('id_number', $metadata);
-    }
-
-    public function test_staff_bind_with_name_search_source_succeeds_without_id_document_id(): void
-    {
-        $staff = $this->staff;
-        $program = Program::create([
-            'name' => 'Test Program',
-            'description' => null,
-            'is_active' => true,
-            'created_by' => $staff->id,
+            'site_id' => $this->site->id,
             'settings' => ['identity_binding_mode' => 'required'],
         ]);
         $station = Station::create([
@@ -340,11 +139,139 @@ class ClientIdentityApiTest extends TestCase
             'is_required' => true,
         ]);
         $token = new Token;
+        $token->site_id = $this->site->id;
+        $token->qr_code_hash = hash('sha256', Str::random(32).'A1');
+        $token->physical_id = 'A1';
+        $token->status = 'available';
+        $token->save();
+
+        $response = $this->actingAs($staff)->postJson('/api/sessions/bind', [
+            'qr_hash' => $token->qr_code_hash,
+            'track_id' => $track->id,
+            'client_category' => 'PWD',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.client_binding.0', 'Client identity binding is required for this program.');
+        $this->assertDatabaseMissing('queue_sessions', ['alias' => 'A1']);
+    }
+
+    public function test_staff_bind_required_mode_with_phone_match_sets_client_id_and_writes_identity_bind_log(): void
+    {
+        $staff = $this->staff;
+        $program = Program::create([
+            'name' => 'Test Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $staff->id,
+            'site_id' => $this->site->id,
+            'settings' => ['identity_binding_mode' => 'required'],
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'First Station',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $staff->update(['assigned_station_id' => $station->id]);
+        $process = Process::create(['program_id' => $program->id, 'name' => 'P1', 'description' => null]);
+        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+            'station_id' => $station->id,
+            'process_id' => $process->id,
+        ]);
+        $track = ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'Default',
+            'is_default' => true,
+            'color_code' => '#333',
+        ]);
+        TrackStep::create([
+            'track_id' => $track->id,
+            'process_id' => $process->id,
+            'step_order' => 1,
+            'is_required' => true,
+        ]);
+        $token = new Token;
+        $token->site_id = $this->site->id;
+        $token->qr_code_hash = hash('sha256', Str::random(32).'A1');
+        $token->physical_id = 'A1';
+        $token->status = 'available';
+        $token->save();
+
+        $clientService = app(ClientService::class);
+        $client = $clientService->createClient('Juan', 'Cruz', '1985-01-01', $this->site->id, '09171234567');
+
+        $response = $this->actingAs($staff)->postJson('/api/sessions/bind', [
+            'qr_hash' => $token->qr_code_hash,
+            'track_id' => $track->id,
+            'client_category' => 'PWD',
+            'client_binding' => [
+                'client_id' => $client->id,
+                'source' => 'phone_match',
+            ],
+        ]);
+
+        $response->assertStatus(201);
+        $sessionId = $response->json('session.id');
+        $this->assertNotNull($sessionId);
+        $this->assertDatabaseHas('queue_sessions', [
+            'id' => $sessionId,
+            'client_id' => $client->id,
+        ]);
+
+        $log = TransactionLog::where('session_id', $sessionId)
+            ->where('action_type', 'identity_bind')
+            ->first();
+        $this->assertNotNull($log);
+        $metadata = $log->metadata;
+        $this->assertSame($client->id, $metadata['client_id'] ?? null);
+        $this->assertSame('required', $metadata['binding_mode'] ?? null);
+        $this->assertSame('staff_triage', $metadata['binding_source'] ?? null);
+        $this->assertSame('phone_match', $metadata['binding_request_source'] ?? null);
+    }
+
+    public function test_staff_bind_with_name_search_source_succeeds_without_id_document(): void
+    {
+        $staff = $this->staff;
+        $program = Program::create([
+            'name' => 'Test Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $staff->id,
+            'site_id' => $this->site->id,
+            'settings' => ['identity_binding_mode' => 'required'],
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'First Station',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $staff->update(['assigned_station_id' => $station->id]);
+        $process = Process::create(['program_id' => $program->id, 'name' => 'P1', 'description' => null]);
+        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+            'station_id' => $station->id,
+            'process_id' => $process->id,
+        ]);
+        $track = ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'Default',
+            'is_default' => true,
+            'color_code' => '#333',
+        ]);
+        TrackStep::create([
+            'track_id' => $track->id,
+            'process_id' => $process->id,
+            'step_order' => 1,
+            'is_required' => true,
+        ]);
+        $token = new Token;
+        $token->site_id = $this->site->id;
         $token->qr_code_hash = hash('sha256', Str::random(32).'B2');
         $token->physical_id = 'B2';
         $token->status = 'available';
         $token->save();
-        $client = Client::factory()->create(['name' => 'Jane Doe', 'birth_year' => 1990]);
+        $client = Client::factory()->create(['first_name' => 'Jane', 'last_name' => 'Doe', 'birth_date' => '1990-01-01', 'site_id' => $this->site->id]);
 
         $response = $this->actingAs($staff)->postJson('/api/sessions/bind', [
             'qr_hash' => $token->qr_code_hash,
@@ -367,69 +294,54 @@ class ClientIdentityApiTest extends TestCase
         $this->assertNotNull($log);
         $metadata = $log->metadata;
         $this->assertSame($client->id, $metadata['client_id'] ?? null);
-        $this->assertSame('staff_triage', $metadata['binding_source'] ?? null);
         $this->assertSame('name_search', $metadata['binding_request_source'] ?? null);
-        $this->assertTrue($metadata['matched_existing_client'] ?? false);
-        $this->assertArrayNotHasKey('id_type', $metadata);
-        $this->assertArrayNotHasKey('id_last4', $metadata);
     }
 
-    public function test_admin_reveal_returns_raw_number_and_writes_audit_log_without_raw_id(): void
+    public function test_admin_reveal_phone_returns_raw_and_writes_audit_log(): void
     {
-        $admin = User::factory()->create(['role' => 'admin']);
-        $client = Client::factory()->create();
-        $raw = '12-3456-7890';
-        $doc = ClientIdDocument::factory()->create([
-            'client_id' => $client->id,
-            'id_type' => 'PhilHealth',
-            'id_number_encrypted' => Crypt::encryptString($raw),
-            'id_number_hash' => ClientIdNumberHasher::hash('PhilHealth', $raw),
-        ]);
+        $admin = User::factory()->create(['role' => 'admin', 'site_id' => $this->site->id]);
+        $clientService = app(ClientService::class);
+        $client = $clientService->createClient('Juan', 'Cruz', '1985-01-01', $this->site->id, '09171234567');
 
-        $response = $this->actingAs($admin)->postJson("/api/admin/client-id-documents/{$doc->id}/reveal", [
-            'confirm' => true,
+        $response = $this->actingAs($admin)->postJson("/api/clients/{$client->id}/reveal-phone", [
             'reason' => 'Investigating possible duplicate registration',
+            'confirm' => true,
         ]);
 
         $response->assertStatus(200);
-        $response->assertJsonPath('id_document.id', $doc->id);
-        $response->assertJsonPath('id_document.client_id', $client->id);
-        $response->assertJsonPath('id_document.id_type', 'PhilHealth');
-        $this->assertSame($raw, $response->json('id_document.id_number'));
+        $response->assertJsonPath('mobile', '09171234567');
 
         $this->assertDatabaseHas('client_id_audit_log', [
             'client_id' => $client->id,
-            'client_id_document_id' => $doc->id,
             'staff_user_id' => $admin->id,
-            'action' => 'id_reveal',
-            'id_type' => 'PhilHealth',
-            'id_last4' => '7890',
+            'action' => 'phone_reveal',
+            'mobile_last2' => '67',
         ]);
     }
 
-    public function test_admin_reveal_missing_confirm_returns_422_with_errors_confirm(): void
+    public function test_admin_reveal_phone_missing_confirm_returns_422(): void
     {
-        $admin = User::factory()->create(['role' => 'admin']);
-        $client = Client::factory()->create();
-        $doc = ClientIdDocument::factory()->create(['client_id' => $client->id]);
+        $admin = User::factory()->create(['role' => 'admin', 'site_id' => $this->site->id]);
+        $clientService = app(ClientService::class);
+        $client = $clientService->createClient('Juan', 'Cruz', '1985-01-01', $this->site->id, '09171234567');
 
-        $response = $this->actingAs($admin)->postJson("/api/admin/client-id-documents/{$doc->id}/reveal", [
+        $response = $this->actingAs($admin)->postJson("/api/clients/{$client->id}/reveal-phone", [
+            'reason' => 'Test',
             'confirm' => false,
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonPath('errors.confirm.0', 'Explicit confirmation is required to reveal this ID.');
     }
 
-    public function test_supervisor_cannot_reveal_and_gets_403(): void
+    public function test_supervisor_cannot_reveal_phone_and_gets_403(): void
     {
-        $supervisor = User::factory()->supervisor()->create();
-        $client = Client::factory()->create();
-        $doc = ClientIdDocument::factory()->create(['client_id' => $client->id]);
+        $supervisor = User::factory()->supervisor()->create(['site_id' => $this->site->id]);
+        $clientService = app(ClientService::class);
+        $client = $clientService->createClient('Juan', 'Cruz', '1985-01-01', $this->site->id, '09171234567');
 
-        $response = $this->actingAs($supervisor)->postJson("/api/admin/client-id-documents/{$doc->id}/reveal", [
-            'confirm' => true,
+        $response = $this->actingAs($supervisor)->postJson("/api/clients/{$client->id}/reveal-phone", [
             'reason' => 'Supervisor attempting reveal',
+            'confirm' => true,
         ]);
 
         $response->assertStatus(403);
@@ -437,8 +349,8 @@ class ClientIdentityApiTest extends TestCase
 
     public function test_client_search_returns_200_with_data_and_meta(): void
     {
-        Client::factory()->create(['name' => 'Maria Santos', 'birth_year' => 1990]);
-        Client::factory()->create(['name' => 'Maria Clara', 'birth_year' => 1985]);
+        Client::factory()->create(['first_name' => 'Maria', 'last_name' => 'Santos', 'birth_date' => '1990-01-01', 'site_id' => $this->site->id]);
+        Client::factory()->create(['first_name' => 'Maria', 'last_name' => 'Clara', 'birth_date' => '1985-01-01', 'site_id' => $this->site->id]);
 
         $response = $this->actingAs($this->staff)->getJson('/api/clients/search?name=Maria');
 
@@ -446,17 +358,17 @@ class ClientIdentityApiTest extends TestCase
         $response->assertJsonStructure(['data', 'meta' => ['current_page', 'last_page', 'total', 'per_page']]);
         $data = $response->json('data');
         $this->assertCount(2, $data);
-        $this->assertArrayHasKey('has_id_document', $data[0]);
+        $this->assertArrayHasKey('mobile_masked', $data[0]);
         $this->assertSame(1, $response->json('meta.current_page'));
         $this->assertSame(3, $response->json('meta.per_page'));
     }
 
     public function test_client_search_pagination_returns_per_page_results(): void
     {
-        Client::factory()->create(['name' => 'Alpha One']);
-        Client::factory()->create(['name' => 'Alpha Two']);
-        Client::factory()->create(['name' => 'Alpha Three']);
-        Client::factory()->create(['name' => 'Alpha Four']);
+        Client::factory()->create(['first_name' => 'Alpha', 'last_name' => 'One', 'birth_date' => '1990-01-01', 'site_id' => $this->site->id]);
+        Client::factory()->create(['first_name' => 'Alpha', 'last_name' => 'Two', 'birth_date' => '1990-01-01', 'site_id' => $this->site->id]);
+        Client::factory()->create(['first_name' => 'Alpha', 'last_name' => 'Three', 'birth_date' => '1990-01-01', 'site_id' => $this->site->id]);
+        Client::factory()->create(['first_name' => 'Alpha', 'last_name' => 'Four', 'birth_date' => '1990-01-01', 'site_id' => $this->site->id]);
 
         $response = $this->actingAs($this->staff)->getJson('/api/clients/search?name=Alpha&per_page=3&page=1');
 
@@ -466,34 +378,34 @@ class ClientIdentityApiTest extends TestCase
         $this->assertSame(4, $response->json('meta.total'));
     }
 
-    public function test_client_search_with_birth_year_filters(): void
+    public function test_client_search_with_birth_date_filters(): void
     {
-        Client::factory()->create(['name' => 'Juan Perez', 'birth_year' => 1980]);
-        Client::factory()->create(['name' => 'Juan Dela Cruz', 'birth_year' => 1990]);
+        Client::factory()->create(['first_name' => 'Juan', 'last_name' => 'Perez', 'birth_date' => '1980-01-01', 'site_id' => $this->site->id]);
+        Client::factory()->create(['first_name' => 'Juan', 'last_name' => 'Cruz', 'birth_date' => '1990-01-01', 'site_id' => $this->site->id]);
 
-        $response = $this->actingAs($this->staff)->getJson('/api/clients/search?name=Juan&birth_year=1980');
+        $response = $this->actingAs($this->staff)->getJson('/api/clients/search?name=Juan&birth_date=1980-01-01');
 
         $response->assertStatus(200);
         $data = $response->json('data');
         $this->assertCount(1, $data);
-        $this->assertSame(1980, $data[0]['birth_year']);
+        $this->assertSame('1980-01-01', $data[0]['birth_date']);
     }
 
     public function test_client_search_tokenizes_name_and_matches_all_tokens(): void
     {
-        Client::factory()->create(['name' => 'Maria Santos', 'birth_year' => 1990]);
-        Client::factory()->create(['name' => 'Santos Maria', 'birth_year' => 1985]);
-        Client::factory()->create(['name' => 'Maria Clara', 'birth_year' => 1988]);
+        Client::factory()->create(['first_name' => 'Maria', 'last_name' => 'Santos', 'birth_date' => '1990-01-01', 'site_id' => $this->site->id]);
+        Client::factory()->create(['first_name' => 'Santos', 'last_name' => 'Maria', 'birth_date' => '1985-01-01', 'site_id' => $this->site->id]);
+        Client::factory()->create(['first_name' => 'Maria', 'last_name' => 'Clara', 'birth_date' => '1988-01-01', 'site_id' => $this->site->id]);
 
         $response = $this->actingAs($this->staff)->getJson('/api/clients/search?name=Maria Santos');
 
         $response->assertStatus(200);
         $data = $response->json('data');
         $this->assertCount(2, $data);
-        $names = array_column($data, 'name');
-        $this->assertContains('Maria Santos', $names);
-        $this->assertContains('Santos Maria', $names);
-        $this->assertNotContains('Maria Clara', $names);
+        $lastNames = array_column($data, 'last_name');
+        $this->assertContains('Santos', $lastNames);
+        $this->assertContains('Maria', $lastNames);
+        $this->assertNotContains('Clara', $lastNames);
     }
 
     public function test_client_search_name_required_returns_422(): void
@@ -511,4 +423,3 @@ class ClientIdentityApiTest extends TestCase
         $this->assertTrue(in_array($response->status(), [301, 302, 401], true));
     }
 }
-

@@ -3,9 +3,9 @@
 namespace Tests\Feature\Admin;
 
 use App\Models\Client;
-use App\Models\ClientIdDocument;
-use App\Models\User;
 use App\Models\Program;
+use App\Models\Site;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -13,6 +13,7 @@ use Tests\TestCase;
  * Admin/supervisor client list + detail pages.
  *
  * Per xm2o bead: admins and supervisors can browse clients and see redacted IDs; staff cannot access.
+ * Per site-scoping-migration-spec §3: scoped by site_id.
  */
 class ClientPageTest extends TestCase
 {
@@ -20,22 +21,31 @@ class ClientPageTest extends TestCase
 
     private User $admin;
 
+    private Site $site;
+
     protected function setUp(): void
     {
         parent::setUp();
-        $this->admin = User::factory()->admin()->create();
+        $this->site = Site::create([
+            'name' => 'Default',
+            'slug' => 'default',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make('key'),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $this->admin = User::factory()->admin()->create(['site_id' => $this->site->id]);
     }
 
     public function test_admin_can_view_clients_index_and_detail_with_masked_ids(): void
     {
-        $client = Client::factory()->create([
-            'name' => 'Juan Dela Cruz',
-            'birth_year' => 1990,
-        ]);
-        $document = ClientIdDocument::factory()->create([
-            'client_id' => $client->id,
-            'id_type' => 'philhealth',
-        ]);
+        $client = app(\App\Services\ClientService::class)->createClient(
+            'Juan',
+            'Cruz',
+            '1990-01-01',
+            $this->site->id,
+            '09171234567',
+            'Dela'
+        );
 
         $indexResponse = $this->actingAs($this->admin)->get('/admin/clients');
         $indexResponse->assertStatus(200);
@@ -49,16 +59,17 @@ class ClientPageTest extends TestCase
         $detailResponse->assertInertia(fn ($page) => $page
             ->component('Admin/Clients/Show')
             ->where('client.id', $client->id)
-            ->where('client.name', 'Juan Dela Cruz')
-            ->has('id_documents')
-            ->where('id_documents.0.id_type', $document->id_type)
+            ->where('client.first_name', 'Juan')
+            ->where('client.last_name', 'Cruz')
+            ->has('client.mobile_masked')
         );
     }
 
     public function test_supervisor_can_view_clients_pages(): void
     {
-        $supervisor = User::factory()->supervisor()->create();
+        $supervisor = User::factory()->supervisor()->create(['site_id' => $this->site->id]);
         $program = Program::create([
+            'site_id' => $this->site->id,
             'name' => 'Relief Program',
             'description' => null,
             'is_active' => false,
@@ -66,7 +77,7 @@ class ClientPageTest extends TestCase
         ]);
         $program->supervisedBy()->attach($supervisor->id);
 
-        $client = Client::factory()->create();
+        $client = Client::factory()->create(['site_id' => $this->site->id]);
 
         $indexResponse = $this->actingAs($supervisor)->get('/admin/clients');
         $indexResponse->assertStatus(200);

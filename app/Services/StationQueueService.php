@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Enums\UserRole;
 use App\Models\Program;
 use App\Models\Session;
 use App\Models\Station;
 use App\Models\TransactionLog;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 
@@ -107,6 +109,24 @@ class StationQueueService
             && $nextIsRegular
             && $priorityWaitingCount > 0;
 
+        $authorizers = [];
+        if ($program) {
+            $supervisorIds = $program->supervisedBy()->pluck('users.id')->all();
+            $adminIds = User::query()
+                ->where('site_id', $program->site_id)
+                ->where('role', UserRole::Admin)
+                ->pluck('id')
+                ->all();
+            $authorizerIds = array_unique(array_merge($supervisorIds, $adminIds));
+            $authorizers = User::query()
+                ->whereIn('id', $authorizerIds)
+                ->orderBy('name')
+                ->get(['id', 'name'])
+                ->map(fn (User $u) => ['id' => $u->id, 'name' => $u->name])
+                ->values()
+                ->all();
+        }
+
         return [
             'station' => [
                 'id' => $station->id,
@@ -130,6 +150,7 @@ class StationQueueService
             'max_no_show_attempts' => $maxNoShowAttempts,
             'waiting' => $waitingFormatted,
             'next_to_call' => $first ? ['session_id' => $first->id, 'alias' => $first->alias] : null,
+            'authorizers' => $authorizers,
             'stats' => [
                 'total_waiting' => $stats['total_waiting'],
                 'total_served_today' => $stats['total_served_today'],

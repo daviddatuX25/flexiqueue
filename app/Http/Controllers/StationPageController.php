@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Program;
 use App\Models\Station;
 use App\Services\StaffAssignmentService;
+use App\Support\SiteResolver;
 use App\Services\StationQueueService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,6 +20,8 @@ use Inertia\Response;
 class StationPageController extends Controller
 {
     public const SESSION_KEY_PROGRAM_ID = 'staff_selected_program_id';
+
+    public const SESSION_KEY_STATION_ID = 'staff_selected_station_id';
 
     public function __construct(
         private StaffAssignmentService $staffAssignmentService,
@@ -44,12 +47,19 @@ class StationPageController extends Controller
 
         $canSwitchProgram = $isAdminOrSupervisorWithoutStation || $staffHasMultiProgramAssignments;
 
+        // Resolve site for program list and ?program= validation: staff use their site so multi-program selector works when not on default site.
+        $siteId = $user->site_id ?? SiteResolver::default()->id;
+
         // Optional ?program=id: set session and redirect so one selection applies to station and triage.
         // Always redirect to base /station (no station id) so the new program context is clear; otherwise
         // we could land on a station from the previous program (e.g. /station/5?program=2 → /station).
         if ($canSwitchProgram && $request->has('program')) {
             $programId = (int) $request->query('program');
-            $programModel = Program::query()->where('id', $programId)->where('is_active', true)->first();
+            $programModel = Program::query()
+                ->forSite($siteId)
+                ->where('id', $programId)
+                ->where('is_active', true)
+                ->first();
             if ($programModel) {
                 $request->session()->put(self::SESSION_KEY_PROGRAM_ID, $programModel->id);
 
@@ -74,6 +84,27 @@ class StationPageController extends Controller
             if ($assigned) {
                 $resolvedStation = $assigned;
             }
+        }
+
+        // Remember last station: when visiting /station with no station, redirect to last selected station if valid.
+        $canSwitchStation = $user->isAdmin() || $user->isSupervisorForAnyProgram();
+        if (! $resolvedStation && $program && $canSwitchStation) {
+            $sessionStationId = $request->session()->get(self::SESSION_KEY_STATION_ID);
+            if ($sessionStationId) {
+                $lastStation = Station::query()
+                    ->where('id', (int) $sessionStationId)
+                    ->where('program_id', $program->id)
+                    ->where('is_active', true)
+                    ->first();
+                if ($lastStation) {
+                    return redirect()->route('station', ['station' => $lastStation->id]);
+                }
+            }
+        }
+
+        // Persist selected station so next visit to /station redirects here.
+        if ($resolvedStation && $canSwitchStation) {
+            $request->session()->put(self::SESSION_KEY_STATION_ID, $resolvedStation->id);
         }
 
         $stationsList = [];
@@ -105,7 +136,10 @@ class StationPageController extends Controller
 
         $programsForSelector = [];
         if ($canSwitchProgram) {
-            $query = Program::query()->where('is_active', true)->orderBy('name');
+            $query = Program::query()
+                ->forSite($siteId)
+                ->where('is_active', true)
+                ->orderBy('name');
 
             // For staff with multiple assignments, restrict selector to programs they can work in.
             if ($staffHasMultiProgramAssignments) {
@@ -134,7 +168,7 @@ class StationPageController extends Controller
             'activeProgram' => $currentProgramPayload,
             'stations' => $stationsList,
             'tracks' => $tracksList,
-            'canSwitchStation' => $user->isAdmin() || $user->isSupervisorForAnyProgram(),
+            'canSwitchStation' => $canSwitchStation,
             'canSwitchProgram' => $canSwitchProgram,
             'programs' => $programsForSelector,
             'queueCount' => $footerStats['queue_count'],
@@ -153,9 +187,13 @@ class StationPageController extends Controller
     {
         $user = $request->user();
 
+        // Use staff's site so session program and fallbacks resolve to programs they can access.
+        $siteId = $user?->site_id ?? SiteResolver::default()->id;
+
         $sessionId = $request->session()->get(self::SESSION_KEY_PROGRAM_ID);
         if ($sessionId) {
             $program = Program::query()
+                ->forSite($siteId)
                 ->where('id', (int) $sessionId)
                 ->where('is_active', true)
                 ->first();
@@ -170,6 +208,7 @@ class StationPageController extends Controller
         }
 
         return Program::query()
+            ->forSite($siteId)
             ->where('is_active', true)
             ->orderBy('name')
             ->first();

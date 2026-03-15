@@ -6,6 +6,7 @@ use App\Http\Controllers\StationPageController;
 use App\Models\PermissionRequest;
 use App\Models\Program;
 use App\Models\Station;
+use App\Support\SiteResolver;
 use App\Models\TemporaryAuthorization;
 use App\Services\StationQueueService;
 use Illuminate\Http\RedirectResponse;
@@ -41,14 +42,21 @@ class ProgramOverridesPageController extends Controller
 
         $canSwitchProgram = $isAdminOrSupervisorWithoutStation || $staffHasMultiProgramAssignments;
 
+        // Resolve site for program list and ?program= validation: staff use their site so multi-program selector works when not on default site.
+        $siteId = $user->site_id ?? SiteResolver::default()->id;
+
         // Optional ?program=id: set session and redirect (shared with Station/Triage).
         if ($canSwitchProgram && $request->has('program')) {
             $programId = (int) $request->query('program');
-            $programModel = Program::query()->where('id', $programId)->where('is_active', true)->first();
+            $programModel = Program::query()
+                ->forSite($siteId)
+                ->where('id', $programId)
+                ->where('is_active', true)
+                ->first();
             if ($programModel) {
                 $request->session()->put(StationPageController::SESSION_KEY_PROGRAM_ID, $programModel->id);
 
-                return redirect('/program-overrides');
+                return redirect('/track-overrides');
             }
         }
 
@@ -126,6 +134,7 @@ class ProgramOverridesPageController extends Controller
         $programsForSelector = [];
         if ($canSwitchProgram) {
             $query = Program::query()
+                ->forSite($siteId)
                 ->where('is_active', true)
                 ->orderBy('name');
 

@@ -5,10 +5,12 @@ namespace Tests\Feature;
 use App\Models\Process;
 use App\Models\Program;
 use App\Models\ServiceTrack;
+use App\Models\Site;
 use App\Models\Station;
 use App\Models\TrackStep;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -19,10 +21,25 @@ class TriagePageControllerTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function defaultSite(): Site
+    {
+        return Site::firstOrCreate(
+            ['slug' => 'default'],
+            [
+                'name' => 'Default',
+                'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+                'settings' => [],
+                'edge_settings' => [],
+            ]
+        );
+    }
+
     public function test_staff_with_assigned_station_can_load_triage_and_gets_active_program(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $site = $this->defaultSite();
+        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
         $program = Program::create([
+            'site_id' => $site->id,
             'name' => 'Triage Program',
             'description' => null,
             'is_active' => true,
@@ -63,7 +80,8 @@ class TriagePageControllerTest extends TestCase
 
     public function test_staff_without_assigned_station_gets_422_when_visiting_triage(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $site = $this->defaultSite();
+        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
         $staff->update(['assigned_station_id' => null]);
 
         $response = $this->actingAs($staff)->get(route('triage'));
@@ -76,16 +94,19 @@ class TriagePageControllerTest extends TestCase
     /** Per follow-up: admin with no station can use triage; ?program= sets session and redirects (shared selector). */
     public function test_admin_with_no_station_can_load_triage_and_program_query_sets_session(): void
     {
-        $admin = User::factory()->admin()->create();
+        $site = $this->defaultSite();
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
         $admin->update(['assigned_station_id' => null]);
 
         $programA = Program::create([
+            'site_id' => $site->id,
             'name' => 'Program A',
             'description' => null,
             'is_active' => true,
             'created_by' => $admin->id,
         ]);
         $programB = Program::create([
+            'site_id' => $site->id,
             'name' => 'Program B',
             'description' => null,
             'is_active' => true,

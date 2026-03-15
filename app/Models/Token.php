@@ -14,6 +14,8 @@ class Token extends Model
     use SoftDeletes;
 
     protected $fillable = [
+        'site_id',
+        'is_global',
         'physical_id',
         'pronounce_as',
         'status',
@@ -33,8 +35,14 @@ class Token extends Model
     protected function casts(): array
     {
         return [
+            'is_global' => 'boolean',
             'tts_settings' => 'array',
         ];
+    }
+
+    public function site(): BelongsTo
+    {
+        return $this->belongsTo(Site::class);
     }
 
     public function currentSession(): BelongsTo
@@ -105,6 +113,22 @@ class Token extends Model
         $config = $this->getTtsConfigFor($lang);
         $config['status'] = $status;
         $this->setTtsConfigFor($lang, $config);
+    }
+
+    /**
+     * Scope tokens to a specific site. Per site-scoping-migration-spec §2.
+     * When $siteId is null, returns no rows.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<Token>  $query
+     * @return \Illuminate\Database\Eloquent\Builder<Token>
+     */
+    public function scopeForSite($query, ?int $siteId)
+    {
+        if ($siteId === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where('site_id', $siteId);
     }
 
     protected static function booted(): void

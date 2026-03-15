@@ -5,6 +5,7 @@
     import { get } from "svelte/store";
     import { Link, usePage } from "@inertiajs/svelte";
     import { toaster } from "../../../lib/toaster.js";
+    import { speakSampleAsync, ensureVoicesLoaded } from "../../../lib/speechUtils.js";
     import {
         Ticket,
         Plus,
@@ -17,16 +18,22 @@
         PlayCircle,
         XCircle,
         ChevronDown,
+        ChevronUp,
         Pencil,
         Volume2,
+        FolderPlus,
     } from "lucide-svelte";
+    import Marquee from "../../../Components/Marquee.svelte";
 
     interface TokenItem {
         id: number;
         physical_id: string;
         qr_code_hash: string;
         status: string;
+        current_session_id?: number | null;
         pronounce_as?: string;
+        is_global?: boolean;
+        assigned_programs?: { id: number; name: string }[];
         tts_status?: string | null;
         tts_failure_reason?: string | null;
         has_tts_audio?: boolean;
@@ -59,12 +66,31 @@
     let showBatchModal = $state(false);
     let filterStatus = $state("");
     let searchQuery = $state("");
+    let filterPrefix = $state("");
+    let filterAssignment = $state("");
+    let filterIsGlobal = $state("");
+    let filterTtsStatus = $state("");
+    let filtersExpanded = $state(true);
+    // Pagination (per UI/UX checklist: Tables – Pagination)
+    const TOKEN_PER_PAGE_DEFAULT = 25;
+    let tokenPage = $state(1);
+    let tokenPerPage = $state(TOKEN_PER_PAGE_DEFAULT);
+    let tokenMeta = $state<{
+        current_page: number;
+        last_page: number;
+        total: number;
+        per_page: number;
+    } | null>(null);
     // Batch form
     let batchPrefix = $state("A");
     let batchStart = $state(1);
     let batchCount = $state(50);
     /** Plan: pronounce alias as letters (e.g. A 3) or word (e.g. A3) for TTS. */
     let batchPronounceAs = $state<"letters" | "word">("letters");
+    /** When true, batch create also triggers offline TTS generation for the new tokens. */
+    let batchGenerateOfflineTts = $state(true);
+    /** When true, new tokens are "use for all programs in this site" (global). Default on. */
+    let batchIsGlobal = $state(true);
     type TtsLangKey = "en" | "fil" | "ilo";
     interface BatchTtsConfig {
         voice_id: string;
@@ -101,24 +127,14 @@
         footer_text: "" as string,
         bg_image_url: "" as string,
     });
-    let logoUploading = $state(false);
-    let bgUploading = $state(false);
-    let logoFileInput = $state<HTMLInputElement | null>(null);
-    let bgFileInput = $state<HTMLInputElement | null>(null);
-
-    // Global token TTS settings (server voice + rate)
+    // Global token TTS settings (server voice + rate) — used by batch modal and edit token TTS
     let tokenTtsVoiceId = $state<string | null>(null);
     let tokenTtsRate = $state(0.84);
-    let tokenTtsSaving = $state(false);
     let tokenTtsLoading = $state(false);
     let tokenTtsVoices = $state<{ id: string; name: string; lang?: string }[]>([]);
-    /** Which language is currently playing a sample (Token TTS settings or per-token phrases modal). */
+    /** Which language is currently playing a sample (per-token phrases or batch modal). */
     let samplePlayingLang = $state<TtsLangKey | null>(null);
-    let tokenTtsRegenerating = $state(false);
-    let showTtsRegenerateConfirm = $state(false);
-    let ttsRegenerateError = $state("");
-    let showTtsSettingsModal = $state(false);
-    // Global default per-language (EN, FIL, ILO) for Token TTS settings modal
+    // Global default per-language (EN, FIL, ILO) for batch modal
     let tokenTtsLanguages = $state<Record<TtsLangKey, BatchTtsConfig>>({
         en: { voice_id: "", rate: 0.84, pre_phrase: "" },
         fil: { voice_id: "", rate: 0.84, pre_phrase: "" },
@@ -132,6 +148,23 @@
         fil: { voice_id: "", rate: 0.84, pre_phrase: "" },
         ilo: { voice_id: "", rate: 0.84, pre_phrase: "" },
     });
+
+    // Confirm cancelling an in-use token's current session
+    let cancelSessionToken = $state<TokenItem | null>(null);
+
+    // Assign to program modal (row or bulk)
+    let showAssignToProgramModal = $state(false);
+    let assignToProgramTokenIds = $state<number[]>([]);
+    let programsForAssign = $state<{ id: number; name: string }[]>([]);
+    let selectedProgramIdForAssign = $state<number | null>(null);
+    let assignToProgramLoading = $state(false);
+    let assignToProgramSubmitting = $state(false);
+
+    // Unassign: one-program-per-token, single click (no modal)
+    let unassigningTokenId = $state<number | null>(null);
+
+    // Programs list for filter dropdown (and optionally for Assign modal reuse)
+    let programsForFilter = $state<{ id: number; name: string }[]>([]);
 
     const page = usePage();
     const serverTtsConfigured = $derived((get(page)?.props as { server_tts_configured?: boolean } | undefined)?.server_tts_configured ?? true);
@@ -166,6 +199,8 @@
             token?: TokenItem;
             created?: number;
             print_settings?: PrintSettingsApi;
+            programs?: { id: number; name: string }[];
+            meta?: { current_page: number; last_page: number; total: number; per_page: number };
         };
         message?: string;
     }> {
@@ -193,22 +228,51 @@
         }
     }
 
-    function buildTokensUrl(): string {
+    function buildTokensUrl(page: number = tokenPage): string {
         const params = new URLSearchParams();
         if (filterStatus) params.set("status", filterStatus);
         if (searchQuery.trim()) params.set("search", searchQuery.trim());
-        const q = params.toString();
-        return q ? `/api/admin/tokens?${q}` : "/api/admin/tokens";
+        if (filterPrefix.trim()) params.set("prefix", filterPrefix.trim());
+        if (filterAssignment) params.set("assignment", filterAssignment);
+        if (filterIsGlobal !== "") params.set("is_global", filterIsGlobal === "1" ? "1" : "0");
+        if (filterTtsStatus) params.set("tts_status", filterTtsStatus);
+        params.set("page", String(page));
+        params.set("per_page", String(tokenPerPage));
+        return `/api/admin/tokens?${params.toString()}`;
     }
 
-    async function fetchTokens() {
+    async function fetchTokens(optionalPage?: number) {
+        const page = optionalPage ?? tokenPage;
         loading = true;
-        const { ok, data } = await api("GET", buildTokensUrl());
+        const { ok, data } = await api("GET", buildTokensUrl(page));
         loading = false;
         if (ok && data?.tokens) {
             tokens = data.tokens;
+            tokenMeta =
+                data.meta &&
+                typeof data.meta.current_page === "number" &&
+                typeof data.meta.last_page === "number" &&
+                typeof data.meta.total === "number" &&
+                typeof data.meta.per_page === "number"
+                    ? {
+                          current_page: data.meta.current_page,
+                          last_page: data.meta.last_page,
+                          total: data.meta.total,
+                          per_page: data.meta.per_page,
+                      }
+                    : null;
+            if (optionalPage !== undefined) {
+                tokenPage = optionalPage;
+            }
         } else {
             tokens = [];
+            tokenMeta = null;
+        }
+    }
+
+    function goToTokenPage(pageNum: number) {
+        if (tokenMeta && pageNum >= 1 && pageNum <= tokenMeta.last_page) {
+            fetchTokens(pageNum);
         }
     }
 
@@ -328,14 +392,9 @@
                 return;
             }
             if (!ttsRes.ok) {
-                let msg = "Sample TTS unavailable.";
-                try {
-                    const d = await ttsRes.json();
-                    if (d && typeof d === "object" && "message" in d) msg = (d as { message?: string }).message ?? msg;
-                } catch {
-                    /* ignore */
-                }
-                toaster.error({ title: msg });
+                // No API or server TTS unavailable: use browser TTS like displays do for token call announcements
+                ensureVoicesLoaded();
+                await speakSampleAsync(phraseData.text, null, 1, config.rate);
                 return;
             }
             const blob = await ttsRes.blob();
@@ -359,10 +418,6 @@
         } finally {
             samplePlayingLang = null;
         }
-    }
-
-    async function onFilterApply() {
-        await fetchTokens();
     }
 
     function openBatchModal() {
@@ -412,6 +467,8 @@
                 count: batchCount,
                 start_number: batchStart,
                 pronounce_as: batchPronounceAs,
+                generate_tts: batchGenerateOfflineTts,
+                is_global: batchIsGlobal,
             },
         );
         submitting = false;
@@ -448,9 +505,49 @@
         }
     }
 
+    function openCancelSessionConfirm(token: TokenItem) {
+        cancelSessionToken = token;
+    }
+
+    function closeCancelSessionConfirm() {
+        cancelSessionToken = null;
+    }
+
+    async function cancelTokenSession(token: TokenItem) {
+        // Prefer full session cancel so history and transaction logs are correct.
+        if (!token.current_session_id) {
+            await setTokenStatus(token, "available");
+            return;
+        }
+
+        submitting = true;
+        const { ok, data, message } = await api(
+            "POST",
+            `/api/sessions/${token.current_session_id}/cancel`,
+            { remarks: "" },
+        );
+        submitting = false;
+
+        if (ok && data?.token) {
+            toaster.success({
+                title: "Session cancelled. Token is now available.",
+            });
+            tokens = tokens.map((t) =>
+                t.id === token.id ? { ...t, status: data.token.status } : t,
+            );
+        } else {
+            toaster.error({
+                title: message ?? "Failed to cancel session.",
+            });
+        }
+    }
+
+    let editIsGlobal = $state(false);
+
     function openEditModal(token: TokenItem) {
         editToken = token;
         editPronounceAs = (token.pronounce_as === "word" ? "word" : "letters") as "letters" | "word";
+        editIsGlobal = token.is_global === true;
         const langs =
             (token.tts_settings?.languages as
                 | Record<string, { voice_id?: string | null; rate?: number | null; pre_phrase?: string | null }>
@@ -487,16 +584,97 @@
         editToken = null;
     }
 
+    async function openAssignToProgramModal(tokenIds: number[]) {
+        assignToProgramTokenIds = tokenIds;
+        selectedProgramIdForAssign = null;
+        showAssignToProgramModal = true;
+        assignToProgramLoading = true;
+        programsForAssign = [];
+        try {
+            const { ok, data } = await api("GET", "/api/admin/programs");
+            if (ok && data?.programs) {
+                programsForAssign = (data.programs as { id: number; name: string }[]) ?? [];
+            }
+        } finally {
+            assignToProgramLoading = false;
+        }
+    }
+
+    function closeAssignToProgramModal() {
+        showAssignToProgramModal = false;
+        assignToProgramTokenIds = [];
+        selectedProgramIdForAssign = null;
+    }
+
+    async function handleAssignToProgramSubmit() {
+        const programId = selectedProgramIdForAssign;
+        if (programId == null || assignToProgramTokenIds.length === 0) return;
+        assignToProgramSubmitting = true;
+        try {
+            const body =
+                assignToProgramTokenIds.length === 1
+                    ? { token_id: assignToProgramTokenIds[0] }
+                    : { token_ids: assignToProgramTokenIds };
+            const { ok, message } = await api(
+                "POST",
+                `/api/admin/programs/${programId}/tokens`,
+                body,
+            );
+            if (ok) {
+                toaster.success({
+                    title:
+                        assignToProgramTokenIds.length === 1
+                            ? "Token assigned to program."
+                            : `${assignToProgramTokenIds.length} tokens assigned to program.`,
+                });
+                closeAssignToProgramModal();
+                if (assignToProgramTokenIds.length > 1) {
+                    selectedIds = new Set();
+                }
+            } else {
+                toaster.error({ title: message ?? "Failed to assign to program." });
+            }
+        } finally {
+            assignToProgramSubmitting = false;
+        }
+    }
+
+    /** One token = one program. Unassign token from its single assigned program (no modal). */
+    async function unassignToken(token: TokenItem) {
+        const program = token.assigned_programs?.[0];
+        if (!program) return;
+        unassigningTokenId = token.id;
+        try {
+            const { ok, message } = await api(
+                "DELETE",
+                `/api/admin/programs/${program.id}/tokens/${token.id}`,
+            );
+            if (ok) {
+                toaster.success({ title: `Unassigned from ${program.name}.` });
+                tokens = tokens.map((t) =>
+                    t.id === token.id ? { ...t, assigned_programs: [] } : t,
+                );
+            } else {
+                toaster.error({ title: message ?? "Failed to unassign." });
+            }
+        } finally {
+            unassigningTokenId = null;
+        }
+    }
+
     async function saveEdit() {
         if (!editToken) return;
         submitting = true;
         const { ok, data, message } = await api("PUT", `/api/admin/tokens/${editToken.id}`, {
             pronounce_as: editPronounceAs,
+            is_global: editIsGlobal,
         });
         submitting = false;
         if (ok && data?.token) {
             tokens = tokens.map((t) =>
-                t.id === editToken!.id ? { ...t, pronounce_as: data.token.pronounce_as } : t,
+                t.id === editToken!.id
+                    ? { ...t, pronounce_as: data.token.pronounce_as, is_global: data.token.is_global }
+                    : t,
             );
             closeEditModal();
         } else {
@@ -628,7 +806,6 @@
 
     function openPrintModal(ids: number[]) {
         printTargetIds = ids;
-        printSettingsSaved = false;
         showPrintModal = true;
         fetchPrintSettings();
     }
@@ -658,98 +835,6 @@
         const url = getPrintUrl(printTargetIds);
         window.open(url, "_blank", "noopener,noreferrer");
         closePrintModal();
-    }
-
-    let printSettingsSaved = $state(false);
-
-    async function savePrintSettings() {
-        submitting = true;
-        printSettingsSaved = false;
-        const { ok, data, message } = await api(
-            "PUT",
-            "/api/admin/print-settings",
-            {
-                cards_per_page: printSettings.cards_per_page,
-                paper: printSettings.paper,
-                orientation: printSettings.orientation,
-                show_hint: printSettings.show_hint,
-                show_cut_lines: printSettings.show_cut_lines,
-                logo_url: printSettings.logo_url.trim() || null,
-                footer_text: printSettings.footer_text.trim() || null,
-                bg_image_url: printSettings.bg_image_url.trim() || null,
-            },
-        );
-        submitting = false;
-        if (ok && data?.print_settings) {
-            const s = data.print_settings;
-            printSettings = {
-                cards_per_page: s.cards_per_page ?? 6,
-                paper: s.paper ?? "a4",
-                orientation: s.orientation ?? "portrait",
-                show_hint: s.show_hint !== false,
-                show_cut_lines: s.show_cut_lines !== false,
-                logo_url: s.logo_url ?? "",
-                footer_text: s.footer_text ?? "",
-                bg_image_url: s.bg_image_url ?? "",
-            };
-            printSettingsSaved = true;
-        } else {
-            toaster.error({ title: message ?? "Failed to save settings." });
-        }
-    }
-
-    async function uploadPrintImage(type: "logo" | "background", file: File) {
-        if (!file) return;
-        const fd = new FormData();
-        fd.append("image", file);
-        fd.append("type", type);
-        const setUploading =
-            type === "logo"
-                ? (value: boolean) => (logoUploading = value)
-                : (value: boolean) => (bgUploading = value);
-        setUploading(true);
-        try {
-            const res = await fetch("/api/admin/print-settings/image", {
-                method: "POST",
-                headers: {
-                    "X-CSRF-TOKEN": getCsrfToken(),
-                    "X-Requested-With": "XMLHttpRequest",
-                },
-                body: fd,
-                credentials: "same-origin",
-            });
-            if (res.status === 419) {
-                toaster.error({ title: MSG_SESSION_EXPIRED });
-                return;
-            }
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                toaster.error({
-                    title: (data && "message" in data && data.message) || "Failed to upload image.",
-                });
-                return;
-            }
-            const url = (data && data.url) as string | undefined;
-            if (url && typeof url === "string") {
-                if (type === "logo") {
-                    printSettings.logo_url = url;
-                } else {
-                    printSettings.bg_image_url = url;
-                }
-                printSettingsSaved = false;
-            }
-        } catch (e) {
-            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
-            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to upload image." });
-        } finally {
-            setUploading(false);
-            if (type === "logo" && logoFileInput) {
-                logoFileInput.value = "";
-            }
-            if (type === "background" && bgFileInput) {
-                bgFileInput.value = "";
-            }
-        }
     }
 
     const selectedAvailableCount = $derived(
@@ -868,6 +953,11 @@
                 return;
             }
             await fetchTokens();
+            // Keep TTS modal in sync if we just generated for the open token
+            if (ttsPhrasesToken && ids.includes(ttsPhrasesToken.id)) {
+                const updated = tokens.find((t) => t.id === ttsPhrasesToken!.id);
+                if (updated) ttsPhrasesToken = updated;
+            }
         } catch (e) {
             const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
             toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to start TTS generation." });
@@ -923,6 +1013,43 @@
         fetchTokenTtsSettings();
     });
 
+    // Fetch programs once for filter dropdown
+    $effect(() => {
+        let cancelled = false;
+        (async () => {
+            const { ok, data } = await api("GET", "/api/admin/programs");
+            if (!cancelled && ok && data?.programs) {
+                programsForFilter = (data.programs as { id: number; name: string }[]) ?? [];
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    });
+
+    // Auto-apply filters when any filter changes; reset to page 1 (debounced for text inputs)
+    let filterDebounceHandle: ReturnType<typeof setTimeout> | null = null;
+    $effect(() => {
+        const status = filterStatus;
+        const query = searchQuery;
+        const prefix = filterPrefix;
+        const assignment = filterAssignment;
+        const isGlobal = filterIsGlobal;
+        const ttsStatus = filterTtsStatus;
+        if (filterDebounceHandle) {
+            clearTimeout(filterDebounceHandle);
+        }
+        filterDebounceHandle = setTimeout(() => {
+            tokenPage = 1;
+            fetchTokens(1);
+        }, 300);
+        return () => {
+            if (filterDebounceHandle) {
+                clearTimeout(filterDebounceHandle);
+            }
+        };
+    });
+
     // Sync select-all checkbox indeterminate state
     $effect(() => {
         const ind = someSelected && !allSelected;
@@ -958,19 +1085,22 @@
             >
                 <button
                     type="button"
-                    class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex justify-center items-center gap-2 w-full sm:w-auto shadow-sm transition-colors"
-                    onclick={() => openPrintModal([])}
-                >
-                    <Printer class="w-4 h-4" /> Print settings
-                </button>
-                <button
-                    type="button"
-                    class="btn preset-filled-primary-500 flex justify-center items-center gap-2 w-full sm:w-auto shadow-sm transition-transform active:scale-95"
+                    class="btn preset-filled-primary-500 flex justify-center items-center gap-2 w-full sm:w-auto shadow-sm transition-transform active:scale-95 md:flex hidden"
                     onclick={openBatchModal}
+                    aria-label="Create Batch"
                 >
                     <Plus class="w-4 h-4" /> Create Batch
                 </button>
             </div>
+            <!-- Mobile FAB: circular icon-only bottom-right, above footer (per Phase 3 Configuration) -->
+            <button
+                type="button"
+                class="fixed bottom-[87px] right-[23px] z-50 flex md:hidden items-center justify-center w-14 h-14 rounded-full bg-primary-500 text-primary-contrast-500 shadow-lg hover:bg-primary-600 active:scale-95 transition-transform touch-manipulation"
+                onclick={openBatchModal}
+                aria-label="Create Batch"
+            >
+                <Plus class="w-6 h-6" aria-hidden="true" />
+            </button>
         </div>
 
         {#if serverTtsConfigured === false}
@@ -984,7 +1114,7 @@
                         href="/admin/settings?tab=integrations"
                         class="font-semibold text-warning-800 underline hover:text-warning-950"
                     >
-                        Settings → Integrations
+                        Configuration → Integrations
                     </Link>
                     to generate token audio. Displays can still use browser voices.
                 </p>
@@ -993,106 +1123,123 @@
 
         <!-- Bulk actions: always visible; buttons disabled when no selection -->
         <div class="flex flex-wrap items-center gap-2">
-            <button
-                type="button"
-                class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-100 flex items-center gap-2 shadow-sm"
-                onclick={() => (showTtsSettingsModal = true)}
-            >
-                Token TTS settings
-            </button>
-            <p class="text-xs text-surface-500">
-                Server voice and speed for pre-generated token audio. Configure in TTS settings.
-            </p>
         </div>
 
-        <div
-            class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-container border border-surface-200 bg-surface-50 p-3 sm:p-4 shadow-sm {someSelected ? 'border-primary-200 bg-primary-50/50' : ''}"
-            role="toolbar"
-            aria-label="Bulk actions"
-        >
-                <div class="flex items-center gap-3">
-                    {#if someSelected}
+        {#if someSelected}
+            <div
+                class="flex flex-col gap-3 rounded-container border border-surface-200 bg-surface-50 p-3 shadow-sm border-primary-200 bg-primary-50/50"
+                role="toolbar"
+                aria-label="Bulk actions"
+            >
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span class="text-xs font-semibold text-surface-900 flex items-center gap-2">
                         <span
-                            class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary-500 text-white text-xs font-bold shadow-sm"
+                            class="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-full bg-primary-500 text-white text-xs font-bold"
                         >
                             {selectedIds.size}
                         </span>
-                        <span class="text-sm font-semibold text-surface-900">
-                            token{selectedIds.size > 1 ? "s" : ""} selected
-                        </span>
-                    {/if}
-                </div>
-                <div class="flex flex-wrap items-center gap-2">
-                    <span class="text-sm font-medium text-surface-600">
-                        {someSelected ? `${selectedIds.size} selected` : "Select tokens for bulk actions"}
+                        token{selectedIds.size > 1 ? "s" : ""} selected
                     </span>
-                    <button
-                        type="button"
-                        class="btn btn-sm preset-filled-primary-500 flex items-center gap-1.5 shadow-sm touch-target-h disabled:opacity-50 disabled:cursor-not-allowed"
-                        onclick={() => openPrintModal([...selectedIds])}
-                        disabled={!someSelected || submitting}
-                        title={!someSelected ? "Select tokens to print" : "Print selected"}
-                    >
-                        <Printer class="w-3.5 h-3.5" /> Print
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-sm preset-tonal text-surface-700 hover:text-surface-950 flex items-center gap-1.5 shadow-sm transition-colors touch-target-h disabled:opacity-50 disabled:cursor-not-allowed"
-                        onclick={() => generateTtsForTokens(selectedIdsNeedingTts)}
-                        disabled={bulkGenerateTtsDisabled}
-                        title={bulkGenerateTtsDisabled ? "Select tokens with failed or not-generated TTS" : `Generate TTS for ${selectedIdsNeedingTts.length} token(s)`}
-                    >
-                        <Volume2 class="w-3.5 h-3.5" />
-                        {submitting ? "Starting…" : "Generate TTS"}
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-sm preset-tonal text-surface-700 hover:text-surface-950 flex items-center gap-1.5 shadow-sm transition-colors touch-target-h disabled:opacity-50 disabled:cursor-not-allowed"
-                        onclick={handleBatchDeactivate}
-                        disabled={submitting || selectedAvailableCount === 0}
-                        title={selectedAvailableCount === 0
-                            ? "Select available tokens to deactivate"
-                            : `Deactivate ${selectedAvailableCount} token(s)`}
-                    >
-                        <Ban class="w-3.5 h-3.5" />
-                        {submitting ? "Deactivating…" : "Deactivate"}
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-sm preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1.5 shadow-sm transition-colors touch-target-h disabled:opacity-50 disabled:cursor-not-allowed"
-                        onclick={handleBatchDelete}
-                        disabled={submitting ||
-                            selectedForPrint.some((t) => t.status === "in_use") ||
-                            !someSelected}
-                        title={selectedForPrint.some((t) => t.status === "in_use")
-                            ? "Cannot delete tokens in use. Deselect them first."
-                            : !someSelected ? "Select tokens to delete" : "Delete selected"}
-                    >
-                        <Trash2 class="w-3.5 h-3.5" />
-                        {submitting ? "Deleting…" : "Delete"}
-                    </button>
-                    {#if someSelected}
+                    <div class="flex flex-wrap items-center gap-1.5 justify-end">
                         <button
                             type="button"
-                            class="btn btn-sm preset-tonal text-surface-600 hover:text-surface-900 flex items-center gap-1 touch-target-h"
-                            onclick={() => (selectedIds = new Set())}
+                            class="btn btn-xs preset-filled-primary-500 flex items-center gap-1 px-2 py-1.5 min-h-0 text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                            onclick={() => openPrintModal([...selectedIds])}
+                            disabled={submitting}
+                            title="Print selected"
                         >
-                            <XCircle class="w-3.5 h-3.5" /> Clear
+                            <Printer class="w-3 h-3" /> Print
                         </button>
-                    {/if}
+                        <button
+                            type="button"
+                            class="btn btn-xs preset-tonal text-surface-700 hover:text-surface-950 flex items-center gap-1 px-2 py-1.5 min-h-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                            onclick={() => openAssignToProgramModal([...selectedIds])}
+                            disabled={submitting}
+                            title="Assign selected tokens to a program"
+                        >
+                            <FolderPlus class="w-3 h-3" /> Assign
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-xs preset-tonal text-surface-700 hover:text-surface-950 flex items-center gap-1 px-2 py-1.5 min-h-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                            onclick={() => generateTtsForTokens(selectedIdsNeedingTts)}
+                            disabled={bulkGenerateTtsDisabled}
+                            title={bulkGenerateTtsDisabled ? "Select tokens with failed or missing offline TTS" : `Generate offline TTS for ${selectedIdsNeedingTts.length} token(s)`}
+                        >
+                            <Volume2 class="w-3 h-3" />
+                            {submitting ? "Starting…" : "TTS"}
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-xs preset-tonal text-surface-700 hover:text-surface-950 flex items-center gap-1 px-2 py-1.5 min-h-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                            onclick={handleBatchDeactivate}
+                            disabled={submitting || selectedAvailableCount === 0}
+                            title={selectedAvailableCount === 0
+                                ? "Select available tokens to deactivate"
+                                : `Deactivate ${selectedAvailableCount} token(s)`}
+                        >
+                            <Ban class="w-3 h-3" />
+                            {submitting ? "Deactivating…" : "Deactivate"}
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-xs preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1 px-2 py-1.5 min-h-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                            onclick={handleBatchDelete}
+                            disabled={submitting ||
+                                selectedForPrint.some((t) => t.status === "in_use")}
+                            title={selectedForPrint.some((t) => t.status === "in_use")
+                                ? "Cannot delete tokens in use. Deselect them first."
+                                : "Delete selected"}
+                        >
+                            <Trash2 class="w-3 h-3" /> Delete
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-xs preset-tonal text-surface-600 hover:text-surface-900 flex items-center gap-1 px-2 py-1.5 min-h-0 text-xs"
+                            onclick={() => (selectedIds = new Set())}
+                            title="Clear selection"
+                        >
+                            <XCircle class="w-3 h-3" /> Clear
+                        </button>
+                    </div>
                 </div>
             </div>
+        {/if}
 
-        <!-- Filter bar per 09-UI-ROUTES §3.9 -->
+        <!-- Filter bar (sticky, expand/collapse) -->
         <div
-            class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-surface-50 p-4 rounded-container border border-surface-200 shadow-sm mt-2"
+            id="tokens-filter-bar"
+            class="sticky top-0 z-10 rounded-container border border-surface-200 bg-surface-50 shadow-sm overflow-hidden"
         >
-            <div class="relative w-full sm:w-48">
-                <Filter
-                    class="w-4 h-4 text-surface-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                />
+            <button
+                type="button"
+                class="w-full flex items-center justify-between gap-2 p-4 text-left hover:bg-surface-100/80 transition-colors touch-target-h"
+                onclick={() => (filtersExpanded = !filtersExpanded)}
+                aria-expanded={filtersExpanded}
+                aria-controls="tokens-filter-controls"
+            >
+                <span class="text-sm font-medium text-surface-700 flex items-center gap-2">
+                    <Filter class="w-4 h-4 text-surface-500" />
+                    Filters
+                </span>
+                <span class="text-surface-500" aria-hidden="true">
+                    {#if filtersExpanded}
+                        <ChevronUp class="w-4 h-4" />
+                    {:else}
+                        <ChevronDown class="w-4 h-4" />
+                    {/if}
+                </span>
+            </button>
+            <div
+                id="tokens-filter-controls"
+                class="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-4 px-4 pb-4 pt-0 border-t border-surface-200/80"
+                class:hidden={!filtersExpanded}
+            >
+            <div class="form-control">
+                <label for="tokens-filter-status" class="label py-0 text-xs font-medium text-surface-600">Status</label>
                 <select
-                    class="select rounded-container border border-surface-200 pl-9 pr-8 py-2 w-full text-sm bg-surface-50 shadow-sm appearance-none"
+                    id="tokens-filter-status"
+                    class="select select-sm rounded-container border border-surface-200 w-[140px] touch-target-h"
                     bind:value={filterStatus}
                     aria-label="Filter by status"
                 >
@@ -1101,34 +1248,87 @@
                     <option value="in_use">In use</option>
                     <option value="deactivated">Deactivated</option>
                 </select>
-                <ChevronDown
-                    class="w-4 h-4 text-surface-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                />
             </div>
-
-            <div class="relative w-full sm:w-64">
-                <Search
-                    class="w-4 h-4 text-surface-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                />
+            <div class="form-control flex-1 min-w-[10rem]">
+                <label for="tokens-filter-search" class="label py-0 text-xs font-medium text-surface-600">Search</label>
                 <input
+                    id="tokens-filter-search"
                     type="text"
-                    class="input rounded-container border border-surface-200 pl-9 pr-3 py-2 w-full text-sm bg-surface-50 shadow-sm"
-                    placeholder="Search by ID (e.g. A1)"
+                    class="input input-sm rounded-container border border-surface-200 w-full touch-target-h"
+                    placeholder="By ID (e.g. A1)"
                     bind:value={searchQuery}
-                    onkeydown={(e) => e.key === "Enter" && onFilterApply()}
                 />
             </div>
+            <div class="form-control min-w-[8rem]">
+                <label for="tokens-filter-prefix" class="label py-0 text-xs font-medium text-surface-600">Prefix</label>
+                <input
+                    id="tokens-filter-prefix"
+                    type="text"
+                    class="input input-sm rounded-container border border-surface-200 w-full touch-target-h"
+                    placeholder="e.g. A"
+                    bind:value={filterPrefix}
+                />
+            </div>
+            <div class="form-control">
+                <label for="tokens-filter-assignment" class="label py-0 text-xs font-medium text-surface-600">Assignment</label>
+                <select
+                    id="tokens-filter-assignment"
+                    class="select select-sm rounded-container border border-surface-200 w-[160px] touch-target-h"
+                    bind:value={filterAssignment}
+                    aria-label="Filter by assignment"
+                >
+                    <option value="">All</option>
+                    <option value="unassigned">Unassigned</option>
+                    <option value="global">Global</option>
+                    {#each programsForFilter as prog (prog.id)}
+                        <option value="program_id:{prog.id}">{prog.name}</option>
+                    {/each}
+                </select>
+            </div>
+            <div class="form-control">
+                <label for="tokens-filter-global" class="label py-0 text-xs font-medium text-surface-600">Is global</label>
+                <select
+                    id="tokens-filter-global"
+                    class="select select-sm rounded-container border border-surface-200 w-[100px] touch-target-h"
+                    bind:value={filterIsGlobal}
+                    aria-label="Filter by global"
+                >
+                    <option value="">All</option>
+                    <option value="1">Yes</option>
+                    <option value="0">No</option>
+                </select>
+            </div>
+            <div class="form-control">
+                <label for="tokens-filter-tts" class="label py-0 text-xs font-medium text-surface-600">TTS status</label>
+                <select
+                    id="tokens-filter-tts"
+                    class="select select-sm rounded-container border border-surface-200 w-[140px] touch-target-h"
+                    bind:value={filterTtsStatus}
+                    aria-label="Filter by TTS status"
+                >
+                    <option value="">All</option>
+                    <option value="not_generated">Not generated</option>
+                    <option value="generating">Generating</option>
+                    <option value="pre_generated">Pre-generated</option>
+                    <option value="failed">Failed</option>
+                </select>
+            </div>
+            </div>
+        </div>
 
-            <button
-                type="button"
-                class="btn preset-filled-primary-500 shadow-sm sm:ml-auto flex items-center justify-center gap-2"
-                onclick={onFilterApply}
-                disabled={loading}
-            >
-                {#if loading}<span class="loading-spinner loading-sm"
-                    ></span>{/if}
-                {loading ? "Applying…" : "Apply filters"}
-            </button>
+        <!-- Select All for card view only (outside filters; hidden on desktop where table has its own column) -->
+        <div class="mt-2 lg:hidden flex items-center">
+            <label class="flex items-center gap-2 text-sm font-medium text-surface-700 cursor-pointer label py-0">
+                <input
+                    type="checkbox"
+                    class="checkbox checkbox-sm"
+                    bind:this={selectAllCheckboxMobile}
+                    checked={allSelected}
+                    onchange={toggleSelectAll}
+                    disabled={selectableForDelete.length === 0}
+                />
+                Select All
+            </label>
         </div>
 
         {#if loading && tokens.length === 0}
@@ -1179,8 +1379,8 @@
                 {/if}
             </div>
         {:else}
-            <!-- Desktop Table View: compact, touch-friendly; row actions always visible, disabled when selection active -->
-            <AdminTable class="mt-2 hidden md:block" tableClass="text-sm">
+            <!-- Desktop Table View (lg+): scrollable so table keeps width and scrolls horizontally when needed -->
+            <AdminTable class="mt-2 hidden lg:block" tableClass="text-sm" scrollable>
                 {#snippet head()}
                     <tr>
                         <th class="w-10 py-2 px-2 text-center text-surface-600 font-medium">
@@ -1199,7 +1399,8 @@
                         </th>
                         <th class="w-36 py-2 px-3 text-center text-surface-600 font-medium">Physical ID</th>
                         <th class="w-32 py-2 px-3 text-center text-surface-600 font-medium">Status</th>
-                        <th class="w-40 py-2 px-3 text-center text-surface-600 font-medium">TTS status</th>
+                        <th class="w-40 py-2 px-3 text-center text-surface-600 font-medium">Assigned</th>
+                        <th class="w-40 py-2 px-3 text-center text-surface-600 font-medium">Offline TTS</th>
                         <th class="py-2 px-3 text-center text-surface-600 font-medium whitespace-nowrap">Actions</th>
                     </tr>
                 {/snippet}
@@ -1234,18 +1435,21 @@
                                 >
                                     {token.physical_id}
                                 </span>
+                                {#if token.is_global}
+                                    <span class="ml-1.5 badge preset-tonal text-[10px] px-2 py-0.5 rounded-full font-medium text-surface-600" title="Available to all programs in this site">Global</span>
+                                {/if}
                             </td>
                             <td class="py-2 px-3 align-middle">
                                 {#if token.status === "available"}
                                     <span
-                                        class="badge preset-filled-success-500 text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 w-max font-medium"
+                                        class="badge token-card-badge-success text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 w-max font-medium"
                                     >
                                         <CheckCircle2 class="w-3 h-3" />
                                         Available
                                     </span>
                                 {:else if token.status === "in_use"}
                                     <span
-                                        class="badge preset-filled-primary-500 text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 w-max font-medium"
+                                        class="badge token-card-badge-primary text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 w-max font-medium"
                                     >
                                         <PlayCircle class="w-3 h-3" /> In use
                                     </span>
@@ -1261,6 +1465,17 @@
                                     >
                                         {token.status}
                                     </span>
+                                {/if}
+                            </td>
+                            <td class="py-2 px-3 align-middle">
+                                {#if token.assigned_programs?.length}
+                                    <span class="text-sm text-surface-800 font-medium">
+                                        {token.assigned_programs.map((p) => p.name).join(", ")}
+                                    </span>
+                                {:else if token.is_global}
+                                    <span class="badge preset-tonal text-[10px] px-2 py-0.5 rounded-full font-medium text-surface-600">Global</span>
+                                {:else}
+                                    <span class="text-sm text-surface-500">Unassigned</span>
                                 {/if}
                             </td>
                             <td class="py-2 px-3 align-middle">
@@ -1295,7 +1510,7 @@
                                 {/if}
                             </td>
                             <td class="py-2 px-3 text-center align-middle">
-                                <div class="flex items-center justify-center gap-1.5 flex-wrap {someSelected ? 'opacity-60 pointer-events-none' : ''}">
+                                <div class="flex items-center justify-center gap-1.5 flex-wrap">
                                     <button
                                         type="button"
                                         class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1310,24 +1525,9 @@
                                         class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                         onclick={() => openTtsPhrasesModal(token)}
                                         disabled={someSelected || submitting}
-                                        title="TTS phrases"
+                                        title="Speech (TTS phrases)"
                                     >
-                                        TTS
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        onclick={() => generateTtsForTokens([token.id])}
-                                        disabled={someSelected || submitting || token.tts_status === "pre_generated" || token.tts_status === "generating"}
-                                        title={token.tts_status === "failed"
-                                            ? "Regenerate TTS (generation failed)"
-                                            : !token.tts_status
-                                                ? "Generate TTS (not generated)"
-                                                : token.tts_status === "pre_generated"
-                                                    ? "TTS already generated"
-                                                    : "Generating…"}
-                                    >
-                                        <Volume2 class="w-3.5 h-3.5" /> Generate TTS
+                                        <Volume2 class="w-3.5 h-3.5" /> Speech
                                     </button>
                                     <button
                                         type="button"
@@ -1338,15 +1538,36 @@
                                     >
                                         <Printer class="w-3.5 h-3.5" />
                                     </button>
-                                    {#if token.status === "in_use"}
+                                    {#if !(token.assigned_programs?.length)}
                                         <button
                                             type="button"
                                             class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onclick={() => setTokenStatus(token, "available")}
+                                            onclick={() => openAssignToProgramModal([token.id])}
                                             disabled={someSelected || submitting}
-                                            title="Mark available"
+                                            title="Assign to program"
                                         >
-                                            <CheckCircle2 class="w-3.5 h-3.5" />
+                                            <FolderPlus class="w-3.5 h-3.5" /> Assign
+                                        </button>
+                                    {:else}
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onclick={() => unassignToken(token)}
+                                            disabled={someSelected || submitting || unassigningTokenId === token.id}
+                                            title="Unassign from program"
+                                        >
+                                            {unassigningTokenId === token.id ? "Unassigning…" : "Unassign"}
+                                        </button>
+                                    {/if}
+                                    {#if token.status === "in_use"}
+                                        <button
+                                            type="button"
+                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 hover:bg-surface-50 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onclick={() => openCancelSessionConfirm(token)}
+                                            disabled={someSelected || submitting}
+                                    title="Cancel current session"
+                                        >
+                                            <Ban class="w-3.5 h-3.5" />
                                         </button>
                                     {:else if token.status === "available"}
                                         <button
@@ -1371,7 +1592,7 @@
                                     {/if}
                                     <button
                                         type="button"
-                                        class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        class="btn btn-sm btn-token-delete flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                         onclick={() => handleDeleteToken(token)}
                                         disabled={someSelected || submitting || token.status === "in_use"}
                                         title="Delete token"
@@ -1385,183 +1606,213 @@
                 {/snippet}
             </AdminTable>
 
-            <!-- Mobile Card View: compact, actions always visible, disabled when selection active -->
-            <div
-                class="md:hidden mt-4 mb-2 flex items-center justify-between px-1"
-            >
-                <label
-                    class="flex items-center gap-2 text-sm font-medium text-surface-700 cursor-pointer"
-                >
-                    <input
-                        type="checkbox"
-                        class="checkbox checkbox-sm"
-                        bind:this={selectAllCheckboxMobile}
-                        checked={allSelected}
-                        onchange={toggleSelectAll}
-                        disabled={selectableForDelete.length === 0}
-                    />
-                    Select All
-                </label>
-            </div>
-            <div class="grid grid-cols-1 gap-3 md:hidden">
+            <!-- Card View (mobile + tablet): 2 cols mobile, 3 cols tablet; hidden on lg where table is shown. Per ui-ux: padding-y bigger; program name marquee when long. -->
+            <div class="mt-2 lg:hidden grid grid-cols-2 md:grid-cols-3 gap-3">
                 {#each tokens as token (token.id)}
+                    {@const programNameText = token.assigned_programs?.length ? token.assigned_programs.map((p) => p.name).join(", ") : (token.is_global ? "Global" : "Unassigned")}
+                    {@const programNameLong = programNameText.length > 28}
                     <div
-                        class="card bg-surface-50 border border-surface-200 shadow-sm p-3 flex flex-col gap-2 rounded-lg"
+                        class="card bg-surface-50 border border-surface-200 shadow-sm rounded-container flex flex-col gap-2 py-4 px-3 max-h-[14rem] min-h-0 hover:border-surface-300 transition-colors"
                     >
-                        <div class="flex items-center justify-between gap-2">
-                            <div class="flex items-center gap-2 min-w-0">
-                                {#if token.status === "available" || token.status === "deactivated"}
-                                    <input
-                                        type="checkbox"
-                                        class="checkbox checkbox-sm shrink-0"
-                                        checked={selectedIds.has(token.id)}
-                                        onchange={() => toggleSelect(token.id)}
-                                        aria-label="Select {token.physical_id}"
-                                    />
-                                {:else}
-                                    <span title="In use" aria-label="In use"><Ban
-                                        class="w-4 h-4 text-surface-300 shrink-0"
-                                    /></span>
+                        <!-- Top row: ID left, checkbox top right -->
+                        <div class="flex items-start justify-between gap-2 min-h-0 shrink-0">
+                            <span class="font-mono font-semibold text-surface-900 text-sm truncate min-w-0">
+                                {token.physical_id}
+                                {#if token.is_global}
+                                    <span class="ml-1 badge preset-tonal text-[9px] px-1.5 py-0 rounded-full font-medium text-surface-600">Global</span>
                                 {/if}
-                                <span
-                                    class="font-mono font-semibold text-surface-900 truncate"
-                                >
-                                    {token.physical_id}
+                            </span>
+                            {#if token.status === "available" || token.status === "deactivated"}
+                                <input
+                                    type="checkbox"
+                                    class="checkbox checkbox-sm shrink-0 mt-0.5"
+                                    checked={selectedIds.has(token.id)}
+                                    onchange={() => toggleSelect(token.id)}
+                                    aria-label="Select {token.physical_id}"
+                                />
+                            {:else}
+                                <span title="In use" aria-label="In use" class="shrink-0 mt-0.5">
+                                    <Ban class="w-4 h-4 text-surface-300" />
                                 </span>
-                            </div>
-                            <div class="shrink-0 flex flex-col items-end gap-1">
-                                {#if token.status === "available"}
-                                    <span
-                                        class="badge preset-filled-success-500 text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 font-medium"
-                                    >
-                                        <CheckCircle2 class="w-3 h-3" /> Available
-                                    </span>
-                                {:else if token.status === "in_use"}
-                                    <span
-                                        class="badge preset-filled-primary-500 text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 font-medium"
-                                    >
-                                        <PlayCircle class="w-3 h-3" /> In use
-                                    </span>
-                                {:else if token.status === "deactivated"}
-                                    <span
-                                        class="badge preset-tonal text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 font-medium text-surface-600"
-                                    >
-                                        <Ban class="w-3 h-3" /> Deactivated
-                                    </span>
-                                {:else}
-                                    <span
-                                        class="badge preset-tonal text-[10px] px-2 py-0.5 rounded-full font-medium"
-                                    >
-                                        {token.status}
-                                    </span>
-                                {/if}
-                                <span class="text-[10px] mt-0.5">
-                                    {#if token.tts_status === "generating"}
-                                        <span class="inline-flex items-center gap-1 text-primary-700">
-                                            <span class="loading-spinner loading-2xs"></span>
-                                            Generating TTS…
-                                        </span>
-                                    {:else if token.tts_status === "pre_generated"}
-                                        <span class="inline-flex items-center gap-1 text-success-700">
-                                            <CheckCircle2 class="w-3 h-3" />
-                                            Pre-generated
-                                        </span>
-                                    {:else if token.tts_status === "failed"}
-                                        <span
-                                            class="inline-flex items-center gap-1 text-error-700"
-                                            title={token.tts_failure_reason || "Generation failed"}
-                                        >
-                                            <XCircle class="w-3 h-3" />
-                                            Failed
-                                        </span>
-                                    {:else}
-                                        <span class="text-surface-500">No TTS</span>
-                                    {/if}
-                                </span>
-                            </div>
+                            {/if}
                         </div>
-
-                        <div class="pt-2 border-t border-surface-200 flex flex-wrap items-center gap-2 min-h-[2.75rem] {someSelected ? 'opacity-60 pointer-events-none' : ''}">
+                        <!-- Status + TTS: single compact row -->
+                        <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+                            {#if token.status === "available"}
+                                <span class="badge token-card-badge-success text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-0.5 font-medium">
+                                    <CheckCircle2 class="w-2.5 h-2.5" /> Available
+                                </span>
+                            {:else if token.status === "in_use"}
+                                <span class="badge token-card-badge-primary text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-0.5 font-medium">
+                                    <PlayCircle class="w-2.5 h-2.5" /> In use
+                                </span>
+                            {:else if token.status === "deactivated"}
+                                <span class="badge preset-tonal text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-0.5 font-medium text-surface-600">
+                                    <Ban class="w-2.5 h-2.5" /> Deactivated
+                                </span>
+                            {:else}
+                                <span class="badge preset-tonal text-[10px] px-2 py-0.5 rounded-full font-medium">
+                                    {token.status}
+                                </span>
+                            {/if}
+                            {#if token.tts_status === "generating"}
+                                <span class="inline-flex items-center gap-0.5 text-primary-700 text-[10px]">
+                                    <span class="loading-spinner loading-2xs"></span> TTS…
+                                </span>
+                            {:else if token.tts_status === "pre_generated"}
+                                <span class="inline-flex items-center gap-0.5 text-success-700 text-[10px]">
+                                    <CheckCircle2 class="w-2.5 h-2.5" /> TTS
+                                </span>
+                            {:else if token.tts_status === "failed"}
+                                <span class="inline-flex items-center gap-0.5 text-error-700 text-[10px]" title={token.tts_failure_reason || "Generation failed"}>
+                                    <XCircle class="w-2.5 h-2.5" /> Failed
+                                </span>
+                            {:else}
+                                <span class="text-surface-500 text-[10px]">No TTS</span>
+                            {/if}
+                        </div>
+                        <!-- Program name: own row, more padding-y; marquee when overflows container (char count > 28) -->
+                        <div class="min-w-0 shrink-0 py-1">
+                            {#if programNameLong}
+                                <div class="overflow-hidden min-w-0">
+                                    <Marquee overflowOnly={true} duration={12} gapEm={1.5} class="text-surface-500 text-[10px] block">
+                                        {#snippet children()}
+                                            <span class="whitespace-nowrap">{programNameText}</span>
+                                        {/snippet}
+                                    </Marquee>
+                                </div>
+                            {:else}
+                                <span class="text-surface-500 text-[10px] block truncate">{programNameText}</span>
+                            {/if}
+                        </div>
+                        <!-- Card actions (only buttons dim when another card is selected, via disabled state) -->
+                        <div class="pt-2 border-t border-surface-200 flex flex-wrap items-center justify-end gap-1 min-h-0">
                             <button
                                 type="button"
-                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 touch-target-h px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="btn btn-xs preset-outlined bg-surface-50 text-surface-600 flex items-center gap-1 px-2 py-1 min-h-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                                 onclick={() => openEditModal(token)}
                                 disabled={someSelected || submitting}
                                 aria-label="Edit token"
                             >
-                                <Pencil class="w-3.5 h-3.5" /> Edit
+                                <Pencil class="w-3 h-3" /> Edit
                             </button>
                             <button
                                 type="button"
-                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 touch-target-h px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="btn btn-xs preset-outlined bg-surface-50 text-surface-600 flex items-center gap-1 px-2 py-1 min-h-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                                 onclick={() => openTtsPhrasesModal(token)}
                                 disabled={someSelected || submitting}
-                                aria-label="TTS phrases"
+                                aria-label="Speech (TTS phrases)"
                             >
-                                TTS
+                                <Volume2 class="w-3 h-3" /> Speech
                             </button>
                             <button
                                 type="button"
-                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 touch-target-h px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                                onclick={() => generateTtsForTokens([token.id])}
-                                disabled={someSelected || submitting || token.tts_status === "pre_generated" || token.tts_status === "generating"}
-                                aria-label={token.tts_status === "failed" ? "Regenerate TTS" : !token.tts_status ? "Generate TTS" : token.tts_status === "pre_generated" ? "TTS already generated" : "Generating"}
-                            >
-                                <Volume2 class="w-3.5 h-3.5" /> Generate TTS
-                            </button>
-                            <button
-                                type="button"
-                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 touch-target-h px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="btn btn-xs preset-outlined bg-surface-50 text-surface-600 flex items-center gap-1 px-2 py-1 min-h-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                                 onclick={() => openPrintModal([token.id])}
                                 disabled={someSelected || submitting}
                                 aria-label="Print token"
                             >
-                                <Printer class="w-3.5 h-3.5" />
+                                <Printer class="w-3 h-3" />
                             </button>
+                            {#if !(token.assigned_programs?.length)}
+                                <button
+                                    type="button"
+                                    class="btn btn-xs preset-outlined bg-surface-50 text-surface-600 flex items-center gap-1 px-2 py-1 min-h-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onclick={() => openAssignToProgramModal([token.id])}
+                                    disabled={someSelected || submitting}
+                                    aria-label="Assign to program"
+                                >
+                                    <FolderPlus class="w-3 h-3" /> Assign
+                                </button>
+                            {:else}
+                                <button
+                                    type="button"
+                                    class="btn btn-xs preset-outlined bg-surface-50 text-surface-600 flex items-center gap-1 px-2 py-1 min-h-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onclick={() => unassignToken(token)}
+                                    disabled={someSelected || submitting || unassigningTokenId === token.id}
+                                    aria-label="Unassign from program"
+                                >
+                                    {unassigningTokenId === token.id ? "Unassigning…" : "Unassign"}
+                                </button>
+                            {/if}
                             {#if token.status === "in_use"}
                                 <button
                                     type="button"
-                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 touch-target-h px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    onclick={() => setTokenStatus(token, "available")}
+                                    class="btn btn-xs preset-outlined bg-surface-50 text-surface-600 flex items-center gap-1 px-2 py-1 min-h-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onclick={() => openCancelSessionConfirm(token)}
                                     disabled={someSelected || submitting}
-                                    aria-label="Mark available"
+                                    aria-label="Cancel current session"
                                 >
-                                    <CheckCircle2 class="w-3.5 h-3.5" />
+                                    <Ban class="w-3 h-3" />
                                 </button>
                             {:else if token.status === "available"}
                                 <button
                                     type="button"
-                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 touch-target-h px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    class="btn btn-xs preset-outlined bg-surface-50 text-surface-600 flex items-center gap-1 px-2 py-1 min-h-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                                     onclick={() => setTokenStatus(token, "deactivated")}
                                     disabled={someSelected || submitting}
                                     aria-label="Deactivate"
                                 >
-                                    <Ban class="w-3.5 h-3.5" />
+                                    <Ban class="w-3 h-3" />
                                 </button>
                             {:else if token.status === "deactivated"}
                                 <button
                                     type="button"
-                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-600 flex items-center justify-center gap-1 touch-target-h px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    class="btn btn-xs preset-outlined bg-surface-50 text-surface-600 flex items-center gap-1 px-2 py-1 min-h-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                                     onclick={() => setTokenStatus(token, "available")}
                                     disabled={someSelected || submitting}
                                     aria-label="Activate"
                                 >
-                                    <CheckCircle2 class="w-3.5 h-3.5" />
+                                    <CheckCircle2 class="w-3 h-3" />
                                 </button>
                             {/if}
                             <button
                                 type="button"
-                                class="btn btn-sm preset-filled-error-500 hover:preset-filled-error-600 flex items-center justify-center touch-target-h w-10 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="btn btn-xs btn-token-delete flex items-center gap-1 px-2 py-1 min-h-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                                 onclick={() => handleDeleteToken(token)}
                                 disabled={someSelected || submitting || token.status === "in_use"}
                                 aria-label="Delete token"
                             >
-                                <Trash2 class="w-4 h-4" />
+                                <Trash2 class="w-3 h-3" /> Delete
                             </button>
                         </div>
                     </div>
                 {/each}
             </div>
+
+            <!-- Pagination (per UI/UX checklist: Tables – Pagination) -->
+            {#if tokenMeta && tokenMeta.last_page > 1}
+                {@const totalPages = tokenMeta.last_page}
+                <div
+                    class="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6 mb-4 px-2"
+                >
+                    <span class="text-sm font-medium text-surface-600">
+                        Showing page
+                        <span class="text-surface-950 font-semibold">{tokenMeta.current_page}</span>
+                        of
+                        <span class="text-surface-950 font-semibold">{totalPages}</span>
+                        ({tokenMeta.total} tokens)
+                    </span>
+                    <div class="flex gap-2">
+                        <button
+                            type="button"
+                            class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-4 py-1.5 transition-colors disabled:opacity-50 touch-target-h"
+                            disabled={tokenMeta.current_page <= 1}
+                            onclick={() => goToTokenPage(tokenMeta!.current_page - 1)}
+                        >
+                            Previous
+                        </button>
+                        <button
+                            type="button"
+                            class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-4 py-1.5 transition-colors disabled:opacity-50 touch-target-h"
+                            disabled={tokenMeta.current_page >= totalPages}
+                            onclick={() => goToTokenPage(tokenMeta!.current_page + 1)}
+                        >
+                            Next
+                        </button>
+                    </div>
+                </div>
+            {/if}
         {/if}
     </div>
 </AdminLayout>
@@ -1577,157 +1828,172 @@
                 e.preventDefault();
                 handleBatchCreate();
             }}
-            class="flex flex-col gap-4"
+            class="flex flex-col gap-5"
         >
-            <div class="form-control w-full">
-                <label for="batch-prefix" class="label"
-                    ><span class="label-text">Prefix</span></label
-                >
-                <input
-                    id="batch-prefix"
-                    type="text"
-                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                    placeholder="e.g. A"
-                    maxlength="10"
-                    bind:value={batchPrefix}
-                    required
-                />
-            </div>
-            <div class="form-control w-full">
-                <label for="batch-start" class="label"
-                    ><span class="label-text font-medium">Start number</span
-                    ></label
-                >
-                <input
-                    id="batch-start"
-                    type="number"
-                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                    min="0"
-                    bind:value={batchStart}
-                    required
-                />
-            </div>
-            <div class="form-control w-full">
-                <label for="batch-count" class="label"
-                    ><span class="label-text font-medium">Count</span></label
-                >
-                <input
-                    id="batch-count"
-                    type="number"
-                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                    min="1"
-                    max="500"
-                    bind:value={batchCount}
-                    required
-                />
-                <div
-                    class="mt-2 p-3 bg-surface-100 rounded-container border border-surface-200 flex items-center justify-between"
-                >
-                    <span
-                        class="text-xs font-semibold uppercase text-surface-500 tracking-wider"
-                        >Preview Sequence</span
-                    >
-                    <span class="font-mono text-sm font-bold text-surface-900"
-                        >{batchPrefix}{batchStart}
-                        <span
-                            class="text-surface-400 font-sans font-normal mx-1"
-                            >to</span
-                        >
-                        {batchPrefix}{Number(batchStart) +
-                            Number(batchCount) -
-                            1}</span
-                    >
-                </div>
-            </div>
-            <div class="form-control w-full">
-                <span class="label-text font-medium mb-1 block">Pronounce alias as</span>
-                <p class="text-sm text-surface-600 mb-2">How display TTS will speak the token ID (e.g. on call).</p>
-                <div class="flex gap-4">
-                    <label class="flex items-center gap-2 cursor-pointer">
+            <!-- Batch range -->
+            <div class="rounded-container border border-surface-200 bg-surface-50/80 p-4">
+                <h3 class="text-sm font-semibold text-surface-700 uppercase tracking-wide mb-3">Batch range</h3>
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="form-control">
+                        <label for="batch-prefix" class="label py-0 min-h-0"><span class="label-text text-xs font-medium text-surface-600">Prefix</span></label>
                         <input
-                            type="radio"
-                            name="batch-pronounce"
-                            value="letters"
-                            checked={batchPronounceAs === "letters"}
-                            onchange={() => (batchPronounceAs = "letters")}
-                            class="radio radio-sm"
+                            id="batch-prefix"
+                            type="text"
+                            class="input input-sm rounded-container border border-surface-200 bg-white px-3 py-2 w-full"
+                            placeholder="e.g. A"
+                            maxlength="10"
+                            bind:value={batchPrefix}
+                            required
                         />
-                        <span>Letters (e.g. A 3)</span>
-                    </label>
-                    <label class="flex items-center gap-2 cursor-pointer">
+                    </div>
+                    <div class="form-control">
+                        <label for="batch-start" class="label py-0 min-h-0"><span class="label-text text-xs font-medium text-surface-600">Start</span></label>
                         <input
-                            type="radio"
-                            name="batch-pronounce"
-                            value="word"
-                            checked={batchPronounceAs === "word"}
-                            onchange={() => (batchPronounceAs = "word")}
-                            class="radio radio-sm"
+                            id="batch-start"
+                            type="number"
+                            class="input input-sm rounded-container border border-surface-200 bg-white px-3 py-2 w-full"
+                            min="0"
+                            bind:value={batchStart}
+                            required
                         />
-                        <span>Word (e.g. A3)</span>
+                    </div>
+                    <div class="form-control">
+                        <label for="batch-count" class="label py-0 min-h-0"><span class="label-text text-xs font-medium text-surface-600">Count</span></label>
+                        <input
+                            id="batch-count"
+                            type="number"
+                            class="input input-sm rounded-container border border-surface-200 bg-white px-3 py-2 w-full"
+                            min="1"
+                            max="500"
+                            bind:value={batchCount}
+                            required
+                        />
+                    </div>
+                </div>
+                <div class="mt-3 pt-3 border-t border-surface-200 flex items-center justify-between gap-2">
+                    <span class="text-xs font-medium text-surface-500">Sequence</span>
+                    <span class="font-mono text-sm font-semibold text-surface-900 tabular-nums">
+                        {batchPrefix || "—"}{batchStart ?? "—"}
+                        <span class="text-surface-400 font-normal mx-1.5">→</span>
+                        {batchPrefix || "—"}{Number(batchStart) + Number(batchCount) - 1}
+                    </span>
+                </div>
+            </div>
+
+            <!-- Speech & playback -->
+            <div class="rounded-container border border-surface-200 bg-surface-50/80 p-4">
+                <h3 class="text-sm font-semibold text-surface-700 uppercase tracking-wide mb-3">Speech & playback</h3>
+                <div class="space-y-4">
+                    <div>
+                        <span class="text-xs font-medium text-surface-600 block mb-2">Pronounce as</span>
+                        <div class="flex gap-4">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="radio"
+                                    name="batch-pronounce"
+                                    value="letters"
+                                    checked={batchPronounceAs === "letters"}
+                                    onchange={() => (batchPronounceAs = "letters")}
+                                    class="radio radio-sm"
+                                />
+                                <span class="text-sm">Letters (e.g. A 3)</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="radio"
+                                    name="batch-pronounce"
+                                    value="word"
+                                    checked={batchPronounceAs === "word"}
+                                    onchange={() => (batchPronounceAs = "word")}
+                                    class="radio radio-sm"
+                                />
+                                <span class="text-sm">Word (e.g. A3)</span>
+                            </label>
+                        </div>
+                    </div>
+                    <label class="flex items-start gap-3 cursor-pointer group">
+                        <input
+                            type="checkbox"
+                            class="checkbox checkbox-sm mt-0.5"
+                            bind:checked={batchIsGlobal}
+                        />
+                        <div>
+                            <span class="text-sm font-medium text-surface-800 group-hover:text-surface-900">Use for all programs in this site</span>
+                            <p class="text-xs text-surface-500 mt-0.5">When enabled, these tokens are available to every program in the site without assigning per program.</p>
+                        </div>
                     </label>
+                    <label class="flex items-start gap-3 cursor-pointer group">
+                        <input
+                            type="checkbox"
+                            class="checkbox checkbox-sm mt-0.5"
+                            bind:checked={batchGenerateOfflineTts}
+                        />
+                        <div>
+                            <span class="text-sm font-medium text-surface-800 group-hover:text-surface-900">Generate offline TTS</span>
+                            <p class="text-xs text-surface-500 mt-0.5">Pre-generate audio for displays when server TTS is configured.</p>
+                        </div>
+                    </label>
+                    <div class="pt-2">
+                        <span class="text-xs font-medium text-surface-600 block mb-2">Preview (first token)</span>
+                        <div class="flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                class="btn btn-sm preset-tonal border border-surface-200"
+                                onclick={() =>
+                                    playTtsSampleForLang("en", tokenTtsLanguages.en, {
+                                        alias: String(batchPrefix) + String(batchStart),
+                                        pronounce_as: batchPronounceAs,
+                                    })}
+                                disabled={samplePlayingLang !== null || tokenTtsLoading}
+                            >
+                                {samplePlayingLang === "en" ? "Playing…" : "EN"}
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-sm preset-tonal border border-surface-200"
+                                onclick={() =>
+                                    playTtsSampleForLang("fil", tokenTtsLanguages.fil, {
+                                        alias: String(batchPrefix) + String(batchStart),
+                                        pronounce_as: batchPronounceAs,
+                                    })}
+                                disabled={samplePlayingLang !== null || tokenTtsLoading}
+                            >
+                                {samplePlayingLang === "fil" ? "Playing…" : "FIL"}
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-sm preset-tonal border border-surface-200"
+                                onclick={() =>
+                                    playTtsSampleForLang("ilo", tokenTtsLanguages.ilo, {
+                                        alias: String(batchPrefix) + String(batchStart),
+                                        pronounce_as: batchPronounceAs,
+                                    })}
+                                disabled={samplePlayingLang !== null || tokenTtsLoading}
+                            >
+                                {samplePlayingLang === "ilo" ? "Playing…" : "ILO"}
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="rounded-container border border-surface-200 bg-surface-50 p-3 mt-2">
-                <p class="text-sm font-medium text-surface-800 mb-1">Preview TTS (default settings)</p>
-                <p class="text-xs text-surface-600 mb-3">
-                    Uses global Token TTS defaults and the first token alias so you can hear how it will sound in each language.
-                </p>
-                <div class="flex flex-wrap gap-2">
-                    <button
-                        type="button"
-                        class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
-                        onclick={() =>
-                            playTtsSampleForLang("en", tokenTtsLanguages.en, {
-                                alias: String(batchPrefix) + String(batchStart),
-                                pronounce_as: batchPronounceAs,
-                            })}
-                        disabled={samplePlayingLang !== null || tokenTtsLoading}
-                    >
-                        {samplePlayingLang === "en" ? "Playing…" : "Play sample (EN)"}
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
-                        onclick={() =>
-                            playTtsSampleForLang("fil", tokenTtsLanguages.fil, {
-                                alias: String(batchPrefix) + String(batchStart),
-                                pronounce_as: batchPronounceAs,
-                            })}
-                        disabled={samplePlayingLang !== null || tokenTtsLoading}
-                    >
-                        {samplePlayingLang === "fil" ? "Playing…" : "Play sample (FIL)"}
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
-                        onclick={() =>
-                            playTtsSampleForLang("ilo", tokenTtsLanguages.ilo, {
-                                alias: String(batchPrefix) + String(batchStart),
-                                pronounce_as: batchPronounceAs,
-                            })}
-                        disabled={samplePlayingLang !== null || tokenTtsLoading}
-                    >
-                        {samplePlayingLang === "ilo" ? "Playing…" : "Play sample (ILO)"}
-                    </button>
-                </div>
-            </div>
-            <div
-                class="flex justify-end gap-3 mt-4 pt-4 border-t border-surface-100"
-            >
+
+            <div class="flex justify-end gap-3 pt-2 border-t border-surface-200">
                 <button
                     type="button"
                     class="btn preset-tonal"
-                    onclick={closeBatchModal}>Cancel</button
+                    onclick={closeBatchModal}
                 >
+                    Cancel
+                </button>
                 <button
                     type="submit"
-                    class="btn preset-filled-primary-500 shadow-sm"
+                    class="btn preset-filled-primary-500"
                     disabled={submitting ||
                         batchCount < 1 ||
                         batchCount > 500 ||
                         !batchPrefix.toString().trim()}
                 >
-                    {submitting ? "Creating…" : "Create"}
+                    {submitting ? "Creating…" : "Create batch"}
                 </button>
             </div>
         </form>
@@ -1735,415 +2001,40 @@
 </Modal>
 
 <Modal
-    open={showTtsSettingsModal}
-    title="Token TTS settings"
-    onClose={() => (showTtsSettingsModal = false)}
+    open={!!cancelSessionToken}
+    title="Cancel token session?"
+    onClose={closeCancelSessionConfirm}
 >
     {#snippet children()}
-        <div class="flex flex-col gap-4">
-            <p class="text-sm text-surface-600">
-                Choose the server voice and speed used when pre-generating token audio and when server TTS is available.
-                Displays will still fall back to browser voices if server TTS is unavailable.
-            </p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div class="form-control">
-                    <label class="label" for="token-tts-voice">
-                        <span class="label-text text-sm font-medium">Server voice</span>
-                    </label>
-                    <select
-                        id="token-tts-voice"
-                        class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm max-w-xs"
-                        bind:value={tokenTtsVoiceId}
-                    >
-                        <option value={""}>Default (from TTS config)</option>
-                        {#each tokenTtsVoices as voice}
-                            <option value={voice.id}>
-                                {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
-                            </option>
-                        {/each}
-                    </select>
-                    <p class="text-xs text-surface-500 mt-1">
-                        Uses configured ElevenLabs voice IDs when server TTS is enabled.
-                    </p>
-                </div>
-                <div class="form-control">
-                    <label class="label" for="token-tts-rate">
-                        <span class="label-text text-sm font-medium">TTS speed</span>
-                    </label>
-                    <div class="flex items-center gap-3">
-                        <input
-                            id="token-tts-rate"
-                            type="range"
-                            min="0.5"
-                            max="2"
-                            step="0.05"
-                            class="range range-sm max-w-xs"
-                            bind:value={tokenTtsRate}
-                        />
-                        <span class="text-xs text-surface-600 w-14">
-                            {tokenTtsRate.toFixed(2)}x
-                        </span>
-                    </div>
-                    <p class="text-xs text-surface-500 mt-1">
-                        1.00x is normal speed. Slower for clearer announcements.
-                    </p>
-                </div>
-            </div>
-            <p class="text-sm font-medium text-surface-800 mt-2">Default per language (English, Filipino, Ilocano)</p>
-            <p class="text-xs text-surface-600 mb-2">
-                These apply when a token has no override. Voice, speed, and pre-phrase (pronunciation) per language.
-            </p>
-            <div class="space-y-3">
-                <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                    <div class="flex items-center justify-between gap-2 mb-2">
-                        <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">English</span>
-                    </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div class="form-control">
-                            <label class="label" for="global-tts-en-voice"><span class="label-text text-xs font-medium">Voice</span></label>
-                            <select
-                                id="global-tts-en-voice"
-                                class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                bind:value={tokenTtsLanguages.en.voice_id}
-                            >
-                                <option value={""}>Use server voice above</option>
-                                {#each tokenTtsVoices as voice}
-                                    <option value={voice.id}>
-                                        {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
-                                    </option>
-                                {/each}
-                            </select>
-                        </div>
-                        <div class="form-control">
-                            <label class="label" for="global-tts-en-rate"><span class="label-text text-xs font-medium">Speed</span></label>
-                            <div class="flex items-center gap-3">
-                                <input
-                                    id="global-tts-en-rate"
-                                    type="range"
-                                    min="0.5"
-                                    max="2"
-                                    step="0.05"
-                                    class="range range-xs max-w-xs"
-                                    bind:value={tokenTtsLanguages.en.rate}
-                                />
-                                <span class="text-xs text-surface-600 w-14">
-                                    {Number(tokenTtsLanguages.en.rate).toFixed(2)}x
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="form-control mt-2">
-                        <label class="label" for="global-tts-en-pre"><span class="label-text text-xs font-medium">Pre-phrase (pronunciation)</span></label>
-                        <input
-                            id="global-tts-en-pre"
-                            type="text"
-                            class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                            placeholder='e.g. "Calling" or "Token"'
-                            bind:value={tokenTtsLanguages.en.pre_phrase}
-                        />
-                    </div>
-                    <div class="mt-2">
-                        <button
-                            type="button"
-                            class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
-                            onclick={() => playTtsSampleForLang("en", tokenTtsLanguages.en, { alias: "A1", pronounce_as: "letters" })}
-                            disabled={samplePlayingLang !== null || tokenTtsLoading}
-                        >
-                            {samplePlayingLang === "en" ? "Playing…" : "Play sample"}
-                        </button>
-                    </div>
-                </div>
-                <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                    <div class="flex items-center justify-between gap-2 mb-2">
-                        <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Filipino</span>
-                    </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div class="form-control">
-                            <label class="label" for="global-tts-fil-voice"><span class="label-text text-xs font-medium">Voice</span></label>
-                            <select
-                                id="global-tts-fil-voice"
-                                class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                bind:value={tokenTtsLanguages.fil.voice_id}
-                            >
-                                <option value={""}>Use server voice above</option>
-                                {#each tokenTtsVoices as voice}
-                                    <option value={voice.id}>
-                                        {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
-                                    </option>
-                                {/each}
-                            </select>
-                        </div>
-                        <div class="form-control">
-                            <label class="label" for="global-tts-fil-rate"><span class="label-text text-xs font-medium">Speed</span></label>
-                            <div class="flex items-center gap-3">
-                                <input
-                                    id="global-tts-fil-rate"
-                                    type="range"
-                                    min="0.5"
-                                    max="2"
-                                    step="0.05"
-                                    class="range range-xs max-w-xs"
-                                    bind:value={tokenTtsLanguages.fil.rate}
-                                />
-                                <span class="text-xs text-surface-600 w-14">
-                                    {Number(tokenTtsLanguages.fil.rate).toFixed(2)}x
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="form-control mt-2">
-                        <label class="label" for="global-tts-fil-pre"><span class="label-text text-xs font-medium">Pre-phrase (pronunciation)</span></label>
-                        <input
-                            id="global-tts-fil-pre"
-                            type="text"
-                            class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                            placeholder='e.g. "Pakitawag" or "Token"'
-                            bind:value={tokenTtsLanguages.fil.pre_phrase}
-                        />
-                    </div>
-                    <div class="mt-2">
-                        <button
-                            type="button"
-                            class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
-                            onclick={() => playTtsSampleForLang("fil", tokenTtsLanguages.fil, { alias: "A1", pronounce_as: "letters" })}
-                            disabled={samplePlayingLang !== null || tokenTtsLoading}
-                        >
-                            {samplePlayingLang === "fil" ? "Playing…" : "Play sample"}
-                        </button>
-                    </div>
-                </div>
-                <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                    <div class="flex items-center justify-between gap-2 mb-2">
-                        <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Ilocano</span>
-                    </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div class="form-control">
-                            <label class="label" for="global-tts-ilo-voice"><span class="label-text text-xs font-medium">Voice</span></label>
-                            <select
-                                id="global-tts-ilo-voice"
-                                class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                                bind:value={tokenTtsLanguages.ilo.voice_id}
-                            >
-                                <option value={""}>Use server voice above</option>
-                                {#each tokenTtsVoices as voice}
-                                    <option value={voice.id}>
-                                        {voice.name}{voice.lang ? ` (${voice.lang})` : ""}
-                                    </option>
-                                {/each}
-                            </select>
-                        </div>
-                        <div class="form-control">
-                            <label class="label" for="global-tts-ilo-rate"><span class="label-text text-xs font-medium">Speed</span></label>
-                            <div class="flex items-center gap-3">
-                                <input
-                                    id="global-tts-ilo-rate"
-                                    type="range"
-                                    min="0.5"
-                                    max="2"
-                                    step="0.05"
-                                    class="range range-xs max-w-xs"
-                                    bind:value={tokenTtsLanguages.ilo.rate}
-                                />
-                                <span class="text-xs text-surface-600 w-14">
-                                    {Number(tokenTtsLanguages.ilo.rate).toFixed(2)}x
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="form-control mt-2">
-                        <label class="label" for="global-tts-ilo-pre"><span class="label-text text-xs font-medium">Pre-phrase (pronunciation)</span></label>
-                        <input
-                            id="global-tts-ilo-pre"
-                            type="text"
-                            class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                            placeholder='e.g. "Mapan" or "Token"'
-                            bind:value={tokenTtsLanguages.ilo.pre_phrase}
-                        />
-                    </div>
-                    <div class="mt-2">
-                        <button
-                            type="button"
-                            class="btn btn-sm preset-tonal text-surface-700 border border-surface-200 bg-surface-50 hover:bg-surface-100 disabled:opacity-50"
-                            onclick={() => playTtsSampleForLang("ilo", tokenTtsLanguages.ilo, { alias: "A1", pronounce_as: "letters" })}
-                            disabled={samplePlayingLang !== null || tokenTtsLoading}
-                        >
-                            {samplePlayingLang === "ilo" ? "Playing…" : "Play sample"}
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <div class="flex flex-wrap items-center gap-2 pt-2">
-                <button
-                    type="button"
-                    class="btn btn-sm preset-filled-primary-500 shadow-sm disabled:opacity-50"
-                    onclick={async () => {
-                        tokenTtsSaving = true;
-                        try {
-                            const res = await fetch("/api/admin/token-tts-settings", {
-                                method: "PUT",
-                                headers: {
-                                    "Content-Type": "application/json",
-                                    Accept: "application/json",
-                                    "X-CSRF-TOKEN": getCsrfToken(),
-                                    "X-Requested-With": "XMLHttpRequest",
-                                },
-                                credentials: "same-origin",
-                                body: JSON.stringify({
-                                    voice_id: tokenTtsVoiceId || null,
-                                    rate: tokenTtsRate,
-                                    languages: {
-                                        en: {
-                                            voice_id: tokenTtsLanguages.en.voice_id || null,
-                                            rate: tokenTtsLanguages.en.rate,
-                                            pre_phrase: tokenTtsLanguages.en.pre_phrase.trim() || null,
-                                        },
-                                        fil: {
-                                            voice_id: tokenTtsLanguages.fil.voice_id || null,
-                                            rate: tokenTtsLanguages.fil.rate,
-                                            pre_phrase: tokenTtsLanguages.fil.pre_phrase.trim() || null,
-                                        },
-                                        ilo: {
-                                            voice_id: tokenTtsLanguages.ilo.voice_id || null,
-                                            rate: tokenTtsLanguages.ilo.rate,
-                                            pre_phrase: tokenTtsLanguages.ilo.pre_phrase.trim() || null,
-                                        },
-                                    },
-                                }),
-                            });
-                            if (res.status === 419) {
-                                toaster.error({ title: MSG_SESSION_EXPIRED });
-                                return;
-                            }
-                            const data = await res.json().catch(() => ({}));
-                            if (!res.ok) {
-                                toaster.error({
-                                    title: (data && "message" in data && data.message) || "Failed to save TTS settings.",
-                                });
-                                return;
-                            }
-                            if (data?.token_tts_settings?.languages) {
-                                const langs = data.token_tts_settings.languages as Record<TtsLangKey, { voice_id?: string | null; rate?: number; pre_phrase?: string | null }>;
-                                tokenTtsLanguages = {
-                                    en: {
-                                        voice_id: (langs.en?.voice_id as string) ?? "",
-                                        rate: typeof langs.en?.rate === "number" ? langs.en.rate : 0.84,
-                                        pre_phrase: (langs.en?.pre_phrase as string) ?? "",
-                                    },
-                                    fil: {
-                                        voice_id: (langs.fil?.voice_id as string) ?? "",
-                                        rate: typeof langs.fil?.rate === "number" ? langs.fil.rate : 0.84,
-                                        pre_phrase: (langs.fil?.pre_phrase as string) ?? "",
-                                    },
-                                    ilo: {
-                                        voice_id: (langs.ilo?.voice_id as string) ?? "",
-                                        rate: typeof langs.ilo?.rate === "number" ? langs.ilo.rate : 0.84,
-                                        pre_phrase: (langs.ilo?.pre_phrase as string) ?? "",
-                                    },
-                                };
-                            }
-                            if (data && "requires_regeneration" in data && data.requires_regeneration) {
-                                showTtsRegenerateConfirm = true;
-                            }
-                        } catch (e) {
-                            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
-                            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to save TTS settings." });
-                        } finally {
-                            tokenTtsSaving = false;
-                        }
-                    }}
-                    disabled={tokenTtsSaving || tokenTtsLoading}
-                >
-                    {tokenTtsSaving ? "Saving…" : "Save TTS settings"}
-                </button>
-            </div>
-        </div>
-    {/snippet}
-</Modal>
-
-<Modal
-    open={showTtsRegenerateConfirm}
-    title="Regenerate token TTS audio"
-    onClose={() => {
-        if (!tokenTtsRegenerating) {
-            showTtsRegenerateConfirm = false;
-            ttsRegenerateError = "";
-        }
-    }}
->
-    {#snippet children()}
-        <div class="flex flex-col gap-4">
-            <p class="text-sm text-surface-700">
-                Voice or speed has changed. This will regenerate TTS audio for all tokens that have
-                <span class="font-semibold">Generate TTS audio for offline playback</span> enabled.
-                Displays will continue to fall back to live TTS while generation runs.
-            </p>
-            <p class="text-sm text-surface-600">
-                Regeneration happens in the background via the queue worker. You can continue using the system;
-                TTS status badges will update as tokens finish.
-            </p>
-            <div class="flex justify-end gap-3 mt-2 pt-3 border-t border-surface-200">
-                <button
-                    type="button"
-                    class="btn preset-tonal"
-                    onclick={() => {
-                        if (!tokenTtsRegenerating) {
-                            showTtsRegenerateConfirm = false;
-                            ttsRegenerateError = "";
-                        }
-                    }}
-                    disabled={tokenTtsRegenerating}
-                >
-                    Cancel
-                </button>
-                <button
-                    type="button"
-                    class="btn preset-filled-primary-500"
-                    disabled={tokenTtsRegenerating}
-                    onclick={async () => {
-                        if (tokenTtsRegenerating) return;
-                        tokenTtsRegenerating = true;
-                        ttsRegenerateError = "";
-                        try {
-                            const res = await fetch("/api/admin/tokens/regenerate-tts", {
-                                method: "POST",
-                                headers: {
-                                    "Content-Type": "application/json",
-                                    Accept: "application/json",
-                                    "X-CSRF-TOKEN": getCsrfToken(),
-                                    "X-Requested-With": "XMLHttpRequest",
-                                },
-                                credentials: "same-origin",
-                                body: JSON.stringify({}),
-                            });
-                            if (res.status === 419) {
-                                toaster.error({ title: MSG_SESSION_EXPIRED });
-                                ttsRegenerateError = MSG_SESSION_EXPIRED;
-                                return;
-                            }
-                            const data = await res.json().catch(() => ({}));
-                            if (!res.ok) {
-                                const msg =
-                                    (data && "message" in data && typeof data.message === "string" && data.message) ||
-                                    "Failed to start TTS regeneration.";
-                                ttsRegenerateError = msg;
-                                toaster.error({ title: msg });
-                                return;
-                            }
-                            showTtsRegenerateConfirm = false;
-                            ttsRegenerateError = "";
-                            await fetchTokens();
-                        } catch (e) {
-                            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
-                            ttsRegenerateError = isNetwork ? MSG_NETWORK_ERROR : "Failed to start TTS regeneration.";
-                            toaster.error({ title: ttsRegenerateError });
-                        } finally {
-                            tokenTtsRegenerating = false;
-                        }
-                    }}
-                >
-                    {tokenTtsRegenerating ? "Starting…" : "Regenerate audio"}
-                </button>
-            </div>
+        <p class="text-sm text-surface-700">
+            This will cancel the current queue session for token
+            <span class="font-mono font-semibold">
+                {cancelSessionToken?.physical_id}
+            </span>
+            and mark it as available. This cannot be undone.
+        </p>
+        <div class="flex justify-end gap-3 mt-5">
+            <button
+                type="button"
+                class="btn preset-tonal"
+                onclick={closeCancelSessionConfirm}
+                disabled={submitting}
+            >
+                Keep session
+            </button>
+            <button
+                type="button"
+                class="btn preset-filled-error-500 flex items-center gap-2"
+                onclick={async () => {
+                    if (!cancelSessionToken) return;
+                    const token = cancelSessionToken;
+                    await cancelTokenSession(token);
+                    closeCancelSessionConfirm();
+                }}
+                disabled={submitting}
+            >
+                <Ban class="w-4 h-4" /> Cancel session
+            </button>
         </div>
     {/snippet}
 </Modal>
@@ -2164,15 +2055,31 @@
             >
                 <div class="form-control w-full">
                     <div class="label"><span class="label-text font-medium">Physical ID</span></div>
-                    <p class="font-mono font-semibold text-surface-900 px-3 py-2 bg-surface-100 rounded-container border border-surface-200">
+                    <p class="font-mono font-semibold text-surface-900 px-3 py-2 bg-surface-100 rounded-container border border-surface-200 inline-flex items-center gap-2 flex-wrap">
                         {editToken.physical_id}
+                        {#if editToken.is_global}
+                            <span class="badge preset-tonal text-[10px] px-2 py-0.5 rounded-full font-medium text-surface-600">Global</span>
+                        {/if}
                     </p>
                     <p class="label-text-alt mt-1">Token ID cannot be changed.</p>
                 </div>
                 <div class="form-control w-full">
+                    <label class="label cursor-pointer justify-start gap-3 rounded-lg border border-surface-200 bg-surface-50 p-3">
+                        <input
+                            type="checkbox"
+                            class="checkbox checkbox-sm"
+                            bind:checked={editIsGlobal}
+                        />
+                        <div>
+                            <span class="label-text font-medium">Use for all programs in this site</span>
+                            <p class="text-xs text-surface-600 mt-0.5">When enabled, this token is available to every program in the site without assigning it per program.</p>
+                        </div>
+                    </label>
+                </div>
+                <div class="form-control w-full">
                     <span class="label-text font-medium mb-2 block">Pronounce as (TTS)</span>
                     <p class="text-sm text-surface-600 mb-2">How display/TTS will speak this token (e.g. on call).</p>
-                    <div class="flex gap-4">
+                <div class="flex flex-col sm:flex-row gap-2 sm:gap-4">
                         <label class="flex items-center gap-2 cursor-pointer">
                             <input
                                 type="radio"
@@ -2219,8 +2126,65 @@
 </Modal>
 
 <Modal
+    open={showAssignToProgramModal}
+    title="Assign to program"
+    onClose={closeAssignToProgramModal}
+>
+    {#snippet children()}
+        <div class="flex flex-col gap-4">
+            <p class="text-sm text-surface-950/80">
+                Choose a program to assign {assignToProgramTokenIds.length === 1 ? "this token" : `${assignToProgramTokenIds.length} tokens`} to. The token(s) will then be available for that program.
+            </p>
+            {#if assignToProgramLoading}
+                <p class="text-sm text-surface-600">Loading programs…</p>
+            {:else if programsForAssign.length === 0}
+                <p class="text-sm text-surface-600">No programs in your site. Create a program first.</p>
+            {:else}
+                <div class="form-control w-full">
+                    <span class="label-text font-medium mb-2 block">Program</span>
+                    <div class="flex flex-col gap-2 max-h-48 overflow-y-auto rounded-container border border-surface-200 bg-surface-50 p-2">
+                        {#each programsForAssign as prog (prog.id)}
+                            <label
+                                class="label cursor-pointer justify-start gap-3 rounded-lg border border-surface-200 p-3 transition-colors {selectedProgramIdForAssign === prog.id ? 'bg-primary-50 border-primary-200' : 'bg-surface-50 hover:bg-surface-100'}"
+                            >
+                                <input
+                                    type="radio"
+                                    name="assign-program"
+                                    class="radio radio-primary radio-sm"
+                                    checked={selectedProgramIdForAssign === prog.id}
+                                    onchange={() => (selectedProgramIdForAssign = prog.id)}
+                                    value={prog.id}
+                                />
+                                <span class="font-medium text-surface-900">{prog.name}</span>
+                            </label>
+                        {/each}
+                    </div>
+                </div>
+            {/if}
+            <div class="flex justify-end gap-3 pt-2 border-t border-surface-200">
+                <button
+                    type="button"
+                    class="btn preset-tonal"
+                    onclick={closeAssignToProgramModal}
+                >
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    class="btn preset-filled-primary-500"
+                    disabled={selectedProgramIdForAssign == null || assignToProgramSubmitting || programsForAssign.length === 0}
+                    onclick={handleAssignToProgramSubmit}
+                >
+                    {assignToProgramSubmitting ? "Assigning…" : assignToProgramTokenIds.length === 1 ? "Assign token" : `Assign ${assignToProgramTokenIds.length} tokens`}
+                </button>
+            </div>
+        </div>
+    {/snippet}
+</Modal>
+
+<Modal
     open={ttsPhrasesToken !== null}
-    title={ttsPhrasesToken ? `Token TTS phrases – ${ttsPhrasesToken.physical_id}` : "Token TTS phrases"}
+    title={ttsPhrasesToken ? `Token speech phrases – ${ttsPhrasesToken.physical_id}` : "Token speech phrases"}
     onClose={closeTtsPhrasesModal}
 >
     {#snippet children()}
@@ -2429,7 +2393,18 @@
                         </div>
                     </div>
                 </div>
-                <div class="flex justify-end gap-3 mt-4 pt-4 border-t border-surface-200">
+                <div class="flex flex-wrap items-center justify-end gap-3 mt-4 pt-4 border-t border-surface-200">
+                    {#if ttsPhrasesToken && ttsPhrasesToken.tts_status !== "pre_generated" && ttsPhrasesToken.tts_status !== "generating"}
+                        <button
+                            type="button"
+                            class="btn preset-tonal"
+                            onclick={() => ttsPhrasesToken && generateTtsForTokens([ttsPhrasesToken.id])}
+                            disabled={submitting}
+                            title={ttsPhrasesToken?.tts_status === "failed" ? "Regenerate offline TTS" : "Generate offline TTS for this token"}
+                        >
+                            {submitting ? "Starting…" : "Generate offline TTS"}
+                        </button>
+                    {/if}
                     <button type="button" class="btn preset-tonal" onclick={closeTtsPhrasesModal}>
                         Cancel
                     </button>
@@ -2445,264 +2420,24 @@
 <Modal open={showPrintModal} title="Print tokens" onClose={closePrintModal}>
     {#snippet children()}
         <div class="flex flex-col gap-5">
-            {#if printTargetIds.length > 0}
-                <div
-                    class="bg-primary-50 border border-primary-200 rounded-container p-3 flex items-start gap-3"
-                >
-                    <Printer class="w-5 h-5 text-primary-500 shrink-0 mt-0.5" />
-                    <div>
-                        <p class="text-sm font-semibold text-surface-900">
-                            Ready to Print
-                        </p>
-                        <p class="text-sm text-surface-700 mt-0.5">
-                            Printing {printTargetIds.length} token(s). Adjust template
-                            options below if needed.
-                        </p>
-                    </div>
-                </div>
-            {:else}
-                <div
-                    class="bg-surface-50 border border-surface-200 rounded-container p-3 flex items-start gap-3"
-                >
-                    <Printer class="w-5 h-5 text-surface-400 shrink-0 mt-0.5" />
-                    <div>
-                        <p class="text-sm font-semibold text-surface-900">
-                            Edit Print Defaults
-                        </p>
-                        <p class="text-sm text-surface-600 mt-0.5">
-                            Set the default printing template. Select tokens and
-                            click "Print selected" to print.
-                        </p>
-                    </div>
-                </div>
-            {/if}
-
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div class="form-control">
-                    <label for="print-cards" class="label"
-                        ><span class="label-text font-medium"
-                            >Cards per page</span
-                        ></label
-                    >
-                    <select
-                        id="print-cards"
-                        class="select rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                        bind:value={printSettings.cards_per_page}
-                    >
-                        {#each [4, 5, 6, 7, 8] as n}
-                            <option value={n}>{n}</option>
-                        {/each}
-                    </select>
-                </div>
-                <div class="form-control">
-                    <label for="print-paper" class="label"
-                        ><span class="label-text font-medium">Paper</span
-                        ></label
-                    >
-                    <select
-                        id="print-paper"
-                        class="select rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                        bind:value={printSettings.paper}
-                    >
-                        <option value="a4">A4</option>
-                        <option value="letter">Letter</option>
-                    </select>
-                </div>
-                <div class="form-control">
-                    <label for="print-orientation" class="label"
-                        ><span class="label-text font-medium">Orientation</span
-                        ></label
-                    >
-                    <select
-                        id="print-orientation"
-                        class="select rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                        bind:value={printSettings.orientation}
-                    >
-                        <option value="portrait">Portrait</option>
-                        <option value="landscape">Landscape</option>
-                    </select>
-                </div>
-            </div>
-
-            <div
-                class="bg-surface-50 p-4 rounded-container border border-surface-200"
-            >
-                <h4
-                    class="text-xs font-semibold uppercase tracking-wider text-surface-500 mb-3"
-                >
-                    Display Options
-                </h4>
-                <div class="flex flex-col sm:flex-row gap-4 sm:gap-8">
-                    <label class="label cursor-pointer justify-start gap-3">
-                        <input
-                            type="checkbox"
-                            class="checkbox"
-                            bind:checked={printSettings.show_hint}
-                        />
-                        <span class="label-text font-medium"
-                            >Show "Scan for status" hint</span
-                        >
-                    </label>
-                    <label class="label cursor-pointer justify-start gap-3">
-                        <input
-                            type="checkbox"
-                            class="checkbox"
-                            bind:checked={printSettings.show_cut_lines}
-                        />
-                        <span class="label-text font-medium"
-                            >Show cut lines</span
-                        >
-                    </label>
-                </div>
-            </div>
-
-            <div class="grid grid-cols-1 gap-4">
-                <div class="form-control">
-                    <label for="print-logo" class="label"
-                        ><span class="label-text font-medium"
-                            >Logo URL <span class="text-surface-500 font-normal"
-                                >(optional)</span
-                            ></span
-                        ></label
-                    >
-                    <div class="flex flex-col gap-2">
-                        <input
-                            id="print-logo"
-                            type="url"
-                            class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                            placeholder="https://example.com/logo.png"
-                            bind:value={printSettings.logo_url}
-                        />
-                        <div class="flex flex-wrap items-center gap-2">
-                            <button
-                                type="button"
-                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 shadow-sm disabled:opacity-50"
-                                onclick={() => logoFileInput && logoFileInput.click()}
-                                disabled={logoUploading || submitting}
-                            >
-                                {logoUploading ? "Uploading…" : "Upload image"}
-                            </button>
-                            {#if printSettings.logo_url}
-                                <img
-                                    src={printSettings.logo_url}
-                                    alt="Logo preview"
-                                    class="h-8 w-auto rounded border border-surface-200 bg-surface-50"
-                                />
-                            {/if}
-                            <input
-                                type="file"
-                                accept="image/*"
-                                class="hidden"
-                                bind:this={logoFileInput}
-                                onchange={(event) => {
-                                    const target = event.currentTarget as HTMLInputElement;
-                                    const file = target.files?.[0];
-                                    if (file) uploadPrintImage("logo", file);
-                                }}
-                            />
-                        </div>
-                    </div>
-                </div>
-                <div class="form-control">
-                    <label for="print-footer" class="label"
-                        ><span class="label-text font-medium"
-                            >Footer text <span
-                                class="text-surface-500 font-normal"
-                                >(optional)</span
-                            ></span
-                        ></label
-                    >
-                    <textarea
-                        id="print-footer"
-                        class="textarea rounded-container border border-surface-200 w-full bg-surface-50 shadow-sm"
-                        placeholder="Shown on each card, centered. e.g. Premise rules, office hours"
-                        rows="2"
-                        bind:value={printSettings.footer_text}
-                    ></textarea>
-                </div>
-                <div class="form-control">
-                    <label for="print-bg" class="label"
-                        ><span class="label-text font-medium"
-                            >Background image URL <span
-                                class="text-surface-500 font-normal"
-                                >(optional)</span
-                            ></span
-                        ></label
-                    >
-                    <div class="flex flex-col gap-2">
-                        <input
-                            id="print-bg"
-                            type="text"
-                            class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                            placeholder="https://example.com/bg.png"
-                            bind:value={printSettings.bg_image_url}
-                        />
-                        <div class="flex flex-wrap items-center gap-2">
-                            <button
-                                type="button"
-                                class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 shadow-sm disabled:opacity-50"
-                                onclick={() => bgFileInput && bgFileInput.click()}
-                                disabled={bgUploading || submitting}
-                            >
-                                {bgUploading ? "Uploading…" : "Upload image"}
-                            </button>
-                            {#if printSettings.bg_image_url}
-                                <div class="flex items-center gap-2">
-                                    <span class="text-xs text-surface-600">Preview</span>
-                                    <div
-                                        class="h-10 w-14 rounded border border-surface-200 bg-surface-100 bg-center bg-cover"
-                                        style={`background-image: url(${printSettings.bg_image_url});`}
-                                    ></div>
-                                </div>
-                            {/if}
-                            <input
-                                type="file"
-                                accept="image/*"
-                                class="hidden"
-                                bind:this={bgFileInput}
-                                onchange={(event) => {
-                                    const target = event.currentTarget as HTMLInputElement;
-                                    const file = target.files?.[0];
-                                    if (file) uploadPrintImage("background", file);
-                                }}
-                            />
-                        </div>
-                    </div>
-                    <p class="label-text-alt mt-1 flex items-center gap-1.5">
-                        <ChevronDown
-                            class="w-3 h-3 text-surface-400 rotate-[-90deg]"
-                        /> Use 6:5 aspect ratio (e.g. 60×50mm) for best fit per card.
+            <div class="bg-primary-50 border border-primary-200 rounded-container p-3 flex items-start gap-3">
+                <Printer class="w-5 h-5 text-primary-500 shrink-0 mt-0.5" />
+                <div>
+                    <p class="text-sm font-semibold text-surface-900">Ready to print</p>
+                    <p class="text-sm text-surface-700 mt-0.5">
+                        Print {printTargetIds.length} token(s) with current defaults. Change defaults in Configuration → Print settings.
                     </p>
                 </div>
             </div>
-            <div
-                class="flex justify-end gap-3 mt-6 pt-4 border-t border-surface-100"
-            >
-                <button
-                    type="button"
-                    class="btn preset-tonal"
-                    onclick={closePrintModal}>Cancel</button
-                >
-                <button
-                    type="button"
-                    class="btn preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 shadow-sm transition-colors"
-                    onclick={() => savePrintSettings()}
-                    disabled={submitting}
-                >
-                    {printSettingsSaved
-                        ? "Saved"
-                        : submitting
-                          ? "Saving…"
-                          : "Save as default"}
-                </button>
+
+            <div class="flex justify-end gap-3 pt-2 border-t border-surface-100">
+                <button type="button" class="btn preset-tonal" onclick={closePrintModal}>Cancel</button>
                 <button
                     type="button"
                     class="btn preset-filled-primary-500 shadow-sm flex items-center gap-2"
                     onclick={doPrint}
                     disabled={printTargetIds.length === 0}
-                    title={printTargetIds.length === 0
-                        ? "Select tokens first"
-                        : ""}
+                    title={printTargetIds.length === 0 ? "Select tokens first" : ""}
                 >
                     <Printer class="w-4 h-4" /> Print
                 </button>

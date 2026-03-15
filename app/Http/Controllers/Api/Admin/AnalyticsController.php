@@ -87,11 +87,13 @@ class AnalyticsController extends Controller
     }
 
     /**
-     * Token and TTS health (no date/program filters).
+     * Token and TTS health (no date/program filters). Per site-scoping-migration-spec §2: scoped by user's site.
      */
     public function tokenTtsHealth(Request $request): JsonResponse
     {
-        return response()->json($this->analytics->getTokenTtsHealth());
+        $siteId = $request->user()->isSuperAdmin() ? null : $request->user()->site_id;
+
+        return response()->json($this->analytics->getTokenTtsHealth($siteId));
     }
 
     /**

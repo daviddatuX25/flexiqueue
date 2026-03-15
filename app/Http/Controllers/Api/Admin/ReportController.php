@@ -20,16 +20,22 @@ class ReportController extends Controller
     /**
      * Get program sessions (start+end pairs) for filter dropdown.
      * Query: ?program_id=1&from=Y-m-d&to=Y-m-d
+     * Per site-scoping-migration-spec §5: site admin restricted to own site's programs; super_admin can pass any.
      */
     public function programSessions(Request $request): JsonResponse
     {
+        $siteId = $this->resolveReportSiteId($request);
+        if ($siteId === false) {
+            return response()->json(['message' => 'Site admin must have a site.'], 403);
+        }
+
         $filters = [
             'program_id' => $request->query('program_id'),
             'from' => $request->query('from'),
             'to' => $request->query('to'),
         ];
 
-        $sessions = $this->reportService->getProgramSessions($filters);
+        $sessions = $this->reportService->getProgramSessions($filters, $siteId);
 
         return response()->json(['program_sessions' => $sessions]);
     }
@@ -61,6 +67,11 @@ class ReportController extends Controller
             ]);
         }
 
+        $siteId = $this->resolveReportSiteId($request);
+        if ($siteId === false) {
+            return response()->json(['message' => 'Site admin must have a site.'], 403);
+        }
+
         $filters = [
             'program_id' => $request->query('program_id'),
             'from' => $request->query('from'),
@@ -73,7 +84,7 @@ class ReportController extends Controller
             'per_page' => min(100, max(10, (int) $request->query('per_page', 50))),
         ];
 
-        $paginator = $this->reportService->getAuditLog($filters);
+        $paginator = $this->reportService->getAuditLog($filters, $siteId);
 
         return response()->json([
             'data' => $paginator->getCollection()->values()->all(),
@@ -110,6 +121,29 @@ class ReportController extends Controller
             'program_session_id' => $request->query('program_session_id'),
         ];
 
-        return $this->reportService->streamAuditCsv($filters);
+        $siteId = $this->resolveReportSiteId($request);
+        if ($siteId === false) {
+            return response()->json(['message' => 'Site admin must have a site.'], 403);
+        }
+
+        return $this->reportService->streamAuditCsv($filters, $siteId);
+    }
+
+    /**
+     * Resolve site_id for report/audit scoping. Per site-scoping-migration-spec §5.
+     *
+     * @return int|null|false null = super_admin (allow any), int = site_id, false = 403 (site admin with no site)
+     */
+    private function resolveReportSiteId(Request $request): int|null|false
+    {
+        $user = $request->user();
+        if ($user->isSuperAdmin()) {
+            return null;
+        }
+        if ($user->site_id === null) {
+            return false;
+        }
+
+        return $user->site_id;
     }
 }

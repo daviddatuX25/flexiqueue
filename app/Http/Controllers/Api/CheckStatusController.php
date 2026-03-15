@@ -16,11 +16,30 @@ class CheckStatusController extends Controller
     ) {}
 
     /**
-     * Get token status by qr_hash. Public.
+     * Get token status by qr_hash and site_id. Public. Token must belong to site (site-scoped QR).
+     */
+    public function showWithSite(int $site_id, string $qr_hash): JsonResponse
+    {
+        $data = $this->checkStatusService->getStatus($qr_hash, $site_id);
+
+        return $this->statusJsonResponse($data);
+    }
+
+    /**
+     * Get token status by qr_hash (legacy, no site scope). Public.
      */
     public function show(string $qr_hash): JsonResponse
     {
         $data = $this->checkStatusService->getStatus($qr_hash);
+
+        return $this->statusJsonResponse($data);
+    }
+
+    /**
+     * @param  array{result: string, alias?: string, ...}  $data
+     */
+    private function statusJsonResponse(array $data): JsonResponse
+    {
 
         if ($data['result'] === 'not_found') {
             return response()->json(['message' => 'Token not found.'], 404);

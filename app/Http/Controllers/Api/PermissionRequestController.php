@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\SessionResource;
 use App\Models\PermissionRequest;
+use App\Models\Program;
 use App\Models\Session;
 use App\Services\PermissionRequestService;
 use Illuminate\Http\JsonResponse;
@@ -68,6 +69,7 @@ class PermissionRequestController extends Controller
 
         return response()->json([
             'id' => $pr->id,
+            'request_token' => $pr->request_token,
             'status' => $pr->status,
             'message' => 'Request sent. Waiting for supervisor approval.',
         ], 201);
@@ -88,19 +90,34 @@ class PermissionRequestController extends Controller
     /**
      * Approve a permission request (supervisor/admin).
      * For override: optional target_track_id or custom_steps to use (overrides request values).
+     * When approving via QR scan, request_token must be provided and must match the stored token.
      */
     public function approve(Request $request, PermissionRequest $permission_request): JsonResponse
     {
         $user = $request->user();
-        if (! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
-            return response()->json(['message' => 'Forbidden.'], 403);
+        $session = $permission_request->session;
+        $program = $session?->program;
+        if (! $program) {
+            return response()->json(['message' => 'Session or program not found.'], 403);
+        }
+
+        $canApprove = ($user->isAdmin() && $user->site_id === $program->site_id)
+            || $user->isSupervisorForProgram($program->id);
+        if (! $canApprove) {
+            return response()->json(['message' => 'You may only approve permission requests for your program or site.'], 403);
         }
 
         $validated = $request->validate([
+            'request_token' => ['nullable', 'string', 'size:64'],
             'target_track_id' => ['nullable', 'integer', 'exists:service_tracks,id'],
             'custom_steps' => ['nullable', 'array'],
             'custom_steps.*' => ['integer', 'exists:stations,id'],
         ]);
+
+        $requestToken = $validated['request_token'] ?? null;
+        if ($requestToken !== null && ! hash_equals($permission_request->request_token ?? '', $requestToken)) {
+            return response()->json(['message' => 'Invalid or expired QR.'], 403);
+        }
 
         $approveTargetTrackId = $validated['target_track_id'] ?? null;
         $approveCustomSteps = $this->sanitizeCustomSteps($validated['custom_steps'] ?? null);
@@ -126,8 +143,16 @@ class PermissionRequestController extends Controller
     public function reject(Request $request, PermissionRequest $permission_request): JsonResponse
     {
         $user = $request->user();
-        if (! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
-            return response()->json(['message' => 'Forbidden.'], 403);
+        $session = $permission_request->session;
+        $program = $session?->program;
+        if (! $program) {
+            return response()->json(['message' => 'Session or program not found.'], 403);
+        }
+
+        $canApprove = ($user->isAdmin() && $user->site_id === $program->site_id)
+            || $user->isSupervisorForProgram($program->id);
+        if (! $canApprove) {
+            return response()->json(['message' => 'You may only reject permission requests for your program or site.'], 403);
         }
 
         $validated = $request->validate([
@@ -157,5 +182,21 @@ class PermissionRequestController extends Controller
         }
 
         return response()->json(['message' => 'Request rejected.']);
+    }
+
+    /**
+     * Cancel a pending permission request (requester only, e.g. on timeout).
+     */
+    public function cancel(Request $request, PermissionRequest $permission_request): JsonResponse
+    {
+        try {
+            $this->permissionRequestService->cancel($permission_request, $request->user()->id);
+        } catch (\InvalidArgumentException $e) {
+            $code = (int) ($e->getCode() ?: 409);
+
+            return response()->json(['message' => $e->getMessage()], $code);
+        }
+
+        return response()->json(['message' => 'Request cancelled.'], 200);
     }
 }

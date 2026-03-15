@@ -74,6 +74,7 @@ class PermissionRequestServiceOverrideTest extends TestCase
             'action_type' => PermissionRequest::ACTION_OVERRIDE,
             'requester_user_id' => $requester->id,
             'status' => PermissionRequest::STATUS_PENDING,
+            'request_token' => Str::random(64),
             'target_station_id' => $toStation->id,
             'reason' => 'Move to different station',
         ]);
@@ -157,6 +158,7 @@ class PermissionRequestServiceOverrideTest extends TestCase
             'action_type' => PermissionRequest::ACTION_OVERRIDE,
             'requester_user_id' => $requester->id,
             'status' => PermissionRequest::STATUS_PENDING,
+            'request_token' => Str::random(64),
             'target_station_id' => null,
             'target_track_id' => null,
             'custom_steps' => null,

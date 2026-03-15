@@ -5,21 +5,38 @@ namespace Tests\Feature;
 use App\Models\Program;
 use App\Models\ProgramStationAssignment;
 use App\Models\ServiceTrack;
+use App\Models\Site;
 use App\Models\Station;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class StaffMultiProgramSelectorTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function defaultSite(): Site
+    {
+        return Site::firstOrCreate(
+            ['slug' => 'default'],
+            [
+                'name' => 'Default',
+                'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+                'settings' => [],
+                'edge_settings' => [],
+            ]
+        );
+    }
+
     public function test_staff_with_single_program_does_not_get_program_selector_on_station(): void
     {
-        $admin = User::factory()->admin()->create();
-        $staff = User::factory()->create(['role' => 'staff']);
+        $site = $this->defaultSite();
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
 
         $program = Program::create([
+            'site_id' => $site->id,
             'name' => 'Program One',
             'description' => null,
             'is_active' => true,
@@ -46,16 +63,19 @@ class StaffMultiProgramSelectorTest extends TestCase
 
     public function test_staff_with_multiple_active_program_assignments_gets_program_selector_shared_across_pages_when_not_pinned(): void
     {
-        $admin = User::factory()->admin()->create();
-        $staff = User::factory()->create(['role' => 'staff']);
+        $site = $this->defaultSite();
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
 
         $programA = Program::create([
+            'site_id' => $site->id,
             'name' => 'Program A',
             'description' => null,
             'is_active' => true,
             'created_by' => $admin->id,
         ]);
         $programB = Program::create([
+            'site_id' => $site->id,
             'name' => 'Program B',
             'description' => null,
             'is_active' => true,
@@ -129,7 +149,7 @@ class StaffMultiProgramSelectorTest extends TestCase
         );
 
         // Program Overrides uses the same shared program selection for this staff user.
-        $overridesResponse = $this->actingAs($staff)->get('/program-overrides');
+        $overridesResponse = $this->actingAs($staff)->get('/track-overrides');
         $overridesResponse->assertStatus(200);
         $overridesResponse->assertInertia(fn ($page) => $page
             ->component('ProgramOverrides/Index')
@@ -141,16 +161,19 @@ class StaffMultiProgramSelectorTest extends TestCase
 
     public function test_staff_with_multiple_active_program_assignments_and_pinned_station_still_gets_selector(): void
     {
-        $admin = User::factory()->admin()->create();
-        $staff = User::factory()->create(['role' => 'staff']);
+        $site = $this->defaultSite();
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
 
         $programA = Program::create([
+            'site_id' => $site->id,
             'name' => 'Program A',
             'description' => null,
             'is_active' => true,
             'created_by' => $admin->id,
         ]);
         $programB = Program::create([
+            'site_id' => $site->id,
             'name' => 'Program B',
             'description' => null,
             'is_active' => true,
@@ -203,16 +226,19 @@ class StaffMultiProgramSelectorTest extends TestCase
 
     public function test_staff_with_pinned_station_and_multi_program_assignments_shares_program_selection_across_station_triage_and_overrides(): void
     {
-        $admin = User::factory()->admin()->create();
-        $staff = User::factory()->create(['role' => 'staff']);
+        $site = $this->defaultSite();
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
 
         $programA = Program::create([
+            'site_id' => $site->id,
             'name' => 'Program A',
             'description' => null,
             'is_active' => true,
             'created_by' => $admin->id,
         ]);
         $programB = Program::create([
+            'site_id' => $site->id,
             'name' => 'Program B',
             'description' => null,
             'is_active' => true,
@@ -288,7 +314,7 @@ class StaffMultiProgramSelectorTest extends TestCase
         );
 
         // 4) Program Overrides also uses the shared selection.
-        $overridesResponse = $this->actingAs($staff)->get('/program-overrides');
+        $overridesResponse = $this->actingAs($staff)->get('/track-overrides');
         $overridesResponse->assertStatus(200);
         $overridesResponse->assertInertia(fn ($page) => $page
             ->component('ProgramOverrides/Index')

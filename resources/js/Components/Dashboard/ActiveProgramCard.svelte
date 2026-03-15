@@ -33,7 +33,7 @@
                         class="btn preset-filled-primary-500 btn-sm gap-1.5 touch-target-h"
                     >
                         <Eye class="h-4 w-4" />
-                        View Program
+                        Manage program
                     </Link>
                 </div>
             {/if}

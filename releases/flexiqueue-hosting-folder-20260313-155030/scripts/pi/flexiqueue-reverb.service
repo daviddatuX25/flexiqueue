@@ -1,0 +1,23 @@
+# Systemd unit for Laravel Reverb (WebSocket server).
+# Copy to the Pi: sudo cp flexiqueue-reverb.service /etc/systemd/system/
+# Then: sudo systemctl daemon-reload && sudo systemctl enable --now flexiqueue-reverb
+# Reverb is a separate long-running process; it is NOT "in" the database.
+# Session/cache/queue use the DB; Reverb only handles WebSocket connections.
+
+[Unit]
+Description=FlexiQueue Reverb WebSocket server
+After=network.target php8.3-fpm.service nginx.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/flexiqueue
+ExecStart=/usr/bin/php artisan reverb:start
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

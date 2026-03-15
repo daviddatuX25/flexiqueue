@@ -1,12 +1,16 @@
 <script lang="ts">
 	import MobileLayout from '../../Layouts/MobileLayout.svelte';
 	import Modal from '../../Components/Modal.svelte';
-	import QrScanner from '../../Components/QrScanner.svelte';
-import CategoryBadge from '../../Components/CategoryBadge.svelte';
-import {
+	import ScanModal from '../../Components/ScanModal.svelte';
+	import CategoryBadge from '../../Components/CategoryBadge.svelte';
+	import AuthChoiceButtons from '../../Components/AuthChoiceButtons.svelte';
+	import PinOrQrInput from '../../Components/PinOrQrInput.svelte';
+	import {
 	Volume2,
 	ChevronDown,
 	ChevronUp,
+	ChevronLeft,
+	ChevronRight,
 	X,
 	ArrowRight,
 	CheckCircle,
@@ -28,7 +32,7 @@ import {
 	import { toaster } from '../../lib/toaster.js';
 	import { shouldFocusHidInput, shouldUseInputModeNone } from '../../lib/displayHid.js';
 
-	type AuthType = 'pin' | 'qr' | 'request_approval';
+	type AuthType = 'preset_pin' | 'request_approval' | 'request_list';
 
 	interface StationInfo {
 		id: number;
@@ -107,6 +111,7 @@ import {
 		stats: { total_waiting: number; total_served_today: number; avg_service_time_minutes: number };
 		display_audio_muted?: boolean;
 		display_audio_volume?: number;
+		authorizers?: { id: number; name: string }[];
 	}
 
 	/** A.4.2: currentProgram from controller; fallback to program for transition. */
@@ -145,11 +150,11 @@ import {
 	let overrideTargetTrackId = $state<number | null>(null);
 	let overrideIsCustom = $state(false);
 	let overrideReason = $state('');
-	let overridePin = $state('');
-	let overrideSupervisorId = $state<number | null>(null);
 	let overrideSession = $state<ServingSession | null>(null);
-	let authType = $state<AuthType>('pin');
-	let tempCodeEntered = $state('');
+	let authType = $state<AuthType>('preset_pin');
+	/** For preset_pin: selected authorizer (supervisor/admin) and their 6-digit PIN. */
+	let overrideAuthorizerId = $state<number | null>(null);
+	let presetPinEntered = $state('');
 	let tempQrScanToken = $state('');
 	let showQrScanner = $state(false);
 	let qrScanHandled = $state(false);
@@ -162,6 +167,14 @@ import {
 	let callNextSession = $state<{ session_id: number; alias: string } | null>(null);
 	let cancelModalSession = $state<{ session_id: number; alias: string; status: string } | null>(null);
 	let showMoreFor = $state<number | null>(null);
+
+	/** Request-approval override: idle | requested (show QR) | approved | rejected | timeout */
+	let overrideRequestState = $state<'idle' | 'requested' | 'approved' | 'rejected' | 'timeout'>('idle');
+	let overrideRequestId = $state<number | null>(null);
+	let overrideRequestToken = $state<string | null>(null);
+	let overrideRequestTimeoutId = $state<ReturnType<typeof setTimeout> | null>(null);
+	let overrideRequestCountdown = $state(60);
+	let overrideRequestCountdownIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
 
 	/** Station token scan: identify client by QR, then show actions. Separate from override-auth scanner. */
 	let showStationTokenScanner = $state(false);
@@ -189,9 +202,22 @@ import {
 	/** Countdown per called session_id: when 0, No-show button enabled. Set when session enters 'called'. */
 	let noShowCountdown = $state<Record<number, number>>({});
 
-	/** Display board audio (for /display/station/{id}): saving state. */
+	/** Display board audio (for /display/station/{id}): saving state. Open only via PIN/QR (admin scan). */
 	let displaySettingsSaving = $state(false);
 	let showDisplayAudioModal = $state(false);
+	/** Local form values; applied only on Save with PIN/QR */
+	let displayAudioMutedLocal = $state(false);
+	let displayAudioVolumeLocal = $state(1);
+	let displayAudioAuthMode = $state<'pin' | 'qr' | 'request'>('pin');
+	let displayAudioPin = $state('');
+	let displayAudioQrScanToken = $state('');
+	let displayAudioPinRef = $state<{ buildPinOrQrPayload?: () => { pin: string } | { qr_scan_token: string } | null } | null>(null);
+	let displayAudioError = $state('');
+	let displayAudioRequestId = $state<number | null>(null);
+	let displayAudioRequestToken = $state<string | null>(null);
+	let displayAudioRequestState = $state<'idle' | 'waiting'>('idle');
+	let displayAudioPollIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
+	const DISPLAY_AUDIO_REQUEST_QR_PREFIX = 'flexiqueue:display_settings_request:';
 	/** Available browser TTS voices for dropdown (loaded on mount). */
 	let availableTtsVoices = $state<{ name: string; lang: string }[]>([]);
 
@@ -336,6 +362,54 @@ import {
 		};
 	});
 
+	// Listen for permission request responded (approve/reject/cancel) when waiting for approval
+	$effect(() => {
+		const state = overrideRequestState;
+		const reqId = overrideRequestId;
+		const userId = authUser?.id;
+		if (state !== 'requested' || reqId == null || userId == null || typeof window === 'undefined') return;
+		const w = window as unknown as { Echo?: { private: (ch: string) => { listen: (e: string, cb: (x: { id?: number; status?: string }) => void) => void; leave: () => void } } };
+		if (!w.Echo) return;
+		const ch = `App.Models.User.${userId}`;
+		const priv = w.Echo.private(ch);
+		const handler = (e: { id?: number; status?: string }) => {
+			if (e.id !== reqId) return;
+			if (overrideRequestTimeoutId != null) {
+				clearTimeout(overrideRequestTimeoutId);
+				overrideRequestTimeoutId = null;
+			}
+			if (overrideRequestCountdownIntervalId != null) {
+				clearInterval(overrideRequestCountdownIntervalId);
+				overrideRequestCountdownIntervalId = null;
+			}
+			if (e.status === 'approved') {
+				overrideRequestState = 'approved';
+				showOverrideModal = false;
+				overrideSession = null;
+				overrideTargetTrackId = null;
+				overrideIsCustom = false;
+				overrideReason = '';
+				overrideRequestId = null;
+				overrideRequestToken = null;
+				overrideRequestCountdown = 60;
+				toaster.success({ title: 'Override approved.' });
+				fetchQueue(true);
+				resetAuthState();
+			} else {
+				overrideRequestState = 'idle';
+				overrideRequestId = null;
+				overrideRequestToken = null;
+				overrideRequestCountdown = 60;
+				if (e.status === 'rejected') toaster.warning({ title: 'Override request was rejected.' });
+				else if (e.status === 'cancelled') toaster.warning({ title: 'Request was cancelled.' });
+			}
+		};
+		priv.listen('.permission_request_responded', handler);
+		return () => {
+			priv.leave?.();
+		};
+	});
+
 	// Real-time: refetch when client arrives or status changes (e.g. after custom path approve)
 	$effect(() => {
 		const hasCountdowns = Object.values(noShowCountdown).some((v) => v > 0);
@@ -381,14 +455,6 @@ import {
 		scanCountdown += Math.max(0, Number(display_scan_timeout_seconds) || 20);
 	}
 
-	// Ensure HID input inside Scan token dialog receives focus when dialog opens.
-	$effect(() => {
-		if (!showStationTokenScanner || !hidModalInputEl) return;
-		queueMicrotask(() => {
-			hidModalInputEl?.focus();
-		});
-	});
-
 	// Ensure HID input inside QR auth modals receives focus when QR scanner is active.
 	$effect(() => {
 		if (!showQrScanner || authType !== 'qr' || !hidModalInputEl) return;
@@ -403,9 +469,7 @@ import {
 		e.preventDefault();
 		const raw = hidScanValue.trim();
 		if (!raw) return;
-		if (showStationTokenScanner) {
-			handleStationTokenScan(raw);
-		} else if (showQrScanner && authType === 'qr') {
+		if (showQrScanner && authType === 'qr') {
 			handleQrScan(raw);
 		}
 		hidScanValue = '';
@@ -430,6 +494,36 @@ import {
 		router.visit(`/station/${s.id}`);
 	}
 
+	/** Station selector nav: scroll with chevrons (no scrollbar), same pattern as Admin/Programs/Show. */
+	let stationListEl = $state<HTMLDivElement | null>(null);
+	let canScrollStationLeft = $state(false);
+	let canScrollStationRight = $state(false);
+	const STATION_SCROLL_PX = 180;
+	function updateStationScrollState() {
+		const el = stationListEl;
+		if (!el) return;
+		canScrollStationLeft = el.scrollLeft > 2;
+		canScrollStationRight = el.scrollLeft < el.scrollWidth - el.clientWidth - 2;
+	}
+	function scrollStationList(direction: 'left' | 'right') {
+		const el = stationListEl;
+		if (!el) return;
+		el.scrollBy({ left: direction === 'left' ? -STATION_SCROLL_PX : STATION_SCROLL_PX, behavior: 'smooth' });
+	}
+	$effect(() => {
+		const el = stationListEl;
+		if (!el) return;
+		updateStationScrollState();
+		const onScroll = () => updateStationScrollState();
+		const ro = new ResizeObserver(() => updateStationScrollState());
+		el.addEventListener('scroll', onScroll);
+		ro.observe(el);
+		return () => {
+			el.removeEventListener('scroll', onScroll);
+			ro.disconnect();
+		};
+	});
+
 	onMount(() => {
 		ensureVoicesLoaded((voices) => {
 			availableTtsVoices = voices.map((v) => ({ name: v.name, lang: v.lang || '' }));
@@ -439,8 +533,8 @@ import {
 	async function saveDisplaySettings(updates: {
 		display_audio_muted?: boolean;
 		display_audio_volume?: number;
-	}) {
-		if (!station || !queue || displaySettingsSaving) return;
+	}): Promise<boolean> {
+		if (!station || !queue || displaySettingsSaving) return false;
 		displaySettingsSaving = true;
 		const body: {
 			display_audio_muted?: boolean;
@@ -460,6 +554,113 @@ import {
 				display_audio_muted: d.display_audio_muted ?? queue.display_audio_muted,
 				display_audio_volume: d.display_audio_volume ?? queue.display_audio_volume,
 			};
+			return true;
+		}
+		return false;
+	}
+
+	function openDisplayAudioModal() {
+		displayAudioMutedLocal = queue?.display_audio_muted ?? false;
+		displayAudioVolumeLocal = queue?.display_audio_volume ?? 1;
+		displayAudioAuthMode = 'pin';
+		displayAudioPin = '';
+		displayAudioQrScanToken = '';
+		displayAudioError = '';
+		displayAudioRequestId = null;
+		displayAudioRequestToken = null;
+		displayAudioRequestState = 'idle';
+		if (displayAudioPollIntervalId) {
+			clearInterval(displayAudioPollIntervalId);
+			displayAudioPollIntervalId = null;
+		}
+		showDisplayAudioModal = true;
+	}
+
+	function cancelDisplayAudioRequest() {
+		displayAudioRequestState = 'idle';
+		displayAudioRequestId = null;
+		displayAudioRequestToken = null;
+		if (displayAudioPollIntervalId) {
+			clearInterval(displayAudioPollIntervalId);
+			displayAudioPollIntervalId = null;
+		}
+	}
+
+	async function saveDisplayAudioWithAuth() {
+		displayAudioError = '';
+		const authBody = displayAudioAuthMode === 'pin' ? (displayAudioPinRef?.buildPinOrQrPayload?.() ?? null) : null;
+		if (!authBody) {
+			displayAudioError = displayAudioAuthMode === 'pin' ? 'Enter a 6-digit PIN to apply changes.' : 'Use "Show QR for supervisor to scan" to apply changes.';
+			return;
+		}
+		const ok = await saveDisplaySettings({
+			display_audio_muted: displayAudioMutedLocal,
+			display_audio_volume: displayAudioVolumeLocal,
+		});
+		if (ok) showDisplayAudioModal = false;
+		else displayAudioError = 'Failed to save.';
+	}
+
+	async function createDisplayAudioRequest() {
+		const programId = effectiveCurrentProgram?.id;
+		if (programId == null || displaySettingsSaving) return;
+		displaySettingsSaving = true;
+		displayAudioError = '';
+		try {
+			const res = await fetch('/api/public/display-settings-requests', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-CSRF-TOKEN': getCsrfToken(),
+					'X-Requested-With': 'XMLHttpRequest',
+				},
+				credentials: 'same-origin',
+				body: JSON.stringify({ program_id: programId }),
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				displayAudioError = (data as { message?: string }).message || 'Failed to create request.';
+				toaster.error({ title: displayAudioError });
+				return;
+			}
+			const d = data as { id: number; request_token: string };
+			displayAudioRequestId = d.id;
+			displayAudioRequestToken = d.request_token;
+			displayAudioRequestState = 'waiting';
+			const id = d.id;
+			const token = d.request_token;
+			displayAudioPollIntervalId = setInterval(async () => {
+				try {
+					const r = await fetch(
+						`/api/public/display-settings-requests/${id}?token=${encodeURIComponent(token)}`,
+						{ credentials: 'same-origin' }
+					);
+					const pollData = await r.json().catch(() => ({}));
+					const status = (pollData as { status?: string }).status;
+					if (status === 'approved') {
+						if (displayAudioPollIntervalId) clearInterval(displayAudioPollIntervalId);
+						displayAudioPollIntervalId = null;
+						displayAudioRequestId = null;
+						displayAudioRequestToken = null;
+						displayAudioRequestState = 'idle';
+						toaster.success({ title: 'Approved.' });
+						showDisplayAudioModal = false;
+						fetchQueue(true);
+					} else if (status === 'rejected' || status === 'cancelled') {
+						if (displayAudioPollIntervalId) clearInterval(displayAudioPollIntervalId);
+						displayAudioPollIntervalId = null;
+						displayAudioRequestState = 'idle';
+						displayAudioRequestId = null;
+						displayAudioRequestToken = null;
+						toaster.warning({ title: status === 'rejected' ? 'Request was rejected.' : 'Request was cancelled.' });
+					}
+				} catch {
+					// ignore
+				}
+			}, 2000);
+		} finally {
+			displaySettingsSaving = false;
 		}
 	}
 
@@ -493,7 +694,14 @@ import {
 			callNextSession = { session_id: sessionId, alias };
 			showCallNextOverrideModal = true;
 			resetAuthState();
-			if (authUser && authUser.id) overrideSupervisorId = authUser.id;
+			const authorizers = queue?.authorizers ?? [];
+			if (authorizers.length > 0) {
+				overrideAuthorizerId = (authUser && authorizers.some((a: { id: number }) => a.id === authUser.id))
+					? authUser.id
+					: (authorizers[0] as { id: number }).id;
+			} else {
+				overrideAuthorizerId = null;
+			}
 			return;
 		}
 
@@ -518,8 +726,8 @@ import {
 		if (ok) {
 			showCallNextOverrideModal = false;
 			callNextSession = null;
-			overridePin = '';
-			overrideSupervisorId = null;
+			presetPinEntered = '';
+			overrideAuthorizerId = null;
 			resetAuthState();
 			await fetchQueue(true, () => { actionLoading = null; });
 		} else {
@@ -805,18 +1013,37 @@ import {
 	}
 
 	function resetAuthState() {
-		authType = 'pin';
-		tempCodeEntered = '';
+		authType = 'preset_pin';
+		presetPinEntered = '';
 		tempQrScanToken = '';
 		showQrScanner = false;
 		qrScanHandled = false;
+		if (overrideRequestTimeoutId != null) {
+			clearTimeout(overrideRequestTimeoutId);
+			overrideRequestTimeoutId = null;
+		}
+		if (overrideRequestCountdownIntervalId != null) {
+			clearInterval(overrideRequestCountdownIntervalId);
+			overrideRequestCountdownIntervalId = null;
+		}
+		overrideRequestState = 'idle';
+		overrideRequestId = null;
+		overrideRequestToken = null;
+		overrideRequestCountdown = 60;
 	}
 
 	function openOverrideModal(s: ServingSession) {
 		overrideSession = s;
 		showOverrideModal = true;
 		resetAuthState();
-		if (authUser && authUser.id) overrideSupervisorId = authUser.id;
+		const authorizers = queue?.authorizers ?? [];
+		if (authorizers.length > 0) {
+			overrideAuthorizerId = (authUser && authorizers.some((a: { id: number }) => a.id === authUser.id))
+				? authUser.id
+				: (authorizers[0] as { id: number }).id;
+		} else {
+			overrideAuthorizerId = null;
+		}
 	}
 
 	function openForceCompleteModal(s: ServingSession) {
@@ -824,7 +1051,14 @@ import {
 		forceCompleteReason = '';
 		showForceCompleteModal = true;
 		resetAuthState();
-		if (authUser && authUser.id) overrideSupervisorId = authUser.id;
+		const authorizers = queue?.authorizers ?? [];
+		if (authorizers.length > 0) {
+			overrideAuthorizerId = (authUser && authorizers.some((a: { id: number }) => a.id === authUser.id))
+				? authUser.id
+				: (authorizers[0] as { id: number }).id;
+		} else {
+			overrideAuthorizerId = null;
+		}
 	}
 
 	function handleQrScan(decodedText: string) {
@@ -835,39 +1069,33 @@ import {
 	}
 
 	function buildAuthBody(): Record<string, unknown> | null {
-		if (authType === 'pin') {
-			const code = tempCodeEntered.trim();
-			if (code.length !== 6) return null;
-			return { auth_type: 'pin', temp_code: code };
-		}
-		if (authType === 'qr') {
-			if (!tempQrScanToken.trim()) return null;
-			return { auth_type: 'qr', qr_scan_token: tempQrScanToken.trim() };
+		if (authType === 'preset_pin') {
+			const pin = presetPinEntered.trim();
+			if (pin.length !== 6 || overrideAuthorizerId == null) return null;
+			return {
+				auth_type: 'preset_pin',
+				supervisor_user_id: overrideAuthorizerId,
+				supervisor_pin: pin,
+			};
 		}
 		return null;
 	}
 
 	function canConfirmAuth(): boolean {
-		if (authType === 'request_approval') return true;
-		if (authType === 'pin') return tempCodeEntered.trim().length === 6;
-		if (authType === 'qr') return !!tempQrScanToken.trim();
+		if (authType === 'request_approval' || authType === 'request_list') return true;
+		if (authType === 'preset_pin') return overrideAuthorizerId != null && presetPinEntered.trim().length === 6;
 		return false;
 	}
 
 	async function override() {
 		const s = overrideSession;
 		if (!s || (!overrideTargetTrackId && !overrideIsCustom) || (overrideIsCustom && !overrideReason.trim()) || actionLoading) return;
-		if (needsAuthForOverride && authType === 'request_approval') {
-			await requestApprovalOverride();
-			return;
-		}
-		const authBody = needsAuthForOverride ? buildAuthBody() : {};
-		if (needsAuthForOverride && !authBody) return;
+		// Custom track: only Request flow (no PIN/QR). Session goes on hold until admin approves/rejects.
 		if (overrideIsCustom) {
-			// Staff cannot define custom path; use request approval (must run before setting actionLoading)
 			await requestApprovalOverride();
 			return;
 		}
+		// Predefined track: no auth, no reason required — override directly.
 		actionLoading = 'override';
 		const overrideBody: { target_track_id?: number; custom_steps?: number[]; reason: string } = {
 			reason: overrideReason.trim(),
@@ -875,7 +1103,6 @@ import {
 		};
 		const { ok, data } = await api('POST', `/api/sessions/${s.session_id}/override`, {
 			...overrideBody,
-			...authBody,
 		});
 		actionLoading = null;
 		if (ok) {
@@ -883,8 +1110,8 @@ import {
 			overrideSession = null;
 			overrideTargetTrackId = null;
 			overrideReason = '';
-			overridePin = '';
-			overrideSupervisorId = null;
+			presetPinEntered = '';
+			overrideAuthorizerId = null;
 			resetAuthState();
 			await fetchQueue(true);
 		} else {
@@ -906,11 +1133,7 @@ import {
 		} else {
 			body.target_track_id = overrideTargetTrackId ?? undefined;
 		}
-		let ok = false;
 		try {
-			// Use AbortController timeout: server completes but client may not receive response (e.g. Docker/proxy)
-			const ac = new AbortController();
-			const t = setTimeout(() => ac.abort(), 10000);
 			const res = await fetch('/api/permission-requests', {
 				method: 'POST',
 				headers: {
@@ -921,40 +1144,75 @@ import {
 				},
 				credentials: 'same-origin',
 				body: JSON.stringify(body),
-				signal: ac.signal,
 			});
-			clearTimeout(t);
 			if (res.status === 419) {
 				toaster.error({ title: MSG_SESSION_EXPIRED });
+				actionLoading = null;
 				return;
 			}
-			const data = (await res.json().catch(() => ({}))) as { message?: string };
-			ok = res.ok;
+			const data = (await res.json().catch(() => ({}))) as { id?: number; request_token?: string; message?: string };
+			actionLoading = null;
+			if (res.ok && data.id != null && data.request_token) {
+				overrideRequestId = data.id;
+				overrideRequestToken = data.request_token;
+				overrideRequestState = 'requested';
+				// No timer: session stays on hold until admin approves or rejects on Track overrides.
+			} else {
+				toaster.error({ title: (data as { message?: string })?.message ?? 'Failed to send request' });
+			}
 		} catch (e) {
 			actionLoading = null;
-			const isAbort = e instanceof Error && e.name === 'AbortError';
 			const isNetwork = e instanceof TypeError && (e as Error).message === 'Failed to fetch';
 			toaster.error({
-				title: isAbort
-					? 'Request timed out. The request may have succeeded – check Program Overrides.'
-					: isNetwork
-						? MSG_NETWORK_ERROR
-						: 'Failed to send request',
+				title: isNetwork ? MSG_NETWORK_ERROR : 'Failed to send request',
 			});
+		}
+	}
+
+	/** Withdraw the pending override request (cancels on server and frees the session/token). */
+	async function cancelOverrideRequest() {
+		const id = overrideRequestId;
+		if (id == null) {
+			resetOverrideRequestState();
 			return;
 		}
-		actionLoading = null;
-		if (ok) {
-			showOverrideModal = false;
-			overrideSession = null;
-			overrideTargetTrackId = null;
-			overrideIsCustom = false;
-			overrideReason = '';
-			resetAuthState();
-			window.location.href = '/program-overrides';
-		} else {
-			toaster.error({ title: 'Failed to send request' });
+		try {
+			const res = await fetch(`/api/permission-requests/${id}/cancel`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-CSRF-TOKEN': getCsrfToken(),
+					'X-Requested-With': 'XMLHttpRequest',
+				},
+				credentials: 'same-origin',
+			});
+			if (res.ok) toaster.success({ title: 'Request cancelled.' });
+		} catch {
+			// ignore
 		}
+		resetOverrideRequestState();
+		showOverrideModal = false;
+		overrideSession = null;
+		overrideTargetTrackId = null;
+		overrideIsCustom = false;
+		overrideReason = '';
+		resetAuthState();
+	}
+
+	function resetOverrideRequestState() {
+		if (overrideRequestTimeoutId != null) {
+			clearTimeout(overrideRequestTimeoutId);
+			overrideRequestTimeoutId = null;
+		}
+		if (overrideRequestCountdownIntervalId != null) {
+			clearInterval(overrideRequestCountdownIntervalId);
+			overrideRequestCountdownIntervalId = null;
+		}
+		overrideRequestState = 'idle';
+		overrideRequestId = null;
+		overrideRequestToken = null;
+		overrideRequestCountdown = 60;
 	}
 
 	async function requestApprovalForceComplete() {
@@ -973,7 +1231,7 @@ import {
 			forceCompleteReason = '';
 			resetAuthState();
 			await fetchQueue(true);
-			router.visit('/program-overrides');
+			router.visit('/track-overrides');
 		} else {
 			toaster.error({ title: 'Failed to send request' });
 		}
@@ -982,7 +1240,7 @@ import {
 	async function forceComplete() {
 		const s = forceCompleteSession;
 		if (!s || !forceCompleteReason.trim() || actionLoading) return;
-		if (needsAuthForOverride && authType === 'request_approval') {
+		if (needsAuthForOverride && (authType === 'request_approval' || authType === 'request_list')) {
 			await requestApprovalForceComplete();
 			return;
 		}
@@ -998,8 +1256,8 @@ import {
 			showForceCompleteModal = false;
 			forceCompleteSession = null;
 			forceCompleteReason = '';
-			overridePin = '';
-			overrideSupervisorId = null;
+			presetPinEntered = '';
+			overrideAuthorizerId = null;
 			resetAuthState();
 			await fetchQueue(true);
 		} else {
@@ -1144,7 +1402,7 @@ import {
 						{#each stations as s (s.id)}
 							<button 
 								type="button" 
-								class="group relative flex flex-col p-6 rounded-2xl border border-surface-200 bg-surface-50 hover:bg-white hover:border-primary-500/30 hover:shadow-xl hover:shadow-primary-500/5 transition-all duration-300 transform hover:-translate-y-1 text-left"
+								class="group relative flex flex-col p-6 rounded-2xl border border-surface-200 bg-surface-50/90 md:bg-surface-50 hover:bg-white hover:border-primary-500/30 hover:shadow-xl hover:shadow-primary-500/5 transition-all duration-300 transform hover:-translate-y-1 text-left"
 								onclick={() => switchStation(s)}
 							>
 								<div class="flex justify-between items-start mb-4">
@@ -1179,21 +1437,49 @@ import {
 				<span class="loading-spinner loading-lg text-primary-500"></span>
 			</div>
 		{:else if queue}
-			<!-- Station switcher (pill bar) -->
+			<!-- Station switcher (pill bar): no scrollbar; left/right pulsating chevrons like Program/Show nav -->
 			{#if canSwitchStation && stations.length > 1}
-				<div class="flex gap-2 overflow-x-auto pb-1 -mx-1" role="tablist" aria-label="Switch station">
-					{#each stations as s (s.id)}
+				<nav class="relative flex items-center w-full -mx-1" aria-label="Switch station">
+					{#if canScrollStationLeft}
 						<button
 							type="button"
-							role="tab"
-							aria-selected={s.id === station.id}
-							class="btn btn-sm shrink-0 touch-target-h px-4 {s.id === station.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
-							onclick={() => switchStation(s)}
+							aria-label="Scroll stations left"
+							class="absolute left-0 inset-y-0 z-10 flex items-center justify-center w-10 rounded-l-lg bg-surface-100/95 text-surface-700 hover:bg-surface-200/90 transition-colors shrink-0 animate-pulse border border-surface-200/80 border-r-0"
+							onclick={() => scrollStationList('left')}
 						>
-							{s.name}
+							<ChevronLeft class="w-5 h-5 drop-shadow-sm" />
 						</button>
-					{/each}
-				</div>
+					{/if}
+					<div
+						role="tablist"
+						tabindex="-1"
+						bind:this={stationListEl}
+						class="flex gap-2 overflow-x-auto overflow-y-hidden flex-nowrap w-full max-w-full min-h-0 py-0.5 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+						aria-label="Switch station"
+					>
+						{#each stations as s (s.id)}
+							<button
+								type="button"
+								role="tab"
+								aria-selected={s.id === station.id}
+								class="btn btn-sm shrink-0 touch-target-h px-4 {s.id === station.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
+								onclick={() => switchStation(s)}
+							>
+								{s.name}
+							</button>
+						{/each}
+					</div>
+					{#if canScrollStationRight}
+						<button
+							type="button"
+							aria-label="Scroll stations right"
+							class="absolute right-0 inset-y-0 z-10 flex items-center justify-center w-10 rounded-r-lg bg-surface-100/95 text-surface-700 hover:bg-surface-200/90 transition-colors shrink-0 animate-pulse border border-surface-200/80 border-l-0"
+							onclick={() => scrollStationList('right')}
+						>
+							<ChevronRight class="w-5 h-5 drop-shadow-sm" />
+						</button>
+					{/if}
+				</nav>
 			{/if}
 
 			<!-- Toolbar: capacity, priority, display audio (single row, wraps on small) -->
@@ -1235,7 +1521,7 @@ import {
 					type="button"
 					class="btn preset-tonal btn-sm gap-2 touch-target md:min-w-auto px-3"
 					title="Display board audio"
-					onclick={() => (showDisplayAudioModal = true)}
+					onclick={openDisplayAudioModal}
 					aria-label="Display board audio settings"
 				>
 					<Volume2 class="w-5 h-5 text-surface-600 shrink-0" />
@@ -1386,8 +1672,8 @@ import {
 											</span>
 										</button>
 									{/if}
-									<!-- Actions row: Hold, Back, More (compact buttons) -->
-									<div class="flex flex-wrap gap-2 mt-2">
+									<!-- Actions row: Hold, Back, More (compact buttons). Mobile: grid 3 cols so More doesn't wrap alone. -->
+									<div class="grid grid-cols-3 gap-2 mt-2 md:flex md:flex-wrap md:gap-2">
 										<button
 											type="button"
 											class="btn preset-tonal btn-sm touch-target-h"
@@ -1566,19 +1852,23 @@ import {
 						{#if (queue.holding ?? []).length > 0}
 							<ul class="space-y-2 max-h-[200px] lg:max-h-[260px] overflow-y-auto">
 								{#each (queue.holding ?? []) as h (h.session_id)}
-									<li class="grid gap-2 md:gap-3 items-center text-sm text-surface-950 py-1.5 border-b border-surface-100 last:border-0" style="grid-template-columns: minmax(0, 3ch) 1fr 1fr 1fr;">
-										<span class="font-mono font-medium tabular-nums min-w-0 truncate">{h.alias}</span>
-										<div class="flex items-center gap-1.5 min-w-0 overflow-hidden">
-											<CategoryBadge category={h.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(h.client_category)} size="sm" />
-											{#if h.process_name}
-												<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80 truncate">{h.process_name}</span>
-											{/if}
+									<li
+										class="flex flex-col gap-1.5 py-3 text-sm text-surface-950 border-b border-surface-100 last:border-0 md:grid md:grid-cols-[minmax(0,3ch)_1fr_1fr_1fr] md:gap-2 md:gap-3 md:items-center md:py-1.5"
+									>
+										<div class="min-w-0 flex flex-col gap-1 md:contents">
+											<span class="font-mono font-medium tabular-nums min-w-0 truncate">{h.alias}</span>
+											<div class="flex flex-wrap items-center gap-1.5 min-w-0">
+												<CategoryBadge category={h.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(h.client_category)} size="sm" />
+												{#if h.process_name}
+													<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80">{h.process_name}</span>
+												{/if}
+											</div>
 										</div>
 										<span class="text-surface-950/60 text-xs min-w-0 truncate">Held {formatDuration(h.held_at)}</span>
-										<div class="flex justify-center min-w-0">
+										<div class="flex items-center mt-2 w-full md:mt-0 md:w-auto md:justify-center min-w-0">
 											<button
 												type="button"
-												class="btn preset-filled-primary-500 btn-sm touch-target-h"
+												class="btn preset-filled-primary-500 btn-sm touch-target-h w-full md:w-auto"
 												disabled={!!actionLoading}
 												onclick={() => resumeFromHold(h)}
 											>
@@ -1597,28 +1887,32 @@ import {
 							<h3 class="text-xs font-semibold text-surface-950/80 uppercase tracking-wide mb-3">Waiting — {queue.waiting.length}</h3>
 							<ul class="space-y-2 max-h-[280px] lg:max-h-[360px] overflow-y-auto">
 								{#each queue.waiting as w (w.session_id)}
-									<li class="grid gap-2 md:gap-3 items-center text-sm text-surface-950 py-1.5 border-b border-surface-100 last:border-0" style="grid-template-columns: minmax(0, 3ch) 1fr max-content auto;">
-										<span class="font-mono font-medium tabular-nums min-w-0 truncate">{w.alias}</span>
-										<div class="flex items-center gap-1.5 min-w-0 overflow-hidden flex-wrap">
-											<CategoryBadge category={w.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(w.client_category)} size="sm" />
-											{#if w.unverified}
-												<a
-													href="/triage?highlight_session_id={w.session_id}"
-													class="text-xs px-2 py-0.5 rounded preset-filled-warning-500/30 text-warning-800 hover:preset-filled-warning-500/50 touch-target-h"
-													title="Identity not yet verified — go to triage"
-												>
-													Unverified
-												</a>
-											{/if}
-											{#if w.process_name}
-												<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80 truncate">{w.process_name}</span>
-											{/if}
+									<li
+										class="flex flex-col gap-1.5 py-3 text-sm text-surface-950 border-b border-surface-100 last:border-0 md:grid md:grid-cols-[minmax(0,3ch)_1fr_1fr_auto] md:gap-2 md:gap-3 md:items-center md:py-1.5"
+									>
+										<div class="min-w-0 flex flex-col gap-1">
+											<span class="font-mono font-medium tabular-nums min-w-0 truncate">{w.alias}</span>
+											<div class="flex flex-wrap items-center gap-1.5 min-w-0">
+												<CategoryBadge category={w.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(w.client_category)} size="sm" />
+												{#if w.unverified}
+													<a
+														href="/triage?highlight_session_id={w.session_id}"
+														class="text-xs px-2 py-0.5 rounded preset-filled-warning-500/30 text-warning-800 hover:preset-filled-warning-500/50 touch-target-h"
+														title="Identity not yet verified — go to triage"
+													>
+														Unverified
+													</a>
+												{/if}
+												{#if w.process_name}
+													<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80">{w.process_name}</span>
+												{/if}
+											</div>
 										</div>
 										<span class="text-surface-950/60 text-xs min-w-0 truncate" title="{w.track}">{formatDuration(w.queued_at)}</span>
-										<div class="flex justify-center min-w-0 gap-2">
+										<div class="flex gap-2 mt-2 w-full md:mt-0 md:w-auto md:justify-center min-w-0">
 											<button
 												type="button"
-												class="btn preset-filled-primary-500 btn-sm touch-target-h"
+												class="btn preset-filled-primary-500 btn-sm touch-target-h flex-1 md:flex-none"
 												disabled={!!actionLoading || atCapacity}
 												title={atCapacity ? 'At capacity' : 'Start serving (no call)'}
 												onclick={() => serveFromWaiting(w)}
@@ -1627,7 +1921,7 @@ import {
 											</button>
 											<button
 												type="button"
-												class="btn preset-tonal btn-sm touch-target-h px-2"
+												class="btn btn-square preset-tonal btn-sm touch-target-h md:flex-none"
 												disabled={!!actionLoading}
 												aria-label="Cancel session"
 												title="Cancel"
@@ -1641,8 +1935,8 @@ import {
 							</ul>
 						</div>
 					{/if}
-					<div class="rounded-container bg-surface-50 border border-surface-200 p-4 md:p-5 text-center text-sm text-surface-950/70">
-						Today: <strong class="text-surface-950">{queue.stats.total_served_today}</strong> served · Avg <strong class="text-surface-950">{queue.stats.avg_service_time_minutes}</strong> min
+					<div class="rounded-container bg-surface-50 border border-surface-200 p-4 md:p-5 text-center text-sm text-surface-950/90">
+						Today: <strong class="text-primary-600">{queue.stats.total_served_today}</strong> served · Avg <strong class="text-primary-600">{queue.stats.avg_service_time_minutes}</strong> min
 					</div>
 				</div>
 
@@ -1711,392 +2005,328 @@ import {
 
 	{#if noShowModalSession}
 		{@const atMax = (noShowModalSession.no_show_attempts ?? 0) >= maxNoShowAttempts}
-		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
-			<div class="card bg-surface-50 rounded-container shadow-xl p-6 text-surface-950">
-				<h3 class="font-bold text-lg">Mark No-Show</h3>
-				<p class="py-2">
-					Mark <span class="font-mono font-semibold text-surface-950">{noShowModalSession.alias}</span> as no-show?
-					{#if atMax}
-						({noShowModalSession.no_show_attempts}/{maxNoShowAttempts}) Extend to allow one more call, or end the session.
-					{:else}
-						Client can be called again. Stay at front or send back to end of queue?
-					{/if}
-				</p>
-				<div class="flex flex-wrap justify-end gap-2 mt-4">
-					<button type="button" class="btn preset-tonal touch-target-h" onclick={() => (noShowModalSession = null)}>Cancel</button>
-					{#if atMax}
-						<button type="button" class="btn preset-tonal touch-target-h" onclick={() => noShowWithOptions(false, true, false)} disabled={!!actionLoading}>
-							{actionLoading === 'noShow' ? 'Processing…' : 'Extend no show'}
-						</button>
-						<button type="button" class="btn preset-filled-warning-500 touch-target-h" onclick={() => noShowWithOptions(false, false, true)} disabled={!!actionLoading}>
-							{actionLoading === 'noShow' ? 'Processing…' : 'Mark no-show (last call)'}
-						</button>
-					{:else}
-						<button type="button" class="btn preset-tonal touch-target-h" onclick={() => noShowWithOptions(false, false, false)} disabled={!!actionLoading}>
-							{actionLoading === 'noShow' ? 'Processing…' : 'Mark no-show only'}
-						</button>
-						<button type="button" class="btn preset-filled-warning-500 touch-target-h" onclick={() => noShowWithOptions(true, false, false)} disabled={!!actionLoading}>
-							{actionLoading === 'noShow' ? 'Processing…' : 'Mark no-show and enqueue back'}
-						</button>
-					{/if}
-				</div>
+		<Modal open={!!noShowModalSession} onClose={() => (noShowModalSession = null)} title="Mark No-Show">
+			<p class="py-2">
+				Mark <span class="font-mono font-semibold text-surface-950">{noShowModalSession.alias}</span> as no-show?
+				{#if atMax}
+					({noShowModalSession.no_show_attempts}/{maxNoShowAttempts}) Extend to allow one more call, or end the session.
+				{:else}
+					Client can be called again. Stay at front or send back to end of queue?
+				{/if}
+			</p>
+			<div class="flex flex-wrap justify-end gap-2 mt-4">
+				<button type="button" class="btn preset-tonal touch-target-h" onclick={() => (noShowModalSession = null)}>Cancel</button>
+				{#if atMax}
+					<button type="button" class="btn preset-tonal touch-target-h" onclick={() => noShowWithOptions(false, true, false)} disabled={!!actionLoading}>
+						{actionLoading === 'noShow' ? 'Processing…' : 'Extend no show'}
+					</button>
+					<button type="button" class="btn preset-filled-warning-500 touch-target-h" onclick={() => noShowWithOptions(false, false, true)} disabled={!!actionLoading}>
+						{actionLoading === 'noShow' ? 'Processing…' : 'Mark no-show (last call)'}
+					</button>
+				{:else}
+					<button type="button" class="btn preset-tonal touch-target-h" onclick={() => noShowWithOptions(false, false, false)} disabled={!!actionLoading}>
+						{actionLoading === 'noShow' ? 'Processing…' : 'Mark no-show only'}
+					</button>
+					<button type="button" class="btn preset-filled-warning-500 touch-target-h" onclick={() => noShowWithOptions(true, false, false)} disabled={!!actionLoading}>
+						{actionLoading === 'noShow' ? 'Processing…' : 'Mark no-show and enqueue back'}
+					</button>
+				{/if}
 			</div>
-			<!-- Per flexiqueue-ldd: backdrop does not close modal; only Cancel/buttons do -->
-			<div class="modal-backdrop" aria-hidden="true"></div>
-		</dialog>
+		</Modal>
 	{/if}
 
 	{#if backModalSession}
 		{@const remaining = noShowCountdown[backModalSession.session_id] ?? 0}
 		{@const atMax = (backModalSession.no_show_attempts ?? 0) >= maxNoShowAttempts}
 		{@const canBackNoShow = canNoShow(backModalSession) && !atMax}
-		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
-			<div class="card bg-surface-50 rounded-container shadow-xl p-6 text-surface-950 max-w-md">
-				<h3 class="font-bold text-lg">Send back or mark no-show?</h3>
-				<p class="text-sm text-surface-950/70 py-2">
-					Choose what happens next for
-					<span class="font-mono font-semibold text-surface-950">{backModalSession.alias}</span>.
-				</p>
-				<div class="space-y-3 mt-2">
-					<button
-						type="button"
-						class="btn preset-outlined w-full justify-between touch-target-h"
-						disabled={!!actionLoading}
-						onclick={sendBackOnlyFromModal}
-					>
-						<span class="inline-flex items-center gap-2">
-							<RotateCcw class="w-4 h-4" aria-hidden="true" />
-							<span>Send back only</span>
-						</span>
-					</button>
-					<div class="space-y-1">
-						<button
-							type="button"
-							class="btn preset-filled-warning-500 w-full justify-between touch-target-h"
-							disabled={!canBackNoShow || !!actionLoading}
-							onclick={noShowAndBackFromModal}
-						>
-							<span class="inline-flex items-center gap-2">
-								<UserX class="w-4 h-4" aria-hidden="true" />
-								<span>Mark no-show &amp; send back</span>
-							</span>
-						</button>
-						{#if backModalSession.status === 'called' && remaining > 0}
-							<p class="text-xs text-surface-950/60">No-show available in {remaining}s.</p>
-						{:else if atMax}
-							<p class="text-xs text-surface-950/60">Max no-show attempts reached for this client.</p>
-						{/if}
-					</div>
-				</div>
-				<div class="flex justify-end gap-2 mt-4">
-					<button
-						type="button"
-						class="btn preset-tonal touch-target-h"
-						onclick={closeBackModal}
-						disabled={!!actionLoading}
-					>
-						Cancel
-					</button>
-				</div>
-			</div>
-			<div class="modal-backdrop" aria-hidden="true"></div>
-		</dialog>
-	{/if}
-
-	{#if cancelModalSession}
-		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
-			<div class="card bg-surface-50 rounded-container shadow-xl p-6 text-surface-950 max-w-md">
-				<h3 class="font-bold text-lg">Cancel session</h3>
-				<p class="py-2 text-sm text-surface-950/80">
-					Cancel token <span class="font-mono font-semibold text-surface-950">{cancelModalSession.alias}</span>?
-					This removes them from the active queue.
-				</p>
-				<div class="flex flex-wrap justify-end gap-2 mt-4">
-					<button type="button" class="btn preset-tonal touch-target-h" onclick={() => (cancelModalSession = null)} disabled={!!actionLoading}>
-						Back
-					</button>
-					<button
-						type="button"
-						class="btn preset-filled-warning-500 touch-target-h"
-						onclick={confirmCancel}
-						disabled={!!actionLoading}
-					>
-						{actionLoading === `cancel-${cancelModalSession.session_id}` ? 'Cancelling…' : 'Confirm cancel'}
-					</button>
-				</div>
-			</div>
-			<div class="modal-backdrop" aria-hidden="true"></div>
-		</dialog>
-	{/if}
-
-	{#if showStationTokenScanner}
-		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
-			<div class="card bg-surface-50 rounded-container shadow-xl p-6 text-surface-950 max-w-md">
-				<h3 class="font-bold text-lg mb-3">Scan client token</h3>
-				<p class="text-sm text-surface-950/70 mb-4">Scan the client's QR to identify their session and show actions.</p>
-				<!-- First focusable so dialog focuses it; same value/handler as global input. Always enabled for Station. -->
-				<input
-					type="text"
-					autocomplete="off"
-					inputmode="none"
-					aria-label="Barcode scanner input"
-					class="sr-only"
-					bind:value={hidScanValue}
-					bind:this={hidModalInputEl}
-					onkeydown={onHidKeydown}
-				/>
-				<QrScanner
-					active={showStationTokenScanner}
-					onScan={handleStationTokenScan}
-					soundOnScan={true}
-					cameraOnly={true}
-				/>
-				<p
-					class="text-sm text-surface-600 rounded-container border border-surface-200 bg-surface-50 px-3 py-2 mt-3"
-					aria-live="polite"
-				>
-					HID scanner turned on, waiting for scan.
-				</p>
+		<Modal open={!!backModalSession} onClose={closeBackModal} title="Send back or mark no-show?">
+			<p class="text-sm text-surface-950/70 py-2">
+				Choose what happens next for
+				<span class="font-mono font-semibold text-surface-950">{backModalSession.alias}</span>.
+			</p>
+			<div class="space-y-3 mt-2">
 				<button
 					type="button"
-					class="btn preset-tonal btn-sm mt-4 touch-target-h w-full"
-					onclick={() => { showStationTokenScanner = false; stationScanHandled = true; }}
+					class="btn preset-outlined w-full justify-between touch-target-h"
+					disabled={!!actionLoading}
+					onclick={sendBackOnlyFromModal}
+				>
+					<span class="inline-flex items-center gap-2">
+						<RotateCcw class="w-4 h-4" aria-hidden="true" />
+						<span>Send back only</span>
+					</span>
+				</button>
+				<div class="space-y-1">
+					<button
+						type="button"
+						class="btn preset-filled-warning-500 w-full justify-between touch-target-h"
+						disabled={!canBackNoShow || !!actionLoading}
+						onclick={noShowAndBackFromModal}
+					>
+						<span class="inline-flex items-center gap-2">
+							<UserX class="w-4 h-4" aria-hidden="true" />
+							<span>Mark no-show &amp; send back</span>
+						</span>
+					</button>
+					{#if backModalSession.status === 'called' && remaining > 0}
+						<p class="text-xs text-surface-950/60">No-show available in {remaining}s.</p>
+					{:else if atMax}
+						<p class="text-xs text-surface-950/60">Max no-show attempts reached for this client.</p>
+					{/if}
+				</div>
+			</div>
+			<div class="flex justify-end gap-2 mt-4">
+				<button
+					type="button"
+					class="btn preset-tonal touch-target-h"
+					onclick={closeBackModal}
+					disabled={!!actionLoading}
 				>
 					Cancel
 				</button>
 			</div>
-			<div class="modal-backdrop" aria-hidden="true"></div>
-		</dialog>
+		</Modal>
+	{/if}
+
+	{#if cancelModalSession}
+		<Modal open={!!cancelModalSession} onClose={() => (cancelModalSession = null)} title="Cancel session">
+			<p class="py-2 text-sm text-surface-950/80">
+				Cancel token <span class="font-mono font-semibold text-surface-950">{cancelModalSession.alias}</span>?
+				This removes them from the active queue.
+			</p>
+			<div class="flex flex-wrap justify-end gap-2 mt-4">
+				<button type="button" class="btn preset-tonal touch-target-h" onclick={() => (cancelModalSession = null)} disabled={!!actionLoading}>
+					Back
+				</button>
+				<button
+					type="button"
+					class="btn preset-filled-warning-500 touch-target-h"
+					onclick={confirmCancel}
+					disabled={!!actionLoading}
+				>
+					{actionLoading === `cancel-${cancelModalSession.session_id}` ? 'Cancelling…' : 'Confirm cancel'}
+				</button>
+			</div>
+		</Modal>
+	{/if}
+
+	{#if showStationTokenScanner}
+		<ScanModal
+			open={showStationTokenScanner}
+			onClose={() => { showStationTokenScanner = false; stationScanHandled = true; }}
+			title="Scan QR via Camera"
+			description="Scan the client's QR to identify their session and show actions."
+			allowHid={true}
+			allowCamera={true}
+			onScan={handleStationTokenScan}
+			soundOnScan={true}
+			wide={true}
+		/>
 	{/if}
 
 	{#if showOverrideModal}
-		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
-			<div class="card bg-surface-50 rounded-container shadow-xl p-6 max-w-md text-surface-950">
-				<h3 class="font-bold text-lg">Override standard flow</h3>
-				<p class="text-sm text-surface-950/70 py-2">
-					Send client <span class="font-mono font-semibold text-surface-950">{overrideSession?.alias ?? ''}</span> to a different track.
-					{#if needsAuthForOverride}
-						Authorize with PIN or QR (get code from supervisor).
-					{/if}
-				</p>
-				<div class="form-control w-full mt-2">
-					<label for="override-target" class="label"><span class="label-text">Target track</span></label>
-					<select
-						id="override-target"
-						class="select rounded-container border border-surface-200 px-3 py-2 w-full"
-						value={overrideIsCustom ? 'custom' : (overrideTargetTrackId ?? '')}
-						onchange={(e) => {
-							const v = (e.target as HTMLSelectElement).value;
-							if (v === 'custom') {
-								overrideIsCustom = true;
-								overrideTargetTrackId = null;
-							} else {
-								overrideIsCustom = false;
-								overrideTargetTrackId = v === '' ? null : Number(v);
-							}
-						}}
-					>
-						<option value="">Select…</option>
-						{#each tracks as t (t.id)}
-							<option value={t.id}>{t.name}</option>
-						{/each}
-						<option value="custom">Custom (admin defines path)</option>
-					</select>
-				</div>
-				<div class="form-control w-full mt-2">
-					<label for="override-reason" class="label"><span class="label-text">Reason {overrideIsCustom ? '(required)' : '(optional)'}</span></label>
-					<textarea
-						id="override-reason"
-						class="textarea rounded-container border border-surface-200 w-full"
-						placeholder="e.g. Needs legal assistance first"
-						bind:value={overrideReason}
-						rows="2"
-					></textarea>
-				</div>
-				{#if needsAuthForOverride}
-				<!-- Auth: PIN | QR | Request approval (icon toggle row) -->
-				<div class="form-control w-full mt-2">
-					<div class="label"><span class="label-text">Authorize with</span></div>
-					<div class="join join-horizontal w-full">
-						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }} title="Enter 6-digit code">PIN</button>
-						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; }} title="Scan QR">QR</button>
-						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'request_approval' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'request_approval'; tempCodeEntered = ''; tempQrScanToken = ''; showQrScanner = false; }} title="Request supervisor approval">Request</button>
-					</div>
-				</div>
-				{#if authType === 'request_approval'}
-					<p class="text-sm text-surface-950/70 mt-2">Request will be sent to supervisor. Check Program Overrides page for status.</p>
-				{:else if authType === 'pin'}
-					<div class="form-control w-full mt-2">
-						<div class="label"><span class="label-text">Enter 6-digit code from supervisor</span></div>
-						<input type="text" inputmode="numeric" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} oninput={(e) => { tempCodeEntered = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }} />
-					</div>
-				{:else if authType === 'qr'}
-					<div class="form-control w-full mt-2">
-						<!-- First focusable so dialog focuses it; same value/handler as global input. Always enabled for Station. -->
-						<input
-							type="text"
-							autocomplete="off"
-							inputmode="none"
-							aria-label="Barcode scanner input"
-							class="sr-only"
-							bind:value={hidScanValue}
-							bind:this={hidModalInputEl}
-							onkeydown={onHidKeydown}
-						/>
-						<QrScanner active={showQrScanner} onScan={handleQrScan} soundOnScan={true} />
-						{#if showQrScanner && scanCountdown > 0}
-							<div class="flex flex-wrap items-center gap-2 mt-2">
-								<span class="text-sm text-surface-950/70" aria-live="polite">Closing in {scanCountdown}s</span>
-								<button type="button" class="btn preset-tonal btn-sm touch-target-h px-3" onclick={extendScannerCountdown}>Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)</button>
-							</div>
-						{/if}
-						<p
-							class="text-sm text-surface-600 rounded-container border border-surface-200 bg-surface-50 px-3 py-2 mt-2"
-							aria-live="polite"
-						>
-							HID scanner turned on, waiting for scan.
-						</p>
-						<button type="button" class="btn preset-tonal btn-sm mt-1 touch-target-h" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
-						{#if tempQrScanToken}<p class="text-xs text-success-500 mt-1">✓ QR scanned</p>{/if}
-					</div>
+		<Modal
+			open={showOverrideModal}
+			onClose={() => { showOverrideModal = false; overrideSession = null; overrideTargetTrackId = null; overrideIsCustom = false; overrideReason = ''; presetPinEntered = ''; overrideAuthorizerId = null; resetOverrideRequestState(); resetAuthState(); }}
+			title="Override standard flow"
+		>
+			<p class="text-sm text-surface-950/70 py-2">
+				Send client <span class="font-mono font-semibold text-surface-950">{overrideSession?.alias ?? ''}</span> to a different track.
+				{#if overrideIsCustom}
+					Custom path requires a request; admin approves or rejects on Track overrides. Session goes on hold until then.
 				{/if}
-				{/if}
-				<div class="flex justify-end gap-2 mt-4">
-					<button
-						type="button"
-						class="btn preset-tonal touch-target-h"
-						onclick={() => {
-							showOverrideModal = false;
-							overrideSession = null;
+			</p>
+			<div class="form-control w-full mt-2">
+				<label for="override-target" class="label"><span class="label-text">Target track</span></label>
+				<select
+					id="override-target"
+					class="select rounded-container border border-surface-200 px-3 py-2 w-full"
+					value={overrideIsCustom ? 'custom' : (overrideTargetTrackId ?? '')}
+					onchange={(e) => {
+						const v = (e.target as HTMLSelectElement).value;
+						if (v === 'custom') {
+							overrideIsCustom = true;
 							overrideTargetTrackId = null;
+						} else {
 							overrideIsCustom = false;
-							overrideReason = '';
-							overridePin = '';
-							overrideSupervisorId = null;
-							resetAuthState();
-						}}
-					>
-						Cancel
-					</button>
-					<button
-						type="button"
-						class="btn preset-filled-primary-500 touch-target-h"
-						disabled={(!overrideTargetTrackId && !overrideIsCustom) || (overrideIsCustom && !overrideReason.trim()) || (needsAuthForOverride && !canConfirmAuth()) || !!actionLoading}
-						onclick={override}
-					>
-						{actionLoading === 'override' ? 'Processing…' : 'Confirm Override'}
-					</button>
-				</div>
+							overrideTargetTrackId = v === '' ? null : Number(v);
+						}
+					}}
+				>
+					<option value="">Select…</option>
+					{#each tracks as t (t.id)}
+						<option value={t.id}>{t.name}</option>
+					{/each}
+					<option value="custom">Custom (admin defines path)</option>
+				</select>
 			</div>
-			<div class="modal-backdrop" aria-hidden="true"></div>
-		</dialog>
+			<div class="form-control w-full mt-2">
+				<label for="override-reason" class="label"><span class="label-text">Reason {overrideIsCustom ? '(required)' : '(optional)'}</span></label>
+				<textarea
+					id="override-reason"
+					class="textarea rounded-container border border-surface-200 w-full"
+					placeholder="e.g. Needs legal assistance first"
+					bind:value={overrideReason}
+					rows="2"
+				></textarea>
+			</div>
+			{#if overrideIsCustom}
+			<!-- Custom track: Request only. No PIN/QR, no timer. Session on hold until admin approves/rejects. -->
+				{#if overrideRequestState === 'requested' && overrideRequestId != null && overrideRequestToken != null}
+					<div class="mt-4 flex flex-col items-center gap-3">
+						<p class="text-sm font-medium text-surface-950">Request sent</p>
+						<p class="text-xs text-surface-950/60 text-center">Session is on hold. Admin or supervisor can approve (customize track) or reject on the Track overrides page.</p>
+						<p class="text-xs text-surface-950/50 text-center">You can close this and check Track overrides for status.</p>
+						<button
+							type="button"
+							class="btn preset-tonal btn-sm touch-target-h"
+							onclick={cancelOverrideRequest}
+						>
+							Cancel request
+						</button>
+					</div>
+				{:else}
+					<p class="text-sm text-surface-950/70 mt-2">Submit a request; admin will approve or reject on Track overrides. Session will go on hold until then.</p>
+				{/if}
+			{/if}
+			{#if overrideRequestState !== 'requested'}
+			<div class="flex justify-end gap-2 mt-4">
+					<button
+					type="button"
+					class="btn preset-tonal touch-target-h"
+					onclick={() => {
+						showOverrideModal = false;
+						overrideSession = null;
+						overrideTargetTrackId = null;
+						overrideIsCustom = false;
+						overrideReason = '';
+						presetPinEntered = '';
+						overrideAuthorizerId = null;
+						resetOverrideRequestState();
+						resetAuthState();
+					}}
+				>
+					Cancel
+				</button>
+				<button
+					type="button"
+					class="btn preset-filled-primary-500 touch-target-h"
+					disabled={(!overrideTargetTrackId && !overrideIsCustom) || (overrideIsCustom && !overrideReason.trim()) || !!actionLoading}
+					onclick={override}
+				>
+					{actionLoading === 'override' ? 'Processing…' : 'Confirm Override'}
+				</button>
+			</div>
+			{/if}
+		</Modal>
 	{/if}
 
 	{#if showForceCompleteModal}
-		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
-			<div class="card bg-surface-50 rounded-container shadow-xl p-6 max-w-md text-surface-950">
-				<h3 class="font-bold text-lg">Force complete session</h3>
-				<p class="text-sm text-surface-950/70 py-2">
-					End session for <span class="font-mono font-semibold text-surface-950">{forceCompleteSession?.alias ?? ''}</span> without normal flow (e.g. client left).
-					{#if needsAuthForOverride}
-						Requires authorization (get code from supervisor).
-					{/if}
-				</p>
-				<div class="form-control w-full mt-2">
-					<label for="fc-reason" class="label"><span class="label-text">Reason (required)</span></label>
-					<textarea id="fc-reason" class="textarea rounded-container border border-surface-200 w-full" placeholder="e.g. Client left without completing" bind:value={forceCompleteReason} rows="2"></textarea>
-				</div>
+		<Modal
+			open={showForceCompleteModal}
+			onClose={() => { showForceCompleteModal = false; forceCompleteSession = null; forceCompleteReason = ''; presetPinEntered = ''; overrideAuthorizerId = null; resetAuthState(); }}
+			title="Force complete session"
+		>
+			<p class="text-sm text-surface-950/70 py-2">
+				End session for <span class="font-mono font-semibold text-surface-950">{forceCompleteSession?.alias ?? ''}</span> without normal flow (e.g. client left).
 				{#if needsAuthForOverride}
-				<div class="form-control w-full mt-2">
-					<div class="label"><span class="label-text">Authorize with</span></div>
-					<div class="join join-horizontal w-full">
-						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }}>PIN</button>
-						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; }}>QR</button>
-						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'request_approval' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'request_approval'; tempCodeEntered = ''; tempQrScanToken = ''; showQrScanner = false; }}>Request</button>
-					</div>
-				</div>
-				{#if authType === 'request_approval'}
-					<p class="text-sm text-surface-950/70 mt-2">Request will be sent to supervisor. Check Program Overrides page for status.</p>
-				{:else if authType === 'pin'}
-					<div class="form-control w-full mt-2">
-						<div class="label"><span class="label-text">Enter 6-digit code from supervisor</span></div>
-						<input type="text" inputmode="numeric" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} oninput={(e) => { tempCodeEntered = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }} />
-					</div>
-				{:else if authType === 'qr'}
-					<div class="form-control w-full mt-2">
-						<QrScanner active={showQrScanner} onScan={handleQrScan} soundOnScan={true} />
-						{#if showQrScanner && scanCountdown > 0}
-							<div class="flex flex-wrap items-center gap-2 mt-2">
-								<span class="text-sm text-surface-950/70" aria-live="polite">Closing in {scanCountdown}s</span>
-								<button type="button" class="btn preset-tonal btn-sm touch-target-h px-3" onclick={extendScannerCountdown}>Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)</button>
-							</div>
-						{/if}
-						<button type="button" class="btn preset-tonal btn-sm mt-1 touch-target-h" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
-						{#if tempQrScanToken}<p class="text-xs text-success-500 mt-1">✓ QR scanned</p>{/if}
-					</div>
+					Requires authorization (get code from supervisor).
 				{/if}
-				{/if}
-				<div class="flex justify-end gap-2 mt-4">
-					<button type="button" class="btn preset-tonal touch-target-h" onclick={() => { showForceCompleteModal = false; forceCompleteSession = null; forceCompleteReason = ''; overridePin = ''; overrideSupervisorId = null; resetAuthState(); }}>Cancel</button>
-					<button type="button" class="btn preset-filled-primary-500 touch-target-h" disabled={!forceCompleteReason.trim() || (needsAuthForOverride && !canConfirmAuth()) || !!actionLoading} onclick={forceComplete}>
-						{actionLoading === 'force-complete' ? 'Processing…' : 'Force Complete'}
-					</button>
+			</p>
+			<div class="form-control w-full mt-2">
+				<label for="fc-reason" class="label"><span class="label-text">Reason (required)</span></label>
+				<textarea id="fc-reason" class="textarea rounded-container border border-surface-200 w-full" placeholder="e.g. Client left without completing" bind:value={forceCompleteReason} rows="2"></textarea>
+			</div>
+			{#if needsAuthForOverride}
+			<div class="form-control w-full mt-2">
+				<div class="label"><span class="label-text">Authorize with</span></div>
+				<div class="join join-horizontal w-full flex-wrap gap-1">
+					<button type="button" class="btn btn-sm flex-1 min-w-0 touch-target-h {authType === 'request_approval' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'request_approval'; presetPinEntered = ''; tempQrScanToken = ''; showQrScanner = false; }}>QR (admin scans)</button>
+					<button type="button" class="btn btn-sm flex-1 min-w-0 touch-target-h {authType === 'preset_pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'preset_pin'; tempQrScanToken = ''; showQrScanner = false; }}>PIN (preset)</button>
+					<button type="button" class="btn btn-sm flex-1 min-w-0 touch-target-h {authType === 'request_list' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'request_list'; presetPinEntered = ''; tempQrScanToken = ''; showQrScanner = false; }}>Request</button>
 				</div>
 			</div>
-			<div class="modal-backdrop" aria-hidden="true"></div>
-		</dialog>
+			{#if authType === 'request_approval' || authType === 'request_list'}
+				<p class="text-sm text-surface-950/70 mt-2">Show the QR to the supervisor to scan on Track overrides, or submit a request for list approval.</p>
+			{:else if authType === 'preset_pin'}
+				<div class="form-control w-full mt-2 space-y-2">
+					{#if (queue?.authorizers?.length ?? 0) > 0}
+						<label class="label py-0"><span class="label-text">Authorizing as</span></label>
+						<select
+							class="select select-sm rounded-container border border-surface-200 bg-surface-50 w-full"
+							bind:value={overrideAuthorizerId}
+							onchange={(e) => { const v = (e.target as HTMLSelectElement).value; overrideAuthorizerId = v === '' ? null : Number(v); }}
+						>
+							{#each (queue?.authorizers ?? []) as auth (auth.id)}
+								<option value={auth.id}>{auth.name}</option>
+							{/each}
+						</select>
+					{/if}
+					<div class="label py-0"><span class="label-text">Preset PIN (6 digits)</span></div>
+					<input type="text" inputmode="numeric" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="000000" maxlength="6" bind:value={presetPinEntered} oninput={(e) => { presetPinEntered = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }} />
+				</div>
+			{/if}
+			{/if}
+			<div class="flex justify-end gap-2 mt-4">
+				<button type="button" class="btn preset-tonal touch-target-h" onclick={() => { showForceCompleteModal = false; forceCompleteSession = null; forceCompleteReason = ''; presetPinEntered = ''; overrideAuthorizerId = null; resetAuthState(); }}>Cancel</button>
+				<button type="button" class="btn preset-filled-primary-500 touch-target-h" disabled={!forceCompleteReason.trim() || (needsAuthForOverride && !canConfirmAuth()) || !!actionLoading} onclick={forceComplete}>
+					{actionLoading === 'force-complete' ? 'Processing…' : 'Force Complete'}
+				</button>
+			</div>
+		</Modal>
 	{/if}
 
 	{#if showCallNextOverrideModal}
-		<dialog open class="modal-dialog-center rounded-container" oncancel={(e) => e.preventDefault()}>
-			<div class="card bg-surface-50 rounded-container shadow-xl p-6 max-w-md text-surface-950">
-				<h3 class="font-bold text-lg">Call Next (Override Priority)</h3>
-				<p class="text-sm text-surface-950/70 py-2">
-					Calling <span class="font-mono font-semibold text-surface-950">{callNextSession?.alias ?? ''}</span> would skip priority clients. Get authorization from supervisor.
-				</p>
-				<div class="form-control w-full mt-2">
-					<div class="label"><span class="label-text">Authorize with</span></div>
-					<div class="join join-horizontal w-full">
-						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'pin'; tempQrScanToken = ''; showQrScanner = false; }}>PIN</button>
-						<button type="button" class="btn btn-sm flex-1 touch-target-h {authType === 'qr' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'qr'; tempCodeEntered = ''; }}>QR</button>
-					</div>
-				</div>
-				{#if authType === 'pin'}
-					<div class="form-control w-full mt-2">
-						<div class="label"><span class="label-text">Enter 6-digit code from supervisor</span></div>
-						<input type="text" inputmode="numeric" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="Enter 6-digit code" maxlength="6" bind:value={tempCodeEntered} oninput={(e) => { tempCodeEntered = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }} />
-					</div>
-				{:else if authType === 'qr'}
-					<div class="form-control w-full mt-2">
-						<QrScanner active={showQrScanner} onScan={handleQrScan} soundOnScan={true} />
-						{#if showQrScanner && scanCountdown > 0}
-							<div class="flex flex-wrap items-center gap-2 mt-2">
-								<span class="text-sm text-surface-950/70" aria-live="polite">Closing in {scanCountdown}s</span>
-								<button type="button" class="btn preset-tonal btn-sm touch-target-h px-3" onclick={extendScannerCountdown}>Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)</button>
-							</div>
-						{/if}
-						<button type="button" class="btn preset-tonal btn-sm mt-1 touch-target-h" onclick={() => { showQrScanner = false; qrScanHandled = true; }}>Cancel scan</button>
-						{#if tempQrScanToken}<p class="text-xs text-success-500 mt-1">✓ QR scanned</p>{/if}
-					</div>
-				{/if}
-				<div class="flex justify-end gap-2 mt-4">
-					<button type="button" class="btn preset-tonal touch-target-h" onclick={() => { showCallNextOverrideModal = false; callNextSession = null; overridePin = ''; overrideSupervisorId = null; resetAuthState(); }}>Cancel</button>
-					<button type="button" class="btn preset-filled-primary-500 touch-target-h" disabled={!canConfirmAuth() || !!actionLoading} onclick={callNextWithAuth}>
-						{actionLoading === 'call' ? 'Calling…' : 'Call Next'}
-					</button>
+		<Modal
+			open={showCallNextOverrideModal}
+			onClose={() => { showCallNextOverrideModal = false; callNextSession = null; presetPinEntered = ''; overrideAuthorizerId = null; resetAuthState(); }}
+			title="Call Next (Override Priority)"
+		>
+			<p class="text-sm text-surface-950/70 py-2">
+				Calling <span class="font-mono font-semibold text-surface-950">{callNextSession?.alias ?? ''}</span> would skip priority clients. Get authorization from supervisor.
+			</p>
+			<div class="form-control w-full mt-2">
+				<div class="label"><span class="label-text">Authorize with</span></div>
+				<div class="join join-horizontal w-full flex-wrap gap-1">
+					<button type="button" class="btn btn-sm flex-1 min-w-0 touch-target-h {authType === 'request_approval' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'request_approval'; presetPinEntered = ''; showQrScanner = false; }}>QR (admin scans)</button>
+					<button type="button" class="btn btn-sm flex-1 min-w-0 touch-target-h {authType === 'preset_pin' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'preset_pin'; showQrScanner = false; }}>PIN (preset)</button>
+					<button type="button" class="btn btn-sm flex-1 min-w-0 touch-target-h {authType === 'request_list' ? 'preset-filled-primary-500' : 'preset-tonal'}" onclick={() => { authType = 'request_list'; presetPinEntered = ''; showQrScanner = false; }}>Request</button>
 				</div>
 			</div>
-			<div class="modal-backdrop" aria-hidden="true"></div>
-		</dialog>
+			{#if authType === 'preset_pin'}
+				<div class="form-control w-full mt-2 space-y-2">
+					{#if (queue?.authorizers?.length ?? 0) > 0}
+						<label class="label py-0"><span class="label-text">Authorizing as</span></label>
+						<select
+							class="select select-sm rounded-container border border-surface-200 bg-surface-50 w-full"
+							bind:value={overrideAuthorizerId}
+							onchange={(e) => { const v = (e.target as HTMLSelectElement).value; overrideAuthorizerId = v === '' ? null : Number(v); }}
+						>
+							{#each (queue?.authorizers ?? []) as auth (auth.id)}
+								<option value={auth.id}>{auth.name}</option>
+							{/each}
+						</select>
+					{/if}
+					<div class="label py-0"><span class="label-text">Preset PIN (6 digits)</span></div>
+					<input type="text" inputmode="numeric" class="input rounded-container border border-surface-200 px-3 py-2 w-full font-mono" placeholder="000000" maxlength="6" bind:value={presetPinEntered} oninput={(e) => { presetPinEntered = (e.currentTarget.value || '').replace(/\D/g, '').slice(0, 6); }} />
+				</div>
+			{/if}
+			<div class="flex justify-end gap-2 mt-4">
+				<button type="button" class="btn preset-tonal touch-target-h" onclick={() => { showCallNextOverrideModal = false; callNextSession = null; presetPinEntered = ''; overrideAuthorizerId = null; resetAuthState(); }}>Cancel</button>
+				<button type="button" class="btn preset-filled-primary-500 touch-target-h" disabled={authType !== 'preset_pin' || !canConfirmAuth() || !!actionLoading} onclick={callNextWithAuth} title={authType !== 'preset_pin' ? 'Use PIN (preset) to authorize Call Next' : ''}>
+					{actionLoading === 'call' ? 'Calling…' : 'Call Next'}
+				</button>
+			</div>
+		</Modal>
 	{/if}
 
 	<Modal
 		open={showDisplayAudioModal}
 		title="Display board audio"
-		onClose={() => (showDisplayAudioModal = false)}
+		onClose={() => { cancelDisplayAudioRequest(); showDisplayAudioModal = false; }}
 	>
 		{#snippet children()}
-			<p class="text-sm text-surface-950/70 mb-4">Mute and volume for the public display at this station.</p>
+			<p class="text-sm text-surface-950/70 mb-4">You can view and change mute/volume below. Changes are applied only when you save; saving requires PIN or QR (admin scan).</p>
 			<div class="flex flex-col gap-4">
 				<label for="display-audio-mute-switch" class="flex items-center justify-between cursor-pointer gap-3">
 					<span class="text-sm font-medium text-surface-950">Mute</span>
@@ -2105,9 +2335,8 @@ import {
 							id="display-audio-mute-switch"
 							type="checkbox"
 							class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300 disabled:opacity-50"
-							checked={queue?.display_audio_muted ?? false}
+							bind:checked={displayAudioMutedLocal}
 							disabled={displaySettingsSaving}
-							onchange={(e) => saveDisplaySettings({ display_audio_muted: (e.target as HTMLInputElement).checked })}
 						/>
 						<span class="absolute top-0 left-0 w-5 h-5 bg-surface-950 rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none" aria-hidden="true"></span>
 					</div>
@@ -2120,17 +2349,37 @@ import {
 						max="1"
 						step="0.1"
 						class="range range-sm w-full max-w-xs"
-						value={queue?.display_audio_volume ?? 1}
-						disabled={displaySettingsSaving || (queue?.display_audio_muted ?? false)}
-						oninput={(e) => {
-							const v = parseFloat((e.target as HTMLInputElement).value);
-							saveDisplaySettings({ display_audio_volume: v });
-						}}
+						bind:value={displayAudioVolumeLocal}
+						disabled={displaySettingsSaving || displayAudioMutedLocal}
 					/>
 				</label>
-				<!-- TTS source/voice are now global; station controls only mute/volume. -->
-				{#if displaySettingsSaving}
-					<span class="text-xs text-surface-950/50">Saving…</span>
+			</div>
+			<div class="border-t border-surface-200 pt-4 flex flex-col gap-2">
+				<h3 class="text-sm font-semibold text-surface-950">Apply changes</h3>
+				<p class="text-xs text-surface-950/60">Authorize with PIN or show QR for supervisor to scan. Settings above are applied only when you save.</p>
+				<AuthChoiceButtons includeRequest={true} disabled={displaySettingsSaving || displayAudioRequestState === 'waiting'} bind:mode={displayAudioAuthMode} />
+				{#if displayAudioRequestState === 'waiting' && displayAudioRequestId != null && displayAudioRequestToken != null}
+					<div class="flex flex-col items-center gap-3 py-4">
+						<p class="text-sm font-medium text-surface-950">Waiting for approval…</p>
+						<p class="text-xs text-surface-950/60 text-center">Ask the program supervisor or admin to scan this QR on the Track overrides page.</p>
+						<img class="rounded-container border border-surface-200 bg-white p-2" alt="QR for supervisor to scan" width="200" height="200" src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(DISPLAY_AUDIO_REQUEST_QR_PREFIX + displayAudioRequestId + ':' + displayAudioRequestToken)}`} />
+						<button type="button" class="btn preset-tonal btn-sm touch-target-h" onclick={cancelDisplayAudioRequest}>Cancel request</button>
+					</div>
+				{:else if displayAudioAuthMode === 'request'}
+					<button type="button" class="btn preset-filled-primary-500" onclick={createDisplayAudioRequest} disabled={displaySettingsSaving || effectiveCurrentProgram?.id == null}>
+						{displaySettingsSaving ? 'Creating…' : 'Show QR for supervisor to scan'}
+					</button>
+				{:else}
+					<PinOrQrInput bind:this={displayAudioPinRef} disabled={displaySettingsSaving} mode={displayAudioAuthMode} bind:pin={displayAudioPin} bind:qrScanToken={displayAudioQrScanToken} />
+				{/if}
+				{#if displayAudioError}
+					<p class="text-sm text-error-600 mt-2">{displayAudioError}</p>
+				{/if}
+			</div>
+			<div class="flex flex-wrap gap-2 justify-end pt-2">
+				<button type="button" class="btn preset-tonal" onclick={() => { cancelDisplayAudioRequest(); showDisplayAudioModal = false; }} disabled={displaySettingsSaving}>Cancel</button>
+				{#if displayAudioAuthMode !== 'request'}
+					<button type="button" class="btn preset-filled-primary-500" onclick={saveDisplayAudioWithAuth} disabled={displaySettingsSaving}>{displaySettingsSaving ? 'Saving…' : 'Save'}</button>
 				{/if}
 			</div>
 		{/snippet}

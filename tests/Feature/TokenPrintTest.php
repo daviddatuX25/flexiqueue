@@ -2,35 +2,74 @@
 
 namespace Tests\Feature;
 
+use App\Models\Site;
 use App\Models\Token;
+use App\Models\User;
 use App\Services\TokenPrintService;
+use Database\Seeders\TokenPrintTestSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Mockery;
 use Tests\TestCase;
 
 /**
  * Per docs/plans/QR-TOKEN-PRINT-SYSTEM.md QR-1, QR-2: Token print template and QR generation.
+ * Per site-scoping-migration-spec §2: print token list scoped by admin's site_id.
  */
 class TokenPrintTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function createToken(string $physicalId = 'A1', ?string $qrHash = null): Token
+    private ?Site $site = null;
+
+    private function site(): Site
+    {
+        if ($this->site === null) {
+            $this->site = Site::create([
+                'name' => 'Default Site',
+                'slug' => 'default',
+                'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+                'settings' => [],
+                'edge_settings' => [],
+            ]);
+        }
+
+        return $this->site;
+    }
+
+    /** @param bool $withSite When true (default), assign site_id so controller resolveTokens finds them; when false, site_id null for legacy URL in service-only tests. */
+    private function createToken(string $physicalId = 'A1', ?string $qrHash = null, bool $withSite = true): Token
     {
         $token = new Token;
         $token->qr_code_hash = $qrHash ?? hash('sha256', Str::random(32).$physicalId);
         $token->physical_id = $physicalId;
+        if ($withSite) {
+            $token->site_id = $this->site()->id;
+        }
         $token->status = 'available';
         $token->save();
 
         return $token;
     }
 
+    /** Mock TokenPrintService so QR image generation does not require GD; use in tests that hit the print controller or call the service. */
+    private function mockQrGeneration(): void
+    {
+        $service = Mockery::mock(TokenPrintService::class)->makePartial();
+        $service->shouldReceive('generateQrDataUri')->andReturn('data:image/png;base64,fake');
+        $this->app->instance(TokenPrintService::class, $service);
+    }
+
     public function test_print_preview_returns_200_for_admin_with_valid_tokens(): void
     {
-        $admin = \App\Models\User::factory()->admin()->create();
-        $t1 = $this->createToken('A1');
-        $t2 = $this->createToken('A2');
+        $this->seed(TokenPrintTestSeeder::class);
+        $this->mockQrGeneration();
+
+        $admin = User::where('email', TokenPrintTestSeeder::ADMIN_EMAIL)->firstOrFail();
+        $tokens = Token::where('site_id', $admin->site_id)->whereIn('physical_id', ['A1', 'A2'])->orderBy('physical_id')->get();
+        $this->assertCount(2, $tokens, 'Seeder should create 2 tokens for the admin site');
+        $t1 = $tokens[0];
+        $t2 = $tokens[1];
 
         $response = $this->actingAs($admin)->get(route('admin.tokens.print').'?ids='.$t1->id.','.$t2->id);
 
@@ -47,11 +86,13 @@ class TokenPrintTest extends TestCase
 
     public function test_print_preview_excludes_token_with_empty_qr_code_hash(): void
     {
-        $admin = \App\Models\User::factory()->admin()->create();
-        $t1 = $this->createToken('A1');
+        $this->mockQrGeneration();
+        $admin = \App\Models\User::factory()->admin()->create(['site_id' => $this->site()->id]);
+        $t1 = $this->createToken('A1', null, false);
         $t2 = new Token;
         $t2->qr_code_hash = '';
         $t2->physical_id = 'A2';
+        $t2->site_id = $this->site()->id;
         $t2->status = 'available';
         $t2->save();
 
@@ -68,7 +109,8 @@ class TokenPrintTest extends TestCase
 
     public function test_prepare_tokens_for_print_generates_qr_data_uri(): void
     {
-        $token = $this->createToken('B15');
+        $this->mockQrGeneration();
+        $token = $this->createToken('B15', null, false);
         $service = app(TokenPrintService::class);
 
         $result = $service->prepareTokensForPrint(collect([$token]));
@@ -81,7 +123,7 @@ class TokenPrintTest extends TestCase
 
     public function test_print_preview_shows_empty_state_when_no_tokens(): void
     {
-        $admin = \App\Models\User::factory()->admin()->create();
+        $admin = \App\Models\User::factory()->admin()->create(['site_id' => $this->site()->id]);
 
         $response = $this->actingAs($admin)->get(route('admin.tokens.print'));
 
@@ -105,7 +147,8 @@ class TokenPrintTest extends TestCase
 
     public function test_prepare_tokens_accepts_custom_base_url(): void
     {
-        $token = $this->createToken('C1');
+        $this->mockQrGeneration();
+        $token = $this->createToken('C1', null, false);
         $service = app(TokenPrintService::class);
 
         $result = $service->prepareTokensForPrint(collect([$token]), 'https://example.local');

@@ -6,9 +6,11 @@
     import AdminLayout from "../../Layouts/AdminLayout.svelte";
     import MobileLayout from "../../Layouts/MobileLayout.svelte";
     import UserAvatar from "../../Components/UserAvatar.svelte";
+    import PasswordInput from "../../Components/PasswordInput.svelte";
     import { usePage } from "@inertiajs/svelte";
     import { router } from "@inertiajs/svelte";
     import { toaster } from "../../lib/toaster.js";
+    import { compressImage, AVATAR_PRESET, getUploadHint } from "../../lib/imageUtils.js";
 
     const page = usePage();
     const user = $derived($page.props?.auth?.user ?? null);
@@ -223,8 +225,9 @@
         avatarSubmitting = true;
         avatarError = null;
         try {
+            const compressed = await compressImage(file, AVATAR_PRESET);
             const fd = new FormData();
-            fd.append("avatar", file);
+            fd.append("avatar", compressed);
             const r = await fetch("/api/profile/avatar", {
                 method: "POST",
                 headers: {
@@ -356,46 +359,17 @@
                             <span id="current_password-error" class="text-error-600 text-sm" role="alert">{passwordErrors.current_password}</span>
                         {/if}
                     </div>
-                    <div>
-                        <label for="password_new" class="label label-text"
-                            >New password</label
-                        >
-                        <input
-                            id="password_new"
-                            type="password"
-                            class="input rounded-container border px-3 py-2 w-full {passwordErrors.password ? 'border-error-500 bg-error-50' : 'border-surface-200'}"
-                            bind:value={passwordNew}
-                            required
-                            autocomplete="new-password"
-                            aria-invalid={!!passwordErrors.password}
-                            aria-describedby={passwordErrors.password ? 'password_new-error' : undefined}
-                        />
-                        {#if passwordErrors.password}
-                            <span id="password_new-error" class="text-error-600 text-sm" role="alert">{passwordErrors.password}</span>
-                        {/if}
-                    </div>
-                    <div>
-                        <label for="password_confirm" class="label label-text"
-                            >Confirm new password</label
-                        >
-                        <input
-                            id="password_confirm"
-                            type="password"
-                            class="input rounded-container border px-3 py-2 w-full {passwordErrors.password_confirmation ? 'border-error-500 bg-error-50' : 'border-surface-200'}"
-                            bind:value={passwordConfirm}
-                            required
-                            autocomplete="new-password"
-                            aria-invalid={!!passwordErrors.password_confirmation}
-                            aria-describedby={passwordErrors.password_confirmation ? 'password_confirm-error' : undefined}
-                        />
-                        {#if passwordErrors.password_confirmation}
-                            <span id="password_confirm-error" class="text-error-600 text-sm" role="alert">{passwordErrors.password_confirmation}</span>
-                        {/if}
-                    </div>
+                    <PasswordInput
+                        bind:password={passwordNew}
+                        bind:passwordConfirm={passwordConfirm}
+                        errors={passwordErrors}
+                        idPrefix="profile_pw"
+                        disabled={passwordSubmitting}
+                    />
                     <button
                         type="submit"
                         class="btn preset-filled-primary-500 btn-sm touch-target-h"
-                        disabled={passwordSubmitting}
+                        disabled={passwordSubmitting || passwordNew.length < 8 || passwordNew !== passwordConfirm}
                     >
                         {passwordSubmitting ? "Updating…" : "Update password"}
                     </button>
@@ -527,8 +501,7 @@
             <div class="card-body">
                 <h2 class="card-title text-base">Profile photo</h2>
                 <p class="text-sm text-surface-950/70 mb-3">
-                    Upload a photo (JPEG or PNG, max 2MB). Shows in header and
-                    on the display board.
+                    JPEG or PNG. Images are compressed automatically; recommended under 50 KB for fast loading. Shows in header and on the display board.
                 </p>
                 <form onsubmit={submitAvatar} class="mb-5 flex flex-col gap-4">
 					<div class="flex flex-col sm:flex-row items-start sm:items-center gap-6">
@@ -579,7 +552,7 @@
 									<div class="text-sm">
 										<span class="font-semibold text-primary-600">Click to upload</span> or drag and drop
 									</div>
-									<p class="text-xs text-surface-500">PNG or JPG up to 2MB</p>
+									<p class="text-xs text-surface-500">PNG or JPG; {getUploadHint('avatar')}</p>
 								</div>
 							</div>
 							{#if avatarError}

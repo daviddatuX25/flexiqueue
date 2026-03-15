@@ -2,8 +2,8 @@
 
 use App\Models\Program;
 use App\Models\Session;
+use App\Models\Site;
 use App\Models\Token;
-use App\Services\ClientIdDocumentService;
 use App\Services\ClientService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -43,9 +43,8 @@ Artisan::command('tokens:fix-stuck-generating {--minutes=5 : Only mark tokens ge
     $this->comment("Marked {$count} token(s) as failed.");
 })->purpose('Fix tokens stuck in generating (no worker, job died, or orphaned).');
 
-Artisan::command('e2e:seed-client {extraArgs?*} {--name=} {--birth-year=} {--id-type=} {--id-number=}', function (
+Artisan::command('e2e:seed-client {extraArgs?*} {--name=} {--birth-year=} {--mobile=}', function (
     ClientService $clientService,
-    ClientIdDocumentService $clientIdDocumentService,
 ) {
     if (! app()->environment(['local', 'testing'])) {
         $this->error('e2e:seed-client is only allowed in local and testing environments.');
@@ -55,20 +54,18 @@ Artisan::command('e2e:seed-client {extraArgs?*} {--name=} {--birth-year=} {--id-
 
     $name = $this->option('name');
     $birthYear = $this->option('birth-year');
-    $idType = $this->option('id-type');
-    $idNumber = $this->option('id-number');
+    $mobile = $this->option('mobile');
 
-    if ($name === null || $birthYear === null || $idType === null || $idNumber === null) {
-        $this->error('Missing required options: --name, --birth-year, --id-type, --id-number are all required.');
+    if ($name === null || $birthYear === null) {
+        $this->error('Missing required options: --name and --birth-year are required. --mobile is optional.');
 
         return 1;
     }
 
-    $client = $clientService->createClient($name, (int) $birthYear);
-    $clientIdDocument = $clientIdDocumentService->createForClient($client, $idType, $idNumber);
+    $siteId = Site::query()->first()?->id;
+    $client = $clientService->createClient($name, (int) $birthYear, $siteId, $mobile);
 
     $this->info('client_id='.$client->id);
-    $this->info('client_id_document_id='.$clientIdDocument->id);
 
     return 0;
-})->purpose('Seed a client and ID document for Playwright E2E tests (local/testing only).');
+})->purpose('Seed a client for Playwright E2E tests (local/testing only).');

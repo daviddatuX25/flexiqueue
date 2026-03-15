@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Program;
+use App\Models\ProgramStationAssignment;
 use App\Models\Session;
 use App\Models\Station;
 use App\Models\TransactionLog;
@@ -23,13 +24,21 @@ class DisplayBoardService
     /**
      * Get board data for the informant display: now serving, waiting by station, program name.
      * A.2.4: When $programId is null, return no-program structure. When set, use that program (must be active).
+     * When $siteId is set, program lookup is scoped to that site (per site-context clean-up).
      */
-    public function getBoardData(?int $programId = null): array
+    public function getBoardData(?int $programId = null, ?int $siteId = null): array
     {
         $startedAt = microtime(true);
 
-        // Per central-edge Phase A: use programId from request; no single-active lookup.
-        $program = $programId !== null ? Program::find($programId) : null;
+        // Per central-edge Phase A: use programId from request; no single-active lookup. Site-scoped when $siteId set.
+        $program = null;
+        if ($programId !== null) {
+            $q = Program::query()->where('id', $programId);
+            if ($siteId !== null) {
+                $q->forSite($siteId);
+            }
+            $program = $q->first();
+        }
         if ($program !== null && ! $program->is_active) {
             $program = null;
         }
@@ -129,20 +138,26 @@ class DisplayBoardService
         $stationIds = $program->stations()->pluck('id')->all();
         $stationActivity = $this->getStationActivity($stationIds, 15);
 
-        $stationsWithStaff = $program->stations()
-            ->with('assignedStaff')
+        // Build staff_at_stations from ProgramStationAssignment (source of truth) so all assigned staff
+        // are shown even if User.assigned_station_id is out of sync.
+        $assignments = ProgramStationAssignment::where('program_id', $program->id)
+            ->with('user')
+            ->get();
+        $byStation = $assignments->groupBy('station_id');
+        $activeStations = $program->stations()
             ->where('is_active', true)
             ->orderBy('name')
             ->get();
-
-        $staffAtStations = $stationsWithStaff->map(fn (Station $s) => [
-            'station_name' => $s->name,
-            'staff' => $s->assignedStaff->map(fn (User $u) => [
+        $staffAtStations = $activeStations->map(function (Station $station) use ($byStation) {
+            $stationAssignments = $byStation->get($station->id, collect());
+            $staff = $stationAssignments->map(fn ($a) => $a->user)->filter()->map(fn (User $u) => [
                 'name' => $u->name,
                 'avatar_url' => $u->avatar_url,
                 'availability_status' => $u->availability_status ?? 'offline',
-            ])->values()->all(),
-        ])->values()->all();
+            ])->values()->all();
+
+            return ['station_name' => $station->name, 'staff' => $staff];
+        })->values()->all();
 
         // Queue/process fallbacks: only 'available' counts; offline/away = not on duty. Logout sets user to 'away'.
         $staffOnline = User::query()
@@ -179,6 +194,7 @@ class DisplayBoardService
             'staff_online' => $staffOnline,
             'display_scan_timeout_seconds' => $program->settings()->getDisplayScanTimeoutSeconds(),
             'program_is_paused' => (bool) $program->is_paused,
+            'program_is_active' => (bool) $program->is_active,
             'display_audio_muted' => $program->settings()->getDisplayAudioMuted(),
             'display_audio_volume' => $program->settings()->getDisplayAudioVolume(),
             'display_tts_repeat_count' => $program->settings()->getDisplayTtsRepeatCount(),

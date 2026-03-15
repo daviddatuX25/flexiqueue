@@ -9,6 +9,7 @@ use App\Models\Token;
 use App\Repositories\TokenTtsSettingRepository;
 use App\Support\TtsPhrase;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class TokenTtsSettingsController extends Controller
 {
@@ -61,9 +62,12 @@ class TokenTtsSettingsController extends Controller
 
         $requiresRegeneration = false;
         if ($voiceChanged || $rateChanged) {
-            $requiresRegeneration = Token::query()
-                ->where('tts_pre_generate_enabled', true)
-                ->exists();
+            $query = Token::query()->where('tts_pre_generate_enabled', true);
+            $user = $request->user();
+            if (! $user->isSuperAdmin() && $user->site_id !== null) {
+                $query->forSite($user->site_id);
+            }
+            $requiresRegeneration = $query->exists();
         }
 
         $defaults = $settings->default_languages;

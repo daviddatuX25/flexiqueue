@@ -9,6 +9,8 @@
     import Modal from "../../../Components/Modal.svelte";
     import ConfirmModal from "../../../Components/ConfirmModal.svelte";
     import { toaster } from "../../../lib/toaster.js";
+    import { compressImage, HERO_BANNER_PRESET, getUploadHint } from "../../../lib/imageUtils.js";
+    import QrDisplay from "../../../Components/QrDisplay.svelte";
     import {
         Building2,
         Key,
@@ -16,8 +18,12 @@
         Copy,
         ArrowLeft,
         Save,
-        Users,
-        ArrowRightLeft,
+        Share2,
+        ChevronUp,
+        ChevronDown,
+        Pencil,
+        Trash2,
+        Plus,
     } from "lucide-svelte";
 
     interface EdgeSettings {
@@ -42,23 +48,19 @@
         offline_allow_client_creation: true,
     };
 
-    interface UserInSite {
-        id: number;
-        name: string;
-        email: string;
-        role: string;
-    }
-
     interface SiteOption {
         id: number;
         name: string;
         slug: string;
+        is_default?: boolean;
     }
 
     let {
         site,
+        site_landing_url = "",
+        site_entry_short_url = null,
         api_key_masked = "sk_live_...****",
-        users_in_site = [],
+        default_site_id = null,
         auth_is_super_admin = false,
         sites = [],
     }: {
@@ -66,13 +68,17 @@
             id: number;
             name: string;
             slug: string;
+            is_default?: boolean;
             settings: Record<string, unknown>;
             edge_settings: Partial<EdgeSettings>;
             created_at: string | null;
             updated_at: string | null;
+            landing_hero_image_url?: string | null;
         };
+        site_landing_url?: string;
+        site_entry_short_url?: string | null;
         api_key_masked?: string;
-        users_in_site?: UserInSite[];
+        default_site_id?: number | null;
         auth_is_super_admin?: boolean;
         sites?: SiteOption[];
     } = $props();
@@ -86,13 +92,51 @@
     let showNewKeyModal = $state(false);
     let newKeyOnce = $state<string | null>(null);
     let edgeErrors = $state<Record<string, string>>({});
-    let moveUser = $state<UserInSite | null>(null);
-    let moveTargetSiteId = $state<string | number>("");
-    let showMoveModal = $state(false);
+
+    /** Per public-site plan: public access key and landing settings (from site.settings). */
+    let publicAccessKey = $state<string>((site?.settings?.public_access_key as string) ?? "");
+    let landingHeroTitle = $state<string>((site?.settings?.landing_hero_title as string) ?? "");
+    let landingHeroDescription = $state<string>((site?.settings?.landing_hero_description as string) ?? "");
+    let landingShowStats = $state<boolean>(!!site?.settings?.landing_show_stats);
+
+    let heroUploading = $state(false);
+    let heroInputEl = $state<HTMLInputElement | null>(null);
+    let siteEntryQrGenerating = $state(false);
+
+    type LandingSection = { type: string; title: string; body?: string };
+    function getInitialLandingSections(): LandingSection[] {
+        const raw = site?.settings?.landing_sections;
+        if (!Array.isArray(raw)) return [];
+        return raw.map((s: unknown) => {
+            const o = s as Record<string, unknown>;
+            return {
+                type: typeof o?.type === "string" ? o.type : "text",
+                title: typeof o?.title === "string" ? o.title : "",
+                body: typeof o?.body === "string" ? o.body : "",
+            };
+        });
+    }
+    let landingSections = $state<LandingSection[]>(getInitialLandingSections());
+    let editingSectionIndex = $state<number | null>(null);
 
     const page = usePage();
 
-    const otherSites = $derived((sites ?? []).filter((s) => s.id !== site.id));
+    const isDefaultSite = $derived(default_site_id !== null && site.id === default_site_id);
+
+    async function handleSetAsDefault(): Promise<void> {
+        if (submitting) return;
+        submitting = true;
+        const result = await api("PATCH", `/api/admin/sites/${site.id}/default`);
+        submitting = false;
+        if (result.ok) {
+            toaster.success({ title: "Default site updated." });
+            router.reload();
+        } else {
+            toaster.error({
+                title: (result as { message?: string })?.message ?? "Failed to set default site.",
+            });
+        }
+    }
 
     function getCsrfToken(): string {
         const p = get(page);
@@ -108,6 +152,102 @@
                   )?.content
                 : "";
         return meta ?? "";
+    }
+
+    async function handleHeroUpload(file: File): Promise<void> {
+        if (heroUploading) return;
+        heroUploading = true;
+        try {
+            const compressed = await compressImage(file, HERO_BANNER_PRESET);
+            const formData = new FormData();
+            formData.append("image", compressed);
+            const res = await fetch(`/api/admin/sites/${site.id}/hero-image`, {
+                method: "POST",
+                headers: {
+                    Accept: "application/json",
+                    "X-CSRF-TOKEN": getCsrfToken(),
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+                credentials: "same-origin",
+                body: formData,
+            });
+            if (res.ok) {
+                toaster.success({ title: "Hero image uploaded." });
+                router.reload();
+            } else {
+                const data = await res.json().catch(() => ({}));
+                toaster.error({
+                    title: (data as { message?: string })?.message ?? "Upload failed.",
+                });
+            }
+        } catch {
+            toaster.error({ title: "Upload failed." });
+        } finally {
+            heroUploading = false;
+        }
+    }
+
+    async function handleHeroRemove(): Promise<void> {
+        if (heroUploading) return;
+        if (!confirm("Remove hero image?")) return;
+        heroUploading = true;
+        try {
+            const res = await fetch(`/api/admin/sites/${site.id}/hero-image`, {
+                method: "DELETE",
+                headers: {
+                    Accept: "application/json",
+                    "X-CSRF-TOKEN": getCsrfToken(),
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+                credentials: "same-origin",
+            });
+            if (res.ok) {
+                toaster.success({ title: "Hero image removed." });
+                router.reload();
+            } else {
+                toaster.error({ title: "Failed to remove image." });
+            }
+        } catch {
+            toaster.error({ title: "Failed to remove image." });
+        } finally {
+            heroUploading = false;
+        }
+    }
+
+    function moveSectionUp(i: number): void {
+        if (i <= 0) return;
+        landingSections = [
+            ...landingSections.slice(0, i - 1),
+            landingSections[i],
+            landingSections[i - 1],
+            ...landingSections.slice(i + 1),
+        ];
+        if (editingSectionIndex === i) editingSectionIndex = i - 1;
+        else if (editingSectionIndex !== null && editingSectionIndex === i - 1) editingSectionIndex = i;
+    }
+
+    function moveSectionDown(i: number): void {
+        if (i >= landingSections.length - 1) return;
+        landingSections = [
+            ...landingSections.slice(0, i),
+            landingSections[i + 1],
+            landingSections[i],
+            ...landingSections.slice(i + 2),
+        ];
+        if (editingSectionIndex === i) editingSectionIndex = i + 1;
+        else if (editingSectionIndex !== null && editingSectionIndex === i + 1) editingSectionIndex = i;
+    }
+
+    function removeSection(i: number): void {
+        if (!confirm("Remove this section?")) return;
+        landingSections = landingSections.filter((_, idx) => idx !== i);
+        if (editingSectionIndex === i) editingSectionIndex = null;
+        else if (editingSectionIndex !== null && editingSectionIndex > i) editingSectionIndex--;
+    }
+
+    function addSection(): void {
+        landingSections = [...landingSections, { type: "text", title: "", body: "" }];
+        editingSectionIndex = landingSections.length - 1;
     }
 
     async function api(
@@ -240,37 +380,6 @@
         }
     }
 
-    function openMoveModal(u: UserInSite): void {
-        moveUser = u;
-        moveTargetSiteId = otherSites[0]?.id ?? "";
-        showMoveModal = true;
-    }
-
-    function closeMoveModal(): void {
-        showMoveModal = false;
-        moveUser = null;
-        moveTargetSiteId = "";
-    }
-
-    async function handleMoveToSite(): Promise<void> {
-        if (!moveUser || (moveTargetSiteId !== "" && moveTargetSiteId == null)) return;
-        const targetId = moveTargetSiteId === "" ? null : Number(moveTargetSiteId);
-        if (targetId == null) return;
-        submitting = true;
-        const result = await api("PUT", `/api/admin/users/${moveUser.id}`, {
-            site_id: targetId,
-        });
-        submitting = false;
-        if (result.ok) {
-            toaster.success({ title: "User moved to site." });
-            closeMoveModal();
-            router.reload();
-        } else {
-            toaster.error({
-                title: (result as { message?: string })?.message ?? "Failed to move user.",
-            });
-        }
-    }
 </script>
 
 <svelte:head>
@@ -295,6 +404,303 @@
                 <p class="text-surface-500 mt-0.5 font-mono text-sm">{site.slug}</p>
             </div>
         </div>
+
+        {#if auth_is_super_admin && sites && sites.length > 1}
+            <section
+                class="rounded-container bg-surface-50 border border-surface-200 p-4 flex flex-wrap items-center gap-3"
+                aria-label="Default site for display and public triage"
+            >
+                {#if isDefaultSite}
+                    <p class="text-sm text-surface-600">
+                        This site is the default for display and public triage.
+                    </p>
+                {:else}
+                    <p class="text-sm text-surface-600 shrink-0">
+                        Use this site as the default for display and public triage.
+                    </p>
+                    <button
+                        type="button"
+                        class="btn preset-tonal flex items-center gap-2 touch-target-h"
+                        onclick={handleSetAsDefault}
+                        disabled={submitting}
+                    >
+                        Use as default site
+                    </button>
+                {/if}
+            </section>
+        {/if}
+
+        <!-- Public site URL (share); future: blog-like content here -->
+        <section
+            class="rounded-container bg-surface-50 border border-surface-200 p-4 flex flex-wrap items-center gap-3"
+            aria-label="Public site URL"
+        >
+            <p class="text-sm text-surface-600 shrink-0">
+                Public site landing: clients open this URL to see active programs and choose display or triage.
+            </p>
+            {#if site_landing_url}
+                <div class="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+                    <code class="flex-1 min-w-0 text-sm bg-surface-100 dark:bg-surface-800 px-2 py-1.5 rounded truncate" title={site_landing_url}>{site_landing_url}</code>
+                    <button
+                        type="button"
+                        class="btn preset-tonal flex items-center gap-2 touch-target-h"
+                        onclick={() => {
+                            navigator.clipboard.writeText(site_landing_url).then(
+                                () => toaster.success({ title: "Copied public site URL." }),
+                                () => toaster.error({ title: "Could not copy." })
+                            );
+                        }}
+                        aria-label="Copy public site URL"
+                    >
+                        <Share2 class="w-4 h-4" />
+                        Share site URL
+                    </button>
+                </div>
+            {/if}
+        </section>
+
+        <!-- Public access & landing (per public-site plan) -->
+        <section
+            class="rounded-container bg-surface-50 border border-surface-200 p-6"
+            aria-labelledby="public-access-heading"
+        >
+            <h2 id="public-access-heading" class="text-lg font-semibold text-surface-950 flex items-center gap-2 mb-4">
+                Public access & landing
+            </h2>
+            <p class="text-surface-600 text-sm mb-4">
+                Site key lets public devices discover this site from the homepage. Landing fields customize the public site page.
+            </p>
+            <form
+                class="space-y-4"
+                onsubmit={async (e) => {
+                    e.preventDefault();
+                    submitting = true;
+                    const result = await api("PUT", `/api/admin/sites/${site.id}`, {
+                        settings: {
+                            public_access_key: publicAccessKey.trim() || null,
+                            landing_hero_title: landingHeroTitle.trim() || null,
+                            landing_hero_description: landingHeroDescription.trim() || null,
+                            landing_show_stats: landingShowStats,
+                            landing_sections: landingSections,
+                        },
+                    });
+                    submitting = false;
+                    if (result.ok) {
+                        toaster.success({ title: "Saved." });
+                        router.reload();
+                    } else {
+                        toaster.error({ title: (result as { message?: string })?.message ?? "Failed to save." });
+                    }
+                }}
+            >
+                <div>
+                    <label for="public-access-key" class="block text-sm font-medium text-surface-700 dark:text-slate-300 mb-1">Site key</label>
+                    <input
+                        id="public-access-key"
+                        type="text"
+                        class="input w-full max-w-xs"
+                        placeholder="e.g. TAGUDIN8"
+                        bind:value={publicAccessKey}
+                        maxlength={20}
+                    />
+                    {#if !publicAccessKey.trim()}
+                        <p class="text-amber-600 dark:text-amber-400 text-sm mt-1">No public access key set — public devices cannot discover this site.</p>
+                    {/if}
+                </div>
+                <div>
+                    <span class="block text-sm font-medium text-surface-700 dark:text-slate-300 mb-1">Site entry QR</span>
+                    <p class="text-sm text-surface-500 dark:text-slate-400 mb-2">Short link for QR codes: devices scan → land on homepage with site key hint.</p>
+                    {#if site_entry_short_url}
+                        <div class="mt-2">
+                            <QrDisplay url={site_entry_short_url} label="Site entry" />
+                        </div>
+                    {:else}
+                        <button
+                            type="button"
+                            class="btn variant-outline text-sm"
+                            disabled={siteEntryQrGenerating}
+                            onclick={async () => {
+                                siteEntryQrGenerating = true;
+                                const res = await api("POST", `/api/admin/sites/${site.id}/generate-qr`);
+                                siteEntryQrGenerating = false;
+                                if (res.ok) router.reload();
+                                else toaster.error({ title: (res as { message?: string }).message ?? "Failed to generate." });
+                            }}
+                        >
+                            {siteEntryQrGenerating ? "Generating…" : "Generate site entry QR"}
+                        </button>
+                    {/if}
+                </div>
+                <div>
+                    <label for="landing-hero-title" class="block text-sm font-medium text-surface-700 dark:text-slate-300 mb-1">Landing page title</label>
+                    <input
+                        id="landing-hero-title"
+                        type="text"
+                        class="input w-full max-w-md"
+                        placeholder={site.name}
+                        bind:value={landingHeroTitle}
+                        maxlength={120}
+                    />
+                </div>
+                <div>
+                    <label for="landing-hero-desc" class="block text-sm font-medium text-surface-700 dark:text-slate-300 mb-1">Landing description</label>
+                    <textarea
+                        id="landing-hero-desc"
+                        class="input w-full max-w-md min-h-[80px]"
+                        placeholder="Short description for the public site page"
+                        bind:value={landingHeroDescription}
+                        maxlength={500}
+                    />
+                </div>
+                <div>
+                    <span class="block text-sm font-medium text-surface-700 dark:text-slate-300 mb-1">Hero image</span>
+                    <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        class="hidden"
+                        bind:this={heroInputEl}
+                        onchange={(e) => {
+                            const file = (e.target as HTMLInputElement)?.files?.[0];
+                            if (file) handleHeroUpload(file);
+                            (e.target as HTMLInputElement).value = "";
+                        }}
+                    />
+                    {#if site.landing_hero_image_url}
+                        <div class="flex flex-wrap items-center gap-3 mt-2">
+                            <img
+                                src={site.landing_hero_image_url}
+                                alt=""
+                                class="max-h-20 rounded-lg border border-surface-200 dark:border-slate-600 object-cover"
+                            />
+                            <div class="flex gap-2">
+                                <button
+                                    type="button"
+                                    class="btn variant-outline text-sm"
+                                    disabled={heroUploading}
+                                    onclick={() => heroInputEl?.click()}
+                                >
+                                    Replace
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn variant-outline text-sm"
+                                    disabled={heroUploading}
+                                    onclick={() => handleHeroRemove()}
+                                >
+                                    Remove
+                                </button>
+                            </div>
+                        </div>
+                    {:else}
+                        <button
+                            type="button"
+                            class="btn variant-outline text-sm mt-2"
+                            disabled={heroUploading}
+                            onclick={() => heroInputEl?.click()}
+                        >
+                            {heroUploading ? "Uploading…" : "Upload image"}
+                        </button>
+                    {/if}
+                    <p class="text-xs text-surface-500 mt-1">{getUploadHint('hero')}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input
+                        id="landing-show-stats"
+                        type="checkbox"
+                        class="checkbox"
+                        bind:checked={landingShowStats}
+                    />
+                    <label for="landing-show-stats" class="text-sm text-surface-700 dark:text-slate-300">Show served stats on public landing</label>
+                </div>
+                <div>
+                    <h3 class="text-sm font-medium text-surface-700 dark:text-slate-300 mb-2">Content sections</h3>
+                    <ul class="space-y-2">
+                        {#each landingSections as section, i (i)}
+                            <li class="rounded-lg border border-surface-200 dark:border-slate-600 bg-surface-100 dark:bg-slate-800/50 p-3">
+                                {#if editingSectionIndex === i}
+                                    <div class="space-y-2">
+                                        <input
+                                            type="text"
+                                            class="input w-full text-sm"
+                                            placeholder="Section title"
+                                            bind:value={landingSections[i].title}
+                                        />
+                                        <textarea
+                                            class="input w-full text-sm min-h-[60px]"
+                                            placeholder="Body (optional)"
+                                            bind:value={landingSections[i].body}
+                                        ></textarea>
+                                        <button
+                                            type="button"
+                                            class="btn variant-outline text-sm"
+                                            onclick={() => (editingSectionIndex = null)}
+                                        >
+                                            Done
+                                        </button>
+                                    </div>
+                                {:else}
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <span class="font-medium text-surface-900 dark:text-white">
+                                            {section.title || "Untitled"}
+                                        </span>
+                                        <span class="text-surface-500 dark:text-slate-400 text-sm truncate max-w-[200px]">
+                                            {section.body ? (section.body.slice(0, 60) + (section.body.length > 60 ? "…" : "")) : ""}
+                                        </span>
+                                        <div class="flex gap-1 ml-auto">
+                                            <button
+                                                type="button"
+                                                class="btn variant-ghost size-sm p-1"
+                                                title="Move up"
+                                                disabled={i === 0}
+                                                onclick={() => moveSectionUp(i)}
+                                            >
+                                                <ChevronUp class="h-4 w-4" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="btn variant-ghost size-sm p-1"
+                                                title="Move down"
+                                                disabled={i === landingSections.length - 1}
+                                                onclick={() => moveSectionDown(i)}
+                                            >
+                                                <ChevronDown class="h-4 w-4" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="btn variant-ghost size-sm p-1"
+                                                title="Edit"
+                                                onclick={() => (editingSectionIndex = i)}
+                                            >
+                                                <Pencil class="h-4 w-4" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="btn variant-ghost size-sm p-1 text-red-600"
+                                                title="Remove"
+                                                onclick={() => removeSection(i)}
+                                            >
+                                                <Trash2 class="h-4 w-4" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                {/if}
+                            </li>
+                        {/each}
+                    </ul>
+                    <button
+                        type="button"
+                        class="btn variant-outline text-sm mt-2 flex items-center gap-1"
+                        onclick={addSection}
+                    >
+                        <Plus class="h-4 w-4" />
+                        Add section
+                    </button>
+                </div>
+                <button type="submit" class="btn preset-filled-primary-500" disabled={submitting}>
+                    {submitting ? "Saving…" : "Save"}
+                </button>
+            </form>
+        </section>
 
         <!-- API key (masked) + Regenerate -->
         <section
@@ -435,97 +841,8 @@
                 </div>
             </form>
         </section>
-
-        <!-- Users in this site -->
-        <section
-            class="rounded-container bg-surface-50 border border-surface-200 p-6"
-            aria-labelledby="users-in-site-heading"
-        >
-            <h2 id="users-in-site-heading" class="text-lg font-semibold text-surface-950 flex items-center gap-2 mb-4">
-                <Users class="w-5 h-5 text-primary-500" />
-                Users in this site
-            </h2>
-            {#if users_in_site.length === 0}
-                <p class="text-surface-600 text-sm">No users assigned to this site yet.</p>
-            {:else}
-                <div class="overflow-x-auto">
-                    <table class="table table-zebra table-pin-rows w-full text-sm">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Email</th>
-                                <th>Role</th>
-                                {#if auth_is_super_admin && otherSites.length > 0}
-                                    <th class="w-32 text-right">Actions</th>
-                                {/if}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {#each users_in_site as u (u.id)}
-                                <tr>
-                                    <td class="font-medium text-surface-950">{u.name}</td>
-                                    <td class="text-surface-700">{u.email}</td>
-                                    <td>
-                                        <span class="badge preset-tonal text-xs uppercase">{u.role}</span>
-                                    </td>
-                                    {#if auth_is_super_admin && otherSites.length > 0}
-                                        <td class="text-right">
-                                            <button
-                                                type="button"
-                                                class="btn btn-sm preset-outlined touch-target-h"
-                                                onclick={() => openMoveModal(u)}
-                                                disabled={submitting}
-                                            >
-                                                <ArrowRightLeft class="w-3.5 h-3.5" />
-                                                Move to site
-                                            </button>
-                                        </td>
-                                    {/if}
-                                </tr>
-                            {/each}
-                        </tbody>
-                    </table>
-                </div>
-            {/if}
-        </section>
     </div>
 </AdminLayout>
-
-<Modal
-    open={showMoveModal}
-    title={moveUser ? `Move ${moveUser.name} to another site` : "Move to site"}
-    onClose={closeMoveModal}
->
-    {#if moveUser && otherSites.length > 0}
-        <div class="space-y-4">
-            <p class="text-surface-600 text-sm">
-                Assign this user to a different site. They will then see only that site's programs and users.
-            </p>
-            <div class="form-control">
-                <label class="label"><span class="label-text font-medium">Site</span></label>
-                <select
-                    class="select select-theme rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                    bind:value={moveTargetSiteId}
-                >
-                    {#each otherSites as s (s.id)}
-                        <option value={s.id}>{s.name}</option>
-                    {/each}
-                </select>
-            </div>
-            <div class="flex justify-end gap-3 pt-2 border-t border-surface-100">
-                <button type="button" class="btn preset-tonal" onclick={closeMoveModal}>Cancel</button>
-                <button
-                    type="button"
-                    class="btn preset-filled-primary-500"
-                    disabled={submitting}
-                    onclick={handleMoveToSite}
-                >
-                    {submitting ? "Moving…" : "Move"}
-                </button>
-            </div>
-        </div>
-    {/if}
-</Modal>
 
 <ConfirmModal
     open={showRegenerateConfirm}

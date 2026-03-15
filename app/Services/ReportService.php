@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AdminActionLog;
+use App\Models\Program;
 use App\Models\ProgramAuditLog;
 use App\Models\TransactionLog;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -23,20 +24,70 @@ class ReportService
     private const PER_PAGE = 50;
 
     /**
+     * Per site-scoping-migration-spec §5: Restrict program_ids to user's site.
+     * Returns null for super_admin (no filter); otherwise program IDs belonging to site.
+     *
+     * @return array<int>|null null = allow any (super_admin), empty = none allowed
+     */
+    public function allowedProgramIds(?int $siteId): ?array
+    {
+        if ($siteId === null) {
+            return null;
+        }
+
+        return Program::where('site_id', $siteId)->pluck('id')->all();
+    }
+
+    /**
+     * Filter program_id to only those in allowed set. Per site-scoping-migration-spec §5.
+     *
+     * @param  int|string|null  $programId
+     * @param  array<int>|null  $allowed  null = allow any
+     * @return int|null valid program_id or null if not allowed
+     */
+    private function filterProgramId(mixed $programId, ?array $allowed): ?int
+    {
+        $id = $programId === null || $programId === '' ? null : (int) $programId;
+        if ($id === null || $id < 1) {
+            return null;
+        }
+        if ($allowed === null) {
+            return $id;
+        }
+        if (! in_array($id, $allowed, true)) {
+            return null;
+        }
+
+        return $id;
+    }
+
+    /**
      * List program sessions (session_start + matching session_stop) for filter dropdown.
+     * Per site-scoping-migration-spec §5: program_id restricted to user's site (or super_admin any).
      *
      * @param  array{program_id?: int, from?: string, to?: string}  $filters
      * @return array<int, array{id: int, program_id: int, program_name: string, started_at: string, ended_at: string|null, started_by: string}>
      */
-    public function getProgramSessions(array $filters): array
+    public function getProgramSessions(array $filters, ?int $siteId = null): array
     {
+        $allowed = $this->allowedProgramIds($siteId);
+        if ($allowed !== null && empty($allowed)) {
+            return [];
+        }
+        $programId = $this->filterProgramId($filters['program_id'] ?? null, $allowed);
+        if (isset($filters['program_id']) && $programId === null) {
+            return [];
+        }
+
         $starts = ProgramAuditLog::query()
             ->where('action', 'session_start')
             ->with(['program:id,name', 'staffUser:id,name'])
             ->orderByDesc('created_at');
 
-        if (! empty($filters['program_id'])) {
-            $starts->where('program_id', (int) $filters['program_id']);
+        if ($programId !== null) {
+            $starts->where('program_id', $programId);
+        } elseif ($allowed !== null) {
+            $starts->whereIn('program_id', $allowed);
         }
         if (! empty($filters['from'])) {
             $starts->whereDate('created_at', '>=', $filters['from']);
@@ -69,10 +120,11 @@ class ReportService
 
     /**
      * Get program session by id (session_start log id). Returns started_at, ended_at, program_id for filtering.
+     * Per site-scoping-migration-spec §5: returns null if program not in user's site.
      *
      * @return array{program_id: int, started_at: string, ended_at: string|null}|null
      */
-    public function getProgramSessionRange(int $programSessionId): ?array
+    public function getProgramSessionRange(int $programSessionId, ?int $siteId = null): ?array
     {
         $start = ProgramAuditLog::query()
             ->where('id', $programSessionId)
@@ -80,6 +132,11 @@ class ReportService
             ->first();
 
         if (! $start) {
+            return null;
+        }
+
+        $allowed = $this->allowedProgramIds($siteId);
+        if ($allowed !== null && ! in_array($start->program_id, $allowed, true)) {
             return null;
         }
 
@@ -99,14 +156,20 @@ class ReportService
 
     /**
      * Get paginated audit log entries (transaction_logs + program_audit_log merged, sorted by created_at desc).
+     * Per site-scoping-migration-spec §5: program_id and program_session_id restricted to user's site.
      *
      * @param  array{program_id?: int, from?: string, to?: string, action_type?: string, station_id?: int, staff_user_id?: int, program_session_id?: int, page?: int, per_page?: int}  $filters
      */
-    public function getAuditLog(array $filters): LengthAwarePaginator
+    public function getAuditLog(array $filters, ?int $siteId = null): LengthAwarePaginator
     {
+        $allowed = $this->allowedProgramIds($siteId);
+        if ($allowed !== null && empty($allowed)) {
+            return new LengthAwarePaginatorConcrete([], 0, max(10, min(100, (int) ($filters['per_page'] ?? self::PER_PAGE))), 1, ['path' => '']);
+        }
+
         $programSessionRange = null;
         if (! empty($filters['program_session_id'])) {
-            $programSessionRange = $this->getProgramSessionRange((int) $filters['program_session_id']);
+            $programSessionRange = $this->getProgramSessionRange((int) $filters['program_session_id'], $siteId);
             if ($programSessionRange) {
                 $filters['program_id'] = $programSessionRange['program_id'];
                 $filters['from'] = Carbon::parse($programSessionRange['started_at'])->toDateString();
@@ -115,7 +178,20 @@ class ReportService
                     : null;
                 $filters['_range_start'] = $programSessionRange['started_at'];
                 $filters['_range_end'] = $programSessionRange['ended_at'];
+            } else {
+                return new LengthAwarePaginatorConcrete([], 0, max(10, min(100, (int) ($filters['per_page'] ?? self::PER_PAGE))), 1, ['path' => '']);
             }
+        }
+
+        if (isset($filters['program_id'])) {
+            $filteredProgramId = $this->filterProgramId($filters['program_id'], $allowed);
+            if ($filteredProgramId === null) {
+                return new LengthAwarePaginatorConcrete([], 0, max(10, min(100, (int) ($filters['per_page'] ?? self::PER_PAGE))), 1, ['path' => '']);
+            }
+            $filters['program_id'] = $filteredProgramId;
+        } elseif ($allowed !== null) {
+            $filters['_allowed_program_ids'] = $allowed;
+            $filters['_site_id'] = $siteId;
         }
 
         $perPage = (int) ($filters['per_page'] ?? self::PER_PAGE);
@@ -146,6 +222,8 @@ class ReportService
 
         if (! empty($filters['program_id'])) {
             $query->where('queue_sessions.program_id', (int) $filters['program_id']);
+        } elseif (! empty($filters['_allowed_program_ids'])) {
+            $query->whereIn('queue_sessions.program_id', $filters['_allowed_program_ids']);
         }
         if (! empty($filters['from'])) {
             $query->whereDate('transaction_logs.created_at', '>=', $filters['from']);
@@ -201,6 +279,8 @@ class ReportService
 
         if (! empty($filters['program_id'])) {
             $query->where('program_id', (int) $filters['program_id']);
+        } elseif (! empty($filters['_allowed_program_ids'])) {
+            $query->whereIn('program_id', $filters['_allowed_program_ids']);
         }
         if (! empty($filters['from'])) {
             $query->whereDate('created_at', '>=', $filters['from']);
@@ -251,6 +331,7 @@ class ReportService
 
         $query = DB::table('staff_activity_log')
             ->join('users', 'staff_activity_log.user_id', '=', 'users.id')
+            ->when(! empty($filters['_site_id']), fn ($q) => $q->where('users.site_id', $filters['_site_id']))
             ->select(
                 'staff_activity_log.id',
                 'staff_activity_log.action_type',
@@ -407,15 +488,27 @@ class ReportService
 
     /**
      * Stream CSV export of audit log. Same filters as getAuditLog (includes program_session, staff), no pagination.
-     * Includes both transaction_logs and program_audit_log rows.
+     * Per site-scoping-migration-spec §5: program_id restricted to user's site.
      *
      * @param  array{program_id?: int, from?: string, to?: string, action_type?: string, station_id?: int, staff_user_id?: int, program_session_id?: int}  $filters
      */
-    public function streamAuditCsv(array $filters): StreamedResponse
+    public function streamAuditCsv(array $filters, ?int $siteId = null): StreamedResponse
     {
+        $allowed = $this->allowedProgramIds($siteId);
+        if ($allowed !== null && empty($allowed)) {
+            return response()->streamDownload(function () {
+                $handle = fopen('php://output', 'w');
+                fputcsv($handle, ['Time', 'Source', 'Session', 'Action', 'Station', 'Staff', 'Remarks']);
+                fclose($handle);
+            }, 'flexiqueue-audit-'.Carbon::now()->format('Y-m-d-His').'.csv', [
+                'Content-Type' => 'text/csv',
+                'Content-Disposition' => 'attachment; filename="flexiqueue-audit-'.Carbon::now()->format('Y-m-d-His').'.csv"',
+            ]);
+        }
+
         $programSessionRange = null;
         if (! empty($filters['program_session_id'])) {
-            $programSessionRange = $this->getProgramSessionRange((int) $filters['program_session_id']);
+            $programSessionRange = $this->getProgramSessionRange((int) $filters['program_session_id'], $siteId);
             if ($programSessionRange) {
                 $filters['program_id'] = $programSessionRange['program_id'];
                 $filters['from'] = Carbon::parse($programSessionRange['started_at'])->toDateString();
@@ -424,7 +517,47 @@ class ReportService
                     : null;
                 $filters['_range_start'] = $programSessionRange['started_at'];
                 $filters['_range_end'] = $programSessionRange['ended_at'];
+            } else {
+                $merged = collect();
+                return response()->streamDownload(function () use ($merged) {
+                    $handle = fopen('php://output', 'w');
+                    fputcsv($handle, ['Time', 'Source', 'Session', 'Action', 'Station', 'Staff', 'Remarks']);
+                    foreach ($merged as $row) {
+                        fputcsv($handle, [
+                            $row['created_at'] ?? '',
+                            $row['source'] ?? 'transaction',
+                            $row['session_alias'] ?? '',
+                            $row['action_type'] ?? '',
+                            $row['station'] ?? '',
+                            $row['staff'] ?? '',
+                            $row['remarks'] ?? '',
+                        ]);
+                    }
+                    fclose($handle);
+                }, 'flexiqueue-audit-'.Carbon::now()->format('Y-m-d-His').'.csv', [
+                    'Content-Type' => 'text/csv',
+                    'Content-Disposition' => 'attachment; filename="flexiqueue-audit-'.Carbon::now()->format('Y-m-d-His').'.csv"',
+                ]);
             }
+        }
+
+        if (isset($filters['program_id'])) {
+            $filteredProgramId = $this->filterProgramId($filters['program_id'], $allowed);
+            if ($filteredProgramId === null) {
+                $merged = collect();
+                return response()->streamDownload(function () use ($merged) {
+                    $handle = fopen('php://output', 'w');
+                    fputcsv($handle, ['Time', 'Source', 'Session', 'Action', 'Station', 'Staff', 'Remarks']);
+                    fclose($handle);
+                }, 'flexiqueue-audit-'.Carbon::now()->format('Y-m-d-His').'.csv', [
+                    'Content-Type' => 'text/csv',
+                    'Content-Disposition' => 'attachment; filename="flexiqueue-audit-'.Carbon::now()->format('Y-m-d-His').'.csv"',
+                ]);
+            }
+            $filters['program_id'] = $filteredProgramId;
+        } elseif ($allowed !== null) {
+            $filters['_allowed_program_ids'] = $allowed;
+            $filters['_site_id'] = $siteId;
         }
 
         $transactionLogs = $this->getTransactionLogsForAudit($filters);

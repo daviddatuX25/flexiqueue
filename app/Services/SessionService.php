@@ -62,7 +62,12 @@ class SessionService
         $bindingAllowed = $isPublic ? $settings->allowsPublicBinding() : true;
         $bindingSource = $bindingSource ?? ($isPublic ? 'public_triage' : 'staff_triage');
 
-        $token = Token::where('qr_code_hash', $qrHash)->first();
+        // Per site-scoping: token must belong to the program's site so cross-site tokens are not recognized.
+        $q = Token::where('qr_code_hash', $qrHash);
+        if ($program->site_id !== null) {
+            $q->where('site_id', $program->site_id);
+        }
+        $token = $q->first();
         if (! $token) {
             throw new \InvalidArgumentException('Token not found.', 422);
         }
@@ -494,7 +499,7 @@ class SessionService
      */
     public function cancel(Session $session, int $staffUserId, ?string $remarks = null): array
     {
-        if (! in_array($session->status, ['waiting', 'called', 'serving'], true)) {
+        if (! in_array($session->status, ['waiting', 'called', 'serving', 'awaiting_approval'], true)) {
             throw new \InvalidArgumentException('Session is already completed.', 409);
         }
 

@@ -2,12 +2,17 @@
 
 namespace Tests\Feature;
 
+use App\Models\DeviceAuthorization;
 use App\Models\Program;
+use App\Models\ProgramStationAssignment;
 use App\Models\Session;
 use App\Models\ServiceTrack;
+use App\Models\Site;
 use App\Models\Station;
 use App\Models\TransactionLog;
 use App\Models\User;
+use App\Services\DeviceAuthorizationService;
+use App\Support\DeviceLock;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -19,9 +24,257 @@ class DisplayBoardTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_display_board_returns_200_without_auth(): void
+    private function defaultSite(): Site
     {
+        return Site::firstOrCreate(
+            ['slug' => 'default'],
+            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
+        );
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->defaultSite();
+    }
+
+    /** Per-site display base URL (e.g. /site/default/display). */
+    private function displayBase(Site $site = null): string
+    {
+        $site = $site ?? $this->defaultSite();
+
+        return '/site/'.$site->slug.'/display';
+    }
+
+    /**
+     * Per plan Step 5: Create a device authorization for the program and return [cookie_name, cookie_value] for request.
+     */
+    private function deviceAuthCookie(Program $program): array
+    {
+        $service = app(DeviceAuthorizationService::class);
+        $result = $service->authorize($program, 'test-device-'.$program->id, DeviceAuthorization::SCOPE_SESSION);
+        $name = DeviceAuthorizationService::cookieNameForProgram($program);
+
+        return [$name, $result['cookie_value']];
+    }
+
+    /** Per public-site plan: known_sites cookie required for /site/* routes. */
+    private function withKnownSiteCookie(Site $site): static
+    {
+        $value = json_encode([['slug' => $site->slug, 'name' => $site->name]]);
+
+        return $this->withUnencryptedCookie('known_sites', $value);
+    }
+
+    /** Call get() with device auth + device lock cookie (for per-site display/station tests). */
+    private function getWithDeviceAuth(string $url, Program $program, ?Station $station = null): \Illuminate\Testing\TestResponse
+    {
+        [$name, $value] = $this->deviceAuthCookie($program);
+        $site = $program->site;
+        $lockType = $station ? DeviceLock::TYPE_STATION : DeviceLock::TYPE_DISPLAY;
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, $lockType, $station?->id);
+        $lockValue = $lockCookie->getValue();
+
+        return $this->withKnownSiteCookie($site)
+            ->withCookie($name, $value)
+            ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockValue)
+            ->get($url);
+    }
+
+    /**
+     * Per plan: legacy /display with no slug — when default site exists, redirect to site display.
+     */
+    public function test_display_redirects_to_site_display_when_default_site_exists(): void
+    {
+        $site = $this->defaultSite();
+
         $response = $this->get('/display');
+
+        $response->assertRedirect('/site/'.$site->slug.'/display');
+    }
+
+    /**
+     * GET /display with no site returns ScanQrMessage (200).
+     */
+    public function test_display_shows_scan_qr_message_when_no_site_exists(): void
+    {
+        \App\Models\Site::query()->delete();
+        \Illuminate\Support\Facades\Cache::forget('default_site');
+
+        $response = $this->get('/display');
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page->component('Display/ScanQrMessage'));
+    }
+
+    /**
+     * Per plan: when device_lock cookie is set, GET / (home) redirects to the locked display URL.
+     */
+    public function test_enforce_device_lock_redirects_home_to_locked_display_url(): void
+    {
+        $site = $this->defaultSite();
+        $user = User::factory()->create();
+        $program = Program::create([
+            'site_id' => $site->id,
+            'name' => 'Lock Test Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $program->refresh();
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_DISPLAY, null);
+        $lockValue = $lockCookie->getValue();
+
+        $response = $this->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockValue)
+            ->get('/');
+
+        $response->assertRedirect();
+        $target = $response->headers->get('Location');
+        $this->assertStringContainsString('/site/'.$site->slug.'/display', $target);
+        $this->assertStringContainsString('program='.$program->id, $target);
+    }
+
+    /**
+     * Per plan: when locked to display, GET program/choose page redirects to locked display URL.
+     */
+    public function test_enforce_device_lock_redirects_program_page_to_locked_display_url(): void
+    {
+        $site = $this->defaultSite();
+        $user = User::factory()->create();
+        $program = Program::create([
+            'site_id' => $site->id,
+            'name' => 'Lock Test Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $program->refresh();
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_DISPLAY, null);
+        $lockValue = $lockCookie->getValue();
+
+        $response = $this->withKnownSiteCookie($site)
+            ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockValue)
+            ->get('/site/'.$site->slug.'/program/'.$program->slug);
+
+        $response->assertRedirect();
+        $target = $response->headers->get('Location');
+        $this->assertStringContainsString('/site/'.$site->slug.'/display', $target);
+    }
+
+    /**
+     * Per plan: when locked to display, GET program/devices page redirects to locked display URL.
+     */
+    public function test_enforce_device_lock_redirects_devices_page_to_locked_display_url(): void
+    {
+        $site = $this->defaultSite();
+        $user = User::factory()->create();
+        $program = Program::create([
+            'site_id' => $site->id,
+            'name' => 'Lock Test Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $program->refresh();
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_DISPLAY, null);
+        $lockValue = $lockCookie->getValue();
+
+        $response = $this->withKnownSiteCookie($site)
+            ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockValue)
+            ->get('/site/'.$site->slug.'/program/'.$program->slug.'/devices');
+
+        $response->assertRedirect();
+        $target = $response->headers->get('Location');
+        $this->assertStringContainsString('/site/'.$site->slug.'/display', $target);
+    }
+
+    /**
+     * Per plan: when locked to display, GET display URL with program is allowed (200).
+     */
+    public function test_enforce_device_lock_allows_display_path_when_locked_to_display(): void
+    {
+        $site = $this->defaultSite();
+        $user = User::factory()->create();
+        $program = Program::create([
+            'site_id' => $site->id,
+            'name' => 'Lock Test Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $program->refresh();
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_DISPLAY, null);
+        $lockValue = $lockCookie->getValue();
+
+        $response = $this->withKnownSiteCookie($site)
+            ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockValue)
+            ->get('/site/'.$site->slug.'/display?program='.$program->id);
+
+        $response->assertStatus(200);
+    }
+
+    /**
+     * Per plan: when locked to triage, GET program page redirects to locked triage URL.
+     */
+    public function test_enforce_device_lock_redirects_program_page_to_locked_triage_url(): void
+    {
+        $site = $this->defaultSite();
+        $user = User::factory()->create();
+        $program = Program::create([
+            'site_id' => $site->id,
+            'name' => 'Triage Lock Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $program->refresh();
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_TRIAGE, null);
+        $lockValue = $lockCookie->getValue();
+
+        $response = $this->withKnownSiteCookie($site)
+            ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockValue)
+            ->get('/site/'.$site->slug.'/program/'.$program->slug);
+
+        $response->assertRedirect('/site/'.$site->slug.'/public-triage/'.$program->slug);
+    }
+
+    /**
+     * Per plan: when locked to station, GET program page redirects to locked station URL.
+     */
+    public function test_enforce_device_lock_redirects_program_page_to_locked_station_url(): void
+    {
+        $site = $this->defaultSite();
+        $user = User::factory()->create();
+        $program = Program::create([
+            'site_id' => $site->id,
+            'name' => 'Station Lock Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $program->refresh();
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Desk 1',
+            'is_active' => true,
+        ]);
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_STATION, $station->id);
+        $lockValue = $lockCookie->getValue();
+
+        $response = $this->withKnownSiteCookie($site)
+            ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockValue)
+            ->get('/site/'.$site->slug.'/program/'.$program->slug);
+
+        $response->assertRedirect('/site/'.$site->slug.'/display/station/'.$station->id);
+    }
+
+    /**
+     * Per-site display board returns 200 and board structure.
+     */
+    public function test_display_board_site_url_returns_200_with_board_structure(): void
+    {
+        $site = $this->defaultSite();
+        $response = $this->withKnownSiteCookie($site)->get('/site/'.$site->slug.'/display');
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -63,8 +316,10 @@ class DisplayBoardTest extends TestCase
 
     public function test_display_board_shows_program_and_serving_when_active(): void
     {
+        $site = $this->defaultSite();
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Cash Assistance',
             'description' => null,
             'is_active' => true,
@@ -97,7 +352,7 @@ class DisplayBoardTest extends TestCase
         ]);
         $token->update(['current_session_id' => Session::first()->id]);
 
-        $response = $this->get('/display?program='.$program->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'?program='.$program->id, $program);
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -126,13 +381,14 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Paused Program',
             'description' => null,
             'is_active' => true,
             'is_paused' => true,
             'created_by' => $user->id,
         ]);
-        $response = $this->get('/display?program='.$program->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'?program='.$program->id, $program);
         $response->assertStatus(200);
         $data = $response->viewData('page')['props'];
         $this->assertTrue($data['program_is_paused']);
@@ -144,13 +400,14 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Test',
             'description' => null,
             'is_active' => true,
             'created_by' => $user->id,
             'settings' => ['display_scan_timeout_seconds' => 120],
         ]);
-        $response = $this->get('/display?program='.$program->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'?program='.$program->id, $program);
         $response->assertStatus(200);
         $data = $response->viewData('page')['props'];
         $this->assertSame(120, $data['display_scan_timeout_seconds']);
@@ -161,6 +418,7 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Cash Assistance',
             'description' => null,
             'is_active' => true,
@@ -193,7 +451,7 @@ class DisplayBoardTest extends TestCase
         ]);
         $token->update(['current_session_id' => Session::first()->id]);
 
-        $response = $this->get('/display?program='.$program->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'?program='.$program->id, $program);
 
         $response->assertStatus(200);
         $data = $response->viewData('page')['props'];
@@ -209,6 +467,7 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Test Program',
             'description' => null,
             'is_active' => true,
@@ -235,8 +494,12 @@ class DisplayBoardTest extends TestCase
             'assigned_station_id' => $station->id,
             'availability_status' => 'away',
         ]);
+        // Display board uses ProgramStationAssignment (source of truth); create assignments so all three staff appear.
+        ProgramStationAssignment::create(['program_id' => $program->id, 'station_id' => $station->id, 'user_id' => $staffAvailable->id]);
+        ProgramStationAssignment::create(['program_id' => $program->id, 'station_id' => $station->id, 'user_id' => $staffOnBreak->id]);
+        ProgramStationAssignment::create(['program_id' => $program->id, 'station_id' => $station->id, 'user_id' => $staffAway->id]);
 
-        $response = $this->get('/display?program='.$program->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'?program='.$program->id, $program);
 
         $response->assertStatus(200);
         $props = $response->viewData('page')['props'];
@@ -262,6 +525,7 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Test Program',
             'description' => null,
             'is_active' => true,
@@ -308,7 +572,7 @@ class DisplayBoardTest extends TestCase
             'action_type' => 'check_in',
         ]);
 
-        $response = $this->get('/display?program='.$program->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'?program='.$program->id, $program);
 
         $response->assertStatus(200);
         $props = $response->viewData('page')['props'];
@@ -331,6 +595,7 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Queue Program',
             'description' => null,
             'is_active' => true,
@@ -373,7 +638,7 @@ class DisplayBoardTest extends TestCase
             'action_type' => 'bind',
         ]);
 
-        $response = $this->get('/display?program='.$program->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'?program='.$program->id, $program);
 
         $response->assertStatus(200);
         $props = $response->viewData('page')['props'];
@@ -392,13 +657,14 @@ class DisplayBoardTest extends TestCase
     public function test_display_status_returns_200_for_valid_qr_hash(): void
     {
         $token = new \App\Models\Token;
+        $token->site_id = $this->defaultSite()->id;
         $hash = hash('sha256', 'test-qr');
         $token->qr_code_hash = $hash;
         $token->physical_id = 'B2';
         $token->status = 'available';
         $token->save();
 
-        $response = $this->get('/display/status/'.$hash);
+        $response = $this->withKnownSiteCookie($this->defaultSite())->get($this->displayBase().'/status/'.$hash);
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -423,6 +689,7 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Test',
             'description' => null,
             'is_active' => true,
@@ -447,6 +714,7 @@ class DisplayBoardTest extends TestCase
         ]);
         $hash = hash('sha256', 'status-'.Str::random(8));
         $token = new \App\Models\Token;
+        $token->site_id = $this->defaultSite()->id;
         $token->qr_code_hash = $hash;
         $token->physical_id = 'F6';
         $token->status = 'in_use';
@@ -464,7 +732,7 @@ class DisplayBoardTest extends TestCase
         ]);
         $token->update(['current_session_id' => $session->id]);
 
-        $response = $this->get('/display/status/'.$hash);
+        $response = $this->withKnownSiteCookie($this->defaultSite())->get($this->displayBase().'/status/'.$hash);
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -486,6 +754,7 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Diagram Program',
             'description' => null,
             'is_active' => true,
@@ -525,6 +794,7 @@ class DisplayBoardTest extends TestCase
         ]);
         $hash = hash('sha256', 'diagram-'.Str::random(8));
         $token = new \App\Models\Token;
+        $token->site_id = $this->defaultSite()->id;
         $token->qr_code_hash = $hash;
         $token->physical_id = 'D1';
         $token->status = 'in_use';
@@ -542,7 +812,7 @@ class DisplayBoardTest extends TestCase
         ]);
         $token->update(['current_session_id' => $session->id]);
 
-        $response = $this->get('/display/status/'.$hash);
+        $response = $this->withKnownSiteCookie($this->defaultSite())->get($this->displayBase().'/status/'.$hash);
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -576,6 +846,7 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Test',
             'description' => null,
             'is_active' => true,
@@ -588,7 +859,7 @@ class DisplayBoardTest extends TestCase
             'is_active' => false,
         ]);
 
-        $response = $this->get('/display/station/'.$station->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'/station/'.$station->id, $station->program, $station);
 
         $response->assertStatus(404);
     }
@@ -598,6 +869,7 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Inactive Program',
             'description' => null,
             'is_active' => false,
@@ -610,7 +882,7 @@ class DisplayBoardTest extends TestCase
             'is_active' => true,
         ]);
 
-        $response = $this->get('/display/station/'.$station->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'/station/'.$station->id, $station->program, $station);
 
         $response->assertStatus(404);
     }
@@ -620,12 +892,14 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $activeProgram = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Active',
             'description' => null,
             'is_active' => true,
             'created_by' => $user->id,
         ]);
         $otherProgram = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Other',
             'description' => null,
             'is_active' => false,
@@ -638,7 +912,7 @@ class DisplayBoardTest extends TestCase
             'is_active' => true,
         ]);
 
-        $response = $this->get('/display/station/'.$station->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'/station/'.$station->id, $station->program, $station);
 
         $response->assertStatus(404);
     }
@@ -648,6 +922,7 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Cash Assistance',
             'description' => null,
             'is_active' => true,
@@ -660,7 +935,7 @@ class DisplayBoardTest extends TestCase
             'is_active' => true,
         ]);
 
-        $response = $this->get('/display/station/'.$station->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'/station/'.$station->id, $station->program, $station);
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -691,6 +966,7 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Test Program',
             'description' => null,
             'is_active' => true,
@@ -747,7 +1023,7 @@ class DisplayBoardTest extends TestCase
         ]);
         $token2->update(['current_session_id' => Session::where('alias', 'A2')->first()->id]);
 
-        $response = $this->get('/display/station/'.$station->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'/station/'.$station->id, $station->program, $station);
 
         $response->assertStatus(200);
         $props = $response->viewData('page')['props'];
@@ -768,6 +1044,7 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Test',
             'description' => null,
             'is_active' => true,
@@ -778,7 +1055,7 @@ class DisplayBoardTest extends TestCase
             ],
         ]);
 
-        $response = $this->get('/display?program='.$program->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'?program='.$program->id, $program);
 
         $response->assertStatus(200);
         $props = $response->viewData('page')['props'];
@@ -793,6 +1070,7 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Test',
             'description' => null,
             'is_active' => true,
@@ -803,7 +1081,7 @@ class DisplayBoardTest extends TestCase
             ],
         ]);
 
-        $response = $this->get('/display?program='.$program->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'?program='.$program->id, $program);
 
         $response->assertStatus(200);
         $props = $response->viewData('page')['props'];
@@ -816,7 +1094,7 @@ class DisplayBoardTest extends TestCase
     /** Per plan: general display returns default display_audio when no program. */
     public function test_display_board_returns_default_display_audio_when_no_program(): void
     {
-        $response = $this->get('/display');
+        $response = $this->withKnownSiteCookie($this->defaultSite())->get($this->displayBase());
 
         $response->assertStatus(200);
         $props = $response->viewData('page')['props'];
@@ -836,20 +1114,22 @@ class DisplayBoardTest extends TestCase
     public function test_display_board_without_program_param_returns_programs_and_selector_state(): void
     {
         $user = User::factory()->create();
-        Program::create([
+        $programA = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Program A',
             'description' => null,
             'is_active' => true,
             'created_by' => $user->id,
         ]);
-        Program::create([
+        $programB = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Program B',
             'description' => null,
             'is_active' => true,
             'created_by' => $user->id,
         ]);
 
-        $response = $this->get('/display');
+        $response = $this->withKnownSiteCookie($this->defaultSite())->get($this->displayBase());
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -878,6 +1158,7 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Cash Assistance',
             'description' => null,
             'is_active' => true,
@@ -910,7 +1191,7 @@ class DisplayBoardTest extends TestCase
         ]);
         $token->update(['current_session_id' => Session::first()->id]);
 
-        $response = $this->get('/display?program='.$program->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'?program='.$program->id, $program);
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -927,10 +1208,10 @@ class DisplayBoardTest extends TestCase
         $this->assertSame('A1', $props['now_serving'][0]['alias']);
     }
 
-    /** GET /display?program=999 (invalid id) returns 200 with program_not_found and empty board. */
+    /** GET /site/{site}/display?program=999 (invalid id) returns 200 with program_not_found and empty board. */
     public function test_display_board_with_invalid_program_param_returns_not_found_state(): void
     {
-        $response = $this->get('/display?program=99999');
+        $response = $this->withKnownSiteCookie($this->defaultSite())->get($this->displayBase().'?program=99999');
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -949,13 +1230,14 @@ class DisplayBoardTest extends TestCase
     {
         $user = User::factory()->create();
         $program = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Inactive Program',
             'description' => null,
             'is_active' => false,
             'created_by' => $user->id,
         ]);
 
-        $response = $this->get('/display?program='.$program->id);
+        $response = $this->getWithDeviceAuth($this->displayBase().'?program='.$program->id, $program);
 
         $response->assertStatus(200);
         $props = $response->viewData('page')['props'];
@@ -972,6 +1254,7 @@ class DisplayBoardTest extends TestCase
 
         // Program A with one serving session
         $programA = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Program A',
             'description' => null,
             'is_active' => true,
@@ -1006,6 +1289,7 @@ class DisplayBoardTest extends TestCase
 
         // Program B with one serving session
         $programB = Program::create([
+            'site_id' => $this->defaultSite()->id,
             'name' => 'Program B',
             'description' => null,
             'is_active' => true,
@@ -1038,8 +1322,9 @@ class DisplayBoardTest extends TestCase
         ]);
         $tokenB->update(['current_session_id' => Session::where('alias', 'B1')->first()->id]);
 
+
         // Board for Program A: only A1 visible
-        $responseA = $this->get('/display?program='.$programA->id);
+        $responseA = $this->getWithDeviceAuth($this->displayBase().'?program='.$programA->id, $programA);
         $responseA->assertStatus(200);
         $propsA = $responseA->viewData('page')['props'];
         $this->assertSame('Program A', $propsA['program_name']);
@@ -1048,7 +1333,7 @@ class DisplayBoardTest extends TestCase
         $this->assertNotContains('B1', $aliasesA);
 
         // Board for Program B: only B1 visible
-        $responseB = $this->get('/display?program='.$programB->id);
+        $responseB = $this->getWithDeviceAuth($this->displayBase().'?program='.$programB->id, $programB);
         $responseB->assertStatus(200);
         $propsB = $responseB->viewData('page')['props'];
         $this->assertSame('Program B', $propsB['program_name']);

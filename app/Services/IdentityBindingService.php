@@ -4,16 +4,14 @@ namespace App\Services;
 
 use App\Exceptions\IdentityBindingException;
 use App\Models\Client;
-use App\Models\ClientIdDocument;
 use App\Support\ClientBindingSource;
 
+/**
+ * Per PRIVACY-BY-DESIGN-IDENTITY-BINDING: resolve client from binding payload.
+ * No ID document logic; trust client_id from phone-based validated search.
+ */
 class IdentityBindingService
 {
-    public function __construct(
-        private ClientIdDocumentService $clientIdDocumentService,
-    ) {
-    }
-
     /**
      * @param  array<string,mixed>|null  $clientBinding
      * @return array{client_id: int|null, metadata: array<string,mixed>|null}
@@ -32,7 +30,6 @@ class IdentityBindingService
 
         $clientId = isset($clientBinding['client_id']) ? (int) $clientBinding['client_id'] : null;
         $source = $clientBinding['source'] ?? null;
-        $idDocumentId = isset($clientBinding['id_document_id']) ? (int) $clientBinding['id_document_id'] : null;
 
         if (! $clientId || ! is_string($source) || $source === '') {
             if ($bindingRequired) {
@@ -51,53 +48,11 @@ class IdentityBindingService
             return ['client_id' => null, 'metadata' => null];
         }
 
-        $idDocumentBased = ClientBindingSource::requiresIdDocument($source);
-
-        if ($idDocumentBased) {
-            if (! $idDocumentId) {
-                if ($bindingRequired) {
-                    throw new IdentityBindingException();
-                }
-
-                return ['client_id' => null, 'metadata' => null];
-            }
-
-            $idDocument = ClientIdDocument::find($idDocumentId);
-            if (! $idDocument || $idDocument->client_id !== $client->id) {
-                if ($bindingRequired) {
-                    throw new IdentityBindingException();
-                }
-
-                return ['client_id' => null, 'metadata' => null];
-            }
-
-            $idLast4 = $this->clientIdDocumentService->getIdLast4FromDocument($idDocument);
-
-            $metadata = [
-                'client_id' => $client->id,
-                'binding_mode' => $bindingMode,
-                'binding_source' => $bindingSource,
-                'binding_request_source' => $source,
-                'id_type' => $idDocument->id_type,
-                'id_last4' => $idLast4,
-                'matched_existing_client' => true,
-                'previous_client_id' => null,
-            ];
-
-            return [
-                'client_id' => $client->id,
-                'metadata' => $metadata,
-            ];
-        }
-
-        // name_search or manual: binding by client only, no ID document required
         $metadata = [
             'client_id' => $client->id,
             'binding_mode' => $bindingMode,
             'binding_source' => $bindingSource,
             'binding_request_source' => $source,
-            'matched_existing_client' => true,
-            'previous_client_id' => null,
         ];
 
         return [
@@ -106,4 +61,3 @@ class IdentityBindingService
         ];
     }
 }
-

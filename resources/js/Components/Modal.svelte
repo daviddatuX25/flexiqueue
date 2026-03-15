@@ -1,6 +1,7 @@
 <script>
 	/**
 	 * Modal — generic dialog wrapper using native <dialog> + Skeleton styling.
+	 * Blur backdrop (via .modal-backdrop) and close on click outside; Escape and X also close.
 	 * Per 07-UI-UX-SPECS.md Section 6.3, 9.2. Use element.showModal() / close().
 	 */
 	let {
@@ -10,6 +11,8 @@
 		children,
 		/** When true, use a wider card (e.g. for scanner modal). */
 		wide = false,
+		/** When true (default), clicking the backdrop or pressing Enter/Space on it closes the modal. Set false for critical dialogs that must not close on outside click. */
+		closeOnBackdropClick = true,
 	} = $props();
 
 	let dialogEl = $state(/** @type {HTMLDialogElement | null} */ (null));
@@ -64,23 +67,43 @@
 			previous.focus();
 		}
 	}
+
+	function handleBackdropClick() {
+		if (closeOnBackdropClick) handleClose();
+	}
+
+	function handleBackdropKeydown(e) {
+		if (closeOnBackdropClick && (e.key === 'Enter' || e.key === ' ')) {
+			e.preventDefault();
+			handleClose();
+		}
+	}
 </script>
 
-<!-- Per ISSUES-ELABORATION: only explicit Close/Cancel (and optionally Escape) close; no click-outside. Per UI-UX-QA: aria-modal and focus trap. -->
+<!-- Blur backdrop via .modal-backdrop; close on backdrop click (when closeOnBackdropClick), Escape, or X. Per UI-UX-QA: aria-modal and focus trap. -->
 <dialog
 	bind:this={dialogEl}
-	class="modal-dialog-center p-0 m-0 rounded-none border-0 shadow-none bg-transparent backdrop:bg-black/50"
+	class="modal-dialog-center p-0 m-0 rounded-none border-0 shadow-none bg-transparent backdrop:bg-transparent"
 	aria-modal="true"
 	onclose={handleClose}
 	oncancel={(e) => e.preventDefault()}
-	onkeydown={(e) => e.key === 'Escape' && handleClose()}
+	onkeydown={(e) => {
+		if (e.key === 'Escape') handleClose();
+		else handleKeydown(e);
+	}}
 >
+	<button
+		type="button"
+		class="modal-backdrop border-0 p-0 appearance-none font-inherit cursor-pointer"
+		aria-hidden="true"
+		tabindex="-1"
+		onclick={handleBackdropClick}
+		onkeydown={handleBackdropKeydown}
+	></button>
 	<div
-		class="card bg-surface-50 rounded-container elevation-modal p-4 sm:p-6 relative max-h-[85dvh] sm:max-h-[90vh] overflow-y-auto w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] sm:max-w-2xl mx-auto {wide ? 'min-w-0 sm:min-w-[36rem] sm:w-full' : ''}"
+		class="card bg-surface-50 rounded-container elevation-modal p-4 sm:p-6 relative max-h-[85dvh] sm:max-h-[90vh] overflow-y-auto w-[calc(100vw-1.5rem)] max-w-[calc(100vw-1.5rem)] sm:w-[calc(100vw-2rem)] sm:max-w-2xl mx-auto {wide ? 'min-w-0 sm:min-w-[36rem] sm:w-full' : ''}"
 		role="document"
 		aria-label={title || 'Dialog'}
-		onclick={(e) => e.stopPropagation()}
-		onkeydown={handleKeydown}
 	>
 		{#if title}
 			<h3 class="font-bold text-lg text-surface-950">{title}</h3>
@@ -90,12 +113,12 @@
 				{@render children()}
 			{/if}
 		</div>
+		<!-- Per ui-ux-tasks-checklist: no background on close (X); ghost style, hover only -->
 		<button
 			type="button"
-			class="btn btn-icon btn-icon-sm preset-tonal absolute right-2 top-2"
+			class="btn btn-icon btn-icon-sm bg-transparent border-0 text-surface-600 hover:text-surface-950 hover:bg-surface-200 dark:text-surface-400 dark:hover:text-surface-100 dark:hover:bg-surface-700 absolute right-2 top-2 shadow-none"
 			aria-label="Close"
 			onclick={handleClose}
 		>✕</button>
 	</div>
-	<!-- Per flexiqueue-ldd: no form/button on backdrop — only explicit Close or Escape close the modal -->
 </dialog>

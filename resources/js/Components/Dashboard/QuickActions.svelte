@@ -57,28 +57,28 @@
         </div>
     </div>
 
-    <!-- Staff Online -->
+    <!-- Staff Online — per ui-ux-tasks-checklist: fix unreadable gray text and consistent layout -->
     {#if stats}
         <div class="card bg-surface-50 rounded-container elevation-card mt-4">
             <div class="card-body p-5 flex items-center justify-between">
                 <div class="flex items-center gap-4">
                     <div
-                        class="p-3 bg-secondary-100 text-secondary-600 rounded-xl"
+                        class="p-3 bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded-xl"
                     >
                         <Users class="h-6 w-6" />
                     </div>
                     <div>
                         <p
-                            class="text-sm font-semibold uppercase tracking-wider text-surface-500 mb-0.5"
+                            class="text-sm font-semibold uppercase tracking-wider text-surface-800 dark:text-surface-200 mb-0.5"
                         >
                             Staff Online
                         </p>
-                        <p class="text-xs text-surface-400">
+                        <p class="text-xs text-surface-600 dark:text-surface-400">
                             Available and assigned
                         </p>
                     </div>
                 </div>
-                <div class="text-3xl font-bold text-surface-900">
+                <div class="text-3xl font-bold text-surface-900 dark:text-surface-100">
                     {stats.staff_online}
                 </div>
             </div>

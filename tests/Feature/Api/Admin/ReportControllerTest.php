@@ -4,6 +4,7 @@ namespace Tests\Feature\Api\Admin;
 
 use App\Models\Program;
 use App\Models\ProgramAuditLog;
+use App\Models\Site;
 use App\Models\ServiceTrack;
 use App\Models\Session;
 use App\Models\Station;
@@ -13,6 +14,7 @@ use App\Models\TrackStep;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -38,9 +40,17 @@ class ReportControllerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->admin = User::factory()->admin()->create();
-        $this->staff = User::factory()->create(['role' => 'staff']);
+        $site = Site::create([
+            'name' => 'Default Site',
+            'slug' => 'default',
+            'api_key_hash' => Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $this->admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $this->staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
         $this->program = Program::create([
+            'site_id' => $site->id,
             'name' => 'Test Program',
             'description' => null,
             'is_active' => true,
@@ -167,6 +177,7 @@ class ReportControllerTest extends TestCase
     public function test_audit_filters_by_program_id(): void
     {
         $otherProgram = Program::create([
+            'site_id' => $this->program->site_id,
             'name' => 'Other',
             'description' => null,
             'is_active' => false,
@@ -288,5 +299,111 @@ class ReportControllerTest extends TestCase
         $response = $this->actingAs($this->staff)->get('/api/admin/logs/audit/export');
 
         $response->assertStatus(403);
+    }
+
+    /** Per site-scoping-migration-spec §5: site admin with null site_id gets 403. */
+    public function test_site_admin_with_null_site_id_gets_403_on_program_sessions(): void
+    {
+        $adminNoSite = User::factory()->admin()->create(['site_id' => null]);
+
+        $response = $this->actingAs($adminNoSite)->getJson('/api/admin/logs/program-sessions');
+
+        $response->assertStatus(403);
+    }
+
+    /** Per site-scoping-migration-spec §5: site admin with null site_id gets 403. */
+    public function test_site_admin_with_null_site_id_gets_403_on_audit(): void
+    {
+        $adminNoSite = User::factory()->admin()->create(['site_id' => null]);
+
+        $response = $this->actingAs($adminNoSite)->getJson('/api/admin/logs/audit');
+
+        $response->assertStatus(403);
+    }
+
+    /** Per site-scoping-migration-spec §5: site admin cannot see program sessions from another site. */
+    public function test_site_admin_cannot_see_program_sessions_from_other_site(): void
+    {
+        $siteB = Site::create([
+            'name' => 'Site B',
+            'slug' => 'site-b',
+            'api_key_hash' => Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $adminB = User::factory()->admin()->create(['site_id' => $siteB->id]);
+        $programB = Program::create([
+            'site_id' => $siteB->id,
+            'name' => 'Program B',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $adminB->id,
+        ]);
+        ProgramAuditLog::create([
+            'program_id' => $programB->id,
+            'staff_user_id' => $adminB->id,
+            'action' => 'session_start',
+        ]);
+
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/logs/program-sessions');
+
+        $response->assertStatus(200);
+        $sessions = $response->json('program_sessions');
+        $programIds = collect($sessions)->pluck('program_id')->unique()->values()->all();
+        $this->assertNotContains($programB->id, $programIds);
+    }
+
+    /** Per site-scoping-migration-spec §5: site admin cannot see audit for program in another site. */
+    public function test_site_admin_cannot_see_audit_log_for_other_site_program(): void
+    {
+        $siteB = Site::create([
+            'name' => 'Site B',
+            'slug' => 'site-b',
+            'api_key_hash' => Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $programB = Program::create([
+            'site_id' => $siteB->id,
+            'name' => 'Program B',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $this->admin->id,
+        ]);
+
+        $response = $this->actingAs($this->admin)->getJson("/api/admin/logs/audit?program_id={$programB->id}");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('meta.total', 0);
+    }
+
+    /** Per site-scoping-migration-spec §5: program_session_id from other site returns empty. */
+    public function test_program_session_id_from_other_site_returns_empty_audit(): void
+    {
+        $siteB = Site::create([
+            'name' => 'Site B',
+            'slug' => 'site-b',
+            'api_key_hash' => Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $adminB = User::factory()->admin()->create(['site_id' => $siteB->id]);
+        $programB = Program::create([
+            'site_id' => $siteB->id,
+            'name' => 'Program B',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $adminB->id,
+        ]);
+        $pal = ProgramAuditLog::create([
+            'program_id' => $programB->id,
+            'staff_user_id' => $adminB->id,
+            'action' => 'session_start',
+        ]);
+
+        $response = $this->actingAs($this->admin)->getJson("/api/admin/logs/audit?program_session_id={$pal->id}");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('meta.total', 0);
     }
 }

@@ -1,8 +1,12 @@
 <script lang="ts">
 	import { useForm } from '@inertiajs/svelte';
 	import AuthLayout from '../../Layouts/AuthLayout.svelte';
+	import AppBackground from '../../Components/AppBackground.svelte';
 
 	let { status = null, error = null } = $props();
+
+	/** Same program photo as Home / app shell so login feels part of the same experience */
+	const heroImageUrl = '/images/mswdo_tagudin.jpg';
 
 	const form = useForm({
 		email: '',
@@ -15,7 +19,20 @@
 </svelte:head>
 
 <AuthLayout>
-	<main class="min-h-screen bg-surface-100 flex flex-col items-center justify-center p-6">
+	<!-- Same program photo background as Home so login is visibly on-brand -->
+	<AppBackground heroImageUrl={heroImageUrl} />
+	<main class="min-h-screen flex flex-col items-center justify-center p-6 relative">
+		<!-- Per ui-ux-tasks-checklist: back button to return to public/home -->
+		<a
+			href="/"
+			class="absolute top-4 left-4 sm:top-6 sm:left-6 inline-flex items-center gap-2 text-sm font-medium text-surface-600 hover:text-surface-950 dark:text-slate-400 dark:hover:text-slate-100 transition-colors no-underline"
+			aria-label="Back to home"
+		>
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+			</svg>
+			Back to home
+		</a>
 		<div class="card bg-surface-50 rounded-container shadow-xl max-w-md w-full p-6">
 			<h1 class="text-2xl font-bold text-primary-500 text-center">FlexiQueue</h1>
 			<p class="text-center text-surface-950/80 text-sm mt-1">Sign in with your email and password.</p>

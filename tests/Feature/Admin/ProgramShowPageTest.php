@@ -67,7 +67,7 @@ class ProgramShowPageTest extends TestCase
         $response->assertInertia(fn ($page) => $page
             ->component('Admin/Programs/Show')
             ->has('tab_order')
-            ->where('tab_order', ['Overview', 'Processes', 'Stations', 'Staff', 'Track', 'Diagram', 'Settings'])
+            ->where('tab_order', ['Overview', 'Public Page', 'Processes', 'Stations', 'Staff', 'Track', 'Diagram', 'Settings'])
         );
     }
 

@@ -10,9 +10,9 @@ use Illuminate\Validation\Rule;
  */
 final class ClientBindingSource
 {
-    public const EXISTING_ID_DOCUMENT = 'existing_id_document';
+    public const PHONE_MATCH = 'phone_match';
 
-    public const NEW_ID_DOCUMENT = 'new_id_document';
+    public const NEW_CLIENT = 'new_client';
 
     public const NAME_SEARCH = 'name_search';
 
@@ -20,16 +20,10 @@ final class ClientBindingSource
 
     /** @var list<string> */
     private const ALL = [
-        self::EXISTING_ID_DOCUMENT,
-        self::NEW_ID_DOCUMENT,
+        self::PHONE_MATCH,
+        self::NEW_CLIENT,
         self::NAME_SEARCH,
         self::MANUAL,
-    ];
-
-    /** @var list<string> Sources that require client_binding.id_document_id. */
-    private const REQUIRES_ID_DOCUMENT = [
-        self::EXISTING_ID_DOCUMENT,
-        self::NEW_ID_DOCUMENT,
     ];
 
     /**
@@ -40,14 +34,6 @@ final class ClientBindingSource
     public static function all(): array
     {
         return self::ALL;
-    }
-
-    /**
-     * Whether this source requires an ID document to be present.
-     */
-    public static function requiresIdDocument(string $source): bool
-    {
-        return in_array($source, self::REQUIRES_ID_DOCUMENT, true);
     }
 
     /**

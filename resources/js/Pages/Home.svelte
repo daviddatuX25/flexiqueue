@@ -1,10 +1,44 @@
 <script lang="ts">
-    import { usePage } from "@inertiajs/svelte";
+    import { usePage, router } from "@inertiajs/svelte";
     import { Link } from "@inertiajs/svelte";
     import AuthLayout from "../Layouts/AuthLayout.svelte";
     import AppBackground from "../Components/AppBackground.svelte";
     import ThemeToggle from "../Components/ThemeToggle.svelte";
+    import Modal from "../Components/Modal.svelte";
     import { fade } from "svelte/transition";
+
+    const KNOWN_SITES_COOKIE = "known_sites";
+    const KNOWN_SITES_MAX_AGE_DAYS = 365;
+
+    type KnownSite = { slug: string; name: string };
+
+    function getKnownSites(): KnownSite[] {
+        if (typeof document === "undefined") return [];
+        const raw = document.cookie
+            .split("; ")
+            .find((row) => row.startsWith(KNOWN_SITES_COOKIE + "="));
+        if (!raw) return [];
+        const value = decodeURIComponent(raw.slice(KNOWN_SITES_COOKIE.length + 1).trim());
+        try {
+            const parsed = JSON.parse(value);
+            if (!Array.isArray(parsed)) return [];
+            return parsed.filter((x): x is KnownSite => x && typeof x.slug === "string");
+        } catch {
+            return [];
+        }
+    }
+
+    function setKnownSites(sites: KnownSite[]) {
+        if (typeof document === "undefined") return;
+        const value = encodeURIComponent(JSON.stringify(sites));
+        document.cookie = `${KNOWN_SITES_COOKIE}=${value}; path=/; max-age=${KNOWN_SITES_MAX_AGE_DAYS * 86400}; SameSite=Lax`;
+    }
+
+    function addKnownSite(slug: string, name: string) {
+        const sites = getKnownSites();
+        if (sites.some((s) => s.slug === slug)) return;
+        setKnownSites([...sites, { slug, name }]);
+    }
 
     interface Props {
         dashboardRoute?: string | null;
@@ -13,9 +47,7 @@
         appName?: string;
         appEnv?: string;
         appVersion?: string;
-        queueCount?: number;
-        processedToday?: number;
-        hasActiveProgram?: boolean;
+        default_site_slug?: string | null;
         heroImageUrl?: string;
     }
 
@@ -217,9 +249,7 @@
         appName = "FlexiQueue",
         appEnv = "production",
         appVersion = "1.0.0-dev",
-        queueCount = 0,
-        processedToday = 0,
-        hasActiveProgram = false,
+        default_site_slug = null,
         heroImageUrl = "/images/mswdo_tagudin.jpg",
     }: Props = $props();
 
@@ -228,15 +258,108 @@
         ($page?.props as { auth?: { user?: { name?: string } } })?.auth?.user ??
             null,
     );
-    const activeProgram = $derived(
-        ($page?.props as { activeProgram?: unknown })?.activeProgram ?? null,
-    );
     const csrfToken = $derived(
         ($page?.props as { csrf_token?: string })?.csrf_token ?? "",
     );
 
-    const showTriageCta = $derived(!!activeProgram);
-    const showPeopleServed = $derived(hasActiveProgram);
+    /** Per public-site plan: global stats from /api/home-stats, poll every 30s. */
+    let homeStats = $state<{ served_count: number; session_hours: number } | null>(null);
+
+    function fetchHomeStats() {
+        fetch("/api/home-stats", { credentials: "same-origin" })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+                if (data && typeof data.served_count === "number" && typeof data.session_hours === "number") {
+                    homeStats = { served_count: data.served_count, session_hours: data.session_hours };
+                }
+            })
+            .catch(() => {});
+    }
+
+    $effect(() => {
+        if (typeof fetch === "undefined") return;
+        fetchHomeStats();
+        const id = setInterval(fetchHomeStats, 30000);
+        return () => clearInterval(id);
+    });
+
+    /** When URL has site_key_for + program_key_prompt and user already has that site, redirect to site landing so program key modal shows there. */
+    $effect(() => {
+        if (typeof window === "undefined") return;
+        const params = new URLSearchParams(window.location.search);
+        const siteSlug = params.get("site_key_for");
+        const programSlug = params.get("program_key_prompt");
+        if (siteSlug && programSlug && getKnownSites().some((s) => s.slug === siteSlug)) {
+            router.visit("/site/" + siteSlug + "?program_key_prompt=" + encodeURIComponent(programSlug));
+        }
+    });
+
+    /** Per public-site plan: site key entry and site picker modals; resolve Monitor your queue destination. */
+    let showKeyEntryModal = $state(false);
+    let showSitePickerModal = $state(false);
+    let keyInput = $state("");
+    let keyEntryError = $state("");
+    let keySubmitting = $state(false);
+    let knownSitesList = $state<KnownSite[]>([]);
+
+    function openMonitorQueue() {
+        const sites = getKnownSites();
+        if (sites.length === 0) {
+            keyEntryError = "";
+            keyInput = "";
+            showKeyEntryModal = true;
+        } else if (sites.length === 1) {
+            router.visit("/site/" + sites[0].slug);
+        } else {
+            knownSitesList = sites;
+            showSitePickerModal = true;
+        }
+    }
+
+    function closeKeyEntry() {
+        showKeyEntryModal = false;
+        keyEntryError = "";
+        keyInput = "";
+    }
+
+    async function submitSiteKey() {
+        const key = keyInput.trim();
+        if (!key) return;
+        keyEntryError = "";
+        keySubmitting = true;
+        try {
+            const res = await fetch("/api/public/site-key", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Accept: "application/json", "X-CSRF-TOKEN": csrfToken, "X-Requested-With": "XMLHttpRequest" },
+                body: JSON.stringify({ key }),
+                credentials: "same-origin",
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data.slug) {
+                addKnownSite(data.slug, data.name || data.slug);
+                closeKeyEntry();
+                const url = typeof window !== "undefined" ? new URL(window.location.href) : null;
+                const programKeyPrompt = url?.searchParams.get("program_key_prompt");
+                const target = programKeyPrompt
+                    ? "/site/" + data.slug + "?program_key_prompt=" + encodeURIComponent(programKeyPrompt)
+                    : "/site/" + data.slug;
+                router.visit(target);
+            } else {
+                keyEntryError = "Invalid key. Please try again.";
+            }
+        } catch {
+            keyEntryError = "Something went wrong. Please try again.";
+        } finally {
+            keySubmitting = false;
+        }
+    }
+
+    function openAddSiteKey() {
+        showSitePickerModal = false;
+        keyEntryError = "";
+        keyInput = "";
+        showKeyEntryModal = true;
+    }
 
     const initialJourneyTab =
         roleBadge === "admin" ||
@@ -323,7 +446,7 @@
                     <Link
                         href="/login"
                         class="hover:text-primary-500 dark:hover:text-primary-400 transition-colors font-medium"
-                        >Staff Login</Link
+                        >Login</Link
                     >
                     <div
                         class="h-4 w-px bg-surface-300 dark:bg-surface-600"
@@ -402,54 +525,53 @@
                     immutable audit trail.
                 </p>
 
-                {#if showPeopleServed}
+                <div
+                    class="flex flex-wrap justify-center gap-6 mb-12"
+                    in:fade={{ delay: 400 }}
+                >
                     <div
-                        class="flex flex-wrap justify-center gap-6 mb-12"
-                        in:fade={{ delay: 400 }}
+                        class="bg-white/60 dark:bg-slate-800/60 backdrop-blur-xl md:backdrop-blur-none md:bg-white/80 md:dark:bg-slate-800/80 border border-surface-200/50 dark:border-slate-700/50 rounded-2xl px-8 py-5 shadow-lg"
                     >
                         <div
-                            class="bg-white/60 dark:bg-slate-800/60 backdrop-blur-xl md:backdrop-blur-none md:bg-white/80 md:dark:bg-slate-800/80 border border-surface-200/50 dark:border-slate-700/50 rounded-2xl px-8 py-5 shadow-lg"
+                            class="text-5xl font-black text-surface-800 dark:text-white"
                         >
-                            <div
-                                class="text-5xl font-black text-surface-800 dark:text-white"
-                            >
-                                {queueCount}
-                            </div>
-                            <div
-                                class="text-xs font-bold text-surface-500 dark:text-surface-300 uppercase tracking-widest mt-2"
-                            >
-                                In Queue
-                            </div>
+                            {homeStats ? homeStats.served_count : "—"}
                         </div>
                         <div
-                            class="bg-white/60 dark:bg-slate-800/60 backdrop-blur-xl md:backdrop-blur-none md:bg-white/80 md:dark:bg-slate-800/80 border border-surface-200/50 dark:border-slate-700/50 rounded-2xl px-8 py-5 shadow-lg"
+                            class="text-xs font-bold text-surface-500 dark:text-surface-300 uppercase tracking-widest mt-2"
                         >
-                            <div
-                                class="text-5xl font-black text-primary-600 dark:text-primary-400"
-                            >
-                                {processedToday}
-                            </div>
-                            <div
-                                class="text-xs font-bold text-surface-500 dark:text-surface-300 uppercase tracking-widest mt-2"
-                            >
-                                Processed Today
-                            </div>
+                            People served
                         </div>
                     </div>
-                {/if}
+                    <div
+                        class="bg-white/60 dark:bg-slate-800/60 backdrop-blur-xl md:backdrop-blur-none md:bg-white/80 md:dark:bg-slate-800/80 border border-surface-200/50 dark:border-slate-700/50 rounded-2xl px-8 py-5 shadow-lg"
+                    >
+                        <div
+                            class="text-5xl font-black text-primary-600 dark:text-primary-400"
+                        >
+                            {homeStats ? homeStats.session_hours : "—"}
+                        </div>
+                        <div
+                            class="text-xs font-bold text-surface-500 dark:text-surface-300 uppercase tracking-widest mt-2"
+                        >
+                            Program hours
+                        </div>
+                    </div>
+                </div>
 
                 <div
                     class="flex flex-col sm:flex-row items-center justify-center gap-5"
                     in:fade={{ delay: 500 }}
                 >
-                    <Link
-                        href="/display"
+                    <button
+                        type="button"
+                        onclick={openMonitorQueue}
                         class="w-full sm:w-auto px-8 py-4 rounded-xl bg-surface-900 dark:bg-primary-600 hover:bg-surface-800 dark:hover:bg-primary-500 text-white font-bold text-lg shadow-[0_4px_20px_rgba(0,0,0,0.15)] hover:-translate-y-1 transition-all duration-300 flex items-center justify-center gap-3 relative overflow-hidden group"
                     >
                         <div
                             class="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300"
                         ></div>
-                        <span class="relative">Launch Queue Display</span>
+                        <span class="relative">Monitor your queue <span class="text-xs font-normal opacity-90">(Beta)</span></span>
                         <svg
                             class="w-5 h-5 relative"
                             fill="none"
@@ -462,13 +584,13 @@
                                 d="M14 5l7 7m0 0l-7 7m7-7H3"
                             ></path></svg
                         >
-                    </Link>
+                    </button>
                     {#if !authUser}
                         <Link
                             href="/login"
                             class="w-full sm:w-auto px-8 py-4 rounded-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-md md:backdrop-blur-none md:bg-white/95 md:dark:bg-slate-800/95 hover:bg-white dark:hover:bg-slate-700 border border-surface-200 dark:border-slate-700 !text-surface-800 dark:!text-white font-bold text-lg hover:-translate-y-1 transition-all duration-300 shadow-sm"
                         >
-                            Staff Login
+                            Login
                         </Link>
                     {/if}
                 </div>
@@ -902,9 +1024,10 @@
                             </p>
                         </div>
                         <div class="lg:col-span-3 grid sm:grid-cols-2 gap-6">
-                            <Link
-                                href="/display"
-                                class="bg-white/10 hover:bg-white/20 backdrop-blur-xl md:backdrop-blur-none md:bg-white/15 border border-white/20 p-8 rounded-[2rem] transition-all duration-300 hover:scale-[1.03] active:scale-95 text-center flex flex-col items-center gap-4"
+                            <button
+                                type="button"
+                                onclick={openMonitorQueue}
+                                class="bg-white/10 hover:bg-white/20 backdrop-blur-xl md:backdrop-blur-none md:bg-white/15 border border-white/20 p-8 rounded-[2rem] transition-all duration-300 hover:scale-[1.03] active:scale-95 text-center flex flex-col items-center gap-4 w-full"
                             >
                                 <svg
                                     class="w-10 h-10 text-primary-200"
@@ -920,47 +1043,18 @@
                                 >
                                 <div>
                                     <h4 class="font-bold text-white text-xl">
-                                        Queue Display
+                                        Monitor your queue
                                     </h4>
                                     <p
                                         class="text-xs font-bold text-primary-200 mt-2 uppercase tracking-widest"
                                     >
-                                        Live full view
+                                        Live full view (Beta)
                                     </p>
                                 </div>
-                            </Link>
+                            </button>
 
-                            {#if showTriageCta}
-                                <Link
-                                    href="/triage/start"
-                                    class="bg-white text-primary-900 p-8 rounded-[2rem] transition-all duration-300 hover:scale-[1.03] active:scale-95 shadow-2xl text-center flex flex-col items-center gap-4"
-                                >
-                                    <svg
-                                        class="w-10 h-10 text-primary-600"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        viewBox="0 0 24 24"
-                                        ><path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"
-                                        ></path></svg
-                                    >
-                                    <div>
-                                        <h4 class="font-bold text-xl">
-                                            Start Triage
-                                        </h4>
-                                        <p
-                                            class="text-xs font-bold text-primary-600 mt-2 uppercase tracking-widest"
-                                        >
-                                            Bind Token
-                                        </p>
-                                    </div>
-                                </Link>
-                            {:else}
-                                <Link
-                                    href="/display/station/1"
+                            <Link
+                                href="/display/station/1"
                                     class="bg-white/10 hover:bg-white/20 backdrop-blur-xl md:backdrop-blur-none md:bg-white/15 border border-white/20 p-8 rounded-[2rem] transition-all duration-300 hover:scale-[1.03] active:scale-95 text-center flex flex-col items-center gap-4"
                                 >
                                     <svg
@@ -988,7 +1082,6 @@
                                         </p>
                                     </div>
                                 </Link>
-                            {/if}
                         </div>
                     </div>
                 </div>
@@ -1082,7 +1175,7 @@
                 <Link
                     href="/login"
                     class="hover:text-primary-600 dark:hover:text-primary-400 transition-colors uppercase tracking-wide text-xs"
-                    >Staff Login</Link
+                    >Login</Link
                 >
                 <span
                     class="text-surface-400 dark:text-surface-500"
@@ -1096,4 +1189,68 @@
             </div>
         </footer>
     </div>
+
+    <!-- Site key entry: per public-site plan -->
+    <Modal
+        open={showKeyEntryModal}
+        title="Enter site key"
+        onClose={closeKeyEntry}
+    >
+        <form
+            onsubmit={(e) => {
+                e.preventDefault();
+                submitSiteKey();
+            }}
+            class="space-y-4"
+        >
+            <p class="text-sm text-surface-600 dark:text-slate-400">
+                Enter the site key provided by your venue to access the queue display.
+            </p>
+            <input
+                type="text"
+                bind:value={keyInput}
+                placeholder="e.g. TAGUDIN8"
+                class="input w-full"
+                autocomplete="off"
+                disabled={keySubmitting}
+            />
+            {#if keyEntryError}
+                <p class="text-sm text-red-600 dark:text-red-400">{keyEntryError}</p>
+            {/if}
+            <div class="flex gap-2 justify-end">
+                <button type="button" onclick={closeKeyEntry} class="btn variant-ghost">Cancel</button>
+                <button type="submit" class="btn" disabled={keySubmitting}>
+                    {keySubmitting ? "Checking…" : "Continue"}
+                </button>
+            </div>
+        </form>
+    </Modal>
+
+    <!-- Site picker: when 2+ known sites -->
+    <Modal
+        open={showSitePickerModal}
+        title="Choose a site"
+        onClose={() => (showSitePickerModal = false)}
+    >
+        <div class="space-y-4">
+            <p class="text-sm text-surface-600 dark:text-slate-400">
+                Select a site to view its queue, or add another site key.
+            </p>
+            <ul class="space-y-2">
+                {#each knownSitesList as site (site.slug)}
+                    <li>
+                        <Link
+                            href="/site/{site.slug}"
+                            class="btn preset-tonal flex w-full justify-start"
+                        >
+                            {site.name}
+                        </Link>
+                    </li>
+                {/each}
+            </ul>
+            <button type="button" onclick={openAddSiteKey} class="btn variant-outline w-full">
+                Enter another site key
+            </button>
+        </div>
+    </Modal>
 </AuthLayout>

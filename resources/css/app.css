@@ -48,10 +48,12 @@ dialog[open] {
 	box-sizing: border-box;
 }
 
-/* Class-based override so centering wins on admin/layout pages — only when open */
-dialog[open].modal-dialog-center {
+/* Skeleton/DaisyUI-style modal: dialog transparent so page shows through; z-50 so modals cover footer (z-10). */
+dialog[open].modal-dialog-center,
+dialog[open].modal {
 	position: fixed !important;
 	inset: 0 !important;
+	z-index: 50 !important;
 	display: flex !important;
 	align-items: center !important;
 	justify-content: center !important;
@@ -62,11 +64,38 @@ dialog[open].modal-dialog-center {
 	min-height: 100vh !important;
 	min-height: 100dvh !important;
 	box-sizing: border-box !important;
+	background: transparent !important;
+	border: none !important;
 }
 
-/* modal-backdrop: form fills dialog for click-to-close (DaisyUI migration per SKELETON-COMPONENT-MAPPING) */
+/* Modal content (modal-box or first non-backdrop child) above backdrop */
+dialog[open].modal > .modal-box,
+dialog[open].modal > *:not(.modal-backdrop):not(form),
+dialog[open].modal-dialog-center > *:not(.modal-backdrop) {
+	position: relative;
+	z-index: 1;
+}
+
+/* Per ui-ux-tasks-checklist: scrollbar always visible — stable gutter so layout doesn’t shift when scrollbar appears */
+.fq-main-scroll {
+	scrollbar-gutter: stable;
+}
+
+/* Sidebar nav: hide scrollbar but keep scroll (admin sidebar) */
+.fq-sidebar-nav {
+	scrollbar-width: none;
+}
+.fq-sidebar-nav::-webkit-scrollbar {
+	display: none;
+}
+
+/* Skeleton/DaisyUI-style backdrop: semi-transparent overlay so background is visible; click to close (handler per dialog) */
 .modal-backdrop {
-	position: absolute;
-	inset: 0;
-	z-index: -1;
+	position: absolute !important;
+	inset: 0 !important;
+	z-index: 0 !important;
+	background: rgba(0, 0, 0, 0.25) !important;
+	backdrop-filter: blur(4px);
+	-webkit-backdrop-filter: blur(4px);
+	cursor: pointer;
 }

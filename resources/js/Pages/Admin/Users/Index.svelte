@@ -18,6 +18,7 @@
         Clock,
     } from "lucide-svelte";
     import UserAvatar from "../../../Components/UserAvatar.svelte";
+    import PasswordInput from "../../../Components/PasswordInput.svelte";
 
     interface SiteOption {
         id: number;
@@ -64,6 +65,7 @@
     let createName = $state("");
     let createEmail = $state("");
     let createPassword = $state("");
+    let createPasswordConfirm = $state("");
     let createRole = $state<"admin" | "staff">("staff");
     let createOverridePin = $state("");
     let createSiteId = $state<string | number>("");
@@ -75,6 +77,7 @@
     let editOverridePin = $state("");
     let editSiteId = $state<string | number>("");
     let resetPassword = $state("");
+    let resetPasswordConfirm = $state("");
 
     const page = usePage();
     function getCsrfToken(): string {
@@ -142,6 +145,7 @@
         createName = "";
         createEmail = "";
         createPassword = "";
+        createPasswordConfirm = "";
         createRole = (allowed_roles_for_create?.[0] ?? "staff") as "admin" | "staff";
         createOverridePin = "";
         createSiteId = sites?.length ? sites[0].id : "";
@@ -152,9 +156,18 @@
         if (
             !createName.trim() ||
             !createEmail.trim() ||
-            !createPassword.trim()
+            !createPassword.trim() ||
+            !createPasswordConfirm.trim()
         ) {
-            toaster.error({ title: "Name, email, and password are required." });
+            toaster.error({ title: "Name, email, password, and confirm password are required." });
+            return;
+        }
+        if (createPassword !== createPasswordConfirm) {
+            toaster.error({ title: "Password and confirm password must match." });
+            return;
+        }
+        if (createPassword.length < 8) {
+            toaster.error({ title: "Password must be at least 8 characters." });
             return;
         }
         submitting = true;
@@ -162,6 +175,7 @@
             name: string;
             email: string;
             password: string;
+            password_confirmation: string;
             role: string;
             override_pin?: string;
             site_id?: number | null;
@@ -169,6 +183,7 @@
             name: createName.trim(),
             email: createEmail.trim(),
             password: createPassword,
+            password_confirmation: createPasswordConfirm,
             role: createRole,
         };
         if (createOverridePin.trim())
@@ -239,12 +254,17 @@
     function openReset(u: UserItem) {
         resetUser = u;
         resetPassword = "";
+        resetPasswordConfirm = "";
         showResetModal = true;
     }
 
     async function handleReset() {
         if (!resetUser || !resetPassword.trim() || resetPassword.length < 8) {
             toaster.error({ title: "Password must be at least 8 characters." });
+            return;
+        }
+        if (resetPassword !== resetPasswordConfirm) {
+            toaster.error({ title: "Passwords don't match." });
             return;
         }
         submitting = true;
@@ -260,6 +280,8 @@
             toaster.success({ title: "Password reset." });
             showResetModal = false;
             resetUser = null;
+            resetPassword = "";
+            resetPasswordConfirm = "";
         } else toaster.error({ title: msg ?? "Failed to reset password." });
     }
 
@@ -317,13 +339,27 @@
                 Staff tab.
             </p>
         </div>
-        <button
-            type="button"
-            class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm"
-            onclick={openCreate}
+        <div
+            class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto mt-2 sm:mt-0"
         >
-            <UserPlus class="w-4 h-4" /> Add Staff
-        </button>
+            <button
+                type="button"
+                class="btn preset-filled-primary-500 flex justify-center items-center gap-2 w-full sm:w-auto shadow-sm transition-transform active:scale-95 md:flex hidden"
+                onclick={openCreate}
+                aria-label="Add Staff"
+            >
+                <UserPlus class="w-4 h-4" /> Add Staff
+            </button>
+        </div>
+        <!-- Mobile FAB: circular icon-only bottom-right, above footer (per Phase 3 Configuration) -->
+            <button
+                type="button"
+                class="fixed bottom-[87px] right-[23px] z-50 flex md:hidden items-center justify-center w-14 h-14 rounded-full bg-primary-500 text-primary-contrast-500 shadow-lg hover:bg-primary-600 active:scale-95 transition-transform touch-manipulation"
+                onclick={openCreate}
+                aria-label="Add Staff"
+            >
+                <UserPlus class="w-6 h-6" aria-hidden="true" />
+            </button>
     </div>
 
     {#if users.length === 0}
@@ -359,7 +395,6 @@
                 <th>Name</th>
                 <th>Email</th>
                 <th>Role</th>
-                <th>Site</th>
                 <th>Status</th>
                 <th>Availability</th>
                 <th>Assigned to</th>
@@ -385,9 +420,6 @@
                                 : 'preset-tonal'} shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
                             >{user.role}</span
                         >
-                    </td>
-                    <td class="text-surface-700">
-                        <span class="text-surface-950/80">{user.site?.name ?? "—"}</span>
                     </td>
                     <td>
                         {#if user.is_active}
@@ -426,12 +458,14 @@
                         {/if}
                     </td>
                     <td class="text-surface-700">
-                        <span class="text-surface-950/70"
-                            >{user.assigned_station?.name ?? "—"}</span
-                        >
+                        {#if user.assigned_station?.name}
+                            <span class="text-surface-950/70">{user.assigned_station.name}</span>
+                        {:else}
+                            <span class="text-xs text-surface-950/50">Not assigned</span>
+                        {/if}
                     </td>
-                    <td class="text-center">
-                        <div class="flex items-center justify-center gap-2">
+                    <td class="text-left">
+                        <div class="flex items-center justify-start gap-2">
                             {#if user.is_active}
                                 <button
                                     type="button"
@@ -447,7 +481,7 @@
                                     onclick={() => openReset(user)}
                                     disabled={submitting}
                                 >
-                                    <Key class="w-3.5 h-3.5" /> PW
+                                    <Key class="w-3.5 h-3.5" /> Reset
                                 </button>
                                 {#if user.id !== auth_user_id}
                                     <button
@@ -535,13 +569,6 @@
                     <div>
                         <span
                             class="text-xs text-surface-500 block mb-0.5 uppercase tracking-wider font-semibold"
-                            >Site</span
-                        >
-                        <span class="text-surface-950 font-medium truncate block">{user.site?.name ?? "—"}</span>
-                    </div>
-                    <div>
-                        <span
-                            class="text-xs text-surface-500 block mb-0.5 uppercase tracking-wider font-semibold"
                             >Availability</span
                         >
                         {#if user.availability_status === "available"}
@@ -569,12 +596,16 @@
                             class="text-xs text-surface-500 block mb-0.5 uppercase tracking-wider font-semibold"
                             >Station</span
                         >
-                        <span
-                            class="text-surface-950 font-medium truncate block"
-                            title={user.assigned_station?.name ?? "—"}
-                        >
-                            {user.assigned_station?.name ?? "—"}
-                        </span>
+                        {#if user.assigned_station?.name}
+                            <span
+                                class="text-surface-950 font-medium truncate block"
+                                title={user.assigned_station.name}
+                            >
+                                {user.assigned_station.name}
+                            </span>
+                        {:else}
+                            <span class="text-xs text-surface-950/50">Not assigned</span>
+                        {/if}
                     </div>
                 </div>
 
@@ -596,7 +627,7 @@
                             onclick={() => openReset(user)}
                             disabled={submitting}
                         >
-                            <Key class="w-3.5 h-3.5" /> PW
+                            <Key class="w-3.5 h-3.5" /> Reset
                         </button>
                         {#if user.id !== auth_user_id}
                             <button
@@ -650,14 +681,12 @@
             />
         </div>
         <div class="form-control">
-            <label class="label"
-                ><span class="label-text font-medium">Password</span></label
-            >
-            <input
-                type="password"
-                class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                bind:value={createPassword}
-                placeholder="Min 8 characters"
+            <PasswordInput
+                bind:password={createPassword}
+                bind:passwordConfirm={createPasswordConfirm}
+                idPrefix="create_pw"
+                disabled={submitting}
+                required={true}
             />
         </div>
         <div class="form-control">
@@ -665,7 +694,7 @@
                 ><span class="label-text font-medium">Role</span></label
             >
             <select
-                class="select select-theme rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
+                class="select select-theme rounded-container border border-surface-200 px-3 py-2 pr-8 w-full bg-surface-50 shadow-sm"
                 bind:value={createRole}
             >
                 {#each allowed_roles_for_create ?? ["staff"] as r}
@@ -673,22 +702,6 @@
                 {/each}
             </select>
         </div>
-        {#if auth_is_super_admin && sites?.length}
-            <div class="form-control">
-                <label class="label"
-                    ><span class="label-text font-medium">Site</span></label
-                >
-                <select
-                    class="select select-theme rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                    bind:value={createSiteId}
-                >
-                    <option value="">— No site —</option>
-                    {#each sites as s (s.id)}
-                        <option value={s.id}>{s.name}</option>
-                    {/each}
-                </select>
-            </div>
-        {/if}
         <div class="form-control">
             <label class="label"
                 ><span class="label-text font-medium"
@@ -719,7 +732,7 @@
             <button
                 type="button"
                 class="btn preset-filled-primary-500 shadow-sm"
-                disabled={submitting}
+                disabled={submitting || createPassword.length < 8 || createPassword !== createPasswordConfirm}
                 onclick={handleCreate}
             >
                 {submitting ? "Creating…" : "Create"}
@@ -760,7 +773,7 @@
                     ><span class="label-text font-medium">Role</span></label
                 >
                 <select
-                    class="select select-theme rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
+                    class="select select-theme rounded-container border border-surface-200 px-3 py-2 pr-8 w-full bg-surface-50 shadow-sm"
                     bind:value={editRole}
                     disabled={editUser?.id === auth_user_id}
                 >
@@ -772,29 +785,6 @@
                     <p class="label-text-alt text-surface-500 mt-1">You cannot change your own role.</p>
                 {/if}
             </div>
-            {#if auth_is_super_admin && sites?.length}
-                <div class="form-control">
-                    <label class="label"
-                        ><span class="label-text font-medium">Site</span></label
-                    >
-                    <select
-                        class="select select-theme rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                        bind:value={editSiteId}
-                    >
-                        <option value="">— No site —</option>
-                        {#each sites as s (s.id)}
-                            <option value={s.id}>{s.name}</option>
-                        {/each}
-                    </select>
-                </div>
-            {:else}
-                <div class="form-control">
-                    <label class="label"
-                        ><span class="label-text font-medium">Site</span></label
-                    >
-                    <p class="text-surface-700 py-2">{editUser.site?.name ?? "—"}</p>
-                </div>
-            {/if}
             <div
                 class="form-control mt-2 mb-2 p-3 border border-surface-100 rounded-container bg-surface-50/50"
             >
@@ -876,18 +866,13 @@
             <p class="text-sm text-surface-950/70">
                 Set a new password. The user will need to use this to log in.
             </p>
-            <div class="form-control">
-                <label class="label"
-                    ><span class="label-text font-medium">New password</span
-                    ></label
-                >
-                <input
-                    type="password"
-                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                    bind:value={resetPassword}
-                    placeholder="Min 8 characters"
-                />
-            </div>
+            <PasswordInput
+                bind:password={resetPassword}
+                bind:passwordConfirm={resetPasswordConfirm}
+                idPrefix="reset_pw"
+                disabled={submitting}
+                required={true}
+            />
             <div
                 class="flex justify-end gap-3 mt-6 pt-2 border-t border-surface-100"
             >
@@ -899,7 +884,7 @@
                 <button
                     type="button"
                     class="btn preset-filled-primary-500 shadow-sm"
-                    disabled={submitting || resetPassword.length < 8}
+                    disabled={submitting || resetPassword.length < 8 || resetPassword !== resetPasswordConfirm}
                     onclick={handleReset}
                 >
                     {submitting ? "Resetting…" : "Reset"}

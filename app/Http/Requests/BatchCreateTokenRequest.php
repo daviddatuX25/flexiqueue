@@ -24,6 +24,7 @@ class BatchCreateTokenRequest extends FormRequest
             'count' => ['required', 'integer', 'min:1', 'max:500'],
             'start_number' => ['required', 'integer', 'min:0'],
             'pronounce_as' => ['sometimes', 'string', 'in:letters,word'],
+            'is_global' => ['sometimes', 'boolean'],
             // Legacy flag kept for backwards-compat; generation is now always enabled when server TTS is available.
             'generate_tts' => ['sometimes', 'boolean'],
             'tts' => ['sometimes', 'array'],

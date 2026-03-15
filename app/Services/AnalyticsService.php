@@ -382,19 +382,26 @@ class AnalyticsService
 
     /**
      * Token and TTS health: counts by status and tts_status.
+     * Per site-scoping-migration-spec §2: when $siteId provided, scope token queries by site.
      *
+     * @param  int|null  $siteId  Scope to this site; null = all tokens (e.g. super_admin).
      * @return array{by_status: array<array{status: string, count: int}>, by_tts_status: array<array{tts_status: string, count: int}>}
      */
-    public function getTokenTtsHealth(): array
+    public function getTokenTtsHealth(?int $siteId = null): array
     {
-        $byStatus = Token::query()
+        $baseQuery = Token::query();
+        if ($siteId !== null) {
+            $baseQuery->forSite($siteId);
+        }
+
+        $byStatus = (clone $baseQuery)
             ->selectRaw('status, count(*) as count')
             ->groupBy('status')
             ->get()
             ->map(fn ($r) => ['status' => $r->status, 'count' => (int) $r->count])
             ->all();
 
-        $byTts = Token::query()
+        $byTts = (clone $baseQuery)
             ->selectRaw("COALESCE(tts_status, 'none') as tts_status, count(*) as count")
             ->groupByRaw("COALESCE(tts_status, 'none')")
             ->get();

@@ -33,6 +33,8 @@
 		diagram_processes = [],
 		diagram_staff = [],
 		diagram_track_id = null,
+		/** When set (per-site URL), dismiss and status links use /site/{site_slug}/display so context is preserved. */
+		site_slug = null,
 	} = $props();
 
 	const showDiagram = $derived(
@@ -42,6 +44,9 @@
 			diagram.nodes.length > 0 &&
 			Array.isArray(diagram_tracks)
 	);
+
+	/** Base URL for display: per-site when site_slug set, else legacy /display. */
+	const displayBase = $derived(site_slug ? `/site/${site_slug}/display` : '/display');
 
 	const dismissSeconds = Math.max(0, Number(display_scan_timeout_seconds) || 20);
 	let countdown = $state(dismissSeconds);
@@ -53,7 +58,7 @@
 		countdown -= 1;
 		if (countdown <= 0) {
 			clearInterval(timerId);
-			router.visit('/display');
+			router.visit(displayBase);
 		}
 	}, 1000);
 
@@ -67,9 +72,19 @@
 		const raw = barcodeInputValue.trim();
 		if (!raw) return;
 		e.preventDefault();
-		const qrHash = raw.includes('/') ? raw.split('/').pop() ?? raw : raw;
-		if (qrHash) {
-			router.visit(`/display/status/${encodeURIComponent(qrHash)}`);
+		if (raw.includes('/display/status/')) {
+			try {
+				const pathname = new URL(raw, window.location.origin).pathname;
+				router.visit(pathname);
+			} catch {
+				const qrHash = raw.split('/').pop() ?? raw;
+				const statusPath = site_slug ? `/site/${site_slug}/display/status/${encodeURIComponent(qrHash)}` : `/display/status/${encodeURIComponent(qrHash)}`;
+				if (qrHash) router.visit(statusPath);
+			}
+		} else {
+			const qrHash = raw;
+			const statusPath = site_slug ? `/site/${site_slug}/display/status/${encodeURIComponent(qrHash)}` : `/display/status/${encodeURIComponent(qrHash)}`;
+			if (qrHash) router.visit(statusPath);
 		}
 		barcodeInputValue = '';
 		if (shouldFocusHidInput(enable_display_hid_barcode, 'display')) barcodeInputEl?.focus();
@@ -191,7 +206,7 @@
 			</button>
 		</div>
 		<div>
-			<Link href="/display" class="btn preset-filled-primary-500 w-full">Go back</Link>
+			<Link href={displayBase} class="btn preset-filled-primary-500 w-full">Go back</Link>
 		</div>
 	</div>
 </DisplayLayout>

@@ -1,19 +1,22 @@
 <script lang="ts">
 	import MobileLayout from '../../Layouts/MobileLayout.svelte';
 	import Modal from '../../Components/Modal.svelte';
-	import QrScanner from '../../Components/QrScanner.svelte';
+	import ScanModal from '../../Components/ScanModal.svelte';
 	import TriageClientBinder, {
 		type BindingMode as BinderBindingMode,
 		type BinderStatus as BinderComponentStatus,
 		type ClientBindingPayload,
 	} from '../../Components/TriageClientBinder.svelte';
 	import IdNumberInput from '../../Components/IdNumberInput.svelte';
-	import { Camera, Plus, Search, Settings } from 'lucide-svelte';
+	import AuthChoiceButtons from '../../Components/AuthChoiceButtons.svelte';
+	import PinOrQrInput from '../../Components/PinOrQrInput.svelte';
+	import { ArrowUpRight, Camera, Plus, Search, Settings } from 'lucide-svelte';
 	import { get } from 'svelte/store';
 	import { onMount } from 'svelte';
 	import { usePage, router } from '@inertiajs/svelte';
 	import { toaster } from '../../lib/toaster.js';
-	import { getLocalAllowHidOnThisDevice, setLocalAllowHidOnThisDevice, isMobileTouch } from '../../lib/displayHid.js';
+	import { clientDisplayName } from '../../lib/clientDisplayName.js';
+	import { getLocalAllowHidOnThisDevice, setLocalAllowHidOnThisDevice, getLocalPersistentHidOnThisDevice, setLocalPersistentHidOnThisDevice, isMobileTouch } from '../../lib/displayHid.js';
 	import { shouldAllowCameraScanner, setLocalAllowCameraOnThisDevice } from '../../lib/displayCamera.js';
 
 	interface Track {
@@ -29,7 +32,8 @@
 		is_active?: boolean;
 		is_paused?: boolean;
 		tracks: Track[];
-		identity_binding_mode?: 'disabled' | 'optional' | 'required';
+		identity_binding_mode?: 'disabled' | 'required';
+		allow_unverified_entry?: boolean;
 	}
 
 	/** A.4.2: currentProgram from controller; fallback to program then activeProgram for transition. */
@@ -44,8 +48,10 @@
 		display_scan_timeout_seconds = 20,
 		staff_triage_allow_hid_barcode = true,
 		staff_triage_allow_camera_scanner = true,
-		id_types = [],
 		pending_identity_registrations = [],
+		site_slug = null,
+		program_slug = null,
+		allow_public_triage = false,
 	}: {
 		currentProgram?: ActiveProgram | null;
 		program?: ActiveProgram | null;
@@ -57,11 +63,19 @@
 		display_scan_timeout_seconds?: number;
 		staff_triage_allow_hid_barcode?: boolean;
 		staff_triage_allow_camera_scanner?: boolean;
-		id_types?: string[];
-		pending_identity_registrations?: { id: number; name: string | null; birth_year: number | null; client_category: string | null; id_type: string | null; id_number_last4: string | null; id_verified_at: string | null; id_verified_by_user_id: number | null; id_verified_by: string | null; requested_at: string; session_id: number | null; session_alias: string | null }[];
+		pending_identity_registrations?: { id: number; request_type?: string; first_name: string | null; middle_name: string | null; last_name: string | null; birth_date: string | null; client_category: string | null; mobile_masked: string | null; id_verified: boolean; id_verified_at: string | null; id_verified_by_user_id: number | null; id_verified_by: string | null; requested_at: string; session_id: number | null; session_alias: string | null; token_physical_id?: string; track_name?: string; client_name?: string | null }[];
+		site_slug?: string | null;
+		program_slug?: string | null;
+		allow_public_triage?: boolean;
 	} = $props();
 
 	const effectiveProgram = $derived(currentProgram ?? program ?? activeProgram);
+
+	const publicTriageUrl = $derived(
+		allow_public_triage && site_slug && program_slug
+			? `/site/${site_slug}/public-triage/${program_slug}`
+			: null
+	);
 
 	const CATEGORIES = [
 		{ label: 'Regular', value: 'Regular' },
@@ -75,14 +89,14 @@
 
 	let showScanner = $state(false);
 	/** When 'verify_id', scan verifies stored ID; when 'capture_id_accept', scan fills optional ID in Accept modal; when 'capture_id_new_reg', scan fills ID in New registration modal; else token lookup. */
-	let scannerMode = $state<'token' | 'verify_id' | 'capture_id_accept' | 'capture_id_new_reg'>('token');
+	/** Token scan only; no ID/phone scan until printable ID and scan feature exist. */
+	let scannerMode = $state<'token'>('token');
 	let scannedToken = $state<{ physical_id: string; qr_hash: string; status: string } | null>(null);
 	/** Latch: ignore repeated onScan callbacks after first successful scan (stops flicker). */
 	let scanHandled = $state(false);
 	let manualPhysicalId = $state('');
 	let barcodeValue = $state('');
 	let barcodeInputEl = $state<HTMLInputElement | null>(null);
-	let barcodeModalInputEl = $state<HTMLInputElement | null>(null);
 	/** Per plan: category hidden in staff triage normal bind; default to Regular. */
 	let selectedCategory = $state<string>('Regular');
 	let selectedTrackId = $state<number | null>(null);
@@ -95,19 +109,32 @@
 	/** Device-level (localStorage staff_binder); in sync with modal device toggles. */
 	let localAllowHid = $state(true);
 	let localAllowCamera = $state(true);
+	/** When true, HID refocused every 2s when scan modal is closed. */
+	let localPersistentHid = $state(false);
 	const effectiveHid = $derived(accountAllowHid && localAllowHid);
 	const effectiveCamera = $derived(accountAllowCamera && localAllowCamera);
 	/** When true, user is in the "manual token input" focus window; pause HID refocus for 10s then return focus to hidden input. */
 	let manualFocusActive = $state(false);
 	let manualFocusTimeoutId = $state<ReturnType<typeof setTimeout> | null>(null);
 
-	/** Staff triage settings modal (no PIN; staff manages own prefs). */
+	/** Staff triage settings modal: view/edit anytime; apply only on Save with PIN/QR. */
 	let showTriageSettingsModal = $state(false);
+	let triageSettingsAuthMode = $state<'pin' | 'qr' | 'request'>('pin');
+	let triageSettingsPin = $state('');
+	let triageSettingsQrScanToken = $state('');
+	let triagePinOrQrRef = $state<{ buildPinOrQrPayload?: () => { pin: string } | { qr_scan_token: string } | null } | null>(null);
+	let triageSettingsError = $state('');
 	let triageSettingsSaving = $state(false);
 	let triageSettingsAccountHid = $state(true);
 	let triageSettingsAccountCamera = $state(true);
 	let triageSettingsLocalHid = $state(true);
+	let triageSettingsLocalPersistentHid = $state(false);
 	let triageSettingsLocalCamera = $state(true);
+	/** QR flow: show QR for admin to scan to unlock settings (reuses display-settings-requests). */
+	let triageSettingsRequestId = $state<number | null>(null);
+	let triageSettingsRequestToken = $state<string | null>(null);
+	let triageSettingsRequestState = $state<'idle' | 'waiting' | 'approved' | 'rejected'>('idle');
+	let triageSettingsPollIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
 
 	let bindingMode = $derived<BinderBindingMode>(
 		(effectiveProgram?.identity_binding_mode as BinderBindingMode | undefined) ?? 'disabled',
@@ -117,51 +144,40 @@
 
 	/** Identity registration accept modal */
 	let acceptRegModalReg = $state<typeof pending_identity_registrations[0] | null>(null);
-	/** Blocker modal: accepting a registration with unverified ID. */
-	let showAcceptUnverifiedIdWarning = $state(false);
-	let acceptVerifyName = $state('');
-	let acceptVerifyBirthYear = $state('');
+	let acceptVerifyFirstName = $state('');
+	let acceptVerifyLastName = $state('');
+	let acceptVerifyBirthDate = $state('');
 	let acceptVerifyCategory = $state('Regular');
-	let showVerifyIdManual = $state(false);
-	let verifyIdManualValue = $state('');
-	let verifyIdManualSubmitting = $state(false);
-	let acceptPossibleMatches = $state<{ id: number; name: string; birth_year: number | null; has_id_document?: boolean; id_documents_count?: number }[]>([]);
+	let acceptPossibleMatches = $state<{ id: number; first_name: string; middle_name?: string | null; last_name: string; birth_date: string | null; mobile_masked?: string | null }[]>([]);
 	let acceptLinkSearchName = $state('');
-	let acceptLinkSearchBirthYear = $state('');
+	let acceptLinkSearchBirthDate = $state('');
 	let acceptLinkSearching = $state(false);
+	let acceptLinkSearchPhone = $state('');
+	let acceptPhoneSearching = $state(false);
 	let acceptChosenClientId = $state<number | null>(null);
 	let acceptCreateNew = $state(false);
-	let acceptRegisterIdType = $state('PhilHealth');
-	let acceptRegisterIdNumber = $state('');
 	let acceptSubmitting = $state(false);
+	/** Reveal phone modal (from Accept modal): reason + result. */
+	let showAcceptRevealModal = $state(false);
+	let acceptRevealReason = $state('');
+	let acceptRevealResult = $state<string | null>(null);
+	let acceptRevealSubmitting = $state(false);
+	/** When possible-matches returns existing_client_by_phone, this is set so we can show verify-existing copy and pre-select. */
+	let acceptExistingClientByPhone = $state<{ id: number; first_name: string; middle_name?: string | null; last_name: string; birth_date: string | null } | null>(null);
 	let highlightSessionId = $state<number | null>(null);
 
 	/** Staff direct registration request (no token) */
 	let showNewRegModal = $state(false);
-	let newRegName = $state('');
-	let newRegBirthYear = $state('');
+	let newRegFirstName = $state('');
+	let newRegMiddleName = $state('');
+	let newRegLastName = $state('');
+	let newRegBirthDate = $state('');
 	let newRegCategory = $state('Regular');
-	let newRegIdType = $state('PhilHealth');
-	let newRegIdNumber = $state('');
+	let newRegMobile = $state('');
 	let newRegSubmitting = $state(false);
 	/** When true, show manual ID entry in New reg modal optional ID block (same format as public triage start). */
-	let showNewRegManualId = $state(false);
-	let newRegLinkSearchName = $state('');
-	let newRegLinkSearchBirthYear = $state('');
-	let newRegLinkSearching = $state(false);
-	let newRegPossibleMatches = $state<
-		{ id: number; name: string; birth_year: number | null; has_id_document?: boolean; id_documents_count?: number }[]
-	>([]);
-	let newRegChosenClientId = $state<number | null>(null);
-
-	const newRegSelectedClient = $derived(
-		newRegChosenClientId !== null
-			? (newRegPossibleMatches.find((c) => c.id === newRegChosenClientId) ?? null)
-			: null,
-	);
 
 	/** When true, show manual ID entry in Accept modal optional ID block (same format as public triage start). */
-	let showAcceptRegManualId = $state(false);
 
 	const MANUAL_FOCUS_SECONDS = 10;
 
@@ -215,74 +231,24 @@
 	async function submitNewRegistrationRequest() {
 		if (newRegSubmitting) return;
 
-		// If staff selected an existing client, this modal becomes an "Attach ID" flow (no registration record).
-		if (newRegChosenClientId !== null) {
-			const idTypeStr = String(newRegIdType ?? '').trim();
-			const idNumberStr = String(newRegIdNumber ?? '').trim();
-			if (!idTypeStr || !idNumberStr) {
-				toaster.error({ title: 'ID type and ID number are required to attach an ID.' });
-				return;
-			}
-			newRegSubmitting = true;
-			const { ok, data, message } = await api(
-				'POST',
-				`/api/clients/${newRegChosenClientId}/id-documents`,
-				{
-					id_type: idTypeStr,
-					id_number: idNumberStr,
-				},
-			);
-			newRegSubmitting = false;
-
-			if (ok) {
-				toaster.success({ title: (data as { message?: string })?.message ?? 'ID attached.' });
-				showNewRegModal = false;
-				newRegName = '';
-				newRegBirthYear = '';
-				newRegCategory = 'Regular';
-				newRegIdType = (id_types?.length ? id_types[0] : 'PhilHealth');
-				newRegIdNumber = '';
-				showNewRegManualId = false;
-				newRegLinkSearchName = '';
-				newRegLinkSearchBirthYear = '';
-				newRegLinkSearching = false;
-				newRegPossibleMatches = [];
-				newRegChosenClientId = null;
-				router.reload();
-				return;
-			}
-
-			toaster.error({
-				title:
-					(data as { message?: string })?.message ??
-					(message as string) ??
-					'Could not attach ID.',
-			});
-			return;
-		}
-
-		const nameStr = String(newRegName ?? '').trim();
-		const birthYearStr = String(newRegBirthYear ?? '').trim();
-		const birthYear = birthYearStr ? Number(birthYearStr) : NaN;
-		if (!nameStr || !birthYearStr) {
-			toaster.error({ title: 'Name and birth year are required to create a registration.' });
-			return;
-		}
-		if (!Number.isFinite(birthYear) || birthYear < 1900 || birthYear > 2100) {
-			toaster.error({ title: 'Enter a valid birth year (1900–2100).' });
+		const first = String(newRegFirstName ?? '').trim();
+		const last = String(newRegLastName ?? '').trim();
+		const birthDate = String(newRegBirthDate ?? '').trim();
+		if (!first || !last || !birthDate) {
+			toaster.error({ title: 'First name, last name, and birth date are required.' });
 			return;
 		}
 		newRegSubmitting = true;
-		const idTypeStr = String(newRegIdType ?? '').trim();
-		const idNumberStr = String(newRegIdNumber ?? '').trim();
+		const mobileStr = String(newRegMobile ?? '').trim();
 
 		const body: Record<string, unknown> = {
 			...(effectiveProgram?.id != null ? { program_id: effectiveProgram.id } : {}),
-			name: nameStr,
-			birth_year: birthYear,
+			first_name: first,
+			middle_name: newRegMiddleName?.trim() || undefined,
+			last_name: last,
+			birth_date: birthDate,
 			client_category: newRegCategory || 'Regular',
-			...(idTypeStr ? { id_type: idTypeStr } : {}),
-			...(idNumberStr ? { id_number: idNumberStr } : {}),
+			...(mobileStr ? { mobile: mobileStr } : {}),
 		};
 
 		const { ok, data, message } = await api('POST', '/api/identity-registrations/direct', body);
@@ -292,54 +258,17 @@
 			const d = data as { message?: string } | undefined;
 			toaster.success({ title: d?.message ?? 'Registration created.' });
 			showNewRegModal = false;
-			newRegName = '';
-			newRegBirthYear = '';
+			newRegFirstName = '';
+			newRegMiddleName = '';
+			newRegLastName = '';
+			newRegBirthDate = '';
 			newRegCategory = 'Regular';
-			newRegIdType = (id_types?.length ? id_types[0] : 'PhilHealth');
-			newRegIdNumber = '';
+			newRegMobile = '';
 			router.reload();
 			return;
 		}
 
 		toaster.error({ title: (data as { message?: string })?.message ?? (message as string) ?? 'Could not create registration.' });
-	}
-
-	const NEW_REG_LINK_BIRTH_YEAR_MIN = 1900;
-	const NEW_REG_LINK_BIRTH_YEAR_MAX = 2100;
-
-	async function runNewRegLinkSearch(e?: SubmitEvent) {
-		e?.preventDefault();
-		const name = newRegLinkSearchName.trim();
-		if (!name) return;
-		newRegLinkSearching = true;
-		try {
-			const birthYearVal = newRegLinkSearchBirthYear.trim();
-			const birthYearNum = birthYearVal ? Number(birthYearVal) : NaN;
-			const birthYear =
-				Number.isInteger(birthYearNum) &&
-				birthYearNum >= NEW_REG_LINK_BIRTH_YEAR_MIN &&
-				birthYearNum <= NEW_REG_LINK_BIRTH_YEAR_MAX
-					? birthYearNum
-					: null;
-			const params = new URLSearchParams({
-				name,
-				per_page: '10',
-				page: '1',
-			});
-			if (birthYear != null) params.set('birth_year', String(birthYear));
-
-			const { ok, data } = await api('GET', `/api/clients/search?${params.toString()}`);
-			if (ok) {
-				const payload = data as {
-					data?: { id: number; name: string; birth_year: number | null; has_id_document?: boolean; id_documents_count?: number }[];
-				};
-				newRegPossibleMatches = payload.data ?? [];
-			} else {
-				newRegPossibleMatches = [];
-			}
-		} finally {
-			newRegLinkSearching = false;
-		}
 	}
 
 	function setDefaultTrack() {
@@ -361,24 +290,19 @@
 	});
 
 	onMount(() => {
-		// Match displayHid.js: when not set, default true on desktop and false on mobile (avoids keyboard pop)
 		const hidLocal = getLocalAllowHidOnThisDevice('staff_binder');
 		localAllowHid = hidLocal !== null ? hidLocal : !isMobileTouch();
+		localPersistentHid = getLocalPersistentHidOnThisDevice('staff_binder');
 		localAllowCamera = shouldAllowCameraScanner('staff_binder');
 	});
 
-	/** Per plan: HID only in modal. When modal opens, an HID input inside the modal (first focusable) is focused by Modal's trap; fallback focus global input. */
+	/** When persistent HID is on, refocus global HID every 2s when scan modal is closed. */
 	$effect(() => {
-		if (!showScanner || !effectiveHid) return;
-		queueMicrotask(() => {
-			requestAnimationFrame(() => {
-				barcodeModalInputEl?.focus();
-				// Fallback: focus the global hidden input if modal ref isn't available.
-				if (document.activeElement !== barcodeModalInputEl) {
-					barcodeInputEl?.focus();
-				}
-			});
-		});
+		if (showScanner || !localPersistentHid || !effectiveHid) return;
+		const id = setInterval(() => {
+			if (!showScanner && localPersistentHid && effectiveHid) barcodeInputEl?.focus();
+		}, 2000);
+		return () => clearInterval(id);
 	});
 
 	/** Optional countdown when scanner modal is open. */
@@ -412,6 +336,7 @@
 	function closeScanner() {
 		showScanner = false;
 		scannerMode = 'token';
+		if (localPersistentHid && effectiveHid) barcodeInputEl?.focus();
 	}
 
 	function extendScannerCountdown() {
@@ -424,43 +349,6 @@
 		if (!raw) return;
 		e.preventDefault();
 		scanHandled = true;
-
-		if (scannerMode === 'verify_id' && acceptRegModalReg) {
-			const idNumber = raw.trim();
-			const idType = acceptRegModalReg.id_type ?? '';
-			api('POST', `/api/identity-registrations/${acceptRegModalReg.id}/verify-id`, { id_type: idType || undefined, id_number: idNumber }).then(({ ok, data, message }) => {
-				if (ok && data && (data as { verified?: boolean }).verified) {
-					const d = data as { id_verified_at?: string; id_verified_by_user_id?: number; id_verified_by?: string };
-					acceptRegModalReg = acceptRegModalReg ? { ...acceptRegModalReg, id_verified_at: d.id_verified_at ?? null, id_verified_by_user_id: d.id_verified_by_user_id ?? null, id_verified_by: d.id_verified_by ?? null } : null;
-					showScanner = false;
-					scannerMode = 'token';
-					toaster.success({ title: 'ID verified.' });
-				} else {
-					toaster.error({ title: (message as string) ?? (data as { message?: string })?.message ?? 'ID does not match.' });
-					scanHandled = false;
-				}
-			});
-			barcodeValue = '';
-			return;
-		}
-		if (scannerMode === 'capture_id_accept') {
-			acceptRegisterIdNumber = raw.trim();
-			showAcceptRegManualId = true;
-			showScanner = false;
-			scannerMode = 'token';
-			toaster.success({ title: 'ID number captured. You can edit and submit.' });
-			barcodeValue = '';
-			return;
-		}
-		if (scannerMode === 'capture_id_new_reg') {
-			newRegIdNumber = raw.trim();
-			showNewRegManualId = true;
-			showScanner = false;
-			scannerMode = 'token';
-			toaster.success({ title: 'ID number captured. You can edit and submit.' });
-			barcodeValue = '';
-			return;
-		}
 
 		const branchA = raw.length <= 10 && /^[A-Za-z0-9]+$/.test(raw);
 		const branchB = raw.length === 64 && /^[a-f0-9]+$/.test(raw);
@@ -514,41 +402,6 @@
 
 	async function handleQrScan(decodedText: string) {
 		if (scanHandled) return;
-		if (scannerMode === 'verify_id' && acceptRegModalReg) {
-			scanHandled = true;
-			const idNumber = decodedText.trim();
-			const idType = acceptRegModalReg.id_type ?? '';
-			const { ok, data, message } = await api('POST', `/api/identity-registrations/${acceptRegModalReg.id}/verify-id`, { id_type: idType || undefined, id_number: idNumber });
-			if (ok && data && (data as { verified?: boolean }).verified) {
-				const d = data as { id_verified_at?: string; id_verified_by_user_id?: number; id_verified_by?: string };
-				acceptRegModalReg = acceptRegModalReg ? { ...acceptRegModalReg, id_verified_at: d.id_verified_at ?? null, id_verified_by_user_id: d.id_verified_by_user_id ?? null, id_verified_by: d.id_verified_by ?? null } : null;
-				showScanner = false;
-				scannerMode = 'token';
-				toaster.success({ title: 'ID verified.' });
-			} else {
-				toaster.error({ title: (message as string) ?? (data as { message?: string })?.message ?? 'ID does not match.' });
-				scanHandled = false;
-			}
-			return;
-		}
-		if (scannerMode === 'capture_id_accept') {
-			scanHandled = true;
-			acceptRegisterIdNumber = decodedText.trim();
-			showAcceptRegManualId = true;
-			showScanner = false;
-			scannerMode = 'token';
-			toaster.success({ title: 'ID number captured. You can edit and submit.' });
-			return;
-		}
-		if (scannerMode === 'capture_id_new_reg') {
-			scanHandled = true;
-			newRegIdNumber = decodedText.trim();
-			showNewRegManualId = true;
-			showScanner = false;
-			scannerMode = 'token';
-			toaster.success({ title: 'ID number captured. You can edit and submit.' });
-			return;
-		}
 		scanHandled = true;
 		const trimmed = decodedText.trim();
 		const branchA = trimmed.length <= 10 && /^[A-Za-z0-9]+$/.test(trimmed);
@@ -592,15 +445,119 @@
 		scannerMode = 'token';
 	}
 
+	const STAFF_TRIAGE_SETTINGS_REQUEST_QR_PREFIX = 'flexiqueue:display_settings_request:';
+
 	function openTriageSettingsModal() {
 		triageSettingsAccountHid = accountAllowHid;
 		triageSettingsAccountCamera = accountAllowCamera;
 		triageSettingsLocalHid = localAllowHid;
+		triageSettingsLocalPersistentHid = localPersistentHid;
 		triageSettingsLocalCamera = localAllowCamera;
+		triageSettingsAuthMode = 'pin';
+		triageSettingsPin = '';
+		triageSettingsQrScanToken = '';
+		triageSettingsError = '';
+		triageSettingsRequestId = null;
+		triageSettingsRequestToken = null;
+		triageSettingsRequestState = 'idle';
+		if (triageSettingsPollIntervalId) {
+			clearInterval(triageSettingsPollIntervalId);
+			triageSettingsPollIntervalId = null;
+		}
 		showTriageSettingsModal = true;
 	}
 
+	function cancelTriageSettingsRequest() {
+		triageSettingsRequestState = 'idle';
+		triageSettingsRequestId = null;
+		triageSettingsRequestToken = null;
+		if (triageSettingsPollIntervalId) {
+			clearInterval(triageSettingsPollIntervalId);
+			triageSettingsPollIntervalId = null;
+		}
+	}
+
+	async function createStaffTriageSettingsRequest() {
+		const programId = effectiveProgram?.id;
+		if (programId == null || triageSettingsSaving) return;
+		triageSettingsSaving = true;
+		triageSettingsError = '';
+		try {
+			const body = {
+				program_id: programId,
+				enable_public_triage_hid_barcode: triageSettingsAccountHid,
+				enable_public_triage_camera_scanner: triageSettingsAccountCamera,
+			};
+			const res = await fetch('/api/public/display-settings-requests', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-CSRF-TOKEN': getCsrfToken(),
+					'X-Requested-With': 'XMLHttpRequest',
+				},
+				credentials: 'same-origin',
+				body: JSON.stringify(body),
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				triageSettingsError = (data as { message?: string }).message || 'Failed to create request.';
+				toaster.error({ title: triageSettingsError });
+				return;
+			}
+			const d = data as { id: number; request_token: string };
+			triageSettingsRequestId = d.id;
+			triageSettingsRequestToken = d.request_token;
+			triageSettingsRequestState = 'waiting';
+			const id = d.id;
+			const token = d.request_token;
+			triageSettingsPollIntervalId = setInterval(async () => {
+				try {
+					const r = await fetch(
+						`/api/public/display-settings-requests/${id}?token=${encodeURIComponent(token)}`,
+						{ credentials: 'same-origin' }
+					);
+					const pollData = await r.json().catch(() => ({}));
+					const status = (pollData as { status?: string }).status;
+					if (status === 'approved') {
+						if (triageSettingsPollIntervalId) clearInterval(triageSettingsPollIntervalId);
+						triageSettingsPollIntervalId = null;
+						triageSettingsRequestId = null;
+						triageSettingsRequestToken = null;
+						triageSettingsRequestState = 'idle';
+						setLocalAllowHidOnThisDevice('staff_binder', triageSettingsLocalHid);
+						localAllowHid = triageSettingsLocalHid;
+						setLocalPersistentHidOnThisDevice('staff_binder', triageSettingsLocalPersistentHid);
+						localPersistentHid = triageSettingsLocalPersistentHid;
+						setLocalAllowCameraOnThisDevice('staff_binder', triageSettingsLocalCamera);
+						localAllowCamera = triageSettingsLocalCamera;
+						toaster.success({ title: 'Settings applied.' });
+						showTriageSettingsModal = false;
+					} else if (status === 'rejected' || status === 'cancelled') {
+						if (triageSettingsPollIntervalId) clearInterval(triageSettingsPollIntervalId);
+						triageSettingsPollIntervalId = null;
+						triageSettingsRequestState = 'idle';
+						triageSettingsRequestId = null;
+						triageSettingsRequestToken = null;
+						toaster.warning({ title: status === 'rejected' ? 'Request was rejected.' : 'Request was cancelled.' });
+					}
+				} catch {
+					// ignore
+				}
+			}, 2000);
+		} finally {
+			triageSettingsSaving = false;
+		}
+	}
+
 	async function saveTriageSettings() {
+		triageSettingsError = '';
+		// Logged-in staff can save without PIN/QR; PIN and QR remain optional for extra verification if desired.
+		const authBody = triageSettingsAuthMode === 'pin' ? (triagePinOrQrRef?.buildPinOrQrPayload?.() ?? null) : null;
+		if (triageSettingsAuthMode === 'request' && !authBody) {
+			triageSettingsError = 'Use "Show QR for supervisor to scan" to apply changes.';
+			return;
+		}
 		triageSettingsSaving = true;
 		try {
 			const res = await fetch('/api/profile/triage-settings', {
@@ -622,12 +579,20 @@
 				const d = data as { allow_hid_barcode?: boolean; allow_camera_scanner?: boolean };
 				accountAllowHid = d.allow_hid_barcode !== false;
 				accountAllowCamera = d.allow_camera_scanner !== false;
+				setLocalAllowHidOnThisDevice('staff_binder', triageSettingsLocalHid);
+				localAllowHid = triageSettingsLocalHid;
+				setLocalPersistentHidOnThisDevice('staff_binder', triageSettingsLocalPersistentHid);
+				localPersistentHid = triageSettingsLocalPersistentHid;
+				setLocalAllowCameraOnThisDevice('staff_binder', triageSettingsLocalCamera);
+				localAllowCamera = triageSettingsLocalCamera;
 				showTriageSettingsModal = false;
 			} else {
-				toaster.error({ title: (data as { message?: string }).message ?? 'Failed to save.' });
+				triageSettingsError = (data as { message?: string }).message ?? 'Failed to save.';
+				toaster.error({ title: triageSettingsError });
 			}
 		} catch (e) {
 			toaster.error({ title: MSG_NETWORK_ERROR });
+			triageSettingsError = MSG_NETWORK_ERROR;
 		} finally {
 			triageSettingsSaving = false;
 		}
@@ -640,14 +605,14 @@
 
 	async function handleConfirm() {
 		if (!scannedToken || selectedTrackId === null) return;
-		if (bindingMode === 'required' && binderStatus !== 'bound') {
+		if (bindingMode === 'required' && binderStatus !== 'bound' && !(binderStatus === 'binding_ready' && clientBinding)) {
 			toaster.error({
 				title: 'Client identity binding is required before completing triage.',
 			});
 			return;
 		}
 		isSubmitting = true;
-		const payload: any = {
+		const payload: Record<string, unknown> = {
 			qr_hash: scannedToken.qr_hash,
 			track_id: Number(selectedTrackId),
 			client_category: selectedCategory,
@@ -663,16 +628,19 @@
 		isSubmitting = false;
 		if (ok) {
 			resetScan();
-			// Could show toast here
+			toaster.success({ title: 'Visit started.' });
+			router.reload();
 			return;
 		}
-		const d = data as { active_session?: { alias: string }; token_status?: string } | undefined;
-		if (d?.active_session) {
+		const d = data as { active_session?: { alias: string }; token_status?: string; error_code?: string; message?: string } | undefined;
+		if (d?.error_code === 'client_already_queued' && d?.active_session) {
+			toaster.error({ title: `Client already has an active visit (Token ${d.active_session.alias}).` });
+		} else if (d?.active_session) {
 			toaster.error({ title: `Token already in use (${d.active_session.alias}).` });
 		} else if (d?.token_status) {
 			toaster.error({ title: `Token is marked as ${d.token_status}.` });
 		} else {
-			toaster.error({ title: message ?? 'Bind failed.' });
+			toaster.error({ title: (d?.message ?? message) ?? 'Bind failed.' });
 		}
 	}
 
@@ -684,58 +652,47 @@
 
 	function openAcceptModal(reg: (typeof pending_identity_registrations)[0]) {
 		acceptRegModalReg = reg;
-		showVerifyIdManual = false;
-		verifyIdManualValue = '';
-		verifyIdManualSubmitting = false;
-		acceptVerifyName = reg.name ?? '';
-		acceptVerifyBirthYear = reg.birth_year != null ? String(reg.birth_year) : '';
+		acceptVerifyFirstName = reg.first_name ?? '';
+		acceptVerifyLastName = reg.last_name ?? '';
+		acceptVerifyBirthDate = reg.birth_date ?? '';
 		acceptVerifyCategory = reg.client_category ?? 'Regular';
 		acceptPossibleMatches = [];
-		acceptLinkSearchName = reg.name?.trim() ?? '';
-		acceptLinkSearchBirthYear = reg.birth_year != null ? String(reg.birth_year) : '';
+		acceptExistingClientByPhone = null;
+		acceptLinkSearchName = clientDisplayName(reg);
+		acceptLinkSearchBirthDate = reg.birth_date ?? '';
 		acceptChosenClientId = null;
 		acceptCreateNew = false;
-		acceptRegisterIdType = (id_types?.length ? id_types[0] : 'PhilHealth');
-		acceptRegisterIdNumber = '';
 		fetchPossibleMatches(reg.id);
 	}
 
 	function closeAcceptModal() {
 		acceptRegModalReg = null;
-		showAcceptUnverifiedIdWarning = false;
-	}
-
-	async function submitVerifyIdManual() {
-		if (!acceptRegModalReg || verifyIdManualSubmitting) return;
-		const idNumber = verifyIdManualValue.trim();
-		if (!idNumber) return;
-		verifyIdManualSubmitting = true;
-		try {
-			const idType = acceptRegModalReg.id_type ?? '';
-			const { ok, data, message } = await api('POST', `/api/identity-registrations/${acceptRegModalReg.id}/verify-id`, { id_type: idType || undefined, id_number: idNumber });
-			if (ok && data && (data as { verified?: boolean }).verified) {
-				const d = data as { id_verified_at?: string; id_verified_by_user_id?: number; id_verified_by?: string };
-				acceptRegModalReg = acceptRegModalReg ? { ...acceptRegModalReg, id_verified_at: d.id_verified_at ?? null, id_verified_by_user_id: d.id_verified_by_user_id ?? null, id_verified_by: d.id_verified_by ?? null } : null;
-				showVerifyIdManual = false;
-				verifyIdManualValue = '';
-				toaster.success({ title: 'ID verified.' });
-			} else {
-				toaster.error({ title: (message as string) ?? (data as { message?: string })?.message ?? 'ID does not match.' });
-			}
-		} finally {
-			verifyIdManualSubmitting = false;
-		}
+		showAcceptRevealModal = false;
+		acceptRevealResult = null;
+		acceptRevealReason = '';
 	}
 
 	async function fetchPossibleMatches(regId: number) {
 		const { ok, data } = await api('GET', `/api/identity-registrations/${regId}/possible-matches`);
-		if (ok && data && Array.isArray((data as { data?: unknown }).data)) {
-			acceptPossibleMatches = (data as { data: { id: number; name: string; birth_year: number | null; has_id_document?: boolean; id_documents_count?: number }[] }).data;
+		if (!ok || !data) return;
+		const payload = data as {
+			data?: { id: number; first_name: string; middle_name?: string | null; last_name: string; birth_date: string | null; mobile_masked?: string | null }[];
+			existing_client_by_phone?: { id: number; first_name: string; middle_name?: string | null; last_name: string; birth_date: string | null } | null;
+		};
+		const list = Array.isArray(payload.data) ? payload.data : [];
+		const existingByPhone = payload.existing_client_by_phone ?? null;
+		acceptExistingClientByPhone = existingByPhone;
+		// Ensure existing client by phone is in the list so selection works; prepend if not already present.
+		if (existingByPhone && !list.some((c) => c.id === existingByPhone.id)) {
+			acceptPossibleMatches = [{ ...existingByPhone }, ...list];
+		} else {
+			acceptPossibleMatches = list;
+		}
+		if (existingByPhone) {
+			acceptChosenClientId = existingByPhone.id;
+			acceptCreateNew = false;
 		}
 	}
-
-	const ACCEPT_LINK_BIRTH_YEAR_MIN = 1900;
-	const ACCEPT_LINK_BIRTH_YEAR_MAX = 2100;
 
 	async function runAcceptLinkSearch(e?: SubmitEvent) {
 		e?.preventDefault();
@@ -743,17 +700,13 @@
 		if (!name) return;
 		acceptLinkSearching = true;
 		try {
-			const birthYearVal = acceptLinkSearchBirthYear.trim();
-			const birthYearNum = birthYearVal ? Number(birthYearVal) : NaN;
-			const birthYear =
-				Number.isInteger(birthYearNum) && birthYearNum >= ACCEPT_LINK_BIRTH_YEAR_MIN && birthYearNum <= ACCEPT_LINK_BIRTH_YEAR_MAX
-					? birthYearNum
-					: null;
 			const params = new URLSearchParams({ name, per_page: '10', page: '1' });
-			if (birthYear != null) params.set('birth_year', String(birthYear));
+			if (effectiveProgram?.id != null) params.set('program_id', String(effectiveProgram.id));
+			const bd = acceptLinkSearchBirthDate.trim();
+			if (bd) params.set('birth_date', bd);
 			const { ok, data } = await api('GET', `/api/clients/search?${params.toString()}`);
 			if (ok && data) {
-				const payload = data as { data?: { id: number; name: string; birth_year: number | null; has_id_document?: boolean; id_documents_count?: number }[] };
+				const payload = data as { data?: { id: number; first_name: string; middle_name?: string | null; last_name: string; birth_date: string | null; mobile_masked?: string | null }[] };
 				acceptPossibleMatches = payload.data ?? [];
 			} else {
 				acceptPossibleMatches = [];
@@ -763,11 +716,43 @@
 		}
 	}
 
+	async function runAcceptPhoneSearch(e?: SubmitEvent) {
+		e?.preventDefault();
+		const mobile = acceptLinkSearchPhone.trim();
+		if (!mobile) return;
+		acceptPhoneSearching = true;
+		try {
+			const body: Record<string, string | number> = { mobile };
+			if (effectiveProgram?.id != null) body.program_id = effectiveProgram.id;
+			const { ok, data } = await api('POST', '/api/clients/search-by-phone', body);
+			if (ok && data) {
+				const payload = data as { match_status?: string; client?: { id: number; first_name: string; middle_name?: string | null; last_name: string; birth_date: string | null; mobile_masked?: string | null } };
+				if (payload.match_status === 'existing' && payload.client) {
+					acceptPossibleMatches = [payload.client];
+					acceptChosenClientId = payload.client.id;
+					acceptCreateNew = false;
+					acceptVerifyFirstName = payload.client.first_name ?? '';
+					acceptVerifyLastName = payload.client.last_name ?? '';
+					acceptVerifyBirthDate = payload.client.birth_date ?? '';
+				} else {
+					acceptPossibleMatches = [];
+					acceptChosenClientId = null;
+					toaster.warning({ title: 'No client found with that phone number.' });
+				}
+			} else {
+				acceptPossibleMatches = [];
+				acceptChosenClientId = null;
+				toaster.warning({ title: 'No client found with that phone number.' });
+			}
+		} finally {
+			acceptPhoneSearching = false;
+		}
+	}
+
 	const acceptCanSubmit = $derived(
-		acceptVerifyName.trim() !== '' &&
-		acceptVerifyBirthYear.trim() !== '' &&
-		Number(acceptVerifyBirthYear) >= 1900 &&
-		Number(acceptVerifyBirthYear) <= 2100 &&
+		acceptVerifyFirstName.trim() !== '' &&
+		acceptVerifyLastName.trim() !== '' &&
+		acceptVerifyBirthDate.trim() !== '' &&
 		(acceptChosenClientId !== null || acceptCreateNew)
 	);
 
@@ -781,19 +766,27 @@
 		if (!acceptRegModalReg || !acceptCanSubmit || acceptSubmitting) return;
 		acceptSubmitting = true;
 		const body: Record<string, unknown> = {
-			name: acceptVerifyName.trim(),
-			birth_year: Number(acceptVerifyBirthYear),
+			first_name: acceptVerifyFirstName.trim(),
+			last_name: acceptVerifyLastName.trim(),
+			birth_date: acceptVerifyBirthDate.trim(),
 			client_category: acceptVerifyCategory,
 			create_new_client: acceptCreateNew,
 		};
 		if (!acceptCreateNew && acceptChosenClientId) body.client_id = acceptChosenClientId;
-		if (acceptRegisterIdNumber.trim()) {
-			body.register_id = { id_type: acceptRegisterIdType, id_number: acceptRegisterIdNumber.trim() };
-		}
 		const { ok, message } = await api('POST', `/api/identity-registrations/${acceptRegModalReg.id}/accept`, body);
 		acceptSubmitting = false;
 		if (ok) {
-			toaster.success({ title: 'Registration accepted.' });
+			const selectedClient = !acceptCreateNew && acceptChosenClientId !== null
+				? acceptPossibleMatches.find((c) => c.id === acceptChosenClientId) ?? null
+				: null;
+			const edited = selectedClient
+				? (acceptVerifyFirstName.trim() !== (selectedClient.first_name ?? '') || acceptVerifyLastName.trim() !== (selectedClient.last_name ?? '') || acceptVerifyBirthDate.trim() !== (selectedClient.birth_date ?? '').trim())
+				: false;
+			if (selectedClient) {
+				toaster.success({ title: edited ? 'Edited and verified client.' : 'Verified.' });
+			} else {
+				toaster.success({ title: 'Registration accepted.' });
+			}
 			closeAcceptModal();
 			router.reload();
 		} else {
@@ -806,6 +799,34 @@
 		if (ok) {
 			toaster.success({ title: 'Registration rejected.' });
 			router.reload();
+		}
+	}
+
+	/** FLOW A: staff confirms bind_confirmation hold → session created. */
+	let confirmBindRegId = $state<number | null>(null);
+	async function submitConfirmBind(regId: number) {
+		if (confirmBindRegId !== null) return;
+		confirmBindRegId = regId;
+		const { ok, message } = await api('POST', `/api/identity-registrations/${regId}/confirm-bind`, {});
+		confirmBindRegId = null;
+		if (ok) {
+			toaster.success({ title: 'Visit started.' });
+			router.reload();
+		} else {
+			toaster.error({ title: (message as string) ?? 'Confirm bind failed.' });
+		}
+	}
+
+	async function submitAcceptReveal() {
+		if (!acceptRegModalReg || !acceptRevealReason.trim() || acceptRevealSubmitting) return;
+		acceptRevealSubmitting = true;
+		acceptRevealResult = null;
+		const { ok, data, message } = await api('POST', `/api/identity-registrations/${acceptRegModalReg.id}/reveal-phone`, { reason: acceptRevealReason.trim() });
+		acceptRevealSubmitting = false;
+		if (ok && data && typeof (data as { mobile?: string }).mobile === 'string') {
+			acceptRevealResult = (data as { mobile: string }).mobile;
+		} else {
+			toaster.error({ title: (message as string) ?? 'Reveal failed.' });
 		}
 	}
 
@@ -849,15 +870,29 @@
 		{:else}
 			<div class="flex items-center justify-between gap-2">
 				<h1 class="text-xl md:text-2xl font-semibold text-surface-950">Triage</h1>
-				<button
-					type="button"
-					class="btn btn-icon preset-tonal touch-target"
-					aria-label="Triage settings (HID and scanner)"
-					title="Settings"
-					onclick={openTriageSettingsModal}
-				>
-					<Settings class="w-5 h-5" />
-				</button>
+				<div class="flex items-center gap-2">
+					{#if publicTriageUrl}
+						<a
+							href={publicTriageUrl}
+							target="_blank"
+							rel="noopener noreferrer"
+							class="btn btn-sm preset-tonal gap-1.5 touch-target-h"
+							title="Open client self-service triage in new tab"
+						>
+							<ArrowUpRight class="w-4 h-4" />
+							<span class="hidden sm:inline text-sm">Public triage</span>
+						</a>
+					{/if}
+					<button
+						type="button"
+						class="btn btn-icon preset-tonal touch-target"
+						aria-label="Triage settings (HID and scanner)"
+						title="Settings"
+						onclick={openTriageSettingsModal}
+					>
+						<Settings class="w-5 h-5" />
+					</button>
+				</div>
 			</div>
 
 			{#if pending_identity_registrations?.length > 0}
@@ -882,15 +917,21 @@
 							>
 								<div class="min-w-0">
 									<p class="text-sm font-medium text-surface-900 truncate flex items-center gap-2">
-										{reg.name ?? '—'}
+										{clientDisplayName(reg)}
+										{#if reg.request_type === 'bind_confirmation'}
+											<span class="badge badge-sm badge-tonal-primary" data-testid="identity-registration-bind-confirmation-badge">Verify & start</span>
+										{/if}
 										{#if reg.id_verified_at}
 											<span class="badge badge-sm badge-filled-primary-500" data-testid="identity-registration-verified-badge">Verified</span>
 										{/if}
 									</p>
 									<p class="text-xs text-surface-600">
-										Birth year: {reg.birth_year ?? '—'} · Category: {reg.client_category ?? '—'}
-										{#if reg.id_type || reg.id_number_last4}
-											· ID: {reg.id_type ?? '—'}{#if reg.id_number_last4} …{reg.id_number_last4}{/if}
+										Birth date: {reg.birth_date ?? '—'} · Category: {reg.client_category ?? '—'}
+										{#if reg.mobile_masked}
+											· {reg.mobile_masked}
+										{/if}
+										{#if reg.request_type === 'bind_confirmation' && (reg.token_physical_id || reg.track_name || reg.client_name)}
+											· Token: {reg.token_physical_id ?? '—'} · Track: {reg.track_name ?? '—'} · Client: {reg.client_name ?? '—'}
 										{/if}
 										{#if reg.session_alias}
 											· Session: {reg.session_alias}
@@ -898,14 +939,26 @@
 									</p>
 								</div>
 								<div class="flex gap-2 shrink-0">
-									<button
-										type="button"
-										class="btn preset-filled-primary-500 text-sm touch-target-h"
-										data-testid="identity-registration-verify-{reg.id}"
-										onclick={() => openAcceptModal(reg)}
-									>
-										Verify
-									</button>
+									{#if reg.request_type === 'bind_confirmation'}
+										<button
+											type="button"
+											class="btn preset-filled-primary-500 text-sm touch-target-h"
+											data-testid="identity-registration-confirm-bind-{reg.id}"
+											disabled={confirmBindRegId === reg.id}
+											onclick={() => submitConfirmBind(reg.id)}
+										>
+											{confirmBindRegId === reg.id ? 'Starting…' : 'Confirm Bind'}
+										</button>
+									{:else}
+										<button
+											type="button"
+											class="btn preset-filled-primary-500 text-sm touch-target-h"
+											data-testid="identity-registration-verify-{reg.id}"
+											onclick={() => openAcceptModal(reg)}
+										>
+											Verify
+										</button>
+									{/if}
 									<button
 										type="button"
 										class="btn preset-tonal text-sm touch-target-h"
@@ -953,40 +1006,26 @@
 				/>
 			{/if}
 
-			<Modal open={showScanner} title={scannerMode === 'verify_id' ? 'Scan ID to verify' : scannerMode === 'capture_id_accept' || scannerMode === 'capture_id_new_reg' ? 'Scan ID to capture number' : 'Scan QR via device'} onClose={closeScanner} wide={true}>
-				{#snippet children()}
-					<div class="flex flex-col gap-3 w-full min-w-[20rem] mx-auto">
-						{#if effectiveHid}
-							<!-- First focusable so Modal focus trap focuses it; same value/handler as global input. -->
-							<input
-								type="text"
-								autocomplete="off"
-								inputmode="none"
-								aria-label="Barcode scanner input"
-								class="sr-only"
-								bind:value={barcodeValue}
-								bind:this={barcodeModalInputEl}
-								onkeydown={onBarcodeKeydown}
-							/>
-						{/if}
-						{#if effectiveCamera}
-							<QrScanner active={showScanner} cameraOnly={true} onScan={handleQrScan} />
-						{/if}
-						{#if scanCountdown > 0}
-							<div class="flex flex-wrap items-center justify-center gap-2">
-								<p class="text-sm text-surface-600" aria-live="polite">Closing in {scanCountdown}s</p>
-								<button type="button" class="btn preset-tonal text-sm py-1.5 px-3" onclick={extendScannerCountdown}>
-									Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)
-								</button>
-							</div>
-						{/if}
-						{#if effectiveHid}
-							<p class="text-sm text-surface-600 rounded-container border border-surface-200 bg-surface-50 px-3 py-2" aria-live="polite">HID scanner turned on, waiting for scan.</p>
-						{/if}
-						<button type="button" class="btn preset-tonal w-full py-3" onclick={closeScanner}>Cancel</button>
-					</div>
+			<ScanModal
+				open={showScanner}
+				onClose={closeScanner}
+				title="Scan QR via Camera"
+				allowHid={effectiveHid}
+				allowCamera={effectiveCamera}
+				onScan={handleQrScan}
+				wide={true}
+			>
+				{#snippet extra()}
+					{#if scanCountdown > 0}
+						<div class="flex flex-wrap items-center justify-center gap-2">
+							<p class="text-sm text-surface-600" aria-live="polite">Closing in {scanCountdown}s</p>
+							<button type="button" class="btn preset-tonal text-sm py-1.5 px-3" onclick={extendScannerCountdown}>
+								Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)
+							</button>
+						</div>
+					{/if}
 				{/snippet}
-			</Modal>
+			</ScanModal>
 
 			{#if !scannedToken}
 				<!-- Get token: pulsing CTA with camera icon opens modal (same pattern as display). -->
@@ -1012,6 +1051,19 @@
 								}}
 							>
 								<Camera class="w-6 h-6" />
+							</button>
+						{/if}
+						{#if effectiveHid}
+							<button
+								type="button"
+								class="btn btn-sm preset-tonal shrink-0 touch-target-h"
+								aria-label="Open scan modal for barcode"
+								onclick={() => {
+									showScanner = true;
+									scanHandled = false;
+								}}
+							>
+								Scan with barcode
 							</button>
 						{/if}
 					</div>
@@ -1040,29 +1092,19 @@
 					</div>
 				</div>
 
-				<Modal open={showTriageSettingsModal} title="Triage settings" onClose={() => (showTriageSettingsModal = false)}>
+				<Modal open={showTriageSettingsModal} title="Triage settings" onClose={() => { cancelTriageSettingsRequest(); showTriageSettingsModal = false; }}>
 					{#snippet children()}
 						<div class="flex flex-col gap-6">
-							<p class="text-sm text-surface-950/70">HID and camera scanner preferences for this account and this device.</p>
+							<p class="text-sm text-surface-950/70">You can view and change settings below. Changes are applied only when you save; saving requires PIN or QR (admin scan).</p>
 							<div class="flex flex-col gap-4">
 								<h3 class="text-sm font-semibold text-surface-950">On this account</h3>
 								<p class="text-xs text-surface-950/60">Saved to your account; applies on any device when you are logged in.</p>
 								<label class="flex items-center gap-2 cursor-pointer">
-									<input
-										type="checkbox"
-										class="checkbox"
-										bind:checked={triageSettingsAccountHid}
-										disabled={triageSettingsSaving}
-									/>
+									<input type="checkbox" class="checkbox" bind:checked={triageSettingsAccountHid} disabled={triageSettingsSaving} />
 									<span class="text-sm text-surface-950">Allow HID barcode scanner</span>
 								</label>
 								<label class="flex items-center gap-2 cursor-pointer">
-									<input
-										type="checkbox"
-										class="checkbox"
-										bind:checked={triageSettingsAccountCamera}
-										disabled={triageSettingsSaving}
-									/>
+									<input type="checkbox" class="checkbox" bind:checked={triageSettingsAccountCamera} disabled={triageSettingsSaving} />
 									<span class="text-sm text-surface-950">Allow camera/QR scanner</span>
 								</label>
 							</div>
@@ -1070,47 +1112,47 @@
 								<h3 class="text-sm font-semibold text-surface-950">On this device</h3>
 								<p class="text-xs text-surface-950/60">Stored on this device only — not saved to server.</p>
 								<label class="flex items-center gap-2 cursor-pointer">
-									<input
-										type="checkbox"
-										class="checkbox"
-										bind:checked={triageSettingsLocalHid}
-										onchange={() => {
-											setLocalAllowHidOnThisDevice('staff_binder', triageSettingsLocalHid);
-											localAllowHid = triageSettingsLocalHid;
-										}}
-									/>
+									<input type="checkbox" class="checkbox" bind:checked={triageSettingsLocalHid} />
 									<span class="text-sm text-surface-950">Allow HID scanner on this device</span>
 								</label>
+								{#if triageSettingsLocalHid}
+									<label class="flex items-center gap-2 cursor-pointer pl-6">
+										<input type="checkbox" class="checkbox" bind:checked={triageSettingsLocalPersistentHid} />
+										<span class="text-sm text-surface-950">Keep HID ready when scan modal is closed</span>
+									</label>
+								{/if}
 								<label class="flex items-center gap-2 cursor-pointer">
-									<input
-										type="checkbox"
-										class="checkbox"
-										bind:checked={triageSettingsLocalCamera}
-										onchange={() => {
-											setLocalAllowCameraOnThisDevice('staff_binder', triageSettingsLocalCamera);
-											localAllowCamera = triageSettingsLocalCamera;
-										}}
-									/>
+									<input type="checkbox" class="checkbox" bind:checked={triageSettingsLocalCamera} />
 									<span class="text-sm text-surface-950">Allow camera/QR scanner on this device</span>
 								</label>
 							</div>
+							<div class="border-t border-surface-200 pt-4 flex flex-col gap-2">
+								<h3 class="text-sm font-semibold text-surface-950">Apply changes</h3>
+								<p class="text-xs text-surface-950/60">Authorize with PIN or show QR for supervisor to scan. Settings above are applied only when you save.</p>
+								<AuthChoiceButtons includeRequest={true} disabled={triageSettingsSaving || triageSettingsRequestState === 'waiting'} bind:mode={triageSettingsAuthMode} />
+								{#if triageSettingsRequestState === 'waiting' && triageSettingsRequestId != null && triageSettingsRequestToken != null}
+									<div class="flex flex-col items-center gap-3 py-4">
+										<p class="text-sm font-medium text-surface-950">Waiting for approval…</p>
+										<p class="text-xs text-surface-950/60 text-center">Ask the program supervisor or admin to scan this QR on the Track overrides page.</p>
+										<img class="rounded-container border border-surface-200 bg-white p-2" alt="QR for supervisor to scan" width="200" height="200" src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(STAFF_TRIAGE_SETTINGS_REQUEST_QR_PREFIX + triageSettingsRequestId + ':' + triageSettingsRequestToken)}`} />
+										<button type="button" class="btn preset-tonal btn-sm touch-target-h" onclick={cancelTriageSettingsRequest}>Cancel request</button>
+									</div>
+								{:else if triageSettingsAuthMode === 'request'}
+									<button type="button" class="btn preset-filled-primary-500" onclick={createStaffTriageSettingsRequest} disabled={triageSettingsSaving || effectiveProgram?.id == null}>
+										{triageSettingsSaving ? 'Creating…' : 'Show QR for supervisor to scan'}
+									</button>
+								{:else}
+									<PinOrQrInput bind:this={triagePinOrQrRef} disabled={triageSettingsSaving} mode={triageSettingsAuthMode} bind:pin={triageSettingsPin} bind:qrScanToken={triageSettingsQrScanToken} />
+								{/if}
+								{#if triageSettingsError}
+									<p class="text-sm text-error-600">{triageSettingsError}</p>
+								{/if}
+							</div>
 							<div class="flex flex-wrap gap-2 justify-end pt-2">
-								<button
-									type="button"
-									class="btn preset-tonal"
-									onclick={() => (showTriageSettingsModal = false)}
-									disabled={triageSettingsSaving}
-								>
-									Cancel
-								</button>
-								<button
-									type="button"
-									class="btn preset-filled-primary-500"
-									onclick={saveTriageSettings}
-									disabled={triageSettingsSaving}
-								>
-									{triageSettingsSaving ? 'Saving…' : 'Save'}
-								</button>
+								<button type="button" class="btn preset-tonal" onclick={() => { cancelTriageSettingsRequest(); showTriageSettingsModal = false; }} disabled={triageSettingsSaving}>Cancel</button>
+								{#if triageSettingsAuthMode !== 'request'}
+									<button type="button" class="btn preset-filled-primary-500" onclick={saveTriageSettings} disabled={triageSettingsSaving}>{triageSettingsSaving ? 'Saving…' : 'Save'}</button>
+								{/if}
 							</div>
 						</div>
 					{/snippet}
@@ -1122,36 +1164,21 @@
 							<p class="text-sm text-surface-700">
 								Create a client registration directly. The registration is created immediately; no Accept/Reject step. Use when a client has no token yet and you are entering their details.
 							</p>
-							{#if newRegSelectedClient}
-								<div class="rounded-container border border-surface-200 bg-surface-50 p-3 space-y-1">
-									<p class="text-xs font-medium text-surface-600">Selected client</p>
-									<p class="text-sm text-surface-950 font-medium">{newRegSelectedClient.name}</p>
-									<p class="text-xs text-surface-600">
-										Birth year: {newRegSelectedClient.birth_year ?? '—'} · ID docs: {newRegSelectedClient.id_documents_count ?? (newRegSelectedClient.has_id_document ? 1 : 0)}
-									</p>
-								</div>
-							{:else}
-								<label class="flex flex-col gap-1 text-sm">
-									<span class="font-medium text-surface-800">Name (required)</span>
-									<input
-										type="text"
-										class="input rounded-container border border-surface-200 px-3 py-2"
-										placeholder="Full name"
-										bind:value={newRegName}
-										disabled={newRegSubmitting}
-									/>
+							<label class="flex flex-col gap-1 text-sm">
+									<span class="font-medium text-surface-800">First name (required)</span>
+									<input type="text" class="input rounded-container border border-surface-200 px-3 py-2" placeholder="First name" bind:value={newRegFirstName} disabled={newRegSubmitting} />
 								</label>
 								<label class="flex flex-col gap-1 text-sm">
-									<span class="font-medium text-surface-800">Birth year (required)</span>
-									<input
-										type="number"
-										class="input rounded-container border border-surface-200 px-3 py-2"
-										placeholder="e.g. 1985"
-										min="1900"
-										max="2100"
-										bind:value={newRegBirthYear}
-										disabled={newRegSubmitting}
-									/>
+									<span class="font-medium text-surface-800">Middle name (optional)</span>
+									<input type="text" class="input rounded-container border border-surface-200 px-3 py-2" placeholder="Middle name" bind:value={newRegMiddleName} disabled={newRegSubmitting} />
+								</label>
+								<label class="flex flex-col gap-1 text-sm">
+									<span class="font-medium text-surface-800">Last name (required)</span>
+									<input type="text" class="input rounded-container border border-surface-200 px-3 py-2" placeholder="Last name" bind:value={newRegLastName} disabled={newRegSubmitting} />
+								</label>
+								<label class="flex flex-col gap-1 text-sm">
+									<span class="font-medium text-surface-800">Birth date (required)</span>
+									<input type="date" class="input rounded-container border border-surface-200 px-3 py-2" bind:value={newRegBirthDate} disabled={newRegSubmitting} />
 								</label>
 								<label class="flex flex-col gap-1 text-sm">
 									<span class="font-medium text-surface-800">Classification</span>
@@ -1165,164 +1192,19 @@
 										{/each}
 									</select>
 								</label>
-							{/if}
 
 							<div class="rounded-container border border-surface-200 bg-surface-50 p-3 space-y-3">
-								<p class="text-sm font-medium text-surface-800">
-									{newRegSelectedClient ? 'Attach ID to client' : 'Or attach ID to an existing client'}
-								</p>
-								<form class="space-y-2" onsubmit={runNewRegLinkSearch}>
-									<label for="new-reg-link-search-name" class="label-text text-xs font-semibold uppercase tracking-wide text-surface-500 block">Search by name</label>
-									<div class="join w-full">
-										<div class="join-item flex items-center gap-2 px-3 py-1 border border-surface-300 rounded-l-container bg-surface-50 w-full">
-											<Search class="w-4 h-4 my-2 text-surface-400 shrink-0" />
-											<input
-												type="text"
-												id="new-reg-link-search-name"
-												class="input input-ghost !bg-transparent px-0 py-0 h-auto text-sm w-full focus:!outline-none focus:!ring-0 focus:!border-transparent"
-												bind:value={newRegLinkSearchName}
-												placeholder="e.g. Maria Santos"
-												data-testid="new-reg-link-search-name"
-												disabled={newRegSubmitting}
-											/>
-										</div>
-										<button
-											type="submit"
-											class="join-item btn preset-filled-primary-500 px-4 text-sm shadow-sm !rounded-none !rounded-tr-lg !rounded-br-lg"
-											disabled={newRegLinkSearching || !newRegLinkSearchName.trim() || newRegSubmitting}
-											data-testid="new-reg-link-search-button"
-										>
-											{newRegLinkSearching ? 'Searching…' : 'Search'}
-										</button>
-									</div>
-									<label class="flex flex-col gap-1 text-xs">
-										<span class="text-surface-700">Birth year (optional)</span>
-										<input
-											type="number"
-											class="input rounded-container border border-surface-200 px-3 py-2 text-sm w-full"
-											bind:value={newRegLinkSearchBirthYear}
-											placeholder="e.g. 1985"
-											min={NEW_REG_LINK_BIRTH_YEAR_MIN}
-											max={NEW_REG_LINK_BIRTH_YEAR_MAX}
-											data-testid="new-reg-link-search-birth-year"
-											disabled={newRegSubmitting}
-										/>
-									</label>
-								</form>
-
-								{#if newRegPossibleMatches.length > 0}
-									<p class="text-xs text-surface-600">Existing clients</p>
-									<ul class="space-y-1 mb-2">
-										{#each newRegPossibleMatches as client (client.id)}
-											<li>
-												<button
-													type="button"
-													class="btn preset-tonal text-sm w-full text-left justify-start py-3 {newRegChosenClientId === client.id ? 'ring-2 ring-primary-500' : ''}"
-													onclick={() => {
-														newRegChosenClientId = client.id;
-														showNewRegManualId = true;
-													}}
-													disabled={newRegSubmitting}
-												>
-													<div class="flex flex-col min-w-0">
-														<span class="truncate">{client.name}</span>
-														<span class="text-xs text-surface-600">
-															{client.birth_year ?? '—'} · ID docs: {client.id_documents_count ?? (client.has_id_document ? 1 : 0)}
-														</span>
-													</div>
-												</button>
-											</li>
-										{/each}
-									</ul>
-								{:else if newRegLinkSearchName.trim() !== '' && !newRegLinkSearching}
-									<p class="text-xs text-surface-600">No matches found.</p>
-								{/if}
-
-								<button
-									type="button"
-									class="btn preset-tonal text-sm w-full justify-start {newRegChosenClientId === null ? 'ring-2 ring-primary-500' : ''}"
-									onclick={() => {
-										newRegChosenClientId = null;
-									}}
-									disabled={newRegSubmitting}
-								>
-									Create new client
-								</button>
-							</div>
-							<div class="border-t border-surface-200 pt-4 space-y-3">
-								<div>
-									<p class="text-sm font-medium text-surface-800">Optional ID details</p>
-									<p class="text-xs text-surface-600 mt-0.5">Used to verify and re-use this ID next time.</p>
-								</div>
-								<div class="space-y-2">
-									{#if effectiveCamera && !showNewRegManualId}
-										<button
-											type="button"
-											class="btn preset-filled-primary-500 w-full text-sm touch-target-h flex items-center justify-center gap-2"
-											data-testid="new-reg-scan-id-button"
-											onclick={() => { scannerMode = 'capture_id_new_reg'; scanHandled = false; showScanner = true; }}
-											disabled={newRegSubmitting}
-										>
-											<Camera class="w-4 h-4 shrink-0" />
-											Scan ID to capture number
-										</button>
-									{/if}
-									{#if showNewRegManualId}
-										<div
-											class="rounded-container border border-surface-200 bg-surface-50 p-3 space-y-3"
-											data-testid="new-reg-manual-id-entry-group"
-										>
-											<div class="flex items-center justify-between gap-2">
-												<span class="text-sm font-medium text-surface-700">Enter ID manually</span>
-												{#if effectiveCamera}
-													<button
-														type="button"
-														class="btn btn-sm preset-tonal"
-														onclick={() => (showNewRegManualId = false)}
-													>
-														Use scanner
-													</button>
-												{/if}
-											</div>
-											<div class="space-y-1">
-												<span class="text-sm text-surface-700">ID number</span>
-												<IdNumberInput
-													bind:value={newRegIdNumber}
-													placeholder="Optional or scan below"
-													disabled={newRegSubmitting}
-													showMaskToggle={true}
-													showScanButton={false}
-													scanButtonFullWidth={true}
-													testId="new-reg-id-number"
-												/>
-											</div>
-											{#if (id_types ?? []).length}
-												<label class="flex flex-col gap-1 text-sm">
-													<span class="text-surface-700">ID type</span>
-													<select
-														class="select select-theme input rounded-container border border-surface-200 px-3 py-2"
-														bind:value={newRegIdType}
-														disabled={newRegSubmitting}
-														aria-label="ID type"
-													>
-														{#each (id_types ?? []) as type (type)}
-															<option value={type}>{type}</option>
-														{/each}
-													</select>
-												</label>
-											{/if}
-										</div>
-									{:else}
-										<button
-											type="button"
-											class="btn preset-tonal w-full touch-target-h"
-											data-testid="new-reg-enter-manually-button"
-											onclick={() => (showNewRegManualId = true)}
-											disabled={newRegSubmitting}
-										>
-											Enter ID manually
-										</button>
-									{/if}
+								<p class="text-sm font-medium text-surface-800">Optional phone</p>
+								<div class="flex gap-2">
+									<input
+										type="tel"
+										inputmode="numeric"
+										class="input flex-1 rounded-container border border-surface-200 px-3 py-2"
+										bind:value={newRegMobile}
+										placeholder="e.g. 09171234567"
+										disabled={newRegSubmitting}
+										data-testid="new-reg-mobile-input"
+									/>
 								</div>
 							</div>
 							<div class="flex gap-2 pt-2">
@@ -1333,18 +1215,10 @@
 									type="button"
 									class="btn preset-filled-primary-500 flex-1"
 									onclick={submitNewRegistrationRequest}
-									disabled={
-										newRegSubmitting ||
-										(newRegChosenClientId !== null &&
-											(String(newRegIdType ?? '').trim() === '' || String(newRegIdNumber ?? '').trim() === ''))
-									}
+									disabled={newRegSubmitting}
 									data-testid="triage-new-registration-submit"
 								>
-									{#if newRegSubmitting}
-										{newRegChosenClientId !== null ? 'Attaching…' : 'Creating…'}
-									{:else}
-										{newRegChosenClientId !== null ? 'Attach ID to client' : 'Create registration'}
-									{/if}
+									{newRegSubmitting ? 'Creating…' : 'Create registration'}
 								</button>
 							</div>
 						</div>
@@ -1392,9 +1266,9 @@
 						<div class="border-t border-surface-200 pt-4" data-testid="triage-client-binder-wrapper">
 							<TriageClientBinder
 								bindingMode={bindingMode}
+								programId={effectiveProgram?.id ?? null}
 								allowHid={effectiveHid}
 								allowCamera={effectiveCamera}
-								id_types={id_types}
 								onBindingChange={({ status, client_binding }) => {
 									binderStatus = status;
 									clientBinding = client_binding;
@@ -1415,7 +1289,7 @@
 							disabled={
 								isSubmitting ||
 								selectedTrackId === null ||
-								(bindingMode === 'required' && binderStatus !== 'bound')
+								(bindingMode === 'required' && binderStatus !== 'bound' && !(binderStatus === 'binding_ready' && clientBinding))
 							}
 						>
 							{isSubmitting ? 'Binding…' : 'Confirm'}
@@ -1435,52 +1309,72 @@
 				{#if acceptRegModalReg}
 					<div class="space-y-4" data-testid="accept-registration-form">
 						<p class="text-sm text-surface-700">
-							Verify details, then choose whether to link to an existing client or create a new one.
+							Verify details, then choose an existing client to verify (or update their details) or create a new one.
 						</p>
-						{#if acceptRegModalReg.id_type || acceptRegModalReg.id_number_last4}
-							<p class="text-xs text-surface-600">ID attempted: {acceptRegModalReg.id_type ?? '—'}{#if acceptRegModalReg.id_number_last4} …{acceptRegModalReg.id_number_last4}{/if}</p>
+						{#if acceptRegModalReg.mobile_masked}
+							<p class="text-xs text-surface-600">Phone: {acceptRegModalReg.mobile_masked}</p>
+						{/if}
+						{#if acceptExistingClientByPhone}
+							<div class="rounded-container border border-primary-200 bg-primary-50 p-3 text-sm text-primary-900" data-testid="accept-existing-client-by-phone-banner">
+								<p class="font-medium">This phone is already registered to a client.</p>
+								<p class="text-xs mt-1">Verify that client below; you can reveal phone for verification or update their details.</p>
+							</div>
 						{/if}
 						{#if acceptSelectedClient}
-							<div class="rounded-container border border-surface-200 bg-surface-50 p-3 space-y-1">
-								<p class="text-xs font-medium text-surface-600">Selected client</p>
-								<p class="text-sm text-surface-950 font-medium">{acceptSelectedClient.name}</p>
-								<p class="text-xs text-surface-600">
-									Birth year: {acceptSelectedClient.birth_year ?? '—'} · ID documents: {acceptSelectedClient.id_documents_count ?? (acceptSelectedClient.has_id_document ? 1 : 0)}
-								</p>
-								<p class="text-xs text-surface-600">Classification: {acceptVerifyCategory}</p>
+							<div class="rounded-container border border-primary-200 bg-primary-50/50 p-3 space-y-1">
+								<p class="text-xs font-medium text-surface-700">Verify this client; edit details below if needed.</p>
+								{#if acceptSelectedClient.mobile_masked}
+									<p class="text-xs text-surface-600">Client phone: {acceptSelectedClient.mobile_masked}</p>
+								{/if}
 							</div>
-						{:else}
-							<label class="flex flex-col gap-1 text-sm">
-								<span class="font-medium text-surface-800">Name (required)</span>
-								<input
-									type="text"
-									class="input rounded-container border border-surface-200 px-3 py-2"
-									bind:value={acceptVerifyName}
-									placeholder="Full name"
-								/>
-							</label>
-							<label class="flex flex-col gap-1 text-sm">
-								<span class="font-medium text-surface-800">Birth year (required)</span>
-								<input
-									type="number"
-									class="input rounded-container border border-surface-200 px-3 py-2"
-									bind:value={acceptVerifyBirthYear}
-									placeholder="e.g. 1985"
-									min="1900"
-									max="2100"
-								/>
-							</label>
-							<label class="flex flex-col gap-1 text-sm">
-								<span class="font-medium text-surface-800">Classification (required)</span>
-								<select class="select select-theme input rounded-container border border-surface-200 px-3 py-2" bind:value={acceptVerifyCategory}>
-									{#each ACCEPT_CATEGORIES as cat (cat.value)}
-										<option value={cat.value}>{cat.label}</option>
-									{/each}
-								</select>
-							</label>
 						{/if}
+						<label class="flex flex-col gap-1 text-sm">
+							<span class="font-medium text-surface-800">First name (required)</span>
+							<input type="text" class="input rounded-container border border-surface-200 px-3 py-2" bind:value={acceptVerifyFirstName} placeholder="First name" />
+						</label>
+						<label class="flex flex-col gap-1 text-sm">
+							<span class="font-medium text-surface-800">Last name (required)</span>
+							<input type="text" class="input rounded-container border border-surface-200 px-3 py-2" bind:value={acceptVerifyLastName} placeholder="Last name" />
+						</label>
+						<label class="flex flex-col gap-1 text-sm">
+							<span class="font-medium text-surface-800">Birth date (required)</span>
+							<input type="date" class="input rounded-container border border-surface-200 px-3 py-2" bind:value={acceptVerifyBirthDate} />
+						</label>
+						<label class="flex flex-col gap-1 text-sm">
+							<span class="font-medium text-surface-800">Classification (required)</span>
+							<select class="select select-theme input rounded-container border border-surface-200 px-3 py-2" bind:value={acceptVerifyCategory}>
+								{#each ACCEPT_CATEGORIES as cat (cat.value)}
+									<option value={cat.value}>{cat.label}</option>
+								{/each}
+							</select>
+						</label>
 						<div class="rounded-container border border-surface-200 bg-surface-50 p-3 space-y-3">
-							<p class="text-sm font-medium text-surface-800">Link to client</p>
+							<p class="text-sm font-medium text-surface-800">Client</p>
+							<form class="space-y-2" onsubmit={runAcceptPhoneSearch}>
+								<label for="accept-link-search-phone" class="label-text text-xs font-semibold uppercase tracking-wide text-surface-500 block">Search by phone</label>
+								<div class="join w-full">
+									<div class="join-item flex items-center gap-2 px-3 py-1 border border-surface-300 rounded-l-container bg-surface-50 w-full">
+										<Search class="w-4 h-4 my-2 text-surface-400 shrink-0" />
+										<input
+											type="tel"
+											inputmode="numeric"
+											id="accept-link-search-phone"
+											class="input input-ghost !bg-transparent px-0 py-0 h-auto text-sm w-full focus:!outline-none focus:!ring-0 focus:!border-transparent"
+											bind:value={acceptLinkSearchPhone}
+											placeholder="e.g. 09171234567"
+											data-testid="accept-link-search-phone"
+										/>
+									</div>
+									<button
+										type="submit"
+										class="join-item btn preset-filled-primary-500 px-4 text-sm shadow-sm !rounded-none !rounded-tr-lg !rounded-br-lg"
+										disabled={acceptPhoneSearching || !acceptLinkSearchPhone.trim()}
+										data-testid="accept-link-search-phone-button"
+									>
+										{acceptPhoneSearching ? 'Searching…' : 'Search'}
+									</button>
+								</div>
+							</form>
 							<form class="space-y-2" onsubmit={runAcceptLinkSearch}>
 								<label for="accept-link-search-name" class="label-text text-xs font-semibold uppercase tracking-wide text-surface-500 block">Search by name</label>
 								<div class="join w-full">
@@ -1505,16 +1399,8 @@
 									</button>
 								</div>
 								<label class="flex flex-col gap-1 text-xs">
-									<span class="text-surface-700">Birth year (optional)</span>
-									<input
-										type="number"
-										class="input rounded-container border border-surface-200 px-3 py-2 text-sm w-full"
-										bind:value={acceptLinkSearchBirthYear}
-										placeholder="e.g. 1985"
-										min={ACCEPT_LINK_BIRTH_YEAR_MIN}
-										max={ACCEPT_LINK_BIRTH_YEAR_MAX}
-										data-testid="accept-link-search-birth-year"
-									/>
+									<span class="text-surface-700">Birth date (optional)</span>
+									<input type="date" class="input rounded-container border border-surface-200 px-3 py-2 text-sm w-full" bind:value={acceptLinkSearchBirthDate} data-testid="accept-link-search-birth-date" />
 								</label>
 							</form>
 							{#if acceptPossibleMatches.length > 0}
@@ -1528,14 +1414,15 @@
 												onclick={() => {
 													acceptChosenClientId = client.id;
 													acceptCreateNew = false;
-													acceptVerifyName = client.name ?? '';
-													acceptVerifyBirthYear = client.birth_year != null ? String(client.birth_year) : '';
+													acceptVerifyFirstName = client.first_name ?? '';
+													acceptVerifyLastName = client.last_name ?? '';
+													acceptVerifyBirthDate = client.birth_date ?? '';
 												}}
 											>
 												<div class="flex flex-col min-w-0">
-													<span class="truncate">{client.name}</span>
+													<span class="truncate">{clientDisplayName(client)}</span>
 													<span class="text-xs text-surface-600">
-														{client.birth_year ?? '—'} · ID docs: {client.id_documents_count ?? (client.has_id_document ? 1 : 0)}
+														{client.birth_date ?? '—'}{#if client.mobile_masked} · {client.mobile_masked}{/if}
 													</span>
 												</div>
 											</button>
@@ -1553,136 +1440,21 @@
 								Create new client
 							</button>
 						</div>
-						{#if acceptRegModalReg?.id_type || acceptRegModalReg?.id_number_last4}
+						{#if acceptRegModalReg?.mobile_masked}
 							<div class="border-t border-surface-200 pt-3">
-								<p class="text-xs font-medium text-surface-600 mb-2">ID verification</p>
+								<p class="text-xs font-medium text-surface-600 mb-2">Phone on file</p>
+								<p class="text-sm text-surface-700">{acceptRegModalReg.mobile_masked}</p>
+								<button
+									type="button"
+									class="btn preset-tonal text-sm mt-2"
+									onclick={() => (showAcceptRevealModal = true)}
+									data-testid="accept-reveal-phone-btn"
+								>
+									Reveal phone
+								</button>
 								{#if acceptRegModalReg?.id_verified_at}
-									<p class="text-sm text-surface-700">Verified{acceptRegModalReg?.id_verified_by ? ` by ${acceptRegModalReg.id_verified_by}` : ''}{acceptRegModalReg?.id_verified_at ? ` on ${new Date(acceptRegModalReg.id_verified_at).toLocaleString()}` : ''}.</p>
-								{:else}
-									<p class="text-sm text-surface-600 mb-2">Not verified yet. Scan the physical ID to verify it matches.</p>
-									<button
-										type="button"
-										class="btn preset-filled-primary-500 text-sm touch-target-h flex items-center justify-center gap-2 w-full"
-										data-testid="verify-id-button"
-										onclick={() => { scannerMode = 'verify_id'; scanHandled = false; showScanner = true; }}
-									>
-										<Camera class="w-4 h-4 shrink-0" />
-										Verify ID
-									</button>
-									{#if showVerifyIdManual}
-										<div class="rounded-container border border-surface-200 bg-surface-100 p-3 space-y-3 mt-3" data-testid="verify-id-manual-entry-group">
-											<div class="flex items-center justify-between gap-2">
-												<span class="text-sm font-medium text-surface-700">Enter ID manually</span>
-												<button type="button" class="btn btn-sm preset-tonal" onclick={() => (showVerifyIdManual = false)} disabled={verifyIdManualSubmitting}>
-													Use scanner
-												</button>
-											</div>
-											<div class="space-y-1">
-												<span class="text-sm text-surface-700">ID number</span>
-												<IdNumberInput
-													bind:value={verifyIdManualValue}
-													placeholder="Enter ID number"
-													disabled={verifyIdManualSubmitting}
-													showMaskToggle={true}
-													showScanButton={false}
-													testId="verify-id-manual-number"
-													onKeydown={(e) => {
-														if (e.key === 'Enter') {
-															e.preventDefault();
-															submitVerifyIdManual();
-														}
-													}}
-												/>
-											</div>
-											<button
-												type="button"
-												class="btn preset-filled-primary-500 w-full text-sm touch-target-h"
-												onclick={submitVerifyIdManual}
-												disabled={!verifyIdManualValue.trim() || verifyIdManualSubmitting}
-											>
-												{verifyIdManualSubmitting ? 'Verifying…' : 'Verify'}
-											</button>
-										</div>
-									{:else}
-										<button
-											type="button"
-											class="btn preset-tonal w-full touch-target-h mt-3"
-											data-testid="verify-id-enter-manually-button"
-											onclick={() => (showVerifyIdManual = true)}
-										>
-											Enter ID manually
-										</button>
-									{/if}
+									<p class="text-xs text-surface-600 mt-1">Verified{acceptRegModalReg?.id_verified_by ? ` by ${acceptRegModalReg.id_verified_by}` : ''}{acceptRegModalReg?.id_verified_at ? ` on ${new Date(acceptRegModalReg.id_verified_at).toLocaleString()}` : ''}.</p>
 								{/if}
-							</div>
-						{:else}
-							<div class="rounded-container border border-surface-200 bg-surface-50 p-3 space-y-3">
-								<div>
-									<p class="text-sm font-medium text-surface-800">Optional: register an ID for this client</p>
-									<p class="text-xs text-surface-600 mt-0.5">Used to verify and re-use this ID next time.</p>
-								</div>
-								<div class="space-y-2">
-									{#if effectiveCamera && !showAcceptRegManualId}
-										<button
-											type="button"
-											class="btn preset-filled-primary-500 w-full text-sm touch-target-h flex items-center justify-center gap-2"
-											data-testid="accept-reg-scan-id-button"
-											onclick={() => { scannerMode = 'capture_id_accept'; scanHandled = false; showScanner = true; }}
-										>
-											<Camera class="w-4 h-4 shrink-0" />
-											Scan ID to capture number
-										</button>
-									{/if}
-									{#if showAcceptRegManualId}
-										<div
-											class="rounded-container border border-surface-200 bg-surface-100 p-3 space-y-3"
-											data-testid="accept-reg-manual-id-entry-group"
-										>
-											<div class="flex items-center justify-between gap-2">
-												<span class="text-sm font-medium text-surface-700">Enter ID manually</span>
-												{#if effectiveCamera}
-													<button
-														type="button"
-														class="btn btn-sm preset-tonal"
-														onclick={() => (showAcceptRegManualId = false)}
-													>
-														Use scanner
-													</button>
-												{/if}
-											</div>
-											<div class="space-y-1">
-												<span class="text-sm text-surface-700">ID number</span>
-												<IdNumberInput
-													bind:value={acceptRegisterIdNumber}
-													placeholder="Optional or scan below"
-													showMaskToggle={true}
-													showScanButton={false}
-													scanButtonFullWidth={true}
-													testId="accept-id-number"
-												/>
-											</div>
-											{#if (id_types ?? []).length}
-												<label class="flex flex-col gap-1 text-sm">
-													<span class="text-surface-700">ID type</span>
-													<select class="select select-theme input rounded-container border border-surface-200 px-3 py-2" bind:value={acceptRegisterIdType} aria-label="ID type">
-														{#each (id_types ?? []) as type (type)}
-															<option value={type}>{type}</option>
-														{/each}
-													</select>
-												</label>
-											{/if}
-										</div>
-									{:else}
-										<button
-											type="button"
-											class="btn preset-tonal w-full touch-target-h"
-											data-testid="accept-reg-enter-manually-button"
-											onclick={() => (showAcceptRegManualId = true)}
-										>
-											Enter ID manually
-										</button>
-									{/if}
-								</div>
 							</div>
 						{/if}
 						<div class="flex gap-2 pt-2">
@@ -1692,11 +1464,14 @@
 								class="btn preset-filled-primary-500 flex-1"
 								disabled={!acceptCanSubmit || acceptSubmitting}
 								onclick={submitAccept}
+								data-testid="accept-registration-submit"
 							>
 								{#if acceptSubmitting}
 									Submitting…
-								{:else if acceptSelectedClient && acceptRegModalReg?.id_verified_at}
-									Attach ID to client
+								{:else if acceptSelectedClient}
+									Verify existing client
+								{:else if acceptCreateNew}
+									Create new client and accept
 								{:else}
 									Submit registration
 								{/if}
@@ -1707,44 +1482,39 @@
 			{/snippet}
 		</Modal>
 
+		<!-- Reveal phone (from Accept modal) -->
 		<Modal
-			open={showAcceptUnverifiedIdWarning}
-			title="Verify ID before accepting"
-			onClose={() => (showAcceptUnverifiedIdWarning = false)}
+			open={showAcceptRevealModal}
+			title="Reveal phone"
+			onClose={() => { showAcceptRevealModal = false; acceptRevealResult = null; acceptRevealReason = ''; }}
 		>
 			{#snippet children()}
-				<div class="space-y-4" data-testid="accept-registration-unverified-id-warning-modal">
-					<p class="text-sm text-surface-700">
-						This registration includes an ID, but it hasn’t been verified yet. To avoid mismatches, please scan the physical ID to verify it matches before accepting.
-					</p>
-					<div class="flex flex-wrap gap-2 justify-end pt-2">
-						<button
-							type="button"
-							class="btn preset-tonal"
-							data-testid="accept-registration-unverified-id-warning-cancel"
-							onclick={() => (showAcceptUnverifiedIdWarning = false)}
-							disabled={acceptSubmitting}
-						>
-							Cancel
-						</button>
-						<button
-							type="button"
-							class="btn preset-filled-primary-500"
-							data-testid="accept-registration-unverified-id-warning-verify"
-							onclick={() => {
-								showAcceptUnverifiedIdWarning = false;
-								if (acceptRegModalReg) {
-									scannerMode = 'verify_id';
-									scanHandled = false;
-									showScanner = true;
-								}
-							}}
-							disabled={acceptSubmitting || acceptRegModalReg == null}
-						>
-							Verify ID now
-						</button>
+				{#if acceptRevealResult !== null}
+					<div class="space-y-3">
+						<p class="text-sm text-surface-700">Phone (for verification only):</p>
+						<p class="font-mono text-lg font-medium text-surface-950">{acceptRevealResult}</p>
+						<button type="button" class="btn preset-tonal w-full" onclick={() => { showAcceptRevealModal = false; acceptRevealResult = null; acceptRevealReason = ''; }}>Close</button>
 					</div>
-				</div>
+				{:else}
+					<form class="space-y-3" onsubmit={(e) => { e.preventDefault(); submitAcceptReveal(); }}>
+						<label class="block">
+							<span class="text-sm font-medium text-surface-800">Reason (required)</span>
+							<textarea
+								class="input textarea w-full mt-1 rounded-container border border-surface-200 px-3 py-2 text-sm"
+								rows="2"
+								placeholder="e.g. Verification before accept"
+								bind:value={acceptRevealReason}
+								disabled={acceptRevealSubmitting}
+							></textarea>
+						</label>
+						<div class="flex gap-2 justify-end">
+							<button type="button" class="btn preset-tonal" onclick={() => { showAcceptRevealModal = false; acceptRevealReason = ''; }}>Cancel</button>
+							<button type="submit" class="btn preset-filled-primary-500" disabled={!acceptRevealReason.trim() || acceptRevealSubmitting}>
+								{acceptRevealSubmitting ? 'Revealing…' : 'Reveal'}
+							</button>
+						</div>
+					</form>
+				{/if}
 			{/snippet}
 		</Modal>
 	</div>

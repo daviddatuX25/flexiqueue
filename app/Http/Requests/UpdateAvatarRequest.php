@@ -5,7 +5,7 @@ namespace App\Http\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
- * Profile avatar update. Validates image upload (max 2MB, jpeg/png).
+ * Profile avatar update. Client compresses to ~50KB; 100KB max (jpeg/png).
  */
 class UpdateAvatarRequest extends FormRequest
 {
@@ -20,7 +20,7 @@ class UpdateAvatarRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'avatar' => ['required', 'image', 'mimes:jpeg,jpg,png', 'max:2048'],
+            'avatar' => ['required', 'image', 'mimes:jpeg,jpg,png', 'max:100'],
         ];
     }
 }

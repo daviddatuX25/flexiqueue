@@ -118,7 +118,10 @@ async function playTokenTts(tokenId, opts) {
 	const o = resolveOptions(opts);
 	if (o.muted) return Promise.resolve();
 	const url = `/api/public/tts/token/${tokenId}`;
-	const res = await fetch(url, { credentials: 'same-origin' });
+	const res = await fetch(url, {
+		credentials: 'same-origin',
+		signal: AbortSignal.timeout(5000),
+	});
 	if (!res.ok) {
 		o.onFallback?.('token_failed', `token ${tokenId}`);
 		throw new Error(res.status === 404 ? 'No token TTS' : `TTS ${res.status}`);
@@ -167,7 +170,10 @@ async function fetchServerTtsBlob(text, opts) {
 			// Fall through to fetch
 		}
 	}
-	const res = await fetch(url, { credentials: 'same-origin' });
+	const res = await fetch(url, {
+		credentials: 'same-origin',
+		signal: AbortSignal.timeout(5000),
+	});
 	if (!res.ok) throw new Error(res.status === 503 ? 'TTS unavailable' : `TTS ${res.status}`);
 	const blob = await res.blob();
 	if (typeof caches !== 'undefined') {

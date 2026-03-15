@@ -6,8 +6,9 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 /**
- * Per central-edge B.5: update site — optional name, slug (unique except current), edge_settings.
- * edge_settings validated via EdgeSettingsValidator in controller.
+ * Per central-edge B.5: update site — optional name, slug, edge_settings.
+ * Per public-site plan: settings.public_access_key, landing_hero_*, landing_sections, landing_show_stats.
+ * settings.landing_hero_image_path is never accepted here (set only via hero image upload endpoint).
  */
 class UpdateSiteRequest extends FormRequest
 {
@@ -33,6 +34,15 @@ class UpdateSiteRequest extends FormRequest
                 $site ? Rule::unique('sites', 'slug')->ignore($site->id) : 'unique:sites,slug',
             ],
             'edge_settings' => ['sometimes', 'array'],
+            'settings' => ['sometimes', 'array'],
+            'settings.public_access_key' => ['nullable', 'string', 'max:20', 'regex:/^[A-Za-z0-9\-]+$/'],
+            'settings.landing_hero_title' => ['nullable', 'string', 'max:120'],
+            'settings.landing_hero_description' => ['nullable', 'string', 'max:500'],
+            'settings.landing_sections' => ['nullable', 'array'],
+            'settings.landing_sections.*.type' => ['required_with:settings.landing_sections.*', 'string', 'in:text'],
+            'settings.landing_sections.*.title' => ['required_with:settings.landing_sections.*', 'string', 'max:200'],
+            'settings.landing_sections.*.body' => ['nullable', 'string'],
+            'settings.landing_show_stats' => ['nullable', 'boolean'],
         ];
     }
 }

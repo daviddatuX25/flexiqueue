@@ -23,7 +23,7 @@ class ProgramTokenController extends Controller
     ) {}
 
     /**
-     * List tokens assigned to this program. Site-scoped via program.
+     * List tokens for this program (assigned + global). Site-scoped via program.
      * GET /api/admin/programs/{program}/tokens
      */
     public function index(Request $request, Program $program): JsonResponse
@@ -31,10 +31,17 @@ class ProgramTokenController extends Controller
         $this->ensureProgramInSite($request, $program);
 
         $perPage = (int) $request->input('per_page', 0);
-        $result = $this->programTokenService->listTokensForProgram($program, $perPage);
+        $assignedOnly = $request->boolean('assigned_only');
+        $result = $this->programTokenService->listTokensForProgram($program, $perPage, $assignedOnly);
+
+        $mapItem = fn (array $item) => $this->tokenResourceWithSource(
+            $item['token'],
+            $item['source'],
+            $item['can_unassign']
+        );
 
         if ($result instanceof LengthAwarePaginator) {
-            $tokens = collect($result->items())->map(fn (Token $t) => $this->tokenResource($t))->values()->all();
+            $tokens = collect($result->items())->map($mapItem)->values()->all();
 
             return response()->json([
                 'tokens' => $tokens,
@@ -47,7 +54,7 @@ class ProgramTokenController extends Controller
             ]);
         }
 
-        $tokens = $result->map(fn (Token $t) => $this->tokenResource($t))->values()->all();
+        $tokens = $result->map($mapItem)->values()->all();
 
         return response()->json(['tokens' => $tokens]);
     }
@@ -104,6 +111,7 @@ class ProgramTokenController extends Controller
                 ? '1 token assigned to program.'
                 : $result['count'].' tokens assigned to program.',
             'count' => $result['count'],
+            'added_count' => $result['count'],
             'token_ids' => $result['token_ids'],
         ], 200);
     }
@@ -124,8 +132,6 @@ class ProgramTokenController extends Controller
 
     private function tokenResource(Token $token): array
     {
-        $ttsSettings = $token->tts_settings ?? [];
-
         return [
             'id' => $token->id,
             'physical_id' => $token->physical_id,
@@ -133,5 +139,14 @@ class ProgramTokenController extends Controller
             'status' => $token->status,
             'tts_status' => $token->tts_status,
         ];
+    }
+
+    private function tokenResourceWithSource(Token $token, string $source, bool $canUnassign): array
+    {
+        return array_merge($this->tokenResource($token), [
+            'is_global' => (bool) $token->is_global,
+            'source' => $source,
+            'can_unassign' => $canUnassign,
+        ]);
     }
 }

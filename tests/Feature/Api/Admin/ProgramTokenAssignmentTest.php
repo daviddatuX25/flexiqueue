@@ -49,6 +49,7 @@ class ProgramTokenAssignmentTest extends TestCase
         $token = new Token;
         $token->qr_code_hash = hash('sha256', 'test-'.uniqid());
         $token->physical_id = $physicalId;
+        $token->site_id = $this->site->id;
         $token->status = 'available';
         $token->save();
 
@@ -200,6 +201,32 @@ class ProgramTokenAssignmentTest extends TestCase
         $response->assertJsonPath('tokens', []);
     }
 
+    public function test_list_tokens_includes_global_tokens_from_site(): void
+    {
+        $assigned = $this->createToken('A1');
+        $this->program->tokens()->attach($assigned->id);
+
+        $globalToken = $this->createToken('G1');
+        $globalToken->update(['is_global' => true]);
+
+        $response = $this->actingAs($this->admin)->getJson("/api/admin/programs/{$this->program->id}/tokens");
+
+        $response->assertStatus(200);
+        $tokens = $response->json('tokens');
+        $this->assertCount(2, $tokens);
+        $physicalIds = collect($tokens)->pluck('physical_id')->sort()->values()->all();
+        $this->assertSame(['A1', 'G1'], $physicalIds);
+
+        $a1 = collect($tokens)->firstWhere('physical_id', 'A1');
+        $this->assertSame('assigned', $a1['source']);
+        $this->assertTrue($a1['can_unassign']);
+
+        $g1 = collect($tokens)->firstWhere('physical_id', 'G1');
+        $this->assertSame('global', $g1['source']);
+        $this->assertFalse($g1['can_unassign']);
+        $this->assertTrue($g1['is_global']);
+    }
+
     public function test_404_for_wrong_site_program(): void
     {
         $siteB = Site::create([
@@ -240,5 +267,34 @@ class ProgramTokenAssignmentTest extends TestCase
         $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$this->program->id}/tokens/bulk", []);
 
         $response->assertStatus(422);
+    }
+
+    public function test_bulk_assign_rejects_all_wildcard_pattern_star(): void
+    {
+        $this->createToken('A1');
+        $this->createToken('B1');
+
+        $response = $this->actingAs($this->admin)->postJson(
+            "/api/admin/programs/{$this->program->id}/tokens/bulk",
+            ['pattern' => '*'],
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('pattern');
+        $this->assertDatabaseCount('program_token', 0);
+    }
+
+    public function test_bulk_assign_rejects_all_wildcard_pattern_percent(): void
+    {
+        $this->createToken('A1');
+
+        $response = $this->actingAs($this->admin)->postJson(
+            "/api/admin/programs/{$this->program->id}/tokens/bulk",
+            ['pattern' => '%'],
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('pattern');
+        $this->assertDatabaseCount('program_token', 0);
     }
 }

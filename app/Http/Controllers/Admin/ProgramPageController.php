@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\Program;
 use App\Models\Session;
 use App\Models\ServiceTrack;
+use App\Models\SiteShortLink;
 use App\Models\Station;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -75,6 +77,8 @@ class ProgramPageController extends Controller
                     'completed_sessions' => 0,
                 ],
                 'tab_order' => ['Overview', 'Processes', 'Stations', 'Staff', 'Track', 'Diagram', 'Settings'],
+                'site_slug' => null,
+                'app_url' => rtrim(config('app.url'), '/'),
             ]);
         }
     }
@@ -179,12 +183,29 @@ class ProgramPageController extends Controller
             'completed_sessions' => Session::where('program_id', $program->id)->whereIn('status', ['completed', 'cancelled', 'no_show'])->count(),
         ];
 
+        $bannerPath = $settings['page_banner_image_path'] ?? null;
+        $bannerUrl = $bannerPath && is_string($bannerPath) ? Storage::url($bannerPath) : null;
+
+        $shortLinks = SiteShortLink::query()
+            ->where('program_id', $program->id)
+            ->get()
+            ->map(fn (SiteShortLink $l) => [
+                'type' => $l->type,
+                'code' => $l->code,
+                'url' => rtrim(config('app.url'), '/').'/go/'.$l->code,
+                'has_embedded_key' => $l->embedded_key !== null && $l->embedded_key !== '',
+            ])
+            ->values()
+            ->all();
+
         $programPayload = [
             'id' => $program->id,
             'name' => $program->name,
+            'slug' => $program->slug,
             'description' => $program->description,
             'is_active' => $program->is_active,
             'is_paused' => $program->is_paused ?? false,
+            'is_published' => $program->is_published ?? true,
             'created_at' => $program->created_at?->toIso8601String(),
             'settings' => [
                 'no_show_timer_seconds' => (int) ($settings['no_show_timer_seconds'] ?? 10),
@@ -210,6 +231,11 @@ class ProgramPageController extends Controller
                 'enable_display_hid_barcode' => $programSettings->getEnableDisplayHidBarcode(),
                 'enable_public_triage_hid_barcode' => $programSettings->getEnablePublicTriageHidBarcode(),
                 'enable_display_camera_scanner' => $programSettings->getEnableDisplayCameraScanner(),
+                'public_access_key' => $programSettings->getPublicAccessKey(),
+                'public_access_expiry_hours' => $programSettings->getPublicAccessExpiryHours(),
+                'page_description' => $programSettings->getPageDescription(),
+                'page_announcement' => $programSettings->getPageAnnouncement(),
+                'page_banner_image_url' => $bannerUrl,
                 'tts' => [
                     'active_language' => $programSettings->getTtsActiveLanguage(),
                     'connector' => [
@@ -217,7 +243,10 @@ class ProgramPageController extends Controller
                     ],
                 ],
             ],
+            'short_links' => $shortLinks,
         ];
+
+        $site = $program->site;
 
         return Inertia::render('Admin/Programs/Show', [
             'program' => $programPayload,
@@ -226,7 +255,9 @@ class ProgramPageController extends Controller
             'processes' => $processes,
             'stations' => $stations,
             'stats' => $stats,
-            'tab_order' => ['Overview', 'Processes', 'Stations', 'Staff', 'Track', 'Diagram', 'Settings'],
+            'tab_order' => ['Overview', 'Public Page', 'Processes', 'Stations', 'Staff', 'Track', 'Diagram', 'Settings'],
+            'site_slug' => $site->slug,
+            'app_url' => rtrim(config('app.url'), '/'),
         ]);
     }
 }

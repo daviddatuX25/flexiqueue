@@ -12,7 +12,13 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->encryptCookies(except: [
+            \App\Support\DeviceLock::COOKIE_NAME,
+            'known_sites',
+            'known_programs',
+        ]);
         $middleware->web(append: [
+            \App\Http\Middleware\EnforceDeviceLock::class,
             \App\Http\Middleware\HandleInertiaRequests::class,
             \App\Http\Middleware\AddPermissionsPolicy::class,
         ]);
@@ -20,6 +26,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'guest' => \App\Http\Middleware\RedirectIfAuthenticated::class,
             'role' => \App\Http\Middleware\EnsureRole::class,
             'site.api_key' => \App\Http\Middleware\AuthenticateSiteByApiKey::class,
+            'require.site.access' => \App\Http\Middleware\RequireSiteAccess::class,
+            'require.program.access' => \App\Http\Middleware\RequireProgramAccess::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

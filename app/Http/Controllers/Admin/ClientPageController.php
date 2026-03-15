@@ -4,8 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Client;
-use App\Models\ClientIdDocument;
-use App\Services\ClientIdDocumentService;
+use App\Services\MobileCryptoService;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -18,29 +17,62 @@ use Inertia\Response;
  */
 class ClientPageController extends Controller
 {
+    /**
+     * Per site-scoping-migration-spec §3: scope by user.site_id; 403 if null.
+     * Per SUPER-ADMIN-VS-ADMIN-SPEC: super_admin has no access to clients (assertCanViewClients).
+     */
     public function index(Request $request): Response
     {
         $this->assertCanViewClients($request);
 
+        /** @var User $user */
+        $user = $request->user();
+        $siteId = $user->site_id;
+        if ($siteId === null) {
+            abort(403, 'Site admin must have an assigned site to view clients.');
+        }
+
         $search = (string) $request->query('search', '');
 
         $query = Client::query()
-            ->withCount('idDocuments')
-            ->orderBy('created_at', 'desc');
+            ->forSite($siteId)
+            ->orderBy('last_name')
+            ->orderBy('first_name')
+            ->orderByDesc('created_at');
 
         if ($search !== '') {
-            $query->where('name', 'like', '%'.$search.'%');
+            $term = '%'.$search.'%';
+            $query->where(function ($q) use ($term) {
+                $q->where('first_name', 'like', $term)
+                    ->orWhere('middle_name', 'like', $term)
+                    ->orWhere('last_name', 'like', $term);
+            });
         }
 
+        $mobileCrypto = app(MobileCryptoService::class);
         $clients = $query
             ->get()
-            ->map(fn (Client $client) => [
-                'id' => $client->id,
-                'name' => $client->name,
-                'birth_year' => $client->birth_year,
-                'id_documents_count' => $client->id_documents_count,
-                'created_at' => $client->created_at?->toIso8601String(),
-            ]);
+            ->map(function (Client $client) use ($mobileCrypto) {
+                $mobileMasked = $client->mobile_encrypted
+                    ? $mobileCrypto->mask($mobileCrypto->decrypt($client->mobile_encrypted))
+                    : null;
+
+                return [
+                    'id' => $client->id,
+                    'first_name' => $client->first_name,
+                    'middle_name' => $client->middle_name,
+                    'last_name' => $client->last_name,
+                    'birth_date' => $client->birth_date?->format('Y-m-d'),
+                    'address_line_1' => $client->address_line_1,
+                    'address_line_2' => $client->address_line_2,
+                    'city' => $client->city,
+                    'state' => $client->state,
+                    'postal_code' => $client->postal_code,
+                    'country' => $client->country,
+                    'mobile_masked' => $mobileMasked,
+                    'created_at' => $client->created_at?->toIso8601String(),
+                ];
+            });
 
         return Inertia::render('Admin/Clients/Index', [
             'clients' => $clients,
@@ -48,28 +80,36 @@ class ClientPageController extends Controller
         ]);
     }
 
-    public function show(Client $client, ClientIdDocumentService $idDocumentService): Response
+    public function show(Client $client, MobileCryptoService $mobileCrypto): Response
     {
         $this->assertCanViewClients(request());
 
-        $idDocuments = $client->idDocuments()
-            ->orderBy('created_at', 'desc')
-            ->get()
-            ->map(fn (ClientIdDocument $document) => [
-                'id' => $document->id,
-                'id_type' => $document->id_type,
-                'id_last4' => $idDocumentService->getIdLast4FromDocument($document),
-                'created_at' => $document->created_at?->toIso8601String(),
-            ]);
+        /** @var User $user */
+        $user = request()->user();
+        if ($user->site_id === null || $client->site_id !== $user->site_id) {
+            abort(404);
+        }
+
+        $mobileMasked = $client->mobile_encrypted
+            ? $mobileCrypto->mask($mobileCrypto->decrypt($client->mobile_encrypted))
+            : null;
 
         return Inertia::render('Admin/Clients/Show', [
             'client' => [
                 'id' => $client->id,
-                'name' => $client->name,
-                'birth_year' => $client->birth_year,
+                'first_name' => $client->first_name,
+                'middle_name' => $client->middle_name,
+                'last_name' => $client->last_name,
+                'birth_date' => $client->birth_date?->format('Y-m-d'),
+                'address_line_1' => $client->address_line_1,
+                'address_line_2' => $client->address_line_2,
+                'city' => $client->city,
+                'state' => $client->state,
+                'postal_code' => $client->postal_code,
+                'country' => $client->country,
+                'mobile_masked' => $mobileMasked,
                 'created_at' => $client->created_at?->toIso8601String(),
             ],
-            'id_documents' => $idDocuments,
         ]);
     }
 

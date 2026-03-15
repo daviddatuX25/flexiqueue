@@ -221,4 +221,34 @@ class PinService
 
         return null;
     }
+
+    /**
+     * Validate preset QR for device authorization: QR must match a user who is a supervisor of the program or an admin.
+     * Per plan Step 5: used by public device-authorize API.
+     *
+     * @return array{verified: true, user_id: int, role: string}|null
+     */
+    public function validateQrForProgram(int $programId, string $qrScanToken): ?array
+    {
+        $result = $this->validatePresetQr($qrScanToken);
+        if (! $result) {
+            return null;
+        }
+
+        $program = Program::find($programId);
+        if (! $program) {
+            return null;
+        }
+
+        $userId = $result['user_id'];
+        $isSupervisor = $program->supervisedBy()->where('users.id', $userId)->exists();
+        $user = User::find($userId);
+        $isAdminOrSuperAdmin = $user && in_array($user->role, [UserRole::Admin, UserRole::SuperAdmin], true);
+
+        if (! $isSupervisor && ! $isAdminOrSuperAdmin) {
+            return null;
+        }
+
+        return $result;
+    }
 }

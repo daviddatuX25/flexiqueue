@@ -14,20 +14,24 @@ class TokenService
 {
     /**
      * Look up a token by qr_code_hash or physical_id. Precedence: qr_hash first, then physical_id.
+     * When $siteId is set, token must belong to that site (per site-scoping: no cross-site recognition).
      * Per docs/REFACTORING-ISSUE-LIST.md Issue 4.
      *
+     * @param  int|null  $siteId  When set, only return token if token.site_id matches (staff/public context).
      * @return Token|null The token if found, null otherwise or when both inputs are empty
      */
-    public function lookupByPhysicalOrHash(?string $physicalId, ?string $qrHash): ?Token
+    public function lookupByPhysicalOrHash(?string $physicalId, ?string $qrHash, ?int $siteId = null): ?Token
     {
         $qrHash = trim($qrHash ?? '') !== '' ? trim($qrHash) : null;
         $physicalId = trim($physicalId ?? '') !== '' ? trim($physicalId) : null;
 
+        $scope = $siteId !== null ? Token::where('site_id', $siteId) : Token::query();
+
         if ($qrHash !== null) {
-            return Token::where('qr_code_hash', $qrHash)->first();
+            return (clone $scope)->where('qr_code_hash', $qrHash)->first();
         }
         if ($physicalId !== null) {
-            return Token::where('physical_id', $physicalId)->first();
+            return (clone $scope)->where('physical_id', $physicalId)->first();
         }
 
         return null;
@@ -36,10 +40,12 @@ class TokenService
     /**
      * Create a batch of tokens. physical_id = prefix + (start_number + i). qr_code_hash is unique per token.
      * pronounce_as: 'letters' (e.g. "A 3") or 'word' (e.g. "A3") for TTS.
+     * Per site-scoping-migration-spec §2: $siteId from auth; caller must 403 if site admin has null site_id.
      *
+     * @param  int|null  $siteId  Site to assign tokens to; null for super_admin (tokens remain unscoped).
      * @return array{created: int, tokens: array<int, array>}
      */
-    public function batchCreate(string $prefix, int $count, int $startNumber, string $pronounceAs = 'letters'): array
+    public function batchCreate(string $prefix, int $count, int $startNumber, string $pronounceAs = 'letters', ?int $siteId = null, bool $isGlobal = true): array
     {
         if ($count <= 0) {
             return [
@@ -58,14 +64,19 @@ class TokenService
             $physicalId = $prefix.(string) $num;
             $hash = hash('sha256', Str::random(40).$physicalId.microtime());
 
-            $rows[] = [
+            $row = [
                 'qr_code_hash' => $hash,
                 'physical_id' => $physicalId,
                 'pronounce_as' => $normalizedPronounceAs,
                 'status' => 'available',
+                'is_global' => $isGlobal,
                 'created_at' => $now,
                 'updated_at' => $now,
             ];
+            if ($siteId !== null) {
+                $row['site_id'] = $siteId;
+            }
+            $rows[] = $row;
             $hashes[] = $hash;
         }
 

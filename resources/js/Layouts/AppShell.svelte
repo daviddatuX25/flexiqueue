@@ -11,8 +11,10 @@
 	import FlashToToast from '../Components/FlashToToast.svelte';
 	import OfflineBanner from '../Components/OfflineBanner.svelte';
 	import UserAvatar from '../Components/UserAvatar.svelte';
+	import LogoutConfirm from '../Components/LogoutConfirm.svelte';
 
 	let { children, showFooter = true, queueCount = 0, processedToday = 0 } = $props();
+	let showLogoutConfirm = $state(false);
 
 	const page = usePage();
 	const user = $derived($page.props?.auth?.user ?? null);
@@ -40,12 +42,13 @@
 				<span class="text-sm text-surface-950/60 hidden sm:inline">{user.name}</span>
 				<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500">{roleLabel}</span>
 				<a href="/profile" class="btn preset-tonal btn-sm">Profile</a>
-				<button type="button" class="btn preset-tonal btn-sm" onclick={() => router.post('/logout')}>Log out</button>
+				<button type="button" class="btn preset-tonal btn-sm" onclick={() => (showLogoutConfirm = true)}>Log out</button>
 			{/if}
 		</div>
 	</header>
 
-	<main class="flex-1 min-h-0 overflow-y-auto pb-24">
+	<!-- Per ui-ux-tasks-checklist: scrollbar always visible for consistent layout -->
+	<main class="fq-main-scroll flex-1 min-h-0 overflow-y-scroll pb-24">
 		{#if children}
 			{@render children()}
 		{/if}
@@ -55,6 +58,7 @@
 		<StatusFooter {queueCount} {processedToday} />
 	{/if}
 
+	<LogoutConfirm open={showLogoutConfirm} onClose={() => (showLogoutConfirm = false)} />
 	<FlexiQueueToaster />
 	<FlashToToast />
 </div>

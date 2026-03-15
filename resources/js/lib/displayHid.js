@@ -1,12 +1,18 @@
 /**
  * Per plan: device-local HID barcode settings for public display, public triage, and staff triage binder.
- * Used on /display, /triage/start, and staff triage lookup-by-ID. Not persisted to DB; localStorage per device.
+ * Used on /display, /public-triage, and staff triage lookup-by-ID. Not persisted to DB; localStorage per device.
  */
 
 const STORAGE_KEYS = {
 	display: 'flexiqueue_display_hid_allow_on_this_device',
 	triage: 'flexiqueue_triage_hid_allow_on_this_device',
 	staff_binder: 'flexiqueue_staff_binder_hid_allow_on_this_device',
+};
+
+const PERSISTENT_HID_KEYS = {
+	display: 'flexiqueue_display_hid_persistent_on_this_device',
+	triage: 'flexiqueue_triage_hid_persistent_on_this_device',
+	staff_binder: 'flexiqueue_staff_binder_hid_persistent_on_this_device',
 };
 
 /**
@@ -71,4 +77,37 @@ export function shouldFocusHidInput(programHidEnabled, context) {
  */
 export function shouldUseInputModeNone(programHidEnabled, context) {
 	return isMobileTouch() && programHidEnabled && getLocalAllowHidOnThisDevice(context) === true;
+}
+
+/**
+ * Persistent HID: when true, HID input is refocused periodically when the scan modal is closed
+ * (Display Board–like). When false, HID only works when the scan modal is open (Triage-like).
+ *
+ * @param {'display' | 'triage' | 'staff_binder'} context
+ * @returns {boolean} default true for display, false for triage/staff_binder
+ */
+export function getLocalPersistentHidOnThisDevice(context) {
+	if (typeof window === 'undefined' || !window.localStorage) return context === 'display';
+	try {
+		const raw = window.localStorage.getItem(PERSISTENT_HID_KEYS[context]);
+		if (raw === null) return context === 'display';
+		if (raw === 'true') return true;
+		if (raw === 'false') return false;
+		return context === 'display';
+	} catch {
+		return context === 'display';
+	}
+}
+
+/**
+ * @param {'display' | 'triage' | 'staff_binder'} context
+ * @param {boolean} value
+ */
+export function setLocalPersistentHidOnThisDevice(context, value) {
+	if (typeof window === 'undefined' || !window.localStorage) return;
+	try {
+		window.localStorage.setItem(PERSISTENT_HID_KEYS[context], value ? 'true' : 'false');
+	} catch {
+		// ignore
+	}
 }

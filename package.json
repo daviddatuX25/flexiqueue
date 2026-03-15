@@ -8,17 +8,22 @@
     "dev:sail": "./scripts/dev-start-sail.sh",
     "dev:local": "./scripts/dev-start-local.sh",
     "quick-check": "bash scripts/dev/quick-check.sh",
+    "deploy:hosting-folder": "bash scripts/build-deploy-hosting-folder.sh",
+    "deploy:zip-current": "bash scripts/build-deploy-zip-current.sh",
     "test:e2e": "playwright test",
     "test:e2e:report": "playwright show-report --host 0.0.0.0"
   },
   "dependencies": {
-    "apexcharts": "^3.45.0",
     "@fontsource/inter": "^5.0.0",
     "@xyflow/svelte": "^1.5.1",
+    "apexcharts": "^3.45.0",
+    "browser-image-compression": "^2.0.2",
     "html5-qrcode": "^2.3.8",
     "laravel-echo": "^1.16.1",
     "lucide-svelte": "^0.575.0",
-    "pusher-js": "^8.4.0-rc2"
+    "pusher-js": "^8.4.0-rc2",
+    "qrcode": "^1.5.4",
+    "scrollbooster": "^3.0.2"
   },
   "devDependencies": {
     "@hyvor/laravel-playwright": "^2.0.0",
