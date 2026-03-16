@@ -65,13 +65,13 @@ class StationQueueService
             ->where('current_station_id', $station->id)
             ->whereIn('status', ['waiting', 'called', 'serving'])
             ->where(fn ($q) => $q->whereNull('is_on_hold')->orWhere('is_on_hold', false))
-            ->with(['serviceTrack.trackSteps.process', 'token', 'identityRegistration'])
+            ->with(['serviceTrack.trackSteps.process', 'token', 'identityRegistration', 'client'])
             ->get();
 
         $heldSessions = Session::query()
             ->where('holding_station_id', $station->id)
             ->where('is_on_hold', true)
-            ->with(['serviceTrack.trackSteps.process', 'token', 'identityRegistration'])
+            ->with(['serviceTrack.trackSteps.process', 'token', 'identityRegistration', 'client'])
             ->orderBy('held_order')
             ->orderBy('held_at')
             ->get();
@@ -299,6 +299,14 @@ class StationQueueService
     }
 
     /**
+     * Display name for staff-only station UI. Prefer client record, else identity registration.
+     */
+    private function sessionDisplayName(Session $s): ?string
+    {
+        return $s->client?->display_name ?? $s->identityRegistration?->display_name ?? null;
+    }
+
+    /**
      * Resolve current process for a session from track step at current_step_order.
      * Per flexiqueue-ui3: 1-station-many-process — show which queue/process each client is in.
      */
@@ -343,6 +351,7 @@ class StationQueueService
             'process_id' => $process ? $process['process_id'] : null,
             'process_name' => $process ? $process['process_name'] : null,
             'unverified' => $unverified,
+            'client_name' => $this->sessionDisplayName($s),
         ];
     }
 
@@ -366,6 +375,7 @@ class StationQueueService
             'process_id' => $process ? $process['process_id'] : null,
             'process_name' => $process ? $process['process_name'] : null,
             'unverified' => $unverified,
+            'client_name' => $this->sessionDisplayName($s),
         ];
     }
 
@@ -389,9 +399,14 @@ class StationQueueService
             'process_name' => $process ? $process['process_name'] : null,
             'current_step_order' => $s->current_step_order ?? 1,
             'total_steps' => $totalSteps,
+            'client_name' => $this->sessionDisplayName($s),
         ];
     }
 
+    /**
+     * Station stats: waiting count, served today (idempotent = one per session), avg service time.
+     * Served = distinct sessions with check_in at this station today. Avg = mean of (first check_in → leave) per session.
+     */
     private function computeStats(Station $station): array
     {
         $today = Carbon::today();
@@ -402,35 +417,56 @@ class StationQueueService
             ->where(fn ($q) => $q->whereNull('is_on_hold')->orWhere('is_on_hold', false))
             ->count();
 
+        // Idempotent: one session = one "served" (distinct session_id; no double-count if same session checked in twice)
         $checkInsToday = TransactionLog::query()
             ->where('station_id', $station->id)
             ->where('action_type', 'check_in')
             ->whereDate('created_at', $today)
+            ->selectRaw('session_id, MIN(created_at) as first_check_in_at')
+            ->groupBy('session_id')
             ->get();
 
         $totalServedToday = $checkInsToday->count();
 
-        $durations = new Collection;
-        foreach ($checkInsToday as $checkIn) {
-            $leaveLog = TransactionLog::query()
-                ->where('session_id', $checkIn->session_id)
-                ->where('created_at', '>', $checkIn->created_at)
-                ->where(function ($q) use ($station) {
-                    $q->where(function ($q2) use ($station) {
-                        $q2->where('action_type', 'transfer')
-                            ->where('previous_station_id', $station->id);
-                    })->orWhere(function ($q2) use ($station) {
-                        $q2->where('action_type', 'complete')
-                            ->where('station_id', $station->id);
-                    });
-                })
-                ->orderBy('created_at')
-                ->first();
+        if ($totalServedToday === 0) {
+            return [
+                'total_waiting' => $totalWaiting,
+                'total_served_today' => 0,
+                'avg_service_time_minutes' => 0,
+            ];
+        }
 
-            if ($leaveLog) {
-                $start = $checkIn->created_at ?? Carbon::now();
-                $end = $leaveLog->created_at ?? Carbon::now();
-                $durations->push($start->diffInMinutes($end));
+        $sessionIds = $checkInsToday->pluck('session_id')->all();
+        $firstCheckInBySession = $checkInsToday->keyBy('session_id');
+
+        // Single query: all leave events (transfer from this station or complete at this station) for those sessions
+        $leaveLogs = TransactionLog::query()
+            ->whereIn('session_id', $sessionIds)
+            ->where(function ($q) use ($station) {
+                $q->where(function ($q2) use ($station) {
+                    $q2->where('action_type', 'transfer')->where('previous_station_id', $station->id);
+                })->orWhere(function ($q2) use ($station) {
+                    $q2->where('action_type', 'complete')->where('station_id', $station->id);
+                });
+            })
+            ->orderBy('created_at')
+            ->get();
+
+        $leaveBySession = $leaveLogs->groupBy('session_id');
+
+        $durations = new Collection;
+        foreach ($firstCheckInBySession as $sessionId => $row) {
+            $firstCheckInAt = $row->first_check_in_at instanceof Carbon
+                ? $row->first_check_in_at
+                : Carbon::parse($row->first_check_in_at);
+            $sessionLeaves = $leaveBySession->get($sessionId);
+            if (! $sessionLeaves) {
+                continue;
+            }
+            $leave = $sessionLeaves->first(fn ($log) => $log->created_at >= $firstCheckInAt);
+            if ($leave) {
+                $leaveAt = $leave->created_at instanceof Carbon ? $leave->created_at : Carbon::parse($leave->created_at);
+                $durations->push($firstCheckInAt->diffInMinutes($leaveAt));
             }
         }
 

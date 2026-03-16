@@ -17,6 +17,11 @@ return Application::configure(basePath: dirname(__DIR__))
             'known_sites',
             'known_programs',
         ]);
+        // Public key-entry APIs: auth by key + cookie only (no session); CSRF would block same-origin form POSTs.
+        $middleware->validateCsrfTokens(except: [
+            'api/public/program-key',
+            'api/public/site-key',
+        ]);
         $middleware->web(append: [
             \App\Http\Middleware\EnforceDeviceLock::class,
             \App\Http\Middleware\HandleInertiaRequests::class,

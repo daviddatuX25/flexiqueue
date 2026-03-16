@@ -80,7 +80,9 @@ class TriagePageController extends Controller
             'is_active' => $program->is_active,
             'is_paused' => $program->is_paused,
             // Per XM2O identity-binding plan: expose mode to staff triage UI.
-            'identity_binding_mode' => $programSettings->getIdentityBindingMode(),
+            // Per final-edge-mode-rush-plann [DF-13]: use effective mode (required→optional when edge offline).
+            'identity_binding_mode' => app(\App\Services\EdgeModeService::class)
+                ->getEffectiveBindingMode($programSettings->getIdentityBindingMode()),
             'allow_unverified_entry' => $programSettings->getAllowUnverifiedEntry(),
             'tracks' => $program->serviceTracks->map(fn ($t) => [
                 'id' => $t->id,

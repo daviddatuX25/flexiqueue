@@ -392,7 +392,7 @@
     {#if compact}
         <!-- Compact (mobile) layout: Program | QR (center) | Availability (right) -->
         <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 shrink">
-            <div class="relative shrink-0 max-w-[12rem] sm:max-w-none" bind:this={programSwitchWrapEl}>
+            <div class="relative shrink-0 max-w-[9rem] sm:max-w-[12rem] md:max-w-none" bind:this={programSwitchWrapEl}>
                 <ProgramChip
                     {programName}
                     {programMode}
@@ -503,7 +503,7 @@
     {:else}
     <!-- Default layout: left = program + availability, right = today's progress (in queue | served) + time. Program chip uses same mobile-style component as compact. -->
     <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 shrink">
-        <div class="relative shrink-0 max-w-[12rem] sm:max-w-none" bind:this={programSwitchWrapEl}>
+        <div class="relative shrink-0 max-w-[9rem] sm:max-w-[12rem] md:max-w-none" bind:this={programSwitchWrapEl}>
             <ProgramChip
                 {programName}
                 {programMode}

@@ -9,6 +9,8 @@ use App\Http\Controllers\Api\Admin\ReportController as AdminReportController;
 use App\Http\Controllers\Api\Admin\StationController as AdminStationController;
 use App\Http\Controllers\Api\Admin\ProcessController as AdminProcessController;
 use App\Http\Controllers\Api\Admin\ProgramDiagramController;
+use App\Http\Controllers\Api\Admin\EdgeImportController;
+use App\Http\Controllers\Api\Admin\ProgramPackageController;
 use App\Http\Controllers\Api\Admin\StepController as AdminStepController;
 use App\Http\Controllers\Api\Admin\PrintSettingsController;
 use App\Http\Controllers\Api\Admin\TokenTtsSettingsController;
@@ -74,6 +76,9 @@ Route::middleware(['auth', 'role:admin'])->prefix('api/admin')->group(function (
     Route::get('/programs', [AdminProgramController::class, 'index']);
     Route::post('/programs', [AdminProgramController::class, 'store']);
     Route::get('/programs/{program}', [AdminProgramController::class, 'show']);
+    Route::get('/programs/{program}/package', [ProgramPackageController::class, 'show']);
+    Route::post('/edge/import', [EdgeImportController::class, 'trigger']);
+    Route::get('/edge/import/status', [EdgeImportController::class, 'status']);
     Route::put('/programs/{program}', [AdminProgramController::class, 'update']);
     Route::get('/programs/{program}/diagram', [ProgramDiagramController::class, 'show']);
     Route::put('/programs/{program}/diagram', [ProgramDiagramController::class, 'update']);
@@ -165,6 +170,7 @@ Route::middleware(['auth', 'role:admin,super_admin'])->prefix('api/admin')->grou
     Route::post('/users/{user}/reset-password', [AdminUserController::class, 'resetPassword']);
     Route::post('/users/{user}/assign-station', [AdminUserController::class, 'assignStation']);
     Route::post('/users/{user}/unassign-station', [AdminUserController::class, 'unassignStation']);
+    Route::put('/clients/{client}', [ClientAdminController::class, 'update']);
     Route::delete('/clients/{client}', [ClientAdminController::class, 'destroy']);
     Route::get('/system/storage', [AdminSystemController::class, 'storage']);
     Route::post('/system/storage/clear', [AdminSystemController::class, 'clearStorage']);
@@ -287,6 +293,14 @@ Route::post('/api/sync/test-site-auth', function (\Illuminate\Http\Request $requ
     return response()->json(['site_id' => $site->id, 'slug' => $site->slug]);
 })->middleware('site.api_key');
 
+// Per docs/final-edge-mode-rush-plann.md [DF-07]: package export + TTS file stream for edge Pi
+Route::middleware('site.api_key')->prefix('api/admin')->group(function (): void {
+    Route::get('/programs/{program}/package', [ProgramPackageController::class, 'showForSite'])
+        ->name('api.admin.programs.package.site');
+    Route::get('/programs/{program}/tts-files/{filename}', [ProgramPackageController::class, 'streamTtsFile'])
+        ->where('filename', '.+');
+});
+
 // Per 08-API-SPEC-PHASE1 §2.1 & 05-SECURITY-CONTROLS §2.4: public (no auth)
 Route::get('/api/check-status/{qr_hash}', [CheckStatusController::class, 'show']);
 Route::get('/api/check-status/{site_id}/{qr_hash}', [CheckStatusController::class, 'showWithSite']);
@@ -324,8 +338,10 @@ Route::prefix('site')->middleware(['require.site.access'])->group(function (): v
     Route::get('{site:slug}/display', [DisplayController::class, 'boardWithSite'])->name('display.site');
     Route::get('{site:slug}/display/station/{station}', [DisplayController::class, 'stationBoardWithSite'])->name('display.site.station');
     Route::get('{site:slug}/display/status/{qr_hash}', [DisplayController::class, 'statusWithSiteSlug'])->name('display.site.status');
-    Route::get('{site:slug}/program/{program_slug}', [DisplayController::class, 'programPage'])->name('site.program');
-    Route::get('{site:slug}/program/{program_slug}/devices', [DisplayController::class, 'chooseDeviceType'])->name('display.site.devices');
+    Route::get('{site:slug}/program/{program_slug}', [DisplayController::class, 'programPage'])
+        ->middleware('require.program.access')->name('site.program');
+    Route::get('{site:slug}/program/{program_slug}/devices', [DisplayController::class, 'chooseDeviceType'])
+        ->middleware('require.program.access')->name('display.site.devices');
     Route::get('{site:slug}/public-triage', [DisplayController::class, 'triageStartWithSite'])->name('public.triage.site');
     Route::get('{site:slug}/public-triage/{program_slug}', [DisplayController::class, 'publicTriageWithSite'])->name('public.triage.site.program');
 });

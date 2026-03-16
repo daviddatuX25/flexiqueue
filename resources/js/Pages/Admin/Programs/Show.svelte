@@ -10,7 +10,7 @@
     import { onMount } from "svelte";
     import { Link, router, usePage } from "@inertiajs/svelte";
     import { toaster } from "../../../lib/toaster.js";
-    import { compressImage, HERO_BANNER_PRESET } from "../../../lib/imageUtils.js";
+    import { compressImage, HERO_BANNER_PRESET, getUploadHint } from "../../../lib/imageUtils.js";
     import { ensureVoicesLoaded, speakSample, speakSampleAsync } from "../../../lib/speechUtils.js";
 
     import {
@@ -391,6 +391,9 @@
     let publicPageDescription = $state("");
     let publicPageAnnouncement = $state("");
     let publicPageBannerUrl = $state<string | null>(null);
+    let publicPageBannerUploading = $state(false);
+    let bannerDragging = $state(false);
+    let bannerInputEl = $state<HTMLInputElement | null>(null);
     let publicPageSaving = $state(false);
     let publicPageSavingQr = $state(false);
     let accessTokensCount = $state(0);
@@ -730,6 +733,9 @@
     }
     const page = usePage();
     const serverTtsConfigured = $derived((get(page)?.props as { server_tts_configured?: boolean } | undefined)?.server_tts_configured ?? true);
+    /** Per docs/final-edge-mode-rush-plann.md [DF-18]: edge mode from shared props for read-only UI and sync card. */
+    const edgeMode = $derived(($page?.props as { edge_mode?: { is_edge?: boolean; admin_read_only?: boolean } } | undefined)?.edge_mode ?? null);
+    let edgeSyncing = $state(false);
 
     // Sync activeTab with URL so direct links with ?tab=stations (or other tab) work when already on this page
     $effect(() => {
@@ -828,6 +834,28 @@
             toaster.error({ title: MSG_NETWORK_ERROR });
             return { ok: false, message: MSG_NETWORK_ERROR };
         }
+    }
+
+    /** Per docs/final-edge-mode-rush-plann.md [DF-18]: trigger edge package import from Programs/Show. */
+    async function triggerEdgeSync() {
+        if (!program?.id || edgeSyncing) return;
+        edgeSyncing = true;
+        const res = await fetch("/api/admin/edge/import", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+                "X-CSRF-TOKEN": getCsrfToken(),
+                "X-Requested-With": "XMLHttpRequest",
+            },
+            credentials: "same-origin",
+            body: JSON.stringify({ program_id: program.id }),
+        });
+        if (!res.ok && res.status !== 409) {
+            toaster.error({ title: "Failed to trigger sync." });
+            edgeSyncing = false;
+        }
+        // Don't reset edgeSyncing — EdgeModeBanner handles progress display; reload will reset UI
     }
 
     async function handlePause() {
@@ -1916,24 +1944,33 @@
         navigator.clipboard?.writeText(url).then(() => toaster.success({ title: "Link copied." })).catch(() => {});
     }
 
-    async function handleBannerUpload(e: Event) {
-        const input = (e.target as HTMLInputElement);
+    async function uploadBannerFile(file: File) {
+        if (!program) return;
+        publicPageBannerUploading = true;
+        try {
+            const compressed = await compressImage(file, HERO_BANNER_PRESET);
+            const fd = new FormData();
+            fd.append("image", compressed);
+            const res = await fetch(`/api/admin/programs/${program.id}/banner-image`, { method: "POST", body: fd, credentials: "same-origin", headers: { "X-Requested-With": "XMLHttpRequest", "Accept": "application/json" } });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data?.url) {
+                publicPageBannerUrl = data.url;
+                router.reload();
+            } else toaster.error({ title: "Upload failed." });
+        } finally {
+            publicPageBannerUploading = false;
+        }
+    }
+
+    function handleBannerUpload(e: Event) {
+        const input = e.target as HTMLInputElement;
         const file = input?.files?.[0];
-        if (!file || !program) return;
-        const compressed = await compressImage(file, HERO_BANNER_PRESET);
-        const fd = new FormData();
-        fd.append("image", compressed);
-        const res = await fetch(`/api/admin/programs/${program.id}/banner-image`, { method: "POST", body: fd, credentials: "same-origin", headers: { "X-Requested-With": "XMLHttpRequest", "Accept": "application/json" } });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && data?.url) {
-            publicPageBannerUrl = data.url;
-            router.reload();
-        } else toaster.error({ title: "Upload failed." });
+        if (file) uploadBannerFile(file);
         input.value = "";
     }
 
-    async function handleBannerReplace(e: Event) {
-        await handleBannerUpload(e);
+    function handleBannerReplace(e: Event) {
+        handleBannerUpload(e);
     }
 
     async function handleBannerRemove() {
@@ -2327,6 +2364,25 @@
 
         {#if activeTab === "overview"}
             <div id="tabpanel-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="-1" class="space-y-8">
+                {#if edgeMode?.is_edge}
+                    <div class="rounded-container bg-warning-50 dark:bg-warning-900/30 border border-warning-200 dark:border-warning-700 p-4 flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <div>
+                            <p class="text-sm font-semibold text-warning-700 dark:text-warning-300">Edge Package</p>
+                            <p class="text-xs text-warning-600 dark:text-warning-400 mt-0.5">
+                                This program was synced from the central server.
+                                Re-sync to get the latest configuration.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            class="btn preset-tonal btn-sm touch-target-h"
+                            onclick={triggerEdgeSync}
+                            disabled={edgeSyncing}
+                        >
+                            {edgeSyncing ? "Syncing…" : "Re-sync from central"}
+                        </button>
+                    </div>
+                {/if}
                 <section>
                     <h2 class="text-lg font-semibold text-surface-950 mb-4">
                         Program stats
@@ -2426,9 +2482,10 @@
                     {/if}
                 </section>
                 <section class="rounded-container bg-surface-50 border border-surface-200 shadow-sm p-5 space-y-4">
-                    <h2 class="text-lg font-semibold text-surface-950">Page content</h2>
+                    <h2 class="text-lg font-semibold text-surface-950">Program public landing</h2>
+                    <p class="text-sm text-surface-600 -mt-1 mb-2">Content for the public program info page (when users open this program from the site landing).</p>
                     <div class="form-control">
-                        <label class="label text-sm text-surface-600">Description (public program info page)</label>
+                        <label class="label text-sm text-surface-600">Description</label>
                         <textarea class="textarea textarea-md max-h-32" maxlength="500" placeholder="Short description" bind:value={publicPageDescription}></textarea>
                     </div>
                     <div class="form-control">
@@ -2437,16 +2494,49 @@
                     </div>
                     <div class="form-control">
                         <label class="label text-sm text-surface-600">Banner image</label>
+                        <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            class="hidden"
+                            bind:this={bannerInputEl}
+                            onchange={handleBannerUpload}
+                        />
                         {#if publicPageBannerUrl}
                             <div class="flex items-center gap-3">
                                 <img src={publicPageBannerUrl} alt="" class="h-20 w-auto rounded object-cover" />
                                 <div class="flex gap-2">
-                                    <label class="btn variant-outline btn-sm cursor-pointer"><input type="file" accept="image/jpeg,image/png,image/webp" class="sr-only" onchange={(e) => handleBannerReplace(e)} /> Replace</label>
+                                    <button type="button" class="btn variant-outline btn-sm" disabled={publicPageBannerUploading} onclick={() => bannerInputEl?.click()}>Replace</button>
                                     <button type="button" class="btn variant-ghost-error btn-sm" onclick={handleBannerRemove}>Remove</button>
                                 </div>
                             </div>
                         {:else}
-                            <label class="btn variant-outline btn-sm cursor-pointer"><input type="file" accept="image/jpeg,image/png,image/webp" class="sr-only" onchange={(e) => handleBannerUpload(e)} /> Upload banner</label>
+                            <div
+                                class="border-2 border-dashed rounded-container p-6 text-center transition-colors cursor-pointer {bannerDragging ? 'border-primary-500 bg-primary-50' : 'border-surface-300 hover:border-primary-400 bg-surface-50/50 hover:bg-surface-100/50'}"
+                                role="button"
+                                tabindex="0"
+                                aria-label="Upload banner image"
+                                ondragover={(e) => { e.preventDefault(); bannerDragging = true; }}
+                                ondragleave={() => (bannerDragging = false)}
+                                ondrop={(e) => {
+                                    e.preventDefault();
+                                    bannerDragging = false;
+                                    const file = e.dataTransfer?.files?.[0];
+                                    if (file && file.type?.startsWith('image/')) uploadBannerFile(file);
+                                }}
+                                onclick={() => bannerInputEl?.click()}
+                                onkeydown={(e) => e.key === 'Enter' && bannerInputEl?.click()}
+                            >
+                                <div class="flex flex-col items-center justify-center gap-2 pointer-events-none">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 text-surface-400 {bannerDragging ? 'text-primary-500' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                    <div class="text-sm">
+                                        <span class="font-semibold text-primary-600">Click to upload</span> or drag and drop
+                                    </div>
+                                    <p class="text-xs text-surface-500">JPEG, PNG or WebP; {getUploadHint('hero')}</p>
+                                </div>
+                            </div>
+                            {#if publicPageBannerUploading}
+                                <p class="text-sm text-surface-600 mt-2">Uploading…</p>
+                            {/if}
                         {/if}
                         <p class="text-xs text-surface-500 mt-1">Images are compressed for web.</p>
                     </div>
@@ -2534,6 +2624,8 @@
                             type="button"
                             class="btn preset-filled-primary-500 flex items-center gap-2"
                             onclick={openCreateProcessModal}
+                            disabled={!!edgeMode?.admin_read_only}
+                            title={edgeMode?.admin_read_only ? "Changes must be made on the central server and re-synced to this device." : undefined}
                         >
                             <Plus class="w-4 h-4" /> Add Process
                         </button>
@@ -2614,6 +2706,8 @@
                         type="button"
                         class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm"
                         onclick={openCreateStation}
+                        disabled={!!edgeMode?.admin_read_only}
+                        title={edgeMode?.admin_read_only ? "Changes must be made on the central server and re-synced to this device." : undefined}
                     >
                         <Plus class="w-4 h-4" /> Add Station
                     </button>
@@ -2646,6 +2740,8 @@
                         type="button"
                         class="btn preset-filled-primary-500 flex items-center gap-2"
                         onclick={openCreateStation}
+                        disabled={!!edgeMode?.admin_read_only}
+                        title={edgeMode?.admin_read_only ? "Changes must be made on the central server and re-synced to this device." : undefined}
                     >
                         <Plus class="w-4 h-4" /> Create First Station
                     </button>
@@ -2894,7 +2990,8 @@
                                                     class="select rounded-container border border-surface-200 px-3 py-2 select-sm max-w-xs"
                                                     value={assignedUserId ?? ""}
                                                     disabled={staffAssigningStationId ===
-                                                        station.id}
+                                                        station.id || !!edgeMode?.admin_read_only}
+                                                    title={edgeMode?.admin_read_only ? "Changes must be made on the central server and re-synced to this device." : undefined}
                                                     onchange={(e) => {
                                                         const val = (
                                                             e.target as HTMLSelectElement
@@ -3147,6 +3244,8 @@
                     type="button"
                     class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm"
                     onclick={openCreate}
+                    disabled={!!edgeMode?.admin_read_only}
+                    title={edgeMode?.admin_read_only ? "Changes must be made on the central server and re-synced to this device." : undefined}
                 >
                     <Plus class="w-4 h-4" /> Add Track
                 </button>
@@ -3173,6 +3272,8 @@
                         type="button"
                         class="btn preset-filled-primary-500 flex items-center gap-2"
                         onclick={openCreate}
+                        disabled={!!edgeMode?.admin_read_only}
+                        title={edgeMode?.admin_read_only ? "Changes must be made on the central server and re-synced to this device." : undefined}
                     >
                         <Plus class="w-4 h-4" /> Create First Track
                     </button>
@@ -3305,13 +3406,17 @@
                             this program.
                         </p>
                     </div>
-                    <button
-                        type="button"
-                        class="btn preset-tonal btn-sm"
-                        onclick={applyDefaultSettings}
-                    >
-                        Apply default settings
-                    </button>
+                    {#if !edgeMode?.admin_read_only}
+                        <button
+                            type="button"
+                            class="btn preset-tonal btn-sm"
+                            onclick={applyDefaultSettings}
+                        >
+                            Apply default settings
+                        </button>
+                    {:else}
+                        <p class="text-sm text-amber-700">Settings must be changed on the central server and re-synced.</p>
+                    {/if}
                 </div>
                 <div
                     class="rounded-container bg-surface-50 border border-surface-200 shadow-sm flex flex-col overflow-hidden"
@@ -3938,19 +4043,23 @@
                     <div
                         class="bg-surface-100/50 px-5 py-4 border-t border-surface-200 flex justify-end"
                     >
-                        <button
-                            type="button"
-                            class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm"
-                            disabled={submitting}
-                            onclick={handleSaveSettings}
-                        >
-                            {#if submitting}
-                                <span class="loading-spinner loading-sm"></span>
-                                Saving...
-                            {:else}
-                                Save settings
-                            {/if}
-                        </button>
+                        {#if !edgeMode?.admin_read_only}
+                            <button
+                                type="button"
+                                class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm"
+                                disabled={submitting}
+                                onclick={handleSaveSettings}
+                            >
+                                {#if submitting}
+                                    <span class="loading-spinner loading-sm"></span>
+                                    Saving...
+                                {:else}
+                                    Save settings
+                                {/if}
+                            </button>
+                        {:else}
+                            <p class="text-sm text-amber-700">Settings must be changed on the central server and re-synced.</p>
+                        {/if}
                     </div>
                 </div>
             </div>

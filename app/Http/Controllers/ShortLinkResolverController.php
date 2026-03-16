@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ProgramAccessToken;
+use App\Models\Site;
 use App\Models\SiteShortLink;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -10,11 +11,13 @@ use Illuminate\Support\Str;
 
 /**
  * Per addition-to-public-site-plan Part 6.2 + Addition A.3: resolve /go/{code} to site or program destination.
+ * When redirecting, we set known_sites cookie so the user is not prompted for site key — the link/QR identifies the site.
  */
 class ShortLinkResolverController extends Controller
 {
     private const COOKIE_KNOWN_SITES = 'known_sites';
     private const COOKIE_KNOWN_PROGRAMS = 'known_programs';
+    private const KNOWN_SITES_MAX_AGE_DAYS = 365;
 
     public function resolve(Request $request, string $code): RedirectResponse
     {
@@ -24,20 +27,21 @@ class ShortLinkResolverController extends Controller
         }
 
         return match ($link->type) {
-            SiteShortLink::TYPE_SITE_ENTRY => $this->resolveSiteEntry($link),
+            SiteShortLink::TYPE_SITE_ENTRY => $this->resolveSiteEntry($request, $link),
             SiteShortLink::TYPE_PROGRAM_PUBLIC => $this->resolveProgramPublic($request, $link),
             SiteShortLink::TYPE_PROGRAM_PRIVATE => $this->resolveProgramPrivate($request, $link),
             default => redirect()->to('/'),
         };
     }
 
-    private function resolveSiteEntry(SiteShortLink $link): RedirectResponse
+    private function resolveSiteEntry(Request $request, SiteShortLink $link): RedirectResponse
     {
         $site = $link->site;
         if (! $site) {
             return redirect()->to('/');
         }
-        return redirect()->to('/?site_key_for='.urlencode($site->slug));
+        $redirect = redirect()->to('/site/'.$site->slug);
+        return $this->redirectWithKnownSite($request, $site, $redirect);
     }
 
     private function resolveProgramPublic(Request $request, SiteShortLink $link): RedirectResponse
@@ -50,11 +54,11 @@ class ShortLinkResolverController extends Controller
 
         $known = $this->parseKnownSites($request->cookie(self::COOKIE_KNOWN_SITES));
         $slugs = array_column($known, 'slug');
+        $redirect = redirect()->to('/site/'.$site->slug.'/program/'.$program->slug.'/view');
         if (in_array($site->slug, $slugs, true)) {
-            return redirect()->to('/site/'.$site->slug.'/program/'.$program->slug.'/view');
+            return $redirect;
         }
-
-        return redirect()->to('/?after_site='.urlencode($site->slug).'&then_program='.urlencode($program->slug));
+        return $this->redirectWithKnownSite($request, $site, $redirect);
     }
 
     private function resolveProgramPrivate(Request $request, SiteShortLink $link): RedirectResponse
@@ -67,19 +71,52 @@ class ShortLinkResolverController extends Controller
 
         $known = $this->parseKnownSites($request->cookie(self::COOKIE_KNOWN_SITES));
         $slugs = array_column($known, 'slug');
-        if (! in_array($site->slug, $slugs, true)) {
-            return redirect()->to('/?after_site='.urlencode($site->slug).'&then_program='.urlencode($program->slug).'&program_key_prompt=1');
-        }
-
         $embeddedKey = $link->embedded_key;
-        if ($embeddedKey !== null && $embeddedKey !== '') {
-            return $this->resolveProgramPrivateScannable($request, $link, $program, $site);
+        $hasEmbeddedKey = $embeddedKey !== null && $embeddedKey !== '';
+
+        if (! in_array($site->slug, $slugs, true)) {
+            // User doesn't have site yet: add site to known_sites so they are not prompted for site key.
+            if ($hasEmbeddedKey) {
+                return $this->resolveProgramPrivateScannable($request, $link, $program, $site, true);
+            }
+            $redirect = redirect()->to('/site/'.$site->slug.'?program_key_prompt='.urlencode($program->slug));
+            return $this->redirectWithKnownSite($request, $site, $redirect);
         }
 
-        return redirect()->to('/?site_key_for='.urlencode($site->slug).'&program_key_prompt='.urlencode($program->slug));
+        if ($hasEmbeddedKey) {
+            return $this->resolveProgramPrivateScannable($request, $link, $program, $site, false);
+        }
+
+        return redirect()->to('/site/'.$site->slug.'?program_key_prompt='.urlencode($program->slug));
     }
 
-    private function resolveProgramPrivateScannable(Request $request, SiteShortLink $link, $program, $site): RedirectResponse
+    /**
+     * Add site to known_sites cookie and attach to redirect so user is not prompted for site key.
+     */
+    private function redirectWithKnownSite(Request $request, Site $site, RedirectResponse $redirect): RedirectResponse
+    {
+        $known = $this->parseKnownSites($request->cookie(self::COOKIE_KNOWN_SITES));
+        $slugs = array_column($known, 'slug');
+        if (in_array($site->slug, $slugs, true)) {
+            return $redirect;
+        }
+        $known[] = ['slug' => $site->slug, 'name' => $site->name ?? $site->slug];
+        $cookie = cookie(
+            self::COOKIE_KNOWN_SITES,
+            json_encode($known),
+            self::KNOWN_SITES_MAX_AGE_DAYS * 24 * 60,
+            '/',
+            null,
+            $request->secure(),
+            false,
+            false,
+            'lax'
+        );
+
+        return $redirect->cookie($cookie);
+    }
+
+    private function resolveProgramPrivateScannable(Request $request, SiteShortLink $link, $program, $site, bool $addSiteToKnown): RedirectResponse
     {
         $storedKey = $link->embedded_key;
         $currentKey = $program->settings()->getPublicAccessKey();
@@ -118,7 +155,12 @@ class ShortLinkResolverController extends Controller
             'lax'
         );
 
-        return redirect()->to('/site/'.$site->slug.'/program/'.$program->slug.'/view')->cookie($cookie);
+        $redirect = redirect()->to('/site/'.$site->slug.'/program/'.$program->slug.'/view')->cookie($cookie);
+        if ($addSiteToKnown) {
+            $redirect = $this->redirectWithKnownSite($request, $site, $redirect);
+        }
+
+        return $redirect;
     }
 
     /**

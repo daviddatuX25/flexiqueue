@@ -96,6 +96,10 @@ class ProgramController extends Controller
                 if ($k === 'page_banner_image_path') {
                     continue;
                 }
+                if ($k === 'public_access_key' && is_string($v)) {
+                    $v = trim($v);
+                    $v = $v === '' ? null : $v;
+                }
                 $merged[$k] = $v;
             }
             $validated['settings'] = $merged;
@@ -103,6 +107,7 @@ class ProgramController extends Controller
 
         $oldKey = $program->settings()->getPublicAccessKey();
         $newKey = isset($validated['settings']['public_access_key']) ? $validated['settings']['public_access_key'] : null;
+        $newKey = (is_string($newKey) ? trim($newKey) : $newKey);
         $newKey = $newKey === '' ? null : $newKey;
         $keyChanged = ($oldKey ?? '') !== ($newKey ?? '');
 

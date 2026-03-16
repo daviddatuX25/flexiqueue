@@ -12,6 +12,7 @@ use App\Policies\SessionPolicy;
 use App\Policies\StationPolicy;
 use App\Repositories\PrintSettingRepository;
 use App\Repositories\TokenTtsSettingRepository;
+use App\Services\EdgeModeService;
 use App\Services\TtsService;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -25,6 +26,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(TtsService::class, fn () => TtsService::fromConfig());
+        $this->app->singleton(EdgeModeService::class);
         $this->app->singleton(PrintSettingRepository::class);
         $this->app->singleton(TokenTtsSettingRepository::class);
     }

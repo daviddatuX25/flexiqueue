@@ -571,7 +571,7 @@
                         <div
                             class="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300"
                         ></div>
-                        <span class="relative">Monitor your queue <span class="text-xs font-normal opacity-90">(Beta)</span></span>
+                        Monitor your queue
                         <svg
                             class="w-5 h-5 relative"
                             fill="none"

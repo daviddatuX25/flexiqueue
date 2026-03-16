@@ -10,6 +10,7 @@ use App\Models\Station;
 use App\Services\CheckStatusService;
 use App\Services\DeviceAuthorizationService;
 use App\Services\DisplayBoardService;
+use App\Services\StationQueueService;
 use App\Support\DeviceLock;
 use App\Support\SiteResolver;
 use Illuminate\Http\RedirectResponse;
@@ -26,7 +27,8 @@ class DisplayController extends Controller
     public function __construct(
         private DisplayBoardService $displayBoardService,
         private CheckStatusService $checkStatusService,
-        private DeviceAuthorizationService $deviceAuth
+        private DeviceAuthorizationService $deviceAuth,
+        private StationQueueService $stationQueueService
     ) {}
 
     /**
@@ -196,7 +198,8 @@ class DisplayController extends Controller
     }
 
     /**
-     * Per plan: site landing at GET /site/{site_slug}. Lists published, public (non-private) programs.
+     * Per plan: site landing at GET /site/{site_slug}. Lists published programs (including private);
+     * private programs require program key when user clicks through (enforced by RequireProgramAccess).
      */
     public function siteLanding(Site $site): Response
     {
@@ -206,7 +209,6 @@ class DisplayController extends Controller
             ->published()
             ->orderBy('name')
             ->get()
-            ->filter(fn (Program $p) => ! $p->settings()->isPrivate())
             ->map(fn (Program $p) => [
                 'id' => $p->id,
                 'name' => $p->name,
@@ -357,6 +359,8 @@ class DisplayController extends Controller
             ->values()
             ->all();
 
+        $footerStats = $this->stationQueueService->getProgramFooterStats($program);
+
         return Inertia::render('Display/DeviceTypeChoose', [
             'site_slug' => $site->slug,
             'program' => [
@@ -365,6 +369,8 @@ class DisplayController extends Controller
                 'slug' => $program->slug,
             ],
             'stations' => $stations,
+            'queueCount' => $footerStats['queue_count'],
+            'processedToday' => $footerStats['processed_today'],
         ]);
     }
 
@@ -426,7 +432,7 @@ class DisplayController extends Controller
             ->values()
             ->all();
 
-        $page = Inertia::render('Display/DeviceTypeChoose', [
+        $payload = [
             'site_slug' => $site->slug,
             'program' => [
                 'id' => $program->id,
@@ -434,7 +440,14 @@ class DisplayController extends Controller
                 'slug' => $program->slug,
             ],
             'stations' => $stations,
-        ]);
+        ];
+        if ($request->user()) {
+            $footerStats = $this->stationQueueService->getProgramFooterStats($program);
+            $payload['queueCount'] = $footerStats['queue_count'];
+            $payload['processedToday'] = $footerStats['processed_today'];
+        }
+
+        $page = Inertia::render('Display/DeviceTypeChoose', $payload);
 
         if ($clearLockCookie) {
             DeviceLock::clearFromSession($request);

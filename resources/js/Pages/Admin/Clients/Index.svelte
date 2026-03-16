@@ -2,11 +2,13 @@
     import AdminLayout from "../../../Layouts/AdminLayout.svelte";
     import Modal from "../../../Components/Modal.svelte";
     import AdminTable from "../../../Components/AdminTable.svelte";
+    import CreateRegistrationModal from "../../../Components/CreateRegistrationModal.svelte";
+    import type { CreateRegistrationPayload } from "../../../Components/CreateRegistrationModal.svelte";
     import { Link, router, usePage } from "@inertiajs/svelte";
     import { get } from "svelte/store";
     import { toaster } from "../../../lib/toaster.js";
     import { clientDisplayName } from "../../../lib/clientDisplayName.js";
-    import { Users as UsersIcon, Search as SearchIcon, Eye, Trash2 } from "lucide-svelte";
+    import { Users as UsersIcon, Search as SearchIcon, Eye, Trash2, Plus } from "lucide-svelte";
 
     interface ClientListItem {
         id: number;
@@ -27,10 +29,14 @@
     let {
         clients = [],
         search: initialSearch = "",
+        programs = [],
     }: {
         clients: ClientListItem[];
         search?: string | null;
+        programs?: { id: number; name: string }[];
     } = $props();
+
+    let showCreateRegModal = $state(false);
 
     let searchTerm = $state("");
     $effect(() => {
@@ -143,6 +149,23 @@
             preserveScroll: true,
         });
     }
+
+    async function submitCreateRegistration(payload: CreateRegistrationPayload): Promise<{ ok: boolean; message?: string }> {
+        const token = getCsrfToken();
+        const res = await fetch("/api/identity-registrations/direct", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+                "X-CSRF-TOKEN": token,
+                "X-Requested-With": "XMLHttpRequest",
+            },
+            credentials: "same-origin",
+            body: JSON.stringify(payload),
+        });
+        const data = (await res.json().catch(() => ({}))) as { message?: string };
+        return { ok: res.ok, message: data?.message };
+    }
 </script>
 
 <svelte:head>
@@ -200,7 +223,38 @@
                 {/if}
             </form>
         </div>
-        <div class="w-full sm:w-auto sm:min-w-[200px]"></div>
+        <div
+            class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto mt-2 sm:mt-0"
+        >
+            <button
+                type="button"
+                class="btn preset-filled-primary-500 flex justify-center items-center gap-2 w-full sm:w-auto shadow-sm transition-transform active:scale-95 md:flex hidden"
+                onclick={() => (showCreateRegModal = true)}
+                aria-label="Create registration"
+            >
+                <Plus class="w-4 h-4" /> Create registration
+            </button>
+        </div>
+        <!-- Mobile FAB: circular icon-only bottom-right, above footer (per staff/tokens pattern) -->
+        <button
+            type="button"
+            class="fixed bottom-[87px] right-[23px] z-50 flex md:hidden items-center justify-center w-14 h-14 rounded-full bg-primary-500 text-primary-contrast-500 shadow-lg hover:bg-primary-600 active:scale-95 transition-transform touch-manipulation"
+            onclick={() => (showCreateRegModal = true)}
+            aria-label="Create registration"
+        >
+            <Plus class="w-6 h-6" aria-hidden="true" />
+        </button>
+        <CreateRegistrationModal
+            open={showCreateRegModal}
+            onClose={() => (showCreateRegModal = false)}
+            onSubmitSuccess={() => {
+                toaster.success({ title: "Registration created." });
+                router.reload();
+            }}
+            programs={programs}
+            submitRequest={submitCreateRegistration}
+            description="Create a client registration. Choose a program, then enter client details. The registration is created immediately."
+        />
     </div>
 
     {#if clients.length === 0}

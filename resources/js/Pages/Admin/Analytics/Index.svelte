@@ -105,11 +105,15 @@
     /** Non-reactive so the scheduleFetch effect does not depend on it (avoids effect_update_depth_exceeded). */
     let debounceTimerRef: ReturnType<typeof setTimeout> | null = null;
 
-    /** Per ui-ux-tasks-checklist: chart text contrast — readable axis/legend (dark gray on light bg) */
+    /** Per ui-ux-tasks-checklist: chart text contrast — readable axis/legend; theme-friendly (no hard white). */
     function withChartTheme<T extends Record<string, unknown>>(opts: T): T {
         return {
             ...opts,
-            chart: { foreColor: "#334155", ...((opts.chart as Record<string, unknown>) || {}) },
+            chart: {
+                foreColor: "#334155",
+                background: "transparent",
+                ...((opts.chart as Record<string, unknown>) || {}),
+            },
             grid: { borderColor: "#e2e8f0", ...((opts.grid as Record<string, unknown>) || {}) },
         } as T;
     }
@@ -610,7 +614,7 @@
                 {/if}
             </div>
 
-            <!-- Chart 3 — Station Utilization -->
+            <!-- Chart 3 — Station Utilization (horizontal bar by % utilization) -->
             <div class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-5">
                 <h3 class="text-sm font-semibold text-surface-950 mb-4">Station Utilization</h3>
                 {#if loadingCharts}
@@ -619,17 +623,38 @@
                     <ApexChart
                         chartLib={chartLib}
                         options={withChartTheme({
-                            chart: { type: "bar", stacked: true, toolbar: { show: false } },
+                            chart: { type: "bar", toolbar: { show: false } },
                             plotOptions: {
-                                bar: { horizontal: true, barHeight: "60%", borderRadius: 2 },
+                                bar: {
+                                    horizontal: true,
+                                    barHeight: "70%",
+                                    borderRadius: 4,
+                                    dataLabels: { position: "top" as const },
+                                },
+                            },
+                            dataLabels: {
+                                enabled: true,
+                                formatter: (val: number) => `${Math.round(Number(val))}%`,
+                                style: { fontSize: "11px" },
                             },
                             xaxis: { categories: stationUtil.stations.map((s) => s.name) },
-                            yaxis: { title: { text: "Minutes" } },
-                            colors: ["#0d9488", "#e2e8f0"],
-                            legend: { position: "top" },
+                            yaxis: { max: 100, title: { text: "Utilization %" }, tickAmount: 5 },
+                            colors: ["#0d9488"],
+                            legend: { show: false },
+                            tooltip: {
+                                y: {
+                                    formatter: (val: number, { seriesIndex, dataPointIndex }: { seriesIndex?: number; dataPointIndex?: number }) => {
+                                        const s = stationUtil!.stations[dataPointIndex ?? 0];
+                                        if (!s) return `${Math.round(Number(val))}%`;
+                                        return `${Math.round(s.utilization_percent)}% busy · ${Math.round(s.busy_minutes)} min busy / ${Math.round(s.idle_minutes)} min idle`;
+                                    },
+                                },
+                            },
                             series: [
-                                { name: "Busy", data: stationUtil.stations.map((s) => Math.round(s.busy_minutes)) },
-                                { name: "Idle", data: stationUtil.stations.map((s) => Math.round(s.idle_minutes)) },
+                                {
+                                    name: "Utilization %",
+                                    data: stationUtil.stations.map((s) => Math.round(s.utilization_percent * 10) / 10),
+                                },
                             ],
                         })}
                         height="280"
@@ -676,7 +701,7 @@
                 {/if}
             </div>
 
-            <!-- Chart 5 — Busiest Hours Heatmap (7 rows = days of week, 24 cols = hours; white → deep blue) -->
+            <!-- Chart 5 — Busiest Hours Heatmap (chart bg transparent = theme; 7 rows = days, 24 cols = hours) -->
             <div class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-5">
                 <h3 class="text-sm font-semibold text-surface-950 mb-4">Busiest Hours</h3>
                 {#if loadingCharts}
@@ -702,7 +727,7 @@
                                 heatmap: {
                                     colorScale: {
                                         ranges: [
-                                            { from: 0, to: 0, color: "#f8fafc", name: "0" },
+                                            { from: 0, to: 0, color: "#e2e8f0", name: "0" },
                                             { from: 0.01, to: maxCount * 0.25, color: "#e0f2fe" },
                                             { from: maxCount * 0.25 + 0.01, to: maxCount * 0.5, color: "#7dd3fc" },
                                             { from: maxCount * 0.5 + 0.01, to: maxCount * 0.75, color: "#0ea5e9" },
@@ -740,7 +765,7 @@
                         height="280"
                     />
                 {:else}
-                    <div class="h-[280px] flex items-center justify-center text-surface-500 text-sm bg-surface-50 rounded-container">
+                    <div class="h-[280px] flex items-center justify-center text-surface-500 text-sm rounded-container">
                         No heatmap data.
                     </div>
                 {/if}

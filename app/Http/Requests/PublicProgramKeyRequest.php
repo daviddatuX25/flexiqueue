@@ -22,6 +22,7 @@ class PublicProgramKeyRequest extends FormRequest
         return [
             'site_slug' => ['required', 'string', 'max:100'],
             'key' => ['required', 'string', 'max:50'],
+            'program_slug' => ['sometimes', 'nullable', 'string', 'max:100'],
         ];
     }
 }

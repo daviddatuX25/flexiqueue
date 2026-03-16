@@ -4,6 +4,7 @@
      * Header: FlexiQueue, program name, date, and live time. Main: full-screen content.
      * When device_locked (from shared props), logo is non-clickable with tooltip so user knows exit is via admin scan QR.
      * Client-side navigation guard: when device_lock cookie is set, redirect any Inertia/history navigation outside allowed prefixes to the locked URL.
+     * When auth is staff/admin: show staff footer (nav bar + StatusFooter with QR) like MobileLayout on program and device-selection pages.
      */
     import { get } from "svelte/store";
     import { Link, router, usePage } from "@inertiajs/svelte";
@@ -11,12 +12,54 @@
     import AppBackground from "../Components/AppBackground.svelte";
     import FlexiQueueToaster from "../Components/FlexiQueueToaster.svelte";
     import FlashToToast from "../Components/FlashToToast.svelte";
+    import StatusFooter from "./StatusFooter.svelte";
+    import ScanModal from "../Components/ScanModal.svelte";
+    import { handleQrApproveScan } from "../lib/qrApproveHandler.js";
+    import { getLocalAllowHidOnThisDevice, isMobileTouch } from "../lib/displayHid.js";
+    import { shouldAllowCameraScanner } from "../lib/displayCamera.js";
+    import { Monitor, Route } from "lucide-svelte";
 
-    let { children, programName = null, date = "" } = $props();
+    let { children, programName = null, date = "", queueCount = 0, processedToday = 0 } = $props();
     let time = $state("");
     const page = usePage();
     const deviceLocked = $derived((get(page)?.props?.device_locked) === true);
     const deviceLockedRedirectUrl = $derived((get(page)?.props?.device_locked_redirect_url) ?? null);
+    const auth = $derived(get(page)?.props?.auth ?? null);
+    /** Staff/admin on program or device-selection page: show nav bar + StatusFooter like MobileLayout. */
+    const showStaffFooter = $derived(
+        auth?.user && auth.user.role && ["staff", "admin", "super_admin"].includes(auth.user.role)
+    );
+    const currentPath = $derived((get(page)?.url ?? "").split("?")[0]);
+    const isStation = $derived(currentPath === "/station" || currentPath.startsWith("/station/"));
+    const isTriage = $derived(currentPath === "/triage");
+    const isTrackOverrides = $derived(currentPath === "/track-overrides");
+    const isDevices = $derived(
+        currentPath === "/devices" ||
+            currentPath.startsWith("/devices/") ||
+            /\/site\/[^/]+\/program\/[^/]+(\/devices)?$/.test(currentPath)
+    );
+    const showFooterQrButton = $derived(!!auth?.can_approve_requests);
+    let showFooterQrScanner = $state(false);
+    let localAllowHid = $state(true);
+    let localAllowCamera = $state(true);
+    const accountAllowHid = $derived(auth?.user?.staff_triage_allow_hid_barcode !== false);
+    const accountAllowCamera = $derived(auth?.user?.staff_triage_allow_camera_scanner !== false);
+    const effectiveHid = $derived(accountAllowHid && localAllowHid);
+    const effectiveCamera = $derived(accountAllowCamera && localAllowCamera);
+
+    $effect(() => {
+        if (!showFooterQrScanner) return;
+        const hidLocal = getLocalAllowHidOnThisDevice("staff_binder");
+        localAllowHid = hidLocal !== null ? hidLocal : !isMobileTouch();
+        localAllowCamera = shouldAllowCameraScanner("staff_binder");
+    });
+
+    function onFooterQrScan(decodedText) {
+        handleQrApproveScan(decodedText.trim(), {
+            onClose: () => (showFooterQrScanner = false),
+            onSuccess: () => router.reload(),
+        });
+    }
 
     const STORAGE_KEY = "device_lock_redirect_url";
 
@@ -76,7 +119,7 @@
     });
 </script>
 
-<div class="flex flex-col min-h-screen bg-transparent">
+<div class="flex flex-col min-h-screen {showStaffFooter ? 'h-screen min-h-0' : ''} bg-transparent">
     <AppBackground />
     <FlexiQueueToaster />
     <FlashToToast />
@@ -147,11 +190,88 @@
         </div>
     </header>
 
-    <main class="flex-1 overflow-auto px-3 py-4 sm:p-4">
+    <main class="flex-1 min-h-0 overflow-auto px-3 py-4 sm:p-4 {showStaffFooter ? 'overflow-y-scroll' : ''}">
         {#if typeof children === "function"}
             {@render children()}
         {/if}
     </main>
+
+    {#if showStaffFooter}
+        <!-- Staff footer: nav bar + StatusFooter (like MobileLayout) on program/device-selection pages -->
+        <footer class="shrink-0 min-h-0 z-10 flex flex-col">
+            <div class="px-3 sm:px-4 pt-3 pb-2">
+                <div
+                    class="fq-nav-bar relative rounded-3xl border bg-surface-50 dark:bg-slate-900 border-t border-surface-200 dark:border-slate-700 shadow-md overflow-visible h-14 md:h-16 flex items-center justify-between px-4 sm:px-6 md:px-8"
+                >
+                    <Link
+                        href="/station"
+                        class="flex flex-col items-center gap-0.5 touch-target justify-center min-w-0 flex-1 py-1 text-surface-800 dark:text-slate-200 {isStation
+                            ? 'text-primary-600 dark:text-primary-400 font-semibold'
+                            : ''}"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-4 w-4 md:h-5 md:w-5 shrink-0"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        <span class="text-[0.55rem] md:text-[0.65rem]">Station</span>
+                    </Link>
+                    <Link
+                        href="/triage"
+                        class="flex flex-col items-center gap-0.5 touch-target justify-center min-w-0 flex-1 py-1 text-surface-800 dark:text-slate-200 {isTriage
+                            ? 'text-primary-600 dark:text-primary-400 font-semibold'
+                            : ''}"
+                    >
+                        <Route class="h-4 w-4 md:h-5 md:w-5 shrink-0" />
+                        <span class="text-[0.55rem] md:text-[0.65rem]">Triage</span>
+                    </Link>
+                    <Link
+                        href="/track-overrides"
+                        class="flex flex-col items-center gap-0.5 touch-target justify-center min-w-0 flex-1 py-1 text-surface-800 dark:text-slate-200 {isTrackOverrides
+                            ? 'text-primary-600 dark:text-primary-400 font-semibold'
+                            : ''}"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 md:h-5 md:w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                        </svg>
+                        <span class="text-[0.55rem] md:text-[0.65rem] text-center leading-tight">Track<br />overrides</span>
+                    </Link>
+                    <Link
+                        href="/devices"
+                        class="flex flex-col items-center gap-0.5 touch-target justify-center min-w-0 flex-1 py-1 text-surface-800 dark:text-slate-200 {isDevices
+                            ? 'text-primary-600 dark:text-primary-400 font-semibold'
+                            : ''}"
+                    >
+                        <Monitor class="h-4 w-4 md:h-5 md:w-5 shrink-0" />
+                        <span class="text-[0.55rem] md:text-[0.65rem]">Devices</span>
+                    </Link>
+                </div>
+            </div>
+        </footer>
+        <StatusFooter
+            {queueCount}
+            {processedToday}
+            fixed={false}
+            compact={true}
+            showQrButton={showFooterQrButton}
+            onQrClick={() => (showFooterQrScanner = true)}
+        />
+        <ScanModal
+            open={showFooterQrScanner}
+            onClose={() => (showFooterQrScanner = false)}
+            title="Scan QR to approve"
+            description="Scan the QR that a device is showing (settings or device authorize request). This is only for approving requests — not for token lookup."
+            allowHid={effectiveHid}
+            allowCamera={effectiveCamera}
+            onScan={onFooterQrScan}
+            soundOnScan={true}
+            wide={true}
+        />
+    {/if}
 </div>
 
 <style>

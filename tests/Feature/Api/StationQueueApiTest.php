@@ -2,11 +2,13 @@
 
 namespace Tests\Feature\Api;
 
+use App\Models\Client;
 use App\Models\IdentityRegistration;
 use App\Models\Program;
 use App\Models\ProgramStationAssignment;
 use App\Models\ServiceTrack;
 use App\Models\Session;
+use App\Models\Site;
 use App\Models\Station;
 use App\Models\Token;
 use App\Models\TrackStep;
@@ -182,6 +184,84 @@ class StationQueueApiTest extends TestCase
         $response->assertJsonPath('station.serving_count', 1);
         // Per flexiqueue-ui3: queue payload includes process for each serving/waiting session
         $response->assertJsonStructure(['serving' => [['session_id', 'alias', 'track', 'process_id', 'process_name']]]);
+        // Staff-only: client_name present; null when session has no client/identity
+        $response->assertJsonPath('serving.0.client_name', null);
+    }
+
+    /** Station page staff-only: queue includes client_name when session has linked client. */
+    public function test_queue_includes_client_name_when_session_has_client(): void
+    {
+        $site = Site::create([
+            'name' => 'Test Site',
+            'slug' => 'test-site',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make('key'),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $this->program->update(['site_id' => $site->id]);
+        $client = Client::factory()->create([
+            'site_id' => $site->id,
+            'first_name' => 'Jane',
+            'last_name' => 'Doe',
+        ]);
+        $token = $this->createToken('A1');
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'A1',
+            'client_id' => $client->id,
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+            'no_show_attempts' => 0,
+        ]);
+        $token->update(['status' => 'in_use', 'current_session_id' => $session->id]);
+
+        $response = $this->actingAs($this->staff)->getJson("/api/stations/{$this->station1->id}/queue");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('serving.0.client_name', $client->display_name);
+    }
+
+    /** Station page staff-only: queue includes client_name from identity registration when no client. */
+    public function test_queue_includes_client_name_from_identity_registration_when_no_client(): void
+    {
+        $reg = IdentityRegistration::create([
+            'program_id' => $this->program->id,
+            'session_id' => null,
+            'first_name' => 'Unverified',
+            'last_name' => 'Person',
+            'client_category' => 'Regular',
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]);
+        $token = $this->createToken('U1');
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'U1',
+            'client_id' => null,
+            'identity_registration_id' => $reg->id,
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'station_queue_position' => 1,
+            'status' => 'waiting',
+            'queued_at_station' => now(),
+        ]);
+        $reg->update(['session_id' => $session->id]);
+        $token->update(['status' => 'in_use', 'current_session_id' => $session->id]);
+
+        $response = $this->actingAs($this->staff)->getJson("/api/stations/{$this->station1->id}/queue");
+
+        $response->assertStatus(200);
+        $waiting = $response->json('waiting');
+        $found = collect($waiting)->firstWhere('session_id', $session->id);
+        $this->assertNotNull($found);
+        $this->assertSame('Unverified Person', $found['client_name'] ?? null);
     }
 
     /** Per flexiqueue-ui3: when track step has process, serving payload includes process_id and process_name */
@@ -440,6 +520,126 @@ class StationQueueApiTest extends TestCase
         $response->assertJsonPath('stats.total_served_today', 1);
         // avg_service_time_minutes may be 0 if times are same or logic differs; we assert structure
         $response->assertJsonStructure(['stats' => ['avg_service_time_minutes']]);
+    }
+
+    public function test_served_count_is_idempotent_same_session_two_check_ins_count_as_one(): void
+    {
+        $token = $this->createToken('B1');
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'B1',
+            'client_category' => 'regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'status' => 'completed',
+        ]);
+        $token->update(['status' => 'available', 'current_session_id' => null]);
+
+        $base = now()->startOfDay()->addHours(9);
+        TransactionLog::create([
+            'session_id' => $session->id,
+            'station_id' => $this->station1->id,
+            'staff_user_id' => $this->staff->id,
+            'action_type' => 'check_in',
+            'previous_station_id' => null,
+            'next_station_id' => null,
+            'created_at' => $base,
+        ]);
+        TransactionLog::create([
+            'session_id' => $session->id,
+            'station_id' => $this->station1->id,
+            'staff_user_id' => $this->staff->id,
+            'action_type' => 'check_in',
+            'previous_station_id' => null,
+            'next_station_id' => null,
+            'created_at' => $base->copy()->addMinutes(2),
+        ]);
+        TransactionLog::create([
+            'session_id' => $session->id,
+            'station_id' => $this->station1->id,
+            'staff_user_id' => $this->staff->id,
+            'action_type' => 'transfer',
+            'previous_station_id' => $this->station1->id,
+            'next_station_id' => $this->station2->id,
+            'created_at' => $base->copy()->addMinutes(5),
+        ]);
+
+        $response = $this->actingAs($this->staff)->getJson("/api/stations/{$this->station1->id}/queue");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('stats.total_served_today', 1);
+        // Avg = first check_in to transfer = 5 min (JSON may return int)
+        $this->assertSame(5, (int) $response->json('stats.avg_service_time_minutes'));
+    }
+
+    public function test_avg_service_time_averages_durations_per_session(): void
+    {
+        $base = now()->startOfDay()->addHours(10);
+        $token1 = $this->createToken('C1');
+        $session1 = Session::create([
+            'token_id' => $token1->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'C1',
+            'client_category' => 'regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'status' => 'completed',
+        ]);
+        $token1->update(['status' => 'available', 'current_session_id' => null]);
+        TransactionLog::create([
+            'session_id' => $session1->id,
+            'station_id' => $this->station1->id,
+            'staff_user_id' => $this->staff->id,
+            'action_type' => 'check_in',
+            'created_at' => $base,
+        ]);
+        TransactionLog::create([
+            'session_id' => $session1->id,
+            'station_id' => $this->station1->id,
+            'staff_user_id' => $this->staff->id,
+            'action_type' => 'complete',
+            'station_id' => $this->station1->id,
+            'created_at' => $base->copy()->addMinutes(4),
+        ]);
+
+        $token2 = $this->createToken('D1');
+        $session2 = Session::create([
+            'token_id' => $token2->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'D1',
+            'client_category' => 'regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'status' => 'completed',
+        ]);
+        $token2->update(['status' => 'available', 'current_session_id' => null]);
+        TransactionLog::create([
+            'session_id' => $session2->id,
+            'station_id' => $this->station1->id,
+            'staff_user_id' => $this->staff->id,
+            'action_type' => 'check_in',
+            'created_at' => $base->copy()->addHour(),
+        ]);
+        TransactionLog::create([
+            'session_id' => $session2->id,
+            'station_id' => $this->station1->id,
+            'staff_user_id' => $this->staff->id,
+            'action_type' => 'transfer',
+            'previous_station_id' => $this->station1->id,
+            'next_station_id' => $this->station2->id,
+            'created_at' => $base->copy()->addHour()->addMinutes(10),
+        ]);
+
+        $response = $this->actingAs($this->staff)->getJson("/api/stations/{$this->station1->id}/queue");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('stats.total_served_today', 2);
+        // 4 min and 10 min → avg 7 (JSON may return int)
+        $this->assertSame(7, (int) $response->json('stats.avg_service_time_minutes'));
     }
 
     public function test_staff_not_assigned_to_station_gets_403(): void
@@ -793,6 +993,45 @@ class StationQueueApiTest extends TestCase
         $response->assertJsonPath('current_station_id', $this->station1->id);
         $response->assertJsonPath('at_this_station', true);
         $response->assertJsonPath('unverified', false);
+        $response->assertJsonPath('client_name', null);
+    }
+
+    /** Station page staff-only: session-by-token includes client_name when session has linked client. */
+    public function test_session_by_token_includes_client_name_when_session_has_client(): void
+    {
+        $site = Site::create([
+            'name' => 'Test Site',
+            'slug' => 'test-site',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make('key'),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $this->program->update(['site_id' => $site->id]);
+        $client = Client::factory()->create([
+            'site_id' => $site->id,
+            'first_name' => 'Maria',
+            'last_name' => 'Santos',
+        ]);
+        $token = $this->createToken('M1');
+        $session = Session::create([
+            'token_id' => $token->id,
+            'program_id' => $this->program->id,
+            'track_id' => $this->track->id,
+            'alias' => 'M1',
+            'client_id' => $client->id,
+            'client_category' => 'Regular',
+            'current_station_id' => $this->station1->id,
+            'current_step_order' => 1,
+            'status' => 'waiting',
+        ]);
+        $token->update(['status' => 'in_use', 'current_session_id' => $session->id]);
+
+        $response = $this->actingAs($this->staff)->getJson(
+            "/api/stations/{$this->station1->id}/session-by-token?qr_hash=".urlencode($token->qr_code_hash)
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('client_name', $client->display_name);
     }
 
     public function test_session_by_token_when_session_at_other_station_returns_at_this_station_false(): void

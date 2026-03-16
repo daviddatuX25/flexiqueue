@@ -69,7 +69,7 @@
 			</Link>
 			<Link
 				href="/site/{site.slug}/program/{program.slug}"
-				class="btn variant-outline flex items-center justify-center gap-2 flex-1 touch-target-h"
+				class="btn flex items-center justify-center gap-2 flex-1 touch-target-h rounded-lg border font-medium text-surface-900 dark:text-white border-surface-300 dark:border-slate-500 bg-surface-50 dark:bg-slate-700/50 hover:bg-surface-200 dark:hover:bg-slate-600/70 hover:border-surface-400 dark:hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/50"
 			>
 				<Smartphone class="h-5 w-5 shrink-0" />
 				Use this device

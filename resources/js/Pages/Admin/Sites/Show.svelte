@@ -100,6 +100,7 @@
     let landingShowStats = $state<boolean>(!!site?.settings?.landing_show_stats);
 
     let heroUploading = $state(false);
+    let heroDragging = $state(false);
     let heroInputEl = $state<HTMLInputElement | null>(null);
     let siteEntryQrGenerating = $state(false);
 
@@ -122,6 +123,10 @@
     const page = usePage();
 
     const isDefaultSite = $derived(default_site_id !== null && site.id === default_site_id);
+
+    /** When false (edge Pi; SYNC_BACK=false), Edge section is read-only — settings are configured on central. */
+    const syncBack = $derived(($page?.props as { edge_mode?: { sync_back?: boolean } } | undefined)?.edge_mode?.sync_back ?? false);
+    const edgeSectionDisabled = $derived(!syncBack);
 
     async function handleSetAsDefault(): Promise<void> {
         if (submitting) return;
@@ -343,6 +348,7 @@
 
     async function handleEdgeSubmit(e: SubmitEvent): Promise<void> {
         e.preventDefault();
+        if (edgeSectionDisabled) return;
         edgeErrors = {};
         if (!validateTime(edge.scheduled_sync_time)) {
             edgeErrors["edge_settings.scheduled_sync_time"] =
@@ -387,27 +393,29 @@
 </svelte:head>
 
 <AdminLayout>
-    <div class="flex flex-col gap-8 max-w-4xl">
+    <div class="flex flex-col gap-6 max-w-4xl">
         <div class="flex items-center gap-4">
-            <Link
-                href="/admin/sites"
-                class="btn btn-ghost btn-square btn-sm"
-                aria-label="Back to sites"
-            >
-                <ArrowLeft class="w-5 h-5" />
-            </Link>
+            {#if auth_is_super_admin}
+                <Link
+                    href="/admin/sites"
+                    class="btn btn-ghost btn-square btn-sm"
+                    aria-label="Back to sites"
+                >
+                    <ArrowLeft class="w-5 h-5" />
+                </Link>
+            {/if}
             <div class="flex-1 min-w-0">
                 <h1 class="text-2xl font-bold text-surface-950 flex items-center gap-2">
                     <Building2 class="w-6 h-6 text-primary-500 shrink-0" />
                     {site.name}
                 </h1>
-                <p class="text-surface-500 mt-0.5 font-mono text-sm">{site.slug}</p>
+                <p class="mt-1 text-sm text-surface-600 font-mono">{site.slug}</p>
             </div>
         </div>
 
         {#if auth_is_super_admin && sites && sites.length > 1}
             <section
-                class="rounded-container bg-surface-50 border border-surface-200 p-4 flex flex-wrap items-center gap-3"
+                class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-4 flex flex-wrap items-center gap-3"
                 aria-label="Default site for display and public triage"
             >
                 {#if isDefaultSite}
@@ -432,7 +440,7 @@
 
         <!-- Public site URL (share); future: blog-like content here -->
         <section
-            class="rounded-container bg-surface-50 border border-surface-200 p-4 flex flex-wrap items-center gap-3"
+            class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-4 flex flex-wrap items-center gap-3"
             aria-label="Public site URL"
         >
             <p class="text-sm text-surface-600 shrink-0">
@@ -440,7 +448,7 @@
             </p>
             {#if site_landing_url}
                 <div class="flex flex-wrap items-center gap-2 min-w-0 flex-1">
-                    <code class="flex-1 min-w-0 text-sm bg-surface-100 dark:bg-surface-800 px-2 py-1.5 rounded truncate" title={site_landing_url}>{site_landing_url}</code>
+                    <code class="flex-1 min-w-0 text-sm font-mono text-surface-900 bg-surface-100 border border-surface-200 px-2 py-1.5 rounded truncate" title={site_landing_url}>{site_landing_url}</code>
                     <button
                         type="button"
                         class="btn preset-tonal flex items-center gap-2 touch-target-h"
@@ -461,15 +469,15 @@
 
         <!-- Public access & landing (per public-site plan) -->
         <section
-            class="rounded-container bg-surface-50 border border-surface-200 p-6"
+            class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6 flex flex-col gap-6"
             aria-labelledby="public-access-heading"
         >
-            <h2 id="public-access-heading" class="text-lg font-semibold text-surface-950 flex items-center gap-2 mb-4">
-                Public access & landing
-            </h2>
-            <p class="text-surface-600 text-sm mb-4">
-                Site key lets public devices discover this site from the homepage. Landing fields customize the public site page.
-            </p>
+            <h2 id="public-access-heading" class="text-base font-semibold text-surface-950 flex items-center gap-2 mb-1">
+                    Public access & landing
+                </h2>
+                <p class="text-xs text-surface-600 mb-4">
+                    Site key lets public devices discover this site from the homepage. Landing fields customize the public site page.
+                </p>
             <form
                 class="space-y-4"
                 onsubmit={async (e) => {
@@ -494,7 +502,7 @@
                 }}
             >
                 <div>
-                    <label for="public-access-key" class="block text-sm font-medium text-surface-700 dark:text-slate-300 mb-1">Site key</label>
+                    <label for="public-access-key" class="block text-sm font-medium text-surface-900 mb-1">Site key</label>
                     <input
                         id="public-access-key"
                         type="text"
@@ -504,12 +512,12 @@
                         maxlength={20}
                     />
                     {#if !publicAccessKey.trim()}
-                        <p class="text-amber-600 dark:text-amber-400 text-sm mt-1">No public access key set — public devices cannot discover this site.</p>
+                        <p class="text-warning-600 text-sm mt-1">No public access key set — public devices cannot discover this site.</p>
                     {/if}
                 </div>
                 <div>
-                    <span class="block text-sm font-medium text-surface-700 dark:text-slate-300 mb-1">Site entry QR</span>
-                    <p class="text-sm text-surface-500 dark:text-slate-400 mb-2">Short link for QR codes: devices scan → land on homepage with site key hint.</p>
+                    <span class="block text-sm font-medium text-surface-900 mb-1">Site entry QR</span>
+                    <p class="text-xs text-surface-600 mb-2">Short link for QR codes: devices scan → land on homepage with site key hint.</p>
                     {#if site_entry_short_url}
                         <div class="mt-2">
                             <QrDisplay url={site_entry_short_url} label="Site entry" />
@@ -532,7 +540,7 @@
                     {/if}
                 </div>
                 <div>
-                    <label for="landing-hero-title" class="block text-sm font-medium text-surface-700 dark:text-slate-300 mb-1">Landing page title</label>
+                    <label for="landing-hero-title" class="block text-sm font-medium text-surface-900 mb-1">Landing page title</label>
                     <input
                         id="landing-hero-title"
                         type="text"
@@ -543,7 +551,7 @@
                     />
                 </div>
                 <div>
-                    <label for="landing-hero-desc" class="block text-sm font-medium text-surface-700 dark:text-slate-300 mb-1">Landing description</label>
+                    <label for="landing-hero-desc" class="block text-sm font-medium text-surface-900 mb-1">Landing description</label>
                     <textarea
                         id="landing-hero-desc"
                         class="input w-full max-w-md min-h-[80px]"
@@ -553,7 +561,7 @@
                     />
                 </div>
                 <div>
-                    <span class="block text-sm font-medium text-surface-700 dark:text-slate-300 mb-1">Hero image</span>
+                    <span class="block text-sm font-medium text-surface-900 mb-1">Hero image</span>
                     <input
                         type="file"
                         accept="image/jpeg,image/png,image/webp"
@@ -570,7 +578,7 @@
                             <img
                                 src={site.landing_hero_image_url}
                                 alt=""
-                                class="max-h-20 rounded-lg border border-surface-200 dark:border-slate-600 object-cover"
+                                class="max-h-20 rounded-lg border border-surface-200 object-cover"
                             />
                             <div class="flex gap-2">
                                 <button
@@ -592,14 +600,33 @@
                             </div>
                         </div>
                     {:else}
-                        <button
-                            type="button"
-                            class="btn variant-outline text-sm mt-2"
-                            disabled={heroUploading}
+                        <div
+                            class="border-2 border-dashed rounded-container p-6 text-center transition-colors cursor-pointer {heroDragging ? 'border-primary-500 bg-primary-50' : 'border-surface-300 hover:border-primary-400 bg-surface-50/50 hover:bg-surface-100/50'}"
+                            role="button"
+                            tabindex="0"
+                            aria-label="Upload hero image"
+                            ondragover={(e) => { e.preventDefault(); heroDragging = true; }}
+                            ondragleave={() => (heroDragging = false)}
+                            ondrop={(e) => {
+                                e.preventDefault();
+                                heroDragging = false;
+                                const file = e.dataTransfer?.files?.[0];
+                                if (file && file.type?.startsWith('image/')) handleHeroUpload(file);
+                            }}
                             onclick={() => heroInputEl?.click()}
+                            onkeydown={(e) => e.key === 'Enter' && heroInputEl?.click()}
                         >
-                            {heroUploading ? "Uploading…" : "Upload image"}
-                        </button>
+                            <div class="flex flex-col items-center justify-center gap-2 pointer-events-none">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 text-surface-400 {heroDragging ? 'text-primary-500' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                <div class="text-sm">
+                                    <span class="font-semibold text-primary-600">Click to upload</span> or drag and drop
+                                </div>
+                                <p class="text-xs text-surface-500">JPEG, PNG or WebP; {getUploadHint('hero')}</p>
+                            </div>
+                        </div>
+                        {#if heroUploading}
+                            <p class="text-sm text-surface-600 mt-2">Uploading…</p>
+                        {/if}
                     {/if}
                     <p class="text-xs text-surface-500 mt-1">{getUploadHint('hero')}</p>
                 </div>
@@ -610,13 +637,13 @@
                         class="checkbox"
                         bind:checked={landingShowStats}
                     />
-                    <label for="landing-show-stats" class="text-sm text-surface-700 dark:text-slate-300">Show served stats on public landing</label>
+                    <label for="landing-show-stats" class="text-sm text-surface-900">Show served stats on public landing</label>
                 </div>
                 <div>
-                    <h3 class="text-sm font-medium text-surface-700 dark:text-slate-300 mb-2">Content sections</h3>
+                    <h3 class="text-sm font-semibold text-surface-950 mb-2">Content sections</h3>
                     <ul class="space-y-2">
                         {#each landingSections as section, i (i)}
-                            <li class="rounded-lg border border-surface-200 dark:border-slate-600 bg-surface-100 dark:bg-slate-800/50 p-3">
+                            <li class="rounded-lg border border-surface-200 bg-surface-100 p-3">
                                 {#if editingSectionIndex === i}
                                     <div class="space-y-2">
                                         <input
@@ -640,10 +667,10 @@
                                     </div>
                                 {:else}
                                     <div class="flex flex-wrap items-center gap-2">
-                                        <span class="font-medium text-surface-900 dark:text-white">
+                                        <span class="font-medium text-surface-900">
                                             {section.title || "Untitled"}
                                         </span>
-                                        <span class="text-surface-500 dark:text-slate-400 text-sm truncate max-w-[200px]">
+                                        <span class="text-surface-600 text-sm truncate max-w-[200px]">
                                             {section.body ? (section.body.slice(0, 60) + (section.body.length > 60 ? "…" : "")) : ""}
                                         </span>
                                         <div class="flex gap-1 ml-auto">
@@ -704,18 +731,18 @@
 
         <!-- API key (masked) + Regenerate -->
         <section
-            class="rounded-container bg-surface-50 border border-surface-200 p-6"
+            class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6"
             aria-labelledby="api-key-heading"
         >
-            <h2 id="api-key-heading" class="text-lg font-semibold text-surface-950 flex items-center gap-2 mb-4">
+            <h2 id="api-key-heading" class="text-base font-semibold text-surface-950 flex items-center gap-2 mb-2">
                 <Key class="w-5 h-5 text-primary-500" />
                 API key
             </h2>
-            <p class="text-surface-600 text-sm mb-3">
-                The key is never shown again after create or regenerate. Store it in Pi <code class="bg-surface-200 dark:bg-surface-700 px-1 rounded text-xs">.env</code> as <code class="bg-surface-200 dark:bg-surface-700 px-1 rounded text-xs">CENTRAL_API_KEY</code>.
+            <p class="text-xs text-surface-600 mb-3">
+                The key is never shown again after create or regenerate. Store it in Pi <code class="bg-surface-100 border border-surface-200 px-1 rounded text-xs text-surface-900">.env</code> as <code class="bg-surface-100 border border-surface-200 px-1 rounded text-xs text-surface-900">CENTRAL_API_KEY</code>.
             </p>
             <div class="flex flex-wrap items-center gap-3">
-                <code class="px-3 py-2 rounded-lg bg-surface-200 dark:bg-surface-700 font-mono text-sm">
+                <code class="px-3 py-2 rounded-lg bg-surface-100 border border-surface-200 font-mono text-sm text-surface-900">
                     {api_key_masked}
                 </code>
                 <button
@@ -730,66 +757,77 @@
             </div>
         </section>
 
-        <!-- Edge settings form -->
+        <!-- Edge settings form (central only when SYNC_BACK=true; on edge SYNC_BACK=false disables inputs) -->
         <section
-            class="rounded-container bg-surface-50 border border-surface-200 p-6"
+            class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6"
             aria-labelledby="edge-settings-heading"
         >
-            <h2 id="edge-settings-heading" class="text-lg font-semibold text-surface-950 mb-4">
+            <h2 id="edge-settings-heading" class="text-base font-semibold text-surface-950 mb-4">
                 Edge settings
             </h2>
+            {#if edgeSectionDisabled}
+                <p class="text-sm text-surface-600 mb-4">
+                    Edge settings are configured on the central server. This device does not sync back; re-sync from central to get the latest program and settings.
+                </p>
+            {/if}
             <form onsubmit={handleEdgeSubmit} class="space-y-6">
                 <div class="grid gap-6 sm:grid-cols-2">
-                    <label class="flex items-center gap-3 cursor-pointer touch-target-h min-h-[48px]">
+                    <label class="flex items-center gap-3 cursor-pointer touch-target-h min-h-[48px] text-surface-900 {edgeSectionDisabled ? 'opacity-60' : ''}">
                         <input
                             type="checkbox"
                             class="checkbox checkbox-primary"
                             bind:checked={edge.sync_clients}
+                            disabled={edgeSectionDisabled}
                         />
                         <span>Sync clients</span>
                     </label>
-                    <label class="flex items-center gap-3 cursor-pointer touch-target-h min-h-[48px]">
+                    <label class="flex items-center gap-3 cursor-pointer touch-target-h min-h-[48px] text-surface-900 {edgeSectionDisabled ? 'opacity-60' : ''}">
                         <input
                             type="checkbox"
                             class="checkbox checkbox-primary"
                             bind:checked={edge.sync_tokens}
+                            disabled={edgeSectionDisabled}
                         />
                         <span>Sync tokens</span>
                     </label>
-                    <label class="flex items-center gap-3 cursor-pointer touch-target-h min-h-[48px]">
+                    <label class="flex items-center gap-3 cursor-pointer touch-target-h min-h-[48px] text-surface-900 {edgeSectionDisabled ? 'opacity-60' : ''}">
                         <input
                             type="checkbox"
                             class="checkbox checkbox-primary"
                             bind:checked={edge.sync_tts}
+                            disabled={edgeSectionDisabled}
                         />
                         <span>Sync TTS</span>
                     </label>
-                    <label class="flex items-center gap-3 cursor-pointer touch-target-h min-h-[48px]">
+                    <label class="flex items-center gap-3 cursor-pointer touch-target-h min-h-[48px] text-surface-900 {edgeSectionDisabled ? 'opacity-60' : ''}">
                         <input
                             type="checkbox"
                             class="checkbox checkbox-primary"
                             bind:checked={edge.bridge_enabled}
+                            disabled={edgeSectionDisabled}
                         />
                         <span>Bridge enabled</span>
                     </label>
-                    <label class="flex items-center gap-3 cursor-pointer touch-target-h min-h-[48px]">
+                    <label class="flex items-center gap-3 cursor-pointer touch-target-h min-h-[48px] text-surface-900 {edgeSectionDisabled ? 'opacity-60' : ''}">
                         <input
                             type="checkbox"
                             class="checkbox checkbox-primary"
                             bind:checked={edge.offline_allow_client_creation}
+                            disabled={edgeSectionDisabled}
                         />
                         <span>Offline allow client creation</span>
                     </label>
                 </div>
 
                 <div>
-                    <label for="sync_client_scope" class="label-text block mb-1">
+                    <label for="sync_client_scope" class="block text-sm font-medium text-surface-900 mb-1">
                         Sync client scope
                     </label>
                     <select
                         id="sync_client_scope"
                         class="select select-bordered w-full max-w-xs select-theme"
                         bind:value={edge.sync_client_scope}
+                        disabled={edgeSectionDisabled}
                     >
                         <option value="program_history">program_history</option>
                         <option value="all">all</option>
@@ -797,13 +835,14 @@
                 </div>
 
                 <div>
-                    <label for="offline_binding_mode" class="label-text block mb-1">
+                    <label for="offline_binding_mode" class="block text-sm font-medium text-surface-900 mb-1">
                         Offline binding mode override
                     </label>
                     <select
                         id="offline_binding_mode"
                         class="select select-bordered w-full max-w-xs select-theme"
                         bind:value={edge.offline_binding_mode_override}
+                        disabled={edgeSectionDisabled}
                     >
                         <option value="optional">optional</option>
                         <option value="required">required</option>
@@ -811,7 +850,7 @@
                 </div>
 
                 <div>
-                    <label for="scheduled_sync_time" class="label-text block mb-1">
+                    <label for="scheduled_sync_time" class="block text-sm font-medium text-surface-900 mb-1">
                         Scheduled sync time (HH:MM 24h)
                     </label>
                     <input
@@ -821,6 +860,7 @@
                         placeholder="17:00"
                         bind:value={edge.scheduled_sync_time}
                         maxlength="5"
+                        disabled={edgeSectionDisabled}
                     />
                     {#if edgeErrors["edge_settings.scheduled_sync_time"]}
                         <p class="text-sm text-error-600 mt-1">
@@ -833,7 +873,7 @@
                     <button
                         type="submit"
                         class="btn preset-filled-primary-500 touch-target-h"
-                        disabled={submitting}
+                        disabled={submitting || edgeSectionDisabled}
                     >
                         <Save class="w-4 h-4" />
                         Save edge settings
@@ -858,11 +898,11 @@
     title="New API key — copy now"
     onClose={closeNewKeyModal}
 >
-    <p class="text-surface-600 mb-4">
+    <p class="text-sm text-surface-600 mb-4">
         This key is shown only once. Copy it and update your Pi
-        <code class="text-sm bg-surface-200 dark:bg-surface-700 px-1 rounded">.env</code>.
+        <code class="text-sm bg-surface-100 border border-surface-200 px-1 rounded text-surface-900">.env</code>.
     </p>
-    <div class="flex flex-wrap items-center gap-2 mb-4 p-3 rounded-lg bg-surface-100 dark:bg-surface-800 font-mono text-sm break-all">
+    <div class="flex flex-wrap items-center gap-2 mb-4 p-3 rounded-lg bg-surface-100 border border-surface-200 font-mono text-sm break-all text-surface-900">
         {newKeyOnce ?? ""}
     </div>
     <div class="flex flex-wrap gap-3">

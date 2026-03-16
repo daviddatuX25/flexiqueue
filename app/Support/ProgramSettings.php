@@ -193,12 +193,16 @@ final class ProgramSettings
         return in_array($lang, $allowed, true) ? $lang : 'en';
     }
 
-    /** Per addition-to-public-site-plan: program key for private program access. Null = public within site. */
+    /** Per addition-to-public-site-plan: program key for private program access. Null = public within site. Always returns trimmed string when set. */
     public function getPublicAccessKey(): ?string
     {
         $v = $this->settings['public_access_key'] ?? null;
+        if ($v === null || $v === '') {
+            return null;
+        }
+        $s = trim((string) $v);
 
-        return $v === null || $v === '' ? null : (string) $v;
+        return $s === '' ? null : $s;
     }
 
     /** Per addition-to-public-site-plan: hours until program-access cookie expires. Min 1, max 168 (1 week). */

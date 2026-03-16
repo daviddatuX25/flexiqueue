@@ -144,6 +144,12 @@ class ClientController extends Controller
 
     public function store(StoreClientRequest $request): JsonResponse
     {
+        // Per final-edge-mode-rush-plann [DF-12]: block client creation when edge is offline.
+        if (app(\App\Services\EdgeModeService::class)->isOffline()) {
+            return response()->json([
+                'message' => 'Client creation is not available in offline mode. Clients must be synced from the central server.',
+            ], 403);
+        }
         $siteId = $this->resolveSiteId($request);
         if ($siteId === null) {
             return response()->json(['message' => 'No program or site context for client creation.'], 403);
@@ -232,6 +238,12 @@ class ClientController extends Controller
 
     public function updateMobile(Request $request, Client $client): JsonResponse
     {
+        // Per final-edge-mode-rush-plann [DF-12]: block mobile updates when edge is offline.
+        if (app(\App\Services\EdgeModeService::class)->isOffline()) {
+            return response()->json([
+                'message' => 'Mobile number updates are not available in offline mode.',
+            ], 403);
+        }
         $siteId = $this->resolveSiteId($request);
         if ($siteId === null || $client->site_id !== $siteId) {
             abort(404);

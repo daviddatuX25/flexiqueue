@@ -30,10 +30,15 @@ class LoginController extends Controller
             return $this->redirectByRole(Auth::user()->role);
         }
 
-        return Inertia::render('Auth/Login', [
+        $payload = [
             'status' => $request->session()->get('status'),
             'error' => $request->session()->get('error'),
-        ]);
+        ];
+        if (config('app.demo')) {
+            $payload['demo'] = true;
+            $payload['demoAccounts'] = config('app.demo_accounts');
+        }
+        return Inertia::render('Auth/Login', $payload);
     }
 
     public function login(LoginRequest $request): RedirectResponse

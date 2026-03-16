@@ -52,6 +52,7 @@
 		process_id?: number | null;
 		process_name?: string | null;
 		unverified?: boolean;
+		client_name?: string | null;
 	}
 
 	interface WaitingSession {
@@ -81,6 +82,7 @@
 		total_steps: number;
 		at_this_station: boolean;
 		unverified?: boolean;
+		client_name?: string | null;
 	}
 
 	interface HoldingSession {
@@ -94,6 +96,7 @@
 		process_name?: string | null;
 		current_step_order: number;
 		total_steps: number;
+		client_name?: string | null;
 	}
 
 	interface QueueData {
@@ -202,22 +205,12 @@
 	/** Countdown per called session_id: when 0, No-show button enabled. Set when session enters 'called'. */
 	let noShowCountdown = $state<Record<number, number>>({});
 
-	/** Display board audio (for /display/station/{id}): saving state. Open only via PIN/QR (admin scan). */
+	/** Display board audio (for /display/station/{id}): staff can change mute/volume and save without PIN/QR. */
 	let displaySettingsSaving = $state(false);
 	let showDisplayAudioModal = $state(false);
-	/** Local form values; applied only on Save with PIN/QR */
 	let displayAudioMutedLocal = $state(false);
 	let displayAudioVolumeLocal = $state(1);
-	let displayAudioAuthMode = $state<'pin' | 'qr' | 'request'>('pin');
-	let displayAudioPin = $state('');
-	let displayAudioQrScanToken = $state('');
-	let displayAudioPinRef = $state<{ buildPinOrQrPayload?: () => { pin: string } | { qr_scan_token: string } | null } | null>(null);
 	let displayAudioError = $state('');
-	let displayAudioRequestId = $state<number | null>(null);
-	let displayAudioRequestToken = $state<string | null>(null);
-	let displayAudioRequestState = $state<'idle' | 'waiting'>('idle');
-	let displayAudioPollIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
-	const DISPLAY_AUDIO_REQUEST_QR_PREFIX = 'flexiqueue:display_settings_request:';
 	/** Available browser TTS voices for dropdown (loaded on mount). */
 	let availableTtsVoices = $state<{ name: string; lang: string }[]>([]);
 
@@ -562,106 +555,18 @@
 	function openDisplayAudioModal() {
 		displayAudioMutedLocal = queue?.display_audio_muted ?? false;
 		displayAudioVolumeLocal = queue?.display_audio_volume ?? 1;
-		displayAudioAuthMode = 'pin';
-		displayAudioPin = '';
-		displayAudioQrScanToken = '';
 		displayAudioError = '';
-		displayAudioRequestId = null;
-		displayAudioRequestToken = null;
-		displayAudioRequestState = 'idle';
-		if (displayAudioPollIntervalId) {
-			clearInterval(displayAudioPollIntervalId);
-			displayAudioPollIntervalId = null;
-		}
 		showDisplayAudioModal = true;
 	}
 
-	function cancelDisplayAudioRequest() {
-		displayAudioRequestState = 'idle';
-		displayAudioRequestId = null;
-		displayAudioRequestToken = null;
-		if (displayAudioPollIntervalId) {
-			clearInterval(displayAudioPollIntervalId);
-			displayAudioPollIntervalId = null;
-		}
-	}
-
-	async function saveDisplayAudioWithAuth() {
+	async function saveDisplayAudio() {
 		displayAudioError = '';
-		const authBody = displayAudioAuthMode === 'pin' ? (displayAudioPinRef?.buildPinOrQrPayload?.() ?? null) : null;
-		if (!authBody) {
-			displayAudioError = displayAudioAuthMode === 'pin' ? 'Enter a 6-digit PIN to apply changes.' : 'Use "Show QR for supervisor to scan" to apply changes.';
-			return;
-		}
 		const ok = await saveDisplaySettings({
 			display_audio_muted: displayAudioMutedLocal,
 			display_audio_volume: displayAudioVolumeLocal,
 		});
 		if (ok) showDisplayAudioModal = false;
 		else displayAudioError = 'Failed to save.';
-	}
-
-	async function createDisplayAudioRequest() {
-		const programId = effectiveCurrentProgram?.id;
-		if (programId == null || displaySettingsSaving) return;
-		displaySettingsSaving = true;
-		displayAudioError = '';
-		try {
-			const res = await fetch('/api/public/display-settings-requests', {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					Accept: 'application/json',
-					'X-CSRF-TOKEN': getCsrfToken(),
-					'X-Requested-With': 'XMLHttpRequest',
-				},
-				credentials: 'same-origin',
-				body: JSON.stringify({ program_id: programId }),
-			});
-			const data = await res.json().catch(() => ({}));
-			if (!res.ok) {
-				displayAudioError = (data as { message?: string }).message || 'Failed to create request.';
-				toaster.error({ title: displayAudioError });
-				return;
-			}
-			const d = data as { id: number; request_token: string };
-			displayAudioRequestId = d.id;
-			displayAudioRequestToken = d.request_token;
-			displayAudioRequestState = 'waiting';
-			const id = d.id;
-			const token = d.request_token;
-			displayAudioPollIntervalId = setInterval(async () => {
-				try {
-					const r = await fetch(
-						`/api/public/display-settings-requests/${id}?token=${encodeURIComponent(token)}`,
-						{ credentials: 'same-origin' }
-					);
-					const pollData = await r.json().catch(() => ({}));
-					const status = (pollData as { status?: string }).status;
-					if (status === 'approved') {
-						if (displayAudioPollIntervalId) clearInterval(displayAudioPollIntervalId);
-						displayAudioPollIntervalId = null;
-						displayAudioRequestId = null;
-						displayAudioRequestToken = null;
-						displayAudioRequestState = 'idle';
-						toaster.success({ title: 'Approved.' });
-						showDisplayAudioModal = false;
-						fetchQueue(true);
-					} else if (status === 'rejected' || status === 'cancelled') {
-						if (displayAudioPollIntervalId) clearInterval(displayAudioPollIntervalId);
-						displayAudioPollIntervalId = null;
-						displayAudioRequestState = 'idle';
-						displayAudioRequestId = null;
-						displayAudioRequestToken = null;
-						toaster.warning({ title: status === 'rejected' ? 'Request was rejected.' : 'Request was cancelled.' });
-					}
-				} catch {
-					// ignore
-				}
-			}, 2000);
-		} finally {
-			displaySettingsSaving = false;
-		}
 	}
 
 	async function togglePriorityFirst(priorityFirst: boolean) {
@@ -1545,6 +1450,9 @@
 											· {scannedSession.track} · Step {scannedSession.current_step_order} of {scannedSession.total_steps}
 										</span>
 									</p>
+									{#if scannedSession.client_name}
+										<p class="text-sm text-surface-950/70">Name: {scannedSession.client_name}</p>
+									{/if}
 									<p class="text-xs text-surface-600">
 										Status: {scannedSession.status} · At {scannedSession.current_station}
 										{#if !scannedSession.at_this_station}
@@ -1598,6 +1506,9 @@
 								{s.status === 'called' ? 'Calling' : 'Now Serving'}
 							</p>
 							<p class="text-2xl md:text-4xl font-bold text-primary-500 tabular-nums">{s.alias}</p>
+							{#if s.client_name}
+								<p class="text-sm text-surface-950/70">Name: {s.client_name}</p>
+							{/if}
 							<div class="flex flex-wrap gap-2">
 								{#if s.process_name}
 									<span class="text-xs px-2 py-0.5 rounded preset-filled-primary-500/20 text-primary-700" title="Current process">{s.process_name}</span>
@@ -1850,30 +1761,35 @@
 					<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5">
 						<h3 class="text-xs font-semibold text-surface-950/80 uppercase tracking-wide mb-3">On hold — {(queue.holding ?? []).length}/{queue.station?.holding_capacity ?? 3}</h3>
 						{#if (queue.holding ?? []).length > 0}
-							<ul class="space-y-2 max-h-[200px] lg:max-h-[260px] overflow-y-auto">
+							<ul class="space-y-3 max-h-[200px] lg:max-h-[260px] overflow-y-auto">
 								{#each (queue.holding ?? []) as h (h.session_id)}
-									<li
-										class="flex flex-col gap-1.5 py-3 text-sm text-surface-950 border-b border-surface-100 last:border-0 md:grid md:grid-cols-[minmax(0,3ch)_1fr_1fr_1fr] md:gap-2 md:gap-3 md:items-center md:py-1.5"
-									>
-										<div class="min-w-0 flex flex-col gap-1 md:contents">
-											<span class="font-mono font-medium tabular-nums min-w-0 truncate">{h.alias}</span>
-											<div class="flex flex-wrap items-center gap-1.5 min-w-0">
-												<CategoryBadge category={h.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(h.client_category)} size="sm" />
-												{#if h.process_name}
-													<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80">{h.process_name}</span>
-												{/if}
+									<li class="rounded-lg border border-surface-200 bg-surface-100 elevation-card p-3 min-w-0">
+										<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+											<div class="min-w-0 flex flex-col gap-1">
+												<div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+													<span class="font-mono font-semibold tabular-nums text-primary-600">{h.alias}</span>
+													{#if h.client_name}
+														<span class="text-sm text-surface-950/70 truncate">{h.client_name}</span>
+													{/if}
+												</div>
+												<div class="flex flex-wrap items-center gap-1.5">
+													<CategoryBadge category={h.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(h.client_category)} size="sm" />
+													{#if h.process_name}
+														<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80">{h.process_name}</span>
+													{/if}
+												</div>
 											</div>
-										</div>
-										<span class="text-surface-950/60 text-xs min-w-0 truncate">Held {formatDuration(h.held_at)}</span>
-										<div class="flex items-center mt-2 w-full md:mt-0 md:w-auto md:justify-center min-w-0">
-											<button
-												type="button"
-												class="btn preset-filled-primary-500 btn-sm touch-target-h w-full md:w-auto"
-												disabled={!!actionLoading}
-												onclick={() => resumeFromHold(h)}
-											>
-												{actionLoading === `resume-${h.session_id}` ? '…' : 'Resume'}
-											</button>
+											<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 flex-shrink-0">
+												<span class="text-surface-950/60 text-xs">Held {formatDuration(h.held_at)}</span>
+												<button
+													type="button"
+													class="btn preset-filled-primary-500 btn-sm touch-target-h w-full sm:w-auto"
+													disabled={!!actionLoading}
+													onclick={() => resumeFromHold(h)}
+												>
+													{actionLoading === `resume-${h.session_id}` ? '…' : 'Resume'}
+												</button>
+											</div>
 										</div>
 									</li>
 								{/each}
@@ -1885,50 +1801,57 @@
 					{#if queue.waiting.length > 0}
 						<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-4 md:p-5">
 							<h3 class="text-xs font-semibold text-surface-950/80 uppercase tracking-wide mb-3">Waiting — {queue.waiting.length}</h3>
-							<ul class="space-y-2 max-h-[280px] lg:max-h-[360px] overflow-y-auto">
+							<ul class="space-y-3 max-h-[280px] lg:max-h-[360px] overflow-y-auto">
 								{#each queue.waiting as w (w.session_id)}
-									<li
-										class="flex flex-col gap-1.5 py-3 text-sm text-surface-950 border-b border-surface-100 last:border-0 md:grid md:grid-cols-[minmax(0,3ch)_1fr_1fr_auto] md:gap-2 md:gap-3 md:items-center md:py-1.5"
-									>
-										<div class="min-w-0 flex flex-col gap-1">
-											<span class="font-mono font-medium tabular-nums min-w-0 truncate">{w.alias}</span>
-											<div class="flex flex-wrap items-center gap-1.5 min-w-0">
-												<CategoryBadge category={w.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(w.client_category)} size="sm" />
-												{#if w.unverified}
-													<a
-														href="/triage?highlight_session_id={w.session_id}"
-														class="text-xs px-2 py-0.5 rounded preset-filled-warning-500/30 text-warning-800 hover:preset-filled-warning-500/50 touch-target-h"
-														title="Identity not yet verified — go to triage"
-													>
-														Unverified
-													</a>
-												{/if}
-												{#if w.process_name}
-													<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80">{w.process_name}</span>
-												{/if}
+									<li class="rounded-lg border border-surface-200 bg-surface-100 elevation-card p-3 min-w-0">
+										<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+											<div class="min-w-0 flex flex-col gap-1">
+												<div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+													<span class="font-mono font-semibold tabular-nums text-primary-600">{w.alias}</span>
+													{#if w.client_name}
+														<span class="text-sm text-surface-950/70 truncate">{w.client_name}</span>
+													{/if}
+												</div>
+												<div class="flex flex-wrap items-center gap-1.5">
+													<CategoryBadge category={w.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(w.client_category)} size="sm" />
+													{#if w.unverified}
+														<a
+															href="/triage?highlight_session_id={w.session_id}"
+															class="text-xs px-2 py-0.5 rounded preset-filled-warning-500/30 text-warning-800 hover:preset-filled-warning-500/50 touch-target-h"
+															title="Identity not yet verified — go to triage"
+														>
+															Unverified
+														</a>
+													{/if}
+													{#if w.process_name}
+														<span class="text-xs px-2 py-0.5 rounded preset-tonal text-surface-950/80">{w.process_name}</span>
+													{/if}
+												</div>
 											</div>
-										</div>
-										<span class="text-surface-950/60 text-xs min-w-0 truncate" title="{w.track}">{formatDuration(w.queued_at)}</span>
-										<div class="flex gap-2 mt-2 w-full md:mt-0 md:w-auto md:justify-center min-w-0">
-											<button
-												type="button"
-												class="btn preset-filled-primary-500 btn-sm touch-target-h flex-1 md:flex-none"
-												disabled={!!actionLoading || atCapacity}
-												title={atCapacity ? 'At capacity' : 'Start serving (no call)'}
-												onclick={() => serveFromWaiting(w)}
-											>
-												{actionLoading === `serve-${w.session_id}` ? '…' : 'Start serving'}
-											</button>
-											<button
-												type="button"
-												class="btn btn-square preset-tonal btn-sm touch-target-h md:flex-none"
-												disabled={!!actionLoading}
-												aria-label="Cancel session"
-												title="Cancel"
-												onclick={() => openCancelModal(w)}
-											>
-												<X class="w-4 h-4" />
-											</button>
+											<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 flex-shrink-0">
+												<span class="text-surface-950/60 text-xs truncate" title="{w.track}">{formatDuration(w.queued_at)}</span>
+												<div class="flex gap-2 w-full sm:w-auto">
+													<button
+														type="button"
+														class="btn preset-filled-primary-500 btn-sm touch-target-h flex-1 sm:flex-none"
+														disabled={!!actionLoading || atCapacity}
+														title={atCapacity ? 'At capacity' : 'Start serving (no call)'}
+														onclick={() => serveFromWaiting(w)}
+													>
+														{actionLoading === `serve-${w.session_id}` ? '…' : 'Start serving'}
+													</button>
+													<button
+														type="button"
+														class="btn btn-square preset-tonal btn-sm touch-target-h flex-shrink-0"
+														disabled={!!actionLoading}
+														aria-label="Cancel session"
+														title="Cancel"
+														onclick={() => openCancelModal(w)}
+													>
+														<X class="w-4 h-4" />
+													</button>
+												</div>
+											</div>
 										</div>
 									</li>
 								{/each}
@@ -1936,7 +1859,7 @@
 						</div>
 					{/if}
 					<div class="rounded-container bg-surface-50 border border-surface-200 p-4 md:p-5 text-center text-sm text-surface-950/90">
-						Today: <strong class="text-primary-600">{queue.stats.total_served_today}</strong> served · Avg <strong class="text-primary-600">{queue.stats.avg_service_time_minutes}</strong> min
+						This station today: <strong class="text-primary-600">{queue.stats.total_served_today}</strong> served · Avg <strong class="text-primary-600">{queue.stats.avg_service_time_minutes}</strong> min
 					</div>
 				</div>
 
@@ -2323,10 +2246,10 @@
 	<Modal
 		open={showDisplayAudioModal}
 		title="Display board audio"
-		onClose={() => { cancelDisplayAudioRequest(); showDisplayAudioModal = false; }}
+		onClose={() => { showDisplayAudioModal = false; }}
 	>
 		{#snippet children()}
-			<p class="text-sm text-surface-950/70 mb-4">You can view and change mute/volume below. Changes are applied only when you save; saving requires PIN or QR (admin scan).</p>
+			<p class="text-sm text-surface-950/70 mb-4">Change mute and volume for this station’s display. Save to apply.</p>
 			<div class="flex flex-col gap-4">
 				<label for="display-audio-mute-switch" class="flex items-center justify-between cursor-pointer gap-3">
 					<span class="text-sm font-medium text-surface-950">Mute</span>
@@ -2354,33 +2277,12 @@
 					/>
 				</label>
 			</div>
-			<div class="border-t border-surface-200 pt-4 flex flex-col gap-2">
-				<h3 class="text-sm font-semibold text-surface-950">Apply changes</h3>
-				<p class="text-xs text-surface-950/60">Authorize with PIN or show QR for supervisor to scan. Settings above are applied only when you save.</p>
-				<AuthChoiceButtons includeRequest={true} disabled={displaySettingsSaving || displayAudioRequestState === 'waiting'} bind:mode={displayAudioAuthMode} />
-				{#if displayAudioRequestState === 'waiting' && displayAudioRequestId != null && displayAudioRequestToken != null}
-					<div class="flex flex-col items-center gap-3 py-4">
-						<p class="text-sm font-medium text-surface-950">Waiting for approval…</p>
-						<p class="text-xs text-surface-950/60 text-center">Ask the program supervisor or admin to scan this QR on the Track overrides page.</p>
-						<img class="rounded-container border border-surface-200 bg-white p-2" alt="QR for supervisor to scan" width="200" height="200" src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(DISPLAY_AUDIO_REQUEST_QR_PREFIX + displayAudioRequestId + ':' + displayAudioRequestToken)}`} />
-						<button type="button" class="btn preset-tonal btn-sm touch-target-h" onclick={cancelDisplayAudioRequest}>Cancel request</button>
-					</div>
-				{:else if displayAudioAuthMode === 'request'}
-					<button type="button" class="btn preset-filled-primary-500" onclick={createDisplayAudioRequest} disabled={displaySettingsSaving || effectiveCurrentProgram?.id == null}>
-						{displaySettingsSaving ? 'Creating…' : 'Show QR for supervisor to scan'}
-					</button>
-				{:else}
-					<PinOrQrInput bind:this={displayAudioPinRef} disabled={displaySettingsSaving} mode={displayAudioAuthMode} bind:pin={displayAudioPin} bind:qrScanToken={displayAudioQrScanToken} />
-				{/if}
-				{#if displayAudioError}
-					<p class="text-sm text-error-600 mt-2">{displayAudioError}</p>
-				{/if}
-			</div>
-			<div class="flex flex-wrap gap-2 justify-end pt-2">
-				<button type="button" class="btn preset-tonal" onclick={() => { cancelDisplayAudioRequest(); showDisplayAudioModal = false; }} disabled={displaySettingsSaving}>Cancel</button>
-				{#if displayAudioAuthMode !== 'request'}
-					<button type="button" class="btn preset-filled-primary-500" onclick={saveDisplayAudioWithAuth} disabled={displaySettingsSaving}>{displaySettingsSaving ? 'Saving…' : 'Save'}</button>
-				{/if}
+			{#if displayAudioError}
+				<p class="text-sm text-error-600 mt-2">{displayAudioError}</p>
+			{/if}
+			<div class="flex flex-wrap gap-2 justify-end pt-4">
+				<button type="button" class="btn preset-tonal" onclick={() => { showDisplayAudioModal = false; }} disabled={displaySettingsSaving}>Cancel</button>
+				<button type="button" class="btn preset-filled-primary-500" onclick={saveDisplayAudio} disabled={displaySettingsSaving}>{displaySettingsSaving ? 'Saving…' : 'Save'}</button>
 			</div>
 		{/snippet}
 	</Modal>

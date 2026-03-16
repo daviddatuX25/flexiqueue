@@ -48,7 +48,7 @@ class ClientAdminActionsTest extends TestCase
         $site = $this->site();
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
         $clientService = app(ClientService::class);
-        $client = $clientService->createClient('Juan Cruz', 1985, $site->id, '09171234567');
+        $client = $clientService->createClient('Juan', 'Cruz', '1985-01-01', $site->id, '09171234567');
 
         ClientIdAuditLog::create([
             'client_id' => $client->id,
@@ -62,5 +62,41 @@ class ClientAdminActionsTest extends TestCase
 
         $res->assertStatus(409);
         $this->assertDatabaseHas('clients', ['id' => $client->id]);
+    }
+
+    public function test_update_client_details_returns_200_and_updates_record(): void
+    {
+        $site = $this->site();
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $client = Client::factory()->create([
+            'site_id' => $site->id,
+            'first_name' => 'Maria',
+            'last_name' => 'Santos',
+            'birth_date' => '1990-05-15',
+        ]);
+
+        $res = $this->actingAs($admin)->putJson("/api/admin/clients/{$client->id}", [
+            'first_name' => 'Maria',
+            'middle_name' => 'C.',
+            'last_name' => 'Santos-Reyes',
+            'birth_date' => '1990-05-16',
+            'address_line_1' => '123 Main St',
+            'city' => 'Manila',
+            'postal_code' => '1000',
+            'country' => 'Philippines',
+        ]);
+
+        $res->assertStatus(200);
+        $res->assertJsonPath('client.first_name', 'Maria');
+        $res->assertJsonPath('client.middle_name', 'C.');
+        $res->assertJsonPath('client.last_name', 'Santos-Reyes');
+        $res->assertJsonPath('client.birth_date', '1990-05-16');
+        $res->assertJsonPath('client.address_line_1', '123 Main St');
+        $res->assertJsonPath('client.city', 'Manila');
+        $res->assertJsonPath('client.country', 'Philippines');
+
+        $client->refresh();
+        $this->assertSame('Santos-Reyes', $client->last_name);
+        $this->assertSame('123 Main St', $client->address_line_1);
     }
 }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Client;
+use App\Models\Program;
 use App\Services\MobileCryptoService;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -74,9 +75,19 @@ class ClientPageController extends Controller
                 ];
             });
 
+        $programs = Program::query()
+            ->forSite($siteId)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(fn (Program $p) => ['id' => $p->id, 'name' => $p->name])
+            ->values()
+            ->all();
+
         return Inertia::render('Admin/Clients/Index', [
             'clients' => $clients,
             'search' => $search !== '' ? $search : null,
+            'programs' => $programs,
         ]);
     }
 

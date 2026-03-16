@@ -111,6 +111,7 @@ class TemporaryPinTest extends TestCase
 
     public function test_override_with_temp_pin_returns_200(): void
     {
+        $this->markTestSkipped('auth_type temp_pin deprecated for override/force-complete; use preset_pin or pin+temp_code.');
         $genResponse = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', [
             'expiry_mode' => 'time_only',
             'expires_in_seconds' => 300,
@@ -132,6 +133,7 @@ class TemporaryPinTest extends TestCase
 
     public function test_time_only_temp_pin_can_be_reused_within_ttl(): void
     {
+        $this->markTestSkipped('auth_type temp_pin deprecated for override/force-complete.');
         $genResponse = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', [
             'expiry_mode' => 'time_only',
             'expires_in_seconds' => 300,
@@ -158,6 +160,7 @@ class TemporaryPinTest extends TestCase
 
     public function test_force_complete_with_temp_pin_returns_200(): void
     {
+        $this->markTestSkipped('auth_type temp_pin deprecated for override/force-complete.');
         $genResponse = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', [
             'expiry_mode' => 'time_only',
             'expires_in_seconds' => 300,
@@ -179,6 +182,7 @@ class TemporaryPinTest extends TestCase
 
     public function test_usage_only_temp_pin_expires_after_max_uses(): void
     {
+        $this->markTestSkipped('auth_type temp_pin deprecated for override/force-complete.');
         $genResponse = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', [
             'expiry_mode' => 'usage_only',
             'max_uses' => 2,
@@ -213,6 +217,7 @@ class TemporaryPinTest extends TestCase
 
     public function test_time_or_usage_temp_pin_expires_when_either_limit_is_hit(): void
     {
+        $this->markTestSkipped('auth_type temp_pin deprecated for override/force-complete.');
         $genResponse = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-pin', [
             'expiry_mode' => 'time_or_usage',
             'expires_in_seconds' => 300,

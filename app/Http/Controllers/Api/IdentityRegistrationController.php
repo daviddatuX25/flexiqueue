@@ -108,6 +108,12 @@ class IdentityRegistrationController extends Controller
      */
     public function direct(Request $request): JsonResponse
     {
+        // Per final-edge-mode-rush-plann [DF-15]: identity registration write requires central connectivity.
+        if (app(\App\Services\EdgeModeService::class)->isOffline()) {
+            return response()->json([
+                'message' => 'Identity registration requires central server connectivity and is not available offline.',
+            ], 403);
+        }
         $request->validate([
             'program_id' => ['nullable', 'integer', 'exists:programs,id'],
             'first_name' => ['required', 'string', 'max:100'],
@@ -288,6 +294,12 @@ class IdentityRegistrationController extends Controller
      */
     public function accept(Request $request, IdentityRegistration $identityRegistration): JsonResponse
     {
+        // Per final-edge-mode-rush-plann [DF-15]: identity registration write requires central connectivity.
+        if (app(\App\Services\EdgeModeService::class)->isOffline()) {
+            return response()->json([
+                'message' => 'Identity registration requires central server connectivity and is not available offline.',
+            ], 403);
+        }
         $request->validate([
             'first_name' => ['required', 'string', 'max:100'],
             'middle_name' => ['nullable', 'string', 'max:100'],
@@ -412,6 +424,12 @@ class IdentityRegistrationController extends Controller
      */
     public function confirmBind(Request $request, IdentityRegistration $identityRegistration): JsonResponse
     {
+        // Per final-edge-mode-rush-plann [DF-15]: identity registration write requires central connectivity.
+        if (app(\App\Services\EdgeModeService::class)->isOffline()) {
+            return response()->json([
+                'message' => 'Identity registration requires central server connectivity and is not available offline.',
+            ], 403);
+        }
         $identityRegistration->load(['token', 'track', 'program', 'client']);
         $user = $request->user();
         $program = $user->assignedStation?->program;

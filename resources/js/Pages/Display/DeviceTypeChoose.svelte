@@ -14,10 +14,14 @@
 		site_slug,
 		program,
 		stations,
+		queueCount = 0,
+		processedToday = 0,
 	}: {
 		site_slug: string;
 		program: { id: number; name: string; slug: string };
 		stations: { id: number; name: string }[];
+		queueCount?: number;
+		processedToday?: number;
 	} = $props();
 
 	const page = usePage();
@@ -110,7 +114,7 @@
 	}
 </script>
 
-<DisplayLayout programName={program.name} date="">
+<DisplayLayout programName={program.name} date="" {queueCount} {processedToday}>
 	<!-- Form POST so server returns 302 + Set-Cookie; browser then follows with cookie. No Accept: application/json. -->
 	<form
 		bind:this={lockForm}

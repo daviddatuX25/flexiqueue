@@ -7,6 +7,7 @@ use App\Http\Requests\StoreSiteRequest;
 use App\Http\Requests\UpdateSiteRequest;
 use App\Models\AdminActionLog;
 use App\Models\Site;
+use App\Services\EdgeModeService;
 use App\Services\SiteApiKeyService;
 use App\Support\SiteResolver;
 use App\Validation\EdgeSettingsValidator;
@@ -118,7 +119,8 @@ class SiteController extends Controller
         if (array_key_exists('slug', $validated)) {
             $site->slug = $validated['slug'];
         }
-        if (array_key_exists('edge_settings', $validated)) {
+        // Per design: edge does not sync back; Edge settings are configured on central only (SYNC_BACK=true).
+        if (array_key_exists('edge_settings', $validated) && app(EdgeModeService::class)->syncBack()) {
             $site->edge_settings = $this->edgeSettingsValidator->validate($validated['edge_settings']);
         }
         if (array_key_exists('settings', $validated) && is_array($validated['settings'])) {

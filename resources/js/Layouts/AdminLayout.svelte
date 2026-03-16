@@ -28,6 +28,7 @@
     import FlashToToast from "../Components/FlashToToast.svelte";
     import ThemeToggle from "../Components/ThemeToggle.svelte";
     import OfflineBanner from "../Components/OfflineBanner.svelte";
+    import EdgeModeBanner from "../Components/EdgeModeBanner.svelte";
     import UserAvatar from "../Components/UserAvatar.svelte";
     import AppBackground from "../Components/AppBackground.svelte";
     import LogoutConfirm from "../Components/LogoutConfirm.svelte";
@@ -284,7 +285,11 @@
             </header>
 
             <!-- Per ui-ux-tasks-checklist: consistent margins — same vertical/horizontal rhythm across admin pages -->
+            <!-- Per docs/final-edge-mode-rush-plann.md [DF-17]: edge mode banner inside main content area -->
             <main class="fq-main-scroll flex-1 min-h-0 overflow-y-scroll py-6 px-4 sm:px-6 lg:px-8 pb-24 max-w-7xl mx-auto w-full">
+                {#if $pageStore.props?.edge_mode?.is_edge}
+                    <EdgeModeBanner />
+                {/if}
                 {#if children}
                     {@render children()}
                 {/if}

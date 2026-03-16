@@ -200,6 +200,7 @@ class SiteControllerTest extends TestCase
 
     public function test_update_site_edge_settings(): void
     {
+        config(['app.sync_back' => true]); // Central with SYNC_BACK=true can update edge_settings
         $this->site->update(['edge_settings' => ['bridge_enabled' => false, 'sync_clients' => true]]);
 
         $response = $this->actingAs($this->admin)->putJson("/api/admin/sites/{$this->site->id}", [
@@ -220,6 +221,7 @@ class SiteControllerTest extends TestCase
 
     public function test_update_site_invalid_edge_settings_returns_422(): void
     {
+        config(['app.sync_back' => true]); // Validation runs when sync_back is true
         $response = $this->actingAs($this->admin)->putJson("/api/admin/sites/{$this->site->id}", [
             'edge_settings' => [
                 'scheduled_sync_time' => '25:00',
@@ -233,6 +235,7 @@ class SiteControllerTest extends TestCase
     /** Per central-edge B.3: unknown keys in edge_settings are rejected with 422. */
     public function test_update_site_unknown_key_in_edge_settings_returns_422(): void
     {
+        config(['app.sync_back' => true]); // Validation runs when sync_back is true
         $response = $this->actingAs($this->admin)->putJson("/api/admin/sites/{$this->site->id}", [
             'edge_settings' => [
                 'sync_clients' => true,
@@ -242,5 +245,23 @@ class SiteControllerTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['edge_settings.foo']);
+    }
+
+    /** When SYNC_BACK=false (e.g. on edge), edge_settings in PUT are ignored and not persisted. */
+    public function test_update_site_edge_settings_ignored_when_sync_back_false(): void
+    {
+        config(['app.sync_back' => false]);
+        $this->site->update(['edge_settings' => ['bridge_enabled' => false]]);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/sites/{$this->site->id}", [
+            'edge_settings' => [
+                'bridge_enabled' => true,
+                'scheduled_sync_time' => '18:30',
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $this->site->refresh();
+        $this->assertFalse($this->site->edge_settings['bridge_enabled'] ?? true); // unchanged
     }
 }

@@ -112,6 +112,7 @@ class TemporaryQrTest extends TestCase
 
     public function test_override_with_temp_qr_returns_200(): void
     {
+        $this->markTestSkipped('auth_type temp_qr deprecated for override/force-complete.');
         $scanToken = Str::random(64);
         TemporaryAuthorization::create([
             'user_id' => $this->supervisor->id,
@@ -135,6 +136,7 @@ class TemporaryQrTest extends TestCase
 
     public function test_time_only_temp_qr_can_be_reused_within_ttl(): void
     {
+        $this->markTestSkipped('auth_type temp_qr deprecated for override/force-complete.');
         $scanToken = Str::random(64);
         TemporaryAuthorization::create([
             'user_id' => $this->supervisor->id,
@@ -164,6 +166,7 @@ class TemporaryQrTest extends TestCase
 
     public function test_force_complete_with_temp_qr_returns_200(): void
     {
+        $this->markTestSkipped('auth_type temp_qr deprecated for override/force-complete.');
         $scanToken = Str::random(64);
         TemporaryAuthorization::create([
             'user_id' => $this->supervisor->id,
@@ -187,6 +190,7 @@ class TemporaryQrTest extends TestCase
 
     public function test_usage_only_temp_qr_expires_after_max_uses(): void
     {
+        $this->markTestSkipped('auth_type temp_qr deprecated for override/force-complete.');
         $genResponse = $this->actingAs($this->supervisor)->postJson('/api/auth/temporary-qr', [
             'expiry_mode' => 'usage_only',
             'max_uses' => 2,

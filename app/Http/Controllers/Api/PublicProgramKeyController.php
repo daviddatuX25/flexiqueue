@@ -21,7 +21,14 @@ class PublicProgramKeyController extends Controller
     public function store(PublicProgramKeyRequest $request): JsonResponse
     {
         $siteSlug = $request->validated('site_slug');
-        $key = trim((string) $request->validated('key'));
+        $key = $this->normalizeKey((string) $request->validated('key'));
+        $programSlug = $request->validated('program_slug');
+        if (is_string($programSlug)) {
+            $programSlug = trim($programSlug);
+            $programSlug = $programSlug === '' ? null : $programSlug;
+        } else {
+            $programSlug = null;
+        }
 
         $site = Site::query()->where('slug', $siteSlug)->first();
         if (! $site) {
@@ -34,14 +41,30 @@ class PublicProgramKeyController extends Controller
             return response()->json(['message' => 'Site access required first.'], 403);
         }
 
-        $program = Program::query()
-            ->where('site_id', $site->id)
-            ->where('is_active', true)
-            ->get()
-            ->first(fn (Program $p) => strcasecmp((string) $p->settings()->getPublicAccessKey(), $key) === 0);
+        $program = null;
+
+        if ($programSlug !== null) {
+            $candidate = Program::query()
+                ->where('site_id', $site->id)
+                ->where('slug', $programSlug)
+                ->where('is_active', true)
+                ->first();
+
+            if ($candidate !== null && $this->keyMatches($candidate, $key)) {
+                $program = $candidate;
+            }
+        }
+
+        if ($program === null) {
+            $program = Program::query()
+                ->where('site_id', $site->id)
+                ->where('is_active', true)
+                ->get()
+                ->first(fn (Program $p) => $this->keyMatches($p, $key));
+        }
 
         if (! $program) {
-            return response()->json(['message' => 'Not found.'], 404);
+            return response()->json(['message' => 'Invalid key.'], 422);
         }
 
         $expiryHours = $program->settings()->getPublicAccessExpiryHours();
@@ -86,5 +109,26 @@ class PublicProgramKeyController extends Controller
             }
         }
         return $out;
+    }
+
+    /** Normalize key for comparison: trim and ensure string (handles any request/encoding quirks). */
+    private function normalizeKey(string $key): string
+    {
+        return trim($key);
+    }
+
+    /** True if program has a non-empty public key that matches the given normalized key (case-insensitive). */
+    private function keyMatches(Program $program, string $key): bool
+    {
+        $stored = $program->settings()->getPublicAccessKey();
+        if ($stored === null || $stored === '') {
+            return false;
+        }
+        $stored = trim((string) $stored);
+        if ($stored === '') {
+            return false;
+        }
+
+        return strcasecmp($stored, $key) === 0;
     }
 }

@@ -2,6 +2,7 @@
 	import MobileLayout from '../../Layouts/MobileLayout.svelte';
 	import Modal from '../../Components/Modal.svelte';
 	import ScanModal from '../../Components/ScanModal.svelte';
+	import CreateRegistrationModal from '../../Components/CreateRegistrationModal.svelte';
 	import TriageClientBinder, {
 		type BindingMode as BinderBindingMode,
 		type BinderStatus as BinderComponentStatus,
@@ -10,7 +11,7 @@
 	import IdNumberInput from '../../Components/IdNumberInput.svelte';
 	import AuthChoiceButtons from '../../Components/AuthChoiceButtons.svelte';
 	import PinOrQrInput from '../../Components/PinOrQrInput.svelte';
-	import { ArrowUpRight, Camera, Plus, Search, Settings } from 'lucide-svelte';
+	import { Camera, Plus, Search, Settings } from 'lucide-svelte';
 	import { get } from 'svelte/store';
 	import { onMount } from 'svelte';
 	import { usePage, router } from '@inertiajs/svelte';
@@ -70,12 +71,6 @@
 	} = $props();
 
 	const effectiveProgram = $derived(currentProgram ?? program ?? activeProgram);
-
-	const publicTriageUrl = $derived(
-		allow_public_triage && site_slug && program_slug
-			? `/site/${site_slug}/public-triage/${program_slug}`
-			: null
-	);
 
 	const CATEGORIES = [
 		{ label: 'Regular', value: 'Regular' },
@@ -168,13 +163,6 @@
 
 	/** Staff direct registration request (no token) */
 	let showNewRegModal = $state(false);
-	let newRegFirstName = $state('');
-	let newRegMiddleName = $state('');
-	let newRegLastName = $state('');
-	let newRegBirthDate = $state('');
-	let newRegCategory = $state('Regular');
-	let newRegMobile = $state('');
-	let newRegSubmitting = $state(false);
 	/** When true, show manual ID entry in New reg modal optional ID block (same format as public triage start). */
 
 	/** When true, show manual ID entry in Accept modal optional ID block (same format as public triage start). */
@@ -228,47 +216,10 @@
 		}
 	}
 
-	async function submitNewRegistrationRequest() {
-		if (newRegSubmitting) return;
-
-		const first = String(newRegFirstName ?? '').trim();
-		const last = String(newRegLastName ?? '').trim();
-		const birthDate = String(newRegBirthDate ?? '').trim();
-		if (!first || !last || !birthDate) {
-			toaster.error({ title: 'First name, last name, and birth date are required.' });
-			return;
-		}
-		newRegSubmitting = true;
-		const mobileStr = String(newRegMobile ?? '').trim();
-
-		const body: Record<string, unknown> = {
-			...(effectiveProgram?.id != null ? { program_id: effectiveProgram.id } : {}),
-			first_name: first,
-			middle_name: newRegMiddleName?.trim() || undefined,
-			last_name: last,
-			birth_date: birthDate,
-			client_category: newRegCategory || 'Regular',
-			...(mobileStr ? { mobile: mobileStr } : {}),
-		};
-
-		const { ok, data, message } = await api('POST', '/api/identity-registrations/direct', body);
-		newRegSubmitting = false;
-
-		if (ok) {
-			const d = data as { message?: string } | undefined;
-			toaster.success({ title: d?.message ?? 'Registration created.' });
-			showNewRegModal = false;
-			newRegFirstName = '';
-			newRegMiddleName = '';
-			newRegLastName = '';
-			newRegBirthDate = '';
-			newRegCategory = 'Regular';
-			newRegMobile = '';
-			router.reload();
-			return;
-		}
-
-		toaster.error({ title: (data as { message?: string })?.message ?? (message as string) ?? 'Could not create registration.' });
+	async function submitNewRegistrationRequest(payload: import('../../Components/CreateRegistrationModal.svelte').CreateRegistrationPayload) {
+		const { ok, data, message } = await api('POST', '/api/identity-registrations/direct', payload);
+		const msg = (data as { message?: string })?.message ?? (message as string);
+		return { ok, message: msg };
 	}
 
 	function setDefaultTrack() {
@@ -871,18 +822,6 @@
 			<div class="flex items-center justify-between gap-2">
 				<h1 class="text-xl md:text-2xl font-semibold text-surface-950">Triage</h1>
 				<div class="flex items-center gap-2">
-					{#if publicTriageUrl}
-						<a
-							href={publicTriageUrl}
-							target="_blank"
-							rel="noopener noreferrer"
-							class="btn btn-sm preset-tonal gap-1.5 touch-target-h"
-							title="Open client self-service triage in new tab"
-						>
-							<ArrowUpRight class="w-4 h-4" />
-							<span class="hidden sm:inline text-sm">Public triage</span>
-						</a>
-					{/if}
 					<button
 						type="button"
 						class="btn btn-icon preset-tonal touch-target"
@@ -1158,72 +1097,16 @@
 					{/snippet}
 				</Modal>
 
-				<Modal open={showNewRegModal} title="New client registration" onClose={() => (showNewRegModal = false)}>
-					{#snippet children()}
-						<div class="space-y-4" data-testid="triage-new-registration-modal">
-							<p class="text-sm text-surface-700">
-								Create a client registration directly. The registration is created immediately; no Accept/Reject step. Use when a client has no token yet and you are entering their details.
-							</p>
-							<label class="flex flex-col gap-1 text-sm">
-									<span class="font-medium text-surface-800">First name (required)</span>
-									<input type="text" class="input rounded-container border border-surface-200 px-3 py-2" placeholder="First name" bind:value={newRegFirstName} disabled={newRegSubmitting} />
-								</label>
-								<label class="flex flex-col gap-1 text-sm">
-									<span class="font-medium text-surface-800">Middle name (optional)</span>
-									<input type="text" class="input rounded-container border border-surface-200 px-3 py-2" placeholder="Middle name" bind:value={newRegMiddleName} disabled={newRegSubmitting} />
-								</label>
-								<label class="flex flex-col gap-1 text-sm">
-									<span class="font-medium text-surface-800">Last name (required)</span>
-									<input type="text" class="input rounded-container border border-surface-200 px-3 py-2" placeholder="Last name" bind:value={newRegLastName} disabled={newRegSubmitting} />
-								</label>
-								<label class="flex flex-col gap-1 text-sm">
-									<span class="font-medium text-surface-800">Birth date (required)</span>
-									<input type="date" class="input rounded-container border border-surface-200 px-3 py-2" bind:value={newRegBirthDate} disabled={newRegSubmitting} />
-								</label>
-								<label class="flex flex-col gap-1 text-sm">
-									<span class="font-medium text-surface-800">Classification</span>
-									<select
-										class="select select-theme input rounded-container border border-surface-200 px-3 py-2"
-										bind:value={newRegCategory}
-										disabled={newRegSubmitting}
-									>
-										{#each ACCEPT_CATEGORIES as cat (cat.value)}
-											<option value={cat.value}>{cat.label}</option>
-										{/each}
-									</select>
-								</label>
-
-							<div class="rounded-container border border-surface-200 bg-surface-50 p-3 space-y-3">
-								<p class="text-sm font-medium text-surface-800">Optional phone</p>
-								<div class="flex gap-2">
-									<input
-										type="tel"
-										inputmode="numeric"
-										class="input flex-1 rounded-container border border-surface-200 px-3 py-2"
-										bind:value={newRegMobile}
-										placeholder="e.g. 09171234567"
-										disabled={newRegSubmitting}
-										data-testid="new-reg-mobile-input"
-									/>
-								</div>
-							</div>
-							<div class="flex gap-2 pt-2">
-								<button type="button" class="btn preset-tonal flex-1" onclick={() => (showNewRegModal = false)} disabled={newRegSubmitting}>
-									Cancel
-								</button>
-								<button
-									type="button"
-									class="btn preset-filled-primary-500 flex-1"
-									onclick={submitNewRegistrationRequest}
-									disabled={newRegSubmitting}
-									data-testid="triage-new-registration-submit"
-								>
-									{newRegSubmitting ? 'Creating…' : 'Create registration'}
-								</button>
-							</div>
-						</div>
-					{/snippet}
-				</Modal>
+				<CreateRegistrationModal
+					open={showNewRegModal}
+					onClose={() => (showNewRegModal = false)}
+					onSubmitSuccess={() => {
+						toaster.success({ title: 'Registration created.' });
+						router.reload();
+					}}
+					programId={effectiveProgram?.id ?? null}
+					submitRequest={submitNewRegistrationRequest}
+				/>
 			{:else}
 				<!-- Category + track + binder + confirm -->
 				<div

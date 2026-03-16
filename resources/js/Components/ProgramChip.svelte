@@ -46,33 +46,33 @@
 </script>
 
 <div
-    class="relative shrink-0 max-w-[12rem] sm:max-w-none"
+    class="relative shrink-0 max-w-[9rem] sm:max-w-[12rem] md:max-w-none"
     data-program-chip
 >
     <div
-        class="px-2 flex items-stretch rounded-full border overflow-hidden
+        class="px-1.5 sm:px-2 flex items-stretch rounded-full border overflow-hidden
             {programMode === 'ongoing'
                 ? 'bg-success-50 dark:bg-success-900/30 text-success-800 dark:text-success-200 border-success-200 dark:border-success-700'
                 : 'bg-surface-100 dark:bg-slate-800 text-surface-800 dark:text-slate-200 border-surface-200 dark:border-slate-600'}"
     >
         <button
             type="button"
-            class="flex flex-col items-start justify-center gap-0.5 px-2 sm:px-2.5 py-2 min-h-[40px] text-left transition-all duration-200 shrink-0 min-w-0
+            class="flex flex-col items-start justify-center gap-0 sm:gap-0.5 px-1.5 sm:px-2 py-1.5 sm:py-2 min-h-[36px] sm:min-h-[40px] text-left transition-all duration-200 shrink-0 min-w-0
                 {isProgramClickable ? 'cursor-pointer hover:bg-success-100 dark:hover:bg-success-900/50' : 'cursor-default'}"
             onclick={onProgramClick}
             disabled={!isProgramClickable}
             aria-label="{programName} — {connectionLabel}"
         >
-            <div class="min-w-0 w-full max-w-[7rem] sm:max-w-[10rem] overflow-hidden">
-                <Marquee overflowOnly={true} duration={14} gapEm={1.5} class="text-[0.62rem] sm:text-[0.68rem] font-semibold uppercase tracking-wide leading-tight text-inherit">
+            <div class="min-w-0 w-full max-w-[5.5rem] sm:max-w-[7rem] md:max-w-[10rem] overflow-hidden">
+                <Marquee overflowOnly={true} duration={14} gapEm={1.5} class="text-[0.55rem] sm:text-[0.62rem] md:text-[0.68rem] font-semibold uppercase tracking-wide leading-tight text-inherit">
                     {#snippet children()}
                         <span class="whitespace-nowrap">{programName}</span>
                     {/snippet}
                 </Marquee>
             </div>
-            <span class="inline-flex items-center gap-1 text-[0.72rem] whitespace-nowrap shrink-0 {programMode === 'ongoing' ? 'text-success-800 dark:text-success-300' : 'text-surface-600 dark:text-slate-400'}">
+            <span class="inline-flex items-center gap-0.5 sm:gap-1 text-[0.6rem] sm:text-[0.72rem] whitespace-nowrap shrink-0 {programMode === 'ongoing' ? 'text-success-800 dark:text-success-300' : 'text-surface-600 dark:text-slate-400'}">
                 <span
-                    class="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse {networkConnected
+                    class="w-1 sm:w-1.5 h-1 sm:h-1.5 rounded-full shrink-0 animate-pulse {networkConnected
                         ? 'bg-success-500'
                         : 'bg-error-500'}"
                     aria-hidden="true"
@@ -83,7 +83,7 @@
         {#if showProgramSwitch}
             <button
                 type="button"
-                class="flex items-center justify-center min-w-[32px] px-2 border-l border-current/20 text-surface-500 dark:text-slate-400 hover:bg-black/5 dark:hover:bg-white/5 transition-colors touch-target"
+                class="flex items-center justify-center min-w-[28px] sm:min-w-[32px] px-1.5 sm:px-2 border-l border-current/20 text-surface-500 dark:text-slate-400 hover:bg-black/5 dark:hover:bg-white/5 transition-colors touch-target"
                 onclick={(e) => {
                     e.stopPropagation();
                     onChevronClick();
@@ -93,7 +93,7 @@
                 aria-label="Change program"
             >
                 <ChevronUp
-                    class="w-3.5 h-3.5 transition-transform {programSwitchOpen ? 'rotate-180' : ''}"
+                    class="w-3 h-3 sm:w-3.5 sm:h-3.5 transition-transform {programSwitchOpen ? 'rotate-180' : ''}"
                     aria-hidden="true"
                 />
             </button>

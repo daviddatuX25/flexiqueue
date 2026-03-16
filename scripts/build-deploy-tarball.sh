@@ -95,6 +95,7 @@ tar -czf flexiqueue-deploy.tar.gz \
   --exclude='scripts/build-deploy-tarball.sh' \
   --exclude='scripts/build-deploy-tarball-sail.sh' \
   --exclude='scripts/deploy-to-pi.sh' \
+  --exclude='scripts/deploy-to-pi-edge.sh' \
   --exclude='scripts/sail-setup.sh' \
   --exclude='scripts/start-dev.sh' \
   --exclude='scripts/full-system-test.sh' \

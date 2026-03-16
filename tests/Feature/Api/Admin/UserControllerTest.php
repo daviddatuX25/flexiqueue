@@ -106,6 +106,7 @@ class UserControllerTest extends TestCase
             'name' => 'New Staff',
             'email' => 'new@example.com',
             'password' => 'password123',
+            'password_confirmation' => 'password123',
             'role' => 'staff',
         ]);
 
@@ -126,6 +127,7 @@ class UserControllerTest extends TestCase
             'name' => 'Supervisor Staff',
             'email' => 'super@example.com',
             'password' => 'password123',
+            'password_confirmation' => 'password123',
             'role' => 'staff',
             'override_pin' => '123456',
         ]);
@@ -141,6 +143,7 @@ class UserControllerTest extends TestCase
             'name' => 'Duplicate',
             'email' => $this->staff->email,
             'password' => 'password123',
+            'password_confirmation' => 'password123',
             'role' => 'staff',
         ]);
 

@@ -115,7 +115,11 @@
 					'X-Requested-With': 'XMLHttpRequest',
 					...(csrfToken ? { 'X-CSRF-TOKEN': csrfToken } : {}),
 				},
-				body: JSON.stringify({ site_slug: site.slug, key }),
+				body: JSON.stringify({
+				site_slug: site.slug,
+				key,
+				...(programKeyPromptSlug ? { program_slug: programKeyPromptSlug } : {}),
+			}),
 				credentials: 'same-origin',
 			});
 			const data = await res.json().catch(() => ({}));
@@ -261,19 +265,19 @@
 							class="rounded-2xl border border-surface-200 dark:border-slate-700 bg-surface-50/90 dark:bg-slate-800/90 p-4 flex flex-col gap-3"
 						>
 							<span class="font-medium text-surface-900 dark:text-white">{program.name}</span>
-							<div class="flex flex-col sm:flex-row gap-2">
+							<div class="flex flex-col gap-2">
 								<Link
 									href="/site/{site.slug}/program/{program.slug}/view"
-									class="btn preset-filled-primary-500 flex items-center justify-center gap-2 flex-1 touch-target-h"
+									class="btn preset-filled-primary-500 flex items-center justify-center gap-2 w-full touch-target-h py-4 text-base font-semibold rounded-xl"
 								>
 									<Monitor class="h-5 w-5 shrink-0" />
 									Monitor your queue
 								</Link>
 								<Link
 									href="/site/{site.slug}/program/{program.slug}"
-									class="btn variant-outline flex items-center justify-center gap-2 flex-1 touch-target-h"
+									class="inline-flex items-center justify-center gap-1.5 py-2 px-3 text-sm font-medium rounded-lg border touch-target-h min-h-[44px] text-primary-600 dark:text-primary-200 border-primary-300 dark:border-primary-500/80 bg-primary-500/5 dark:bg-primary-400/15 hover:bg-primary-500/10 dark:hover:bg-primary-400/25 hover:underline focus:outline-none focus:ring-2 focus:ring-primary-500/50"
 								>
-									<Smartphone class="h-5 w-5 shrink-0" />
+									<Smartphone class="h-4 w-4 shrink-0" />
 									Use this device
 								</Link>
 							</div>

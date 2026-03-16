@@ -130,6 +130,7 @@ class UserSiteAssignmentTest extends TestCase
             'name' => 'New Admin',
             'email' => 'newadmin@example.com',
             'password' => 'password123',
+            'password_confirmation' => 'password123',
             'role' => 'admin',
             'site_id' => $site->id,
         ]);
@@ -154,6 +155,7 @@ class UserSiteAssignmentTest extends TestCase
             'name' => 'New Staff',
             'email' => 'staff@example.com',
             'password' => 'password123',
+            'password_confirmation' => 'password123',
             'role' => 'staff',
             'site_id' => $site->id,
         ]);
@@ -178,6 +180,7 @@ class UserSiteAssignmentTest extends TestCase
             'name' => 'Another Admin',
             'email' => 'admin2@example.com',
             'password' => 'password123',
+            'password_confirmation' => 'password123',
             'role' => 'admin',
         ]);
 
@@ -228,6 +231,7 @@ class UserSiteAssignmentTest extends TestCase
             'name' => 'Fake Super',
             'email' => 'super@example.com',
             'password' => 'password123',
+            'password_confirmation' => 'password123',
             'role' => 'super_admin',
             'site_id' => $site->id,
         ]);

@@ -7,7 +7,7 @@
 	import { usePage } from "@inertiajs/svelte";
 	import { onMount } from "svelte";
 	import { toaster } from "../../../lib/toaster.js";
-	import { compressImage, HERO_BANNER_PRESET } from "../../../lib/imageUtils.js";
+	import { compressImage, HERO_BANNER_PRESET, getUploadHint } from "../../../lib/imageUtils.js";
 	import { Printer, ChevronDown } from "lucide-svelte";
 
 	const page = usePage();
@@ -62,6 +62,8 @@
 	let printSettingsSaved = $state(false);
 	let logoUploading = $state(false);
 	let bgUploading = $state(false);
+	let logoDragging = $state(false);
+	let bgDragging = $state(false);
 	let logoFileInput = $state<HTMLInputElement | null>(null);
 	let bgFileInput = $state<HTMLInputElement | null>(null);
 
@@ -208,15 +210,39 @@
 				<label for="cfg-print-logo" class="label"><span class="label-text font-medium">Logo URL <span class="text-surface-500 font-normal">(optional)</span></span></label>
 				<div class="flex flex-col gap-2">
 					<input id="cfg-print-logo" type="url" class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm" placeholder="https://example.com/logo.png" bind:value={printSettings.logo_url} />
-					<div class="flex flex-wrap items-center gap-2">
-						<button type="button" class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 shadow-sm disabled:opacity-50" onclick={() => logoFileInput?.click()} disabled={logoUploading || submitting}>
-							{logoUploading ? "Uploading…" : "Upload image"}
-						</button>
-						{#if printSettings.logo_url}
-							<img src={printSettings.logo_url} alt="Logo preview" class="h-8 w-auto rounded border border-surface-200 bg-surface-50" />
-						{/if}
+					<div
+						class="border-2 border-dashed rounded-container p-6 text-center transition-colors cursor-pointer {logoUploading || submitting ? 'opacity-50 pointer-events-none' : ''} {logoDragging ? 'border-primary-500 bg-primary-50' : 'border-surface-300 hover:border-primary-400 bg-surface-50/50 hover:bg-surface-100/50'}"
+						role="button"
+						tabindex="0"
+						aria-label="Upload logo image"
+						aria-disabled={logoUploading || submitting}
+						ondragover={(e) => { e.preventDefault(); if (!logoUploading && !submitting) logoDragging = true; }}
+						ondragleave={() => (logoDragging = false)}
+						ondrop={(e) => {
+							e.preventDefault();
+							logoDragging = false;
+							if (logoUploading || submitting) return;
+							const f = e.dataTransfer?.files?.[0];
+							if (f && f.type?.startsWith('image/')) uploadPrintImage("logo", f);
+						}}
+						onclick={() => { if (!logoUploading && !submitting) logoFileInput?.click(); }}
+						onkeydown={(e) => e.key === 'Enter' && !logoUploading && !submitting && logoFileInput?.click()}
+					>
 						<input type="file" accept="image/*" class="hidden" bind:this={logoFileInput} onchange={(e) => { const f = (e.currentTarget as HTMLInputElement).files?.[0]; if (f) uploadPrintImage("logo", f); }} />
+						<div class="flex flex-col items-center justify-center gap-2 pointer-events-none">
+							<svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 text-surface-400 {logoDragging ? 'text-primary-500' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+							<div class="text-sm">
+								<span class="font-semibold text-primary-600">Click to upload</span> or drag and drop
+							</div>
+							<p class="text-xs text-surface-500">{getUploadHint('hero')}</p>
+						</div>
 					</div>
+					{#if logoUploading}
+						<p class="text-sm text-surface-600">Uploading…</p>
+					{/if}
+					{#if printSettings.logo_url}
+						<img src={printSettings.logo_url} alt="Logo preview" class="h-8 w-auto rounded border border-surface-200 bg-surface-50" />
+					{/if}
 				</div>
 			</div>
 			<div class="form-control">
@@ -227,15 +253,39 @@
 				<label for="cfg-print-bg" class="label"><span class="label-text font-medium">Background image URL <span class="text-surface-500 font-normal">(optional)</span></span></label>
 				<div class="flex flex-col gap-2">
 					<input id="cfg-print-bg" type="text" class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm" placeholder="https://example.com/bg.png" bind:value={printSettings.bg_image_url} />
-					<div class="flex flex-wrap items-center gap-2">
-						<button type="button" class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 shadow-sm disabled:opacity-50" onclick={() => bgFileInput?.click()} disabled={bgUploading || submitting}>
-							{bgUploading ? "Uploading…" : "Upload image"}
-						</button>
-						{#if printSettings.bg_image_url}
-							<div class="h-10 w-14 rounded border border-surface-200 bg-surface-100 bg-center bg-cover" style="background-image: url({printSettings.bg_image_url});"></div>
-						{/if}
+					<div
+						class="border-2 border-dashed rounded-container p-6 text-center transition-colors cursor-pointer {bgUploading || submitting ? 'opacity-50 pointer-events-none' : ''} {bgDragging ? 'border-primary-500 bg-primary-50' : 'border-surface-300 hover:border-primary-400 bg-surface-50/50 hover:bg-surface-100/50'}"
+						role="button"
+						tabindex="0"
+						aria-label="Upload background image"
+						aria-disabled={bgUploading || submitting}
+						ondragover={(e) => { e.preventDefault(); if (!bgUploading && !submitting) bgDragging = true; }}
+						ondragleave={() => (bgDragging = false)}
+						ondrop={(e) => {
+							e.preventDefault();
+							bgDragging = false;
+							if (bgUploading || submitting) return;
+							const f = e.dataTransfer?.files?.[0];
+							if (f && f.type?.startsWith('image/')) uploadPrintImage("background", f);
+						}}
+						onclick={() => { if (!bgUploading && !submitting) bgFileInput?.click(); }}
+						onkeydown={(e) => e.key === 'Enter' && !bgUploading && !submitting && bgFileInput?.click()}
+					>
 						<input type="file" accept="image/*" class="hidden" bind:this={bgFileInput} onchange={(e) => { const f = (e.currentTarget as HTMLInputElement).files?.[0]; if (f) uploadPrintImage("background", f); }} />
+						<div class="flex flex-col items-center justify-center gap-2 pointer-events-none">
+							<svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 text-surface-400 {bgDragging ? 'text-primary-500' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+							<div class="text-sm">
+								<span class="font-semibold text-primary-600">Click to upload</span> or drag and drop
+							</div>
+							<p class="text-xs text-surface-500">{getUploadHint('hero')}</p>
+						</div>
 					</div>
+					{#if bgUploading}
+						<p class="text-sm text-surface-600">Uploading…</p>
+					{/if}
+					{#if printSettings.bg_image_url}
+						<div class="h-10 w-14 rounded border border-surface-200 bg-surface-100 bg-center bg-cover" style="background-image: url({printSettings.bg_image_url});"></div>
+					{/if}
 					<p class="label-text-alt mt-1 flex items-center gap-1.5"><ChevronDown class="w-3 h-3 text-surface-400 rotate-[-90deg]" /> Use 6:5 aspect ratio for best fit per card.</p>
 				</div>
 			</div>

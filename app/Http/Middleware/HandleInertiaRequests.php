@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Enums\UserRole;
 use App\Http\Controllers\StationPageController;
 use App\Models\Program;
 use App\Models\Station;
@@ -55,8 +56,17 @@ class HandleInertiaRequests extends Middleware
             'server_tts_configured' => $user?->role === 'admin'
                 ? app(TtsService::class)->isEnabled()
                 : null,
-            'device_locked' => DeviceLock::isLocked($request),
+            // Lockout applies only to non-staff/admin; staff/admin can exit without PIN/QR.
+            'device_locked' => self::deviceLockedForRequest($request),
             'device_locked_redirect_url' => self::deviceLockedRedirectUrl($request),
+            'edge_mode' => [
+                'is_edge' => app(\App\Services\EdgeModeService::class)->isEdge(),
+                'is_online' => app(\App\Services\EdgeModeService::class)->isOnline(),
+                'is_offline' => app(\App\Services\EdgeModeService::class)->isOffline(),
+                'admin_read_only' => app(\App\Services\EdgeModeService::class)->isAdminReadOnly(),
+                'sync_back' => app(\App\Services\EdgeModeService::class)->syncBack(),
+                'bridge_mode_enabled' => app(\App\Services\EdgeModeService::class)->bridgeModeEnabled(),
+            ],
         ];
 
         // Per central-edge A.2.5 / A.4.1: admin routes receive programs (all active); currentProgram only (A.4.4: program alias removed).
@@ -209,5 +219,18 @@ class HandleInertiaRequests extends Middleware
         $lock = DeviceLock::decode($request);
 
         return $lock !== null ? DeviceLock::redirectUrlForLock($lock) : null;
+    }
+
+    /**
+     * Device lockout applies only to non-staff/admin. Staff and admin can navigate away without PIN/QR.
+     */
+    private static function deviceLockedForRequest(Request $request): bool
+    {
+        $user = $request->user();
+        if ($user && in_array($user->role, [UserRole::Staff, UserRole::Admin, UserRole::SuperAdmin], true)) {
+            return false;
+        }
+
+        return DeviceLock::isLocked($request);
     }
 }

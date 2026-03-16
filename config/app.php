@@ -30,6 +30,46 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Application Mode (central / edge)
+    |--------------------------------------------------------------------------
+    |
+    | Single source of truth for whether this instance is a central server or
+    | an edge Pi. Default is 'central' so existing deployments are unaffected.
+    | All edge-mode checks must go through EdgeModeService, not config().
+    |
+    */
+
+    'mode' => env('APP_MODE', 'central'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Edge sync-back (central only)
+    |--------------------------------------------------------------------------
+    |
+    | When true (central only), Site settings → Edge section is editable and
+    | sync-back features are enabled. When false (always on edge; design: edge
+    | does not sync back to central), the Edge section inputs and Save are
+    | disabled. Set SYNC_BACK=false in env.edge on the Pi.
+    |
+    */
+
+    'sync_back' => (bool) env('SYNC_BACK', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Edge bridge mode (edge only)
+    |--------------------------------------------------------------------------
+    |
+    | When true on an edge Pi, Phase E bridge (proxy to central) can be active.
+    | When false (default on edge), bridge is disabled; set EDGE_BRIDGE_MODE=false
+    | in env.edge so any bridge-related UI or behavior stays off.
+    |
+    */
+
+    'edge_bridge_mode' => (bool) env('EDGE_BRIDGE_MODE', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Debug Mode
     |--------------------------------------------------------------------------
     |
@@ -40,6 +80,40 @@ return [
     */
 
     'debug' => (bool) env('APP_DEBUG', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Demo mode (show seeded accounts on login page)
+    |--------------------------------------------------------------------------
+    | When DEMO=true, the login page shows a section with seeded demo accounts
+    | (email + password hint) so staff can quickly sign in during demos.
+    | When DEMO is false or unset, that section is hidden.
+    |
+    */
+
+    'demo' => (bool) env('DEMO', false),
+
+    'demo_accounts' => [
+        ['label' => 'Admin (Tagudin)', 'email' => 'admin@tagudinmswdo.gov.ph'],
+        ['label' => 'Staff 1 (Tagudin)', 'email' => 'staff1@tagudinmswdo.gov.ph'],
+        ['label' => 'Staff 2 (Tagudin)', 'email' => 'staff2@tagudinmswdo.gov.ph'],
+        ['label' => 'Staff 3 (Tagudin)', 'email' => 'staff3@tagudinmswdo.gov.ph'],
+        ['label' => 'Staff 4 (Tagudin)', 'email' => 'staff4@tagudinmswdo.gov.ph'],
+        ['label' => 'Staff 5 (Tagudin)', 'email' => 'staff5@tagudinmswdo.gov.ph'],
+        ['label' => 'Staff 6 (Tagudin)', 'email' => 'staff6@tagudinmswdo.gov.ph'],
+        ['label' => 'Admin (Candon)', 'email' => 'admin@candonmswdo.gov.ph'],
+        ['label' => 'Staff 1 (Candon)', 'email' => 'staff1@candonmswdo.gov.ph'],
+        ['label' => 'Staff 2 (Candon)', 'email' => 'staff2@candonmswdo.gov.ph'],
+        ['label' => 'Staff 3 (Candon)', 'email' => 'staff3@candonmswdo.gov.ph'],
+        ['label' => 'Staff 4 (Candon)', 'email' => 'staff4@candonmswdo.gov.ph'],
+        ['label' => 'Staff 5 (Candon)', 'email' => 'staff5@candonmswdo.gov.ph'],
+        ['label' => 'Staff 6 (Candon)', 'email' => 'staff6@candonmswdo.gov.ph'],
+        ['label' => 'Admin (Edge)', 'email' => 'admin@tagudinfield.gov.ph'],
+        ['label' => 'Staff 1 (Edge)', 'email' => 'staff1@tagudinfield.gov.ph'],
+        ['label' => 'Staff 2 (Edge)', 'email' => 'staff2@tagudinfield.gov.ph'],
+        ['label' => 'Staff 3 (Edge)', 'email' => 'staff3@tagudinfield.gov.ph'],
+        ['label' => 'Staff 4 (Edge)', 'email' => 'staff4@tagudinfield.gov.ph'],
+    ],
 
     /*
     |--------------------------------------------------------------------------

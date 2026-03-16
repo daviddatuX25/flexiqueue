@@ -16,6 +16,11 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 /**
+ * Legacy/default seeder: single default site, Tagudin users, multiple programs.
+ * For central server (two orgs, 10-day history, analytics): use CentralSeeder.
+ * For edge (one org, AICS only, 3 stale sessions): use EdgeSeeder.
+ * See docs/seeder-plan.txt.
+ *
  * MSWDO Tagudin–realistic seeder (per MSWDO Program Seeder Specification).
  * 1 admin + 6 staff with Filipino names.
  * Programs: AICS (Regular + Priority tracks), Social Pension, Supplemental Feeding,

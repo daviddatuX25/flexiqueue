@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Enums\UserRole;
 use App\Models\Program;
 use App\Models\ProgramAccessToken;
 use App\Models\Site;
@@ -12,7 +13,7 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Per addition-to-public-site-plan Part 5.3: for public program routes, require valid program access.
  * If program is private, known_programs cookie must contain valid token (validated against DB).
- * Applied after RequireSiteAccess so site is already validated.
+ * Staff/admin/super_admin bypass (public key only enforced for non-staff). Applied after RequireSiteAccess.
  */
 class RequireProgramAccess
 {
@@ -40,6 +41,11 @@ class RequireProgramAccess
             return $next($request);
         }
 
+        $user = $request->user();
+        if ($user && in_array($user->role, [UserRole::Staff, UserRole::Admin, UserRole::SuperAdmin], true)) {
+            return $next($request);
+        }
+
         $entries = $this->parseKnownPrograms($request->cookie(self::COOKIE_NAME));
         $entry = null;
         foreach ($entries as $e) {
@@ -50,8 +56,10 @@ class RequireProgramAccess
             }
         }
 
+        $redirectToLanding = redirect()->to('/site/'.urlencode($site->slug).'?program_key_prompt='.urlencode($program->slug));
+
         if (! $entry || empty($entry['token'])) {
-            return redirect()->to('/');
+            return $redirectToLanding;
         }
 
         $hash = hash('sha256', $entry['token']);
@@ -75,7 +83,7 @@ class RequireProgramAccess
                 'lax'
             );
 
-            return redirect()->to('/')->with('program_access_expired', true)->cookie($cookie);
+            return $redirectToLanding->with('program_access_expired', true)->cookie($cookie);
         }
 
         return $next($request);

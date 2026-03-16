@@ -60,12 +60,13 @@ class SiteIsolationRegressionTest extends TestCase
         return $token;
     }
 
-    private function createClientForSite(string $name, int $siteId): Client
+    private function createClientForSite(string $firstName, string $lastName, int $siteId): Client
     {
         return Client::create([
             'site_id' => $siteId,
-            'name' => $name,
-            'birth_year' => 1990,
+            'first_name' => $firstName,
+            'last_name' => $lastName,
+            'birth_date' => '1990-01-01',
         ]);
     }
 
@@ -75,9 +76,9 @@ class SiteIsolationRegressionTest extends TestCase
         $this->createTokenForSite('A2', $this->siteA->id);
         $tokenB = $this->createTokenForSite('B1', $this->siteB->id);
 
-        $this->createClientForSite('Alice A', $this->siteA->id);
-        $this->createClientForSite('Alan A2', $this->siteA->id);
-        $clientB = $this->createClientForSite('Bob B', $this->siteB->id);
+        $this->createClientForSite('Alice', 'A', $this->siteA->id);
+        $this->createClientForSite('Alan', 'A2', $this->siteA->id);
+        $clientB = $this->createClientForSite('Bob', 'B', $this->siteB->id);
 
         // Token index: only site A
         $tokenResp = $this->actingAs($this->adminA)->getJson('/api/admin/tokens');
@@ -91,7 +92,7 @@ class SiteIsolationRegressionTest extends TestCase
         $clientResp->assertInertia(fn ($page) => $page
             ->has('clients')
             ->where('clients', fn ($clients) => count($clients) === 2
-                && collect($clients)->pluck('name')->sort()->values()->all() === ['Alan A2', 'Alice A'])
+                && collect($clients)->map(fn ($c) => trim(($c['first_name'] ?? '').' '.($c['last_name'] ?? '')))->sort()->values()->all() === ['Alan A2', 'Alice A'])
         );
 
         // Print settings: site A row
@@ -115,9 +116,9 @@ class SiteIsolationRegressionTest extends TestCase
         $this->createTokenForSite('B1', $this->siteB->id);
         $this->createTokenForSite('B2', $this->siteB->id);
 
-        $clientA = $this->createClientForSite('Alice A', $this->siteA->id);
-        $this->createClientForSite('Bob B', $this->siteB->id);
-        $this->createClientForSite('Bella B2', $this->siteB->id);
+        $clientA = $this->createClientForSite('Alice', 'A', $this->siteA->id);
+        $this->createClientForSite('Bob', 'B', $this->siteB->id);
+        $this->createClientForSite('Bella', 'B2', $this->siteB->id);
 
         // Token index: only site B
         $tokenResp = $this->actingAs($this->adminB)->getJson('/api/admin/tokens');
@@ -131,7 +132,7 @@ class SiteIsolationRegressionTest extends TestCase
         $clientResp->assertInertia(fn ($page) => $page
             ->has('clients')
             ->where('clients', fn ($clients) => count($clients) === 2
-                && collect($clients)->pluck('name')->sort()->values()->all() === ['Bella B2', 'Bob B'])
+                && collect($clients)->map(fn ($c) => trim(($c['first_name'] ?? '').' '.($c['last_name'] ?? '')))->sort()->values()->all() === ['Bella B2', 'Bob B'])
         );
 
         // Print settings: site B row

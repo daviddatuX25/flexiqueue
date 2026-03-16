@@ -155,7 +155,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         );
     }
 
-    /** Per A.4.1 / A.4.4: shared data includes currentProgram only; admin gets null. Per B.4: programs site-scoped. */
+    /** Per A.4.1 / A.4.4: admin dashboard receives first active program as currentProgram (StatusFooter chip). Per B.4: programs site-scoped. */
     public function test_admin_dashboard_receives_current_program_null_and_programs(): void
     {
         $site = Site::create([
@@ -166,7 +166,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
             'edge_settings' => [],
         ]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        Program::create([
+        $program = Program::create([
             'site_id' => $site->id,
             'name' => 'Alpha',
             'description' => null,
@@ -179,7 +179,8 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
             ->has('currentProgram')
-            ->where('currentProgram', null)
+            ->where('currentProgram.id', $program->id)
+            ->where('currentProgram.name', 'Alpha')
             ->has('programs')
         );
     }
@@ -187,9 +188,17 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
     /** Per A.4.1 / A.4.4: staff on station receives shared currentProgram only. */
     public function test_station_page_shared_data_has_current_program(): void
     {
-        $admin = User::factory()->admin()->create();
-        $staff = User::factory()->create(['role' => 'staff']);
+        $site = Site::create([
+            'name' => 'Default',
+            'slug' => 'default',
+            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
         $program = Program::create([
+            'site_id' => $site->id,
             'name' => 'Station Program',
             'description' => null,
             'is_active' => true,
@@ -203,7 +212,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         ]);
         $staff->update(['assigned_station_id' => $station->id]);
 
-        $response = $this->actingAs($staff)->get(route('station', ['station' => $station]));
+        $response = $this->actingAs($staff)->get(route('station'));
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page

@@ -3,7 +3,17 @@
 	import AuthLayout from '../../Layouts/AuthLayout.svelte';
 	import AppBackground from '../../Components/AppBackground.svelte';
 
-	let { status = null, error = null } = $props();
+	interface DemoAccount {
+		label: string;
+		email: string;
+	}
+
+	let {
+		status = null,
+		error = null,
+		demo = false,
+		demoAccounts = [] as DemoAccount[]
+	} = $props();
 
 	/** Same program photo as Home / app shell so login feels part of the same experience */
 	const heroImageUrl = '/images/mswdo_tagudin.jpg';
@@ -90,6 +100,37 @@
 					{$form.processing ? 'Signing in…' : 'Sign in'}
 				</button>
 			</form>
+
+			{#if demo && demoAccounts.length > 0}
+				<section
+					class="mt-6 p-4 rounded-container border border-surface-200 bg-surface-100/80"
+					aria-labelledby="demo-accounts-heading"
+				>
+					<h2 id="demo-accounts-heading" class="text-sm font-semibold text-surface-700 mb-2">
+						Demo accounts
+					</h2>
+					<p class="text-xs text-surface-600 mb-3">
+						Password: <kbd class="px-1 rounded bg-surface-200 font-mono text-xs">password</kbd>
+						· Override PIN: <kbd class="px-1 rounded bg-surface-200 font-mono text-xs">123456</kbd>
+					</p>
+					<ul class="space-y-1.5 max-h-48 overflow-y-auto">
+						{#each demoAccounts as account (account.email)}
+							<li>
+								<button
+									type="button"
+									class="text-left w-full text-sm py-1.5 px-2 rounded hover:bg-primary-500/10 focus:bg-primary-500/10 focus:outline-none focus:ring-2 focus:ring-primary-500"
+									onclick={() => {
+										$form.setData({ email: account.email, password: 'password' });
+									}}
+								>
+									<span class="font-medium text-surface-800">{account.label}</span>
+									<span class="block text-xs text-surface-500 truncate" title={account.email}>{account.email}</span>
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</section>
+			{/if}
 		</div>
 	</main>
 </AuthLayout>

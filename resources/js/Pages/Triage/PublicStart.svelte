@@ -53,6 +53,8 @@ let {
 		identity_binding_mode = 'disabled',
 		/** When true, request identification registration can create a session (unverified). */
 		allow_unverified_entry = false,
+		/** Shared: when staff/admin, lockout does not apply; can exit without PIN/QR. */
+		auth = null as { user?: { role?: string } } | null,
 	}: {
 		allowed: boolean;
 		program_id: number | null;
@@ -67,7 +69,13 @@ let {
 		enable_public_triage_camera_scanner?: boolean;
 		identity_binding_mode?: IdentityBindingMode;
 		allow_unverified_entry?: boolean;
+		auth?: { user?: { role?: string } } | null;
 	} = $props();
+
+	/** Staff/admin can change device without unlock modal (lockout applies only to non-staff/admin). */
+	const canBypassDeviceLock = $derived(
+		auth?.user && auth.user.role && ['staff', 'admin', 'super_admin'].includes(auth.user.role)
+	);
 
 	const page = usePage();
 	function getCsrfToken(): string {
@@ -178,6 +186,24 @@ let selectedTrackId = $state<number | null>(null);
 	const chooseUrl = $derived(
 		site_slug && program_slug ? `/site/${site_slug}/program/${program_slug}/devices` : null
 	);
+	/** Staff/admin: exit immediately without modal; clear lock and redirect to choose page. */
+	async function handleChangeDeviceClick() {
+		if (canBypassDeviceLock && chooseUrl) {
+			try {
+				const res = await fetch('/api/public/device-lock/clear', {
+					method: 'POST',
+					credentials: 'include',
+					headers: { 'X-CSRF-TOKEN': getCsrfToken(), Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+				});
+				if (res.ok) {
+					sessionStorage.removeItem('device_lock_redirect_url');
+					router.visit(chooseUrl);
+					return;
+				}
+			} catch (_) {}
+		}
+		showUnlockModal = true;
+	}
 	/** Unlock flow: change device type. Same PIN/QR as when entering. */
 	let showUnlockModal = $state(false);
 	let unlockAuthMode = $state<'pin' | 'request'>('pin');
@@ -925,7 +951,7 @@ let hidMode = $state<HidMode>('token');
 						<button
 							type="button"
 							class="btn preset-tonal text-sm touch-target-h"
-							onclick={() => (showUnlockModal = true)}
+							onclick={handleChangeDeviceClick}
 						>
 							Change device type
 						</button>

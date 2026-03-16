@@ -114,6 +114,7 @@ class StationController extends Controller
             'currentStation',
             'token',
             'identityRegistration',
+            'client',
         ]);
         $track = $session->serviceTrack;
         $totalSteps = $track ? $track->trackSteps()->count() : 1;
@@ -136,6 +137,7 @@ class StationController extends Controller
             'total_steps' => $totalSteps,
             'at_this_station' => $session->current_station_id === $station->id,
             'unverified' => $unverified,
+            'client_name' => $session->client?->display_name ?? $session->identityRegistration?->display_name ?? null,
         ]);
     }
 

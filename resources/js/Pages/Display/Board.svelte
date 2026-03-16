@@ -93,7 +93,14 @@ let {
 	station_selection_mode = null,
 	/** Per public-site plan: read-only board at /site/{site}/program/{program}/view; no device controls. */
 	publicView = false,
+	/** Shared: when staff/admin, lockout does not apply; can exit without PIN/QR. */
+	auth = null,
 } = $props();
+
+/** Staff/admin can change device without unlock modal (lockout applies only to non-staff/admin). */
+const canBypassDeviceLock = $derived(
+	auth?.user && ['staff', 'admin', 'super_admin'].includes(auth.user.role)
+);
 
 /** Effective program: currentProgram with fallback to program for transition. */
 const effectiveCurrentProgram = $derived(currentProgram ?? program);
@@ -264,6 +271,24 @@ let stationTtsByName = $state({});
 
 	/** Unlock flow: change device type (back to choose page). Same PIN/QR as when entering. */
 	let showUnlockModal = $state(false);
+	/** Staff/admin: exit immediately without modal; clear lock and redirect to choose page. */
+	async function handleChangeDeviceClick() {
+		if (canBypassDeviceLock && chooseUrl) {
+			try {
+				const res = await fetch('/api/public/device-lock/clear', {
+					method: 'POST',
+					credentials: 'include',
+					headers: { 'X-CSRF-TOKEN': getCsrfToken(), Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+				});
+				if (res.ok) {
+					sessionStorage.removeItem('device_lock_redirect_url');
+					router.visit(chooseUrl);
+					return;
+				}
+			} catch (_) {}
+		}
+		showUnlockModal = true;
+	}
 	let unlockAuthMode = $state('pin'); // 'pin' | 'request'
 	let unlockPin = $state('');
 	let unlockRequestId = $state(null);
@@ -1022,7 +1047,7 @@ let stationTtsByName = $state({});
 						<button
 							type="button"
 							class="btn preset-tonal text-sm touch-target-h"
-							onclick={() => (showUnlockModal = true)}
+							onclick={handleChangeDeviceClick}
 						>
 							Change device type
 						</button>
