@@ -23,15 +23,16 @@
 # Environment variables:
 #   PI_HOST          Pi hostname or IP (required; prompted if not set)
 #   PI_USER          Pi SSH user (default: root)
-#   CENTRAL_URL      Central server URL (default https://flexiqueue.click; from .env.edge or prompted)
-#   CENTRAL_API_KEY  Site API key from the central server's Organization settings (prompted if not set)
-#   SITE_ID          Site ID on central this Pi belongs to (prompted if not set)
+#   CENTRAL_URL      Central server URL (from .env.edge or env.edge, else prompted)
+#   CENTRAL_API_KEY  Site API key (from .env.edge or env.edge, else prompted)
+#   SITE_ID          Site ID on central (from .env.edge or env.edge, else prompted)
 #   DEPLOY_MIGRATE   1=incremental, 2=fresh+seed, 3=skip (interactive prompt if not set)
 #   EDGE_PROGRAM_ID  Program ID to import after deploy (prompted if --import flag used)
 #
 # Flags:
-#   --build          Build tarball before deploying
-#   --sail           Use Sail/Docker for build
+#   --build          Build tarball before deploying (defaults to Sail/Docker for build)
+#   --sail           Use Sail/Docker for build (default when --build)
+#   --no-sail        Use host PHP for build instead of Sail
 #   --migrate=...    incremental|fresh|skip (same as deploy-to-pi.sh)
 #   --import=N       After deploy, run edge:import-package --program=N on the Pi
 #   --no-import      Skip the import prompt entirely
@@ -49,6 +50,7 @@ CENTRAL_API_KEY="${CENTRAL_API_KEY:-}"
 SITE_ID="${SITE_ID:-}"
 BUILD=0
 USE_SAIL=0
+SAIL_CHOSEN=0  # 1 if user passed --sail or --no-sail
 MIGRATE_ARG=""
 IMPORT_PROGRAM_ID="${EDGE_PROGRAM_ID:-}"
 DO_IMPORT=""  # empty = prompt, "skip" = skip
@@ -56,12 +58,27 @@ DO_IMPORT=""  # empty = prompt, "skip" = skip
 for arg in "$@"; do
   case "$arg" in
     --build) BUILD=1 ;;
-    --sail)  USE_SAIL=1 ;;
+    --sail)  USE_SAIL=1; SAIL_CHOSEN=1 ;;
+    --no-sail) USE_SAIL=0; SAIL_CHOSEN=1 ;;
     --migrate=*) MIGRATE_ARG="${arg#--migrate=}" ;;
     --import=*)  IMPORT_PROGRAM_ID="${arg#--import=}"; DO_IMPORT="yes" ;;
     --no-import) DO_IMPORT="skip" ;;
   esac
 done
+
+# When building, prefer Sail/Docker (PHP and deps live there) unless user passed --no-sail.
+if [ "$BUILD" -eq 1 ] && [ "$SAIL_CHOSEN" -eq 0 ]; then
+  USE_SAIL=1
+fi
+
+# Edge config file: .env.edge or env.edge (so SITE_ID etc. are read without prompting)
+if [ -f ".env.edge" ]; then
+  ENV_EDGE_FILE=".env.edge"
+elif [ -f "env.edge" ]; then
+  ENV_EDGE_FILE="env.edge"
+else
+  ENV_EDGE_FILE=""
+fi
 
 # ── Ensure prod is up to date with current branch for Pi builds ────────────────
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
@@ -82,12 +99,21 @@ else
   fi
 fi
 
+# Merge current branch into prod. If prod is checked out in another worktree, merge there (like deploy-via-prod-to-pi).
+source "$(dirname "$0")/lib/git-worktree.sh"
+EXISTING_PROD_WT="$(get_existing_prod_worktree_path)"
 if [ "$CURRENT_BRANCH" != "prod" ] && [ -n "$CURRENT_BRANCH" ] && [ "$CURRENT_BRANCH" != "HEAD" ]; then
-  echo "[FlexiQueue][deploy-to-pi-edge] Merging $CURRENT_BRANCH into prod for Pi deploy..."
-  git checkout prod
-  git merge --no-edit "$CURRENT_BRANCH"
-  git checkout "$CURRENT_BRANCH"
-  echo "[FlexiQueue][deploy-to-pi-edge] prod is now up to date with $CURRENT_BRANCH."
+  if [ -n "$EXISTING_PROD_WT" ] && [ -d "$EXISTING_PROD_WT" ]; then
+    echo "[FlexiQueue][deploy-to-pi-edge] Merging $CURRENT_BRANCH into prod (in prod worktree at $EXISTING_PROD_WT)..."
+    (cd "$EXISTING_PROD_WT" && git merge --no-edit "$CURRENT_BRANCH")
+    echo "[FlexiQueue][deploy-to-pi-edge] prod is now up to date with $CURRENT_BRANCH."
+  else
+    echo "[FlexiQueue][deploy-to-pi-edge] Merging $CURRENT_BRANCH into prod for Pi deploy..."
+    git checkout prod
+    git merge --no-edit "$CURRENT_BRANCH"
+    git checkout "$CURRENT_BRANCH"
+    echo "[FlexiQueue][deploy-to-pi-edge] prod is now up to date with $CURRENT_BRANCH."
+  fi
 fi
 
 echo ""
@@ -104,47 +130,51 @@ if [ -z "$PI_HOST" ]; then
   fi
 fi
 
-# ── Central URL ────────────────────────────────────────────────────────────────
-# Canonical central for all envs: https://flexiqueue.click
+# ── Central config (from env.edge when present; no prompts then) ───────────────
+# Trim helper for values read from file
+trim() { echo "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
 DEFAULT_CENTRAL_URL="https://flexiqueue.click"
-if [ -z "$CENTRAL_URL" ] && [ -f ".env.edge" ]; then
-  CENTRAL_URL="$(grep -E '^CENTRAL_URL=' .env.edge 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
-fi
-if [ -z "$CENTRAL_URL" ]; then
-  read -r -p "  Central server URL [$DEFAULT_CENTRAL_URL]: " CENTRAL_URL
-  CENTRAL_URL="$(echo "${CENTRAL_URL:-$DEFAULT_CENTRAL_URL}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-  if [ -z "$CENTRAL_URL" ]; then
-    CENTRAL_URL="$DEFAULT_CENTRAL_URL"
-  fi
+if [ -n "$ENV_EDGE_FILE" ]; then
+  [ -z "$CENTRAL_URL" ]      && CENTRAL_URL="$(trim "$(grep -E '^CENTRAL_URL=' "$ENV_EDGE_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")")"
+  [ -z "$CENTRAL_API_KEY" ]  && CENTRAL_API_KEY="$(trim "$(grep -E '^CENTRAL_API_KEY=' "$ENV_EDGE_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")")"
+  [ -z "$SITE_ID" ]         && SITE_ID="$(trim "$(grep -E '^SITE_ID=' "$ENV_EDGE_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")")"
+  [ -z "$IMPORT_PROGRAM_ID" ] && [ "$DO_IMPORT" = "yes" ] && IMPORT_PROGRAM_ID="$(trim "$(grep -E '^EDGE_PROGRAM_ID=' "$ENV_EDGE_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")")"
 fi
 
-# ── Central API key ────────────────────────────────────────────────────────────
-if [ -z "$CENTRAL_API_KEY" ] && [ -f ".env.edge" ]; then
-  CENTRAL_API_KEY="$(grep -E '^CENTRAL_API_KEY=' .env.edge 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
+# If env.edge supplied all central values, skip prompts (one-command deploy).
+FROM_EDGE=
+if [ -n "$ENV_EDGE_FILE" ] && [ -n "$CENTRAL_URL" ] && [ -n "$CENTRAL_API_KEY" ] && [ -n "$SITE_ID" ]; then
+  FROM_EDGE=1
+fi
+
+if [ -z "$CENTRAL_URL" ]; then
+  read -r -p "  Central server URL [$DEFAULT_CENTRAL_URL]: " CENTRAL_URL
+  CENTRAL_URL="$(trim "${CENTRAL_URL:-$DEFAULT_CENTRAL_URL}")"
+  [ -z "$CENTRAL_URL" ] && CENTRAL_URL="$DEFAULT_CENTRAL_URL"
 fi
 if [ -z "$CENTRAL_API_KEY" ]; then
   read -r -p "  Central API key (sk_live_... from Organization settings): " CENTRAL_API_KEY
-  CENTRAL_API_KEY="$(echo "$CENTRAL_API_KEY" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  CENTRAL_API_KEY="$(trim "$CENTRAL_API_KEY")"
   if [ -z "$CENTRAL_API_KEY" ]; then
-    echo "No API key given. Exiting."
+    echo "No API key given. Set CENTRAL_API_KEY in env.edge for one-command deploy. Exiting."
     exit 1
   fi
-fi
-
-# ── Site ID ────────────────────────────────────────────────────────────────────
-if [ -z "$SITE_ID" ] && [ -f ".env.edge" ]; then
-  SITE_ID="$(grep -E '^SITE_ID=' .env.edge 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
 fi
 if [ -z "$SITE_ID" ]; then
-  read -r -p "  Site ID on central (number, from Organization settings page URL): " SITE_ID
-  SITE_ID="$(echo "$SITE_ID" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-  if [ -z "$SITE_ID" ]; then
-    echo "No site ID given. Exiting."
-    exit 1
-  fi
+  read -r -p "  Site ID on central (number) [2]: " SITE_ID
+  SITE_ID="$(trim "${SITE_ID:-2}")"
+  [ -z "$SITE_ID" ] && SITE_ID=2
+fi
+
+# Default program to import when --import used without =N (or from env.edge EDGE_PROGRAM_ID)
+if [ "$DO_IMPORT" = "yes" ] && [ -z "$IMPORT_PROGRAM_ID" ]; then
+  IMPORT_PROGRAM_ID=1
 fi
 
 echo ""
+if [ -n "$FROM_EDGE" ]; then
+  echo "  Using central config from $ENV_EDGE_FILE (no prompts)."
+fi
 echo "  Config:"
 echo "    Pi host:      $PI_HOST"
 echo "    Central URL:  $CENTRAL_URL"
@@ -252,11 +282,11 @@ ssh -t -o ControlPath="$CONTROL" "${PI_USER}@${PI_HOST}" \
 echo ""
 echo "Writing edge configuration to Pi .env..."
 
-# If .env.edge exists locally, scp it first as the base .env on the Pi.
+# If edge env file exists locally (.env.edge or env.edge), scp it as the base .env on the Pi.
 # Then patch in the confirmed values so prompts override anything in the file.
-if [ -f ".env.edge" ]; then
-  echo "  Found .env.edge locally — using as base .env on Pi..."
-  scp -o ControlPath="$CONTROL" .env.edge "${PI_USER}@${PI_HOST}:/tmp/fq-env-edge"
+if [ -n "$ENV_EDGE_FILE" ]; then
+  echo "  Found $ENV_EDGE_FILE locally — using as base .env on Pi..."
+  scp -o ControlPath="$CONTROL" "$ENV_EDGE_FILE" "${PI_USER}@${PI_HOST}:/tmp/fq-env-edge"
   ssh -o ControlPath="$CONTROL" "${PI_USER}@${PI_HOST}" \
     "sudo cp /tmp/fq-env-edge /var/www/flexiqueue/.env && sudo chown www-data:www-data /var/www/flexiqueue/.env && rm /tmp/fq-env-edge"
 fi
