@@ -1,0 +1,72 @@
+@import 'tailwindcss';
+@plugin '@tailwindcss/forms';
+
+/* Inter font — bundled locally for offline (per 07-UI-UX-SPECS) */
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+@source '../**/*.blade.php';
+@source '../**/*.js';
+@source '../**/*.svelte';
+
+/* Skeleton UI — per migration plan; theme in themes/flexiqueue.css */
+@import '@skeletonlabs/skeleton';
+@import './themes/flexiqueue.css';
+
+/* Dark mode — data-mode strategy per Skeleton docs */
+@custom-variant dark (&:where([data-mode=dark], [data-mode=dark] *));
+
+/* Skeleton forms: explicit background/text for cross-platform consistency */
+.select,
+.input,
+.textarea,
+.input-group {
+	background-color: var(--color-surface-50-950);
+	color: var(--color-surface-950-50);
+}
+
+@theme {
+	--font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+}
+
+/* Native <dialog> centering — only when OPEN (per 07-UI-UX-SPECS 6.3). Must not style closed dialogs or they all show. */
+dialog[open] {
+	position: fixed;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	margin: 0;
+	padding: 0;
+	width: 100%;
+	max-width: 100vw;
+	min-height: 100vh;
+	min-height: 100dvh;
+	box-sizing: border-box;
+}
+
+/* Class-based override so centering wins on admin/layout pages — only when open */
+dialog[open].modal-dialog-center {
+	position: fixed !important;
+	inset: 0 !important;
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+	margin: 0 !important;
+	padding: 0 !important;
+	width: 100% !important;
+	max-width: 100vw !important;
+	min-height: 100vh !important;
+	min-height: 100dvh !important;
+	box-sizing: border-box !important;
+}
+
+/* modal-backdrop: form fills dialog for click-to-close (DaisyUI migration per SKELETON-COMPONENT-MAPPING) */
+.modal-backdrop {
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+}

@@ -63,6 +63,33 @@ for arg in "$@"; do
   esac
 done
 
+# ── Ensure prod is up to date with current branch for Pi builds ────────────────
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+if [[ "${ALLOW_DIRTY_DEPLOY:-0}" != "1" ]] && [[ -n "$(git status --porcelain)" ]]; then
+  echo "[FlexiQueue][deploy-to-pi-edge] Working tree has uncommitted changes on ${CURRENT_BRANCH:-unknown}." >&2
+  echo "  Commit or stash your changes, or set ALLOW_DIRTY_DEPLOY=1 to bypass this check." >&2
+  exit 1
+fi
+
+if git show-ref --verify --quiet refs/heads/prod; then
+  :
+else
+  echo "[FlexiQueue][deploy-to-pi-edge] Creating prod branch from ${CURRENT_BRANCH:-current HEAD}..."
+  if [ -n "$CURRENT_BRANCH" ] && [ "$CURRENT_BRANCH" != "HEAD" ]; then
+    git branch prod "$CURRENT_BRANCH"
+  else
+    git branch prod
+  fi
+fi
+
+if [ "$CURRENT_BRANCH" != "prod" ] && [ -n "$CURRENT_BRANCH" ] && [ "$CURRENT_BRANCH" != "HEAD" ]; then
+  echo "[FlexiQueue][deploy-to-pi-edge] Merging $CURRENT_BRANCH into prod for Pi deploy..."
+  git checkout prod
+  git merge --no-edit "$CURRENT_BRANCH"
+  git checkout "$CURRENT_BRANCH"
+  echo "[FlexiQueue][deploy-to-pi-edge] prod is now up to date with $CURRENT_BRANCH."
+fi
+
 echo ""
 echo "  FlexiQueue — Deploy to Pi (EDGE MODE)"
 echo "  ——————————————————————————————————————"

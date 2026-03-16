@@ -32,21 +32,33 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
+# Branch used as the stable source for hosting builds.
 BRANCH="prod-hosting"
 
-# Ensure prod-hosting branch exists at the safe commit (6cec111 = pre edge-central).
-if ! git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-  echo "Creating $BRANCH branch at safe commit 6cec111..."
-  git branch "$BRANCH" 6cec111
-fi
+# Source branch/ref to mirror into prod-hosting (defaults to current branch, e.g. dev).
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+SOURCE_BRANCH="${HOSTING_SOURCE_BRANCH:-$CURRENT_BRANCH}"
 
 PARENT_DIR="$(cd "$REPO_ROOT/.." && pwd)"
 PROD_WORKTREE="$PARENT_DIR/flexiqueue-prod-hosting"
 
-if [ ! -d "$PROD_WORKTREE" ]; then
-  echo "Creating prod-hosting worktree at $PROD_WORKTREE..."
-  git worktree add "$PROD_WORKTREE" "$BRANCH"
+# Always recreate the prod-hosting worktree fresh so it mirrors SOURCE_BRANCH.
+if [ -d "$PROD_WORKTREE" ]; then
+  echo "Removing existing prod-hosting worktree at $PROD_WORKTREE (build artifacts only)..."
+  git worktree remove "$PROD_WORKTREE" --force >/dev/null 2>&1 || true
 fi
+
+# Ensure prod-hosting branch exists and points at SOURCE_BRANCH (e.g. dev).
+if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+  echo "Updating $BRANCH to track $SOURCE_BRANCH..."
+  git branch -f "$BRANCH" "$SOURCE_BRANCH"
+else
+  echo "Creating $BRANCH from $SOURCE_BRANCH..."
+  git branch "$BRANCH" "$SOURCE_BRANCH"
+fi
+
+echo "Creating prod-hosting worktree at $PROD_WORKTREE from $BRANCH..."
+git worktree add "$PROD_WORKTREE" "$BRANCH"
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 RELEASES_DIR="$REPO_ROOT/releases"
