@@ -27,12 +27,12 @@ class EdgeImportController extends Controller
         }
 
         $programId = $request->input('program_id');
-        $centralUrl = env('CENTRAL_URL');
-        $apiKey = env('CENTRAL_API_KEY');
+        $centralUrl = config('app.central_url') ?: env('CENTRAL_URL');
+        $apiKey = config('app.central_api_key') ?: env('CENTRAL_API_KEY');
 
         if ($programId === null || $programId === '' || empty($centralUrl) || empty($apiKey)) {
             return response()->json([
-                'message' => 'program_id (in body), CENTRAL_URL and CENTRAL_API_KEY are required in .env.',
+                'message' => 'program_id (in body), CENTRAL_URL and CENTRAL_API_KEY are required in .env (run config:cache on Pi after setting them).',
             ], 422);
         }
 

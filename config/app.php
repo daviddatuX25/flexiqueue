@@ -70,6 +70,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Edge central connection (edge Pi only)
+    |--------------------------------------------------------------------------
+    |
+    | Used by edge:import-package and ImportProgramPackageJob. Must be in config
+    | so they are available when config is cached on the Pi (env() is not read
+    | after config:cache otherwise).
+    |
+    */
+
+    'central_url' => env('CENTRAL_URL'),
+    'central_api_key' => env('CENTRAL_API_KEY'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Debug Mode
     |--------------------------------------------------------------------------
     |

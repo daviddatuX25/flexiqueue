@@ -20,12 +20,12 @@ class EdgeImportPackage extends Command
 
     public function handle(EdgePackageImportService $importService): int
     {
-        $centralUrl = $this->option('url') ?: env('CENTRAL_URL');
-        $apiKey = env('CENTRAL_API_KEY');
+        $centralUrl = $this->option('url') ?: config('app.central_url') ?: env('CENTRAL_URL');
+        $apiKey = config('app.central_api_key') ?: env('CENTRAL_API_KEY');
         $programId = $this->option('program');
 
         if (empty($centralUrl) || empty($apiKey) || $programId === null || $programId === '') {
-            $this->error('CENTRAL_URL, CENTRAL_API_KEY and --program are required. Set in .env or pass --program=ID and optionally --url=URL.');
+            $this->error('CENTRAL_URL, CENTRAL_API_KEY and --program are required. Set in .env (and run config:cache on Pi) or pass --program=ID and optionally --url=URL.');
             return Command::FAILURE;
         }
 
