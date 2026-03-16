@@ -15,6 +15,24 @@ use RuntimeException;
 class EdgePackageImportService
 {
     /**
+     * Encode array/object values for the given keys as JSON strings for raw DB upsert.
+     * Package data from central uses decoded JSON (e.g. settings); SQLite expects strings.
+     */
+    private static function encodeJsonColumns(array $row, array $jsonKeys): array
+    {
+        foreach ($jsonKeys as $key) {
+            if (! array_key_exists($key, $row)) {
+                continue;
+            }
+            $value = $row[$key];
+            if (is_array($value) || is_object($value)) {
+                $row[$key] = json_encode($value);
+            }
+        }
+        return $row;
+    }
+
+    /**
      * Fetch package from central, validate checksums, run DB import, download TTS, write status file.
      *
      * @throws RuntimeException on fetch failure, checksum mismatch, or DB error
@@ -46,10 +64,11 @@ class EdgePackageImportService
         }
 
         DB::transaction(function () use ($package, $manifest): void {
+            $programRow = self::encodeJsonColumns($package['program'], ['settings']);
             DB::table('programs')->upsert(
-                [$package['program']],
+                [$programRow],
                 ['id'],
-                array_keys($package['program'])
+                array_keys($programRow)
             );
 
             if (! empty($package['tracks'])) {
@@ -69,8 +88,12 @@ class EdgePackageImportService
             }
 
             if (! empty($package['stations'])) {
+                $stationRows = array_map(
+                    fn (array $row) => self::encodeJsonColumns($row, ['settings']),
+                    $package['stations']
+                );
                 DB::table('stations')->upsert(
-                    $package['stations'],
+                    $stationRows,
                     ['id'],
                     ['name', 'capacity', 'client_capacity', 'holding_capacity', 'settings', 'is_active', 'updated_at']
                 );
@@ -99,8 +122,12 @@ class EdgePackageImportService
             );
 
             if (! empty($manifest['sync_tokens']) && ! empty($package['tokens'])) {
+                $tokenRows = array_map(
+                    fn (array $row) => self::encodeJsonColumns($row, ['tts_settings']),
+                    $package['tokens']
+                );
                 DB::table('tokens')->upsert(
-                    $package['tokens'],
+                    $tokenRows,
                     ['id'],
                     ['site_id', 'physical_id', 'pronounce_as', 'qr_code_hash', 'status', 'tts_audio_path', 'tts_status', 'tts_settings', 'is_global', 'created_at', 'updated_at']
                 );
