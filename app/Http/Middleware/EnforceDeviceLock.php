@@ -66,6 +66,30 @@ class EnforceDeviceLock
             return $next($request);
         }
 
+        // Authenticated staff/admin for this site should not be forced to stay on the locked
+        // device URL. When a user is logged in and their account is tied to this site (or they
+        // are an org-wide admin/super_admin), allow navigation anywhere even if a device_lock
+        // cookie is present.
+        $user = $request->user();
+        if ($user) {
+            $siteSlugFromLock = $lock['site_slug'] ?? null;
+            if (is_string($siteSlugFromLock) && $siteSlugFromLock !== '') {
+                $site = Site::query()->where('slug', $siteSlugFromLock)->first();
+                $isSameSite = $site && $user->site_id === $site->id;
+            } else {
+                $site = null;
+                $isSameSite = false;
+            }
+
+            $isAdminLike = method_exists($user, 'isAdmin') && $user->isAdmin();
+            $isSuperAdmin = method_exists($user, 'isSuperAdmin') && $user->isSuperAdmin();
+
+            if ($isSameSite || $isAdminLike || $isSuperAdmin) {
+                $log(['hypothesisId' => 'H6', 'message' => 'skip for staff/admin user', 'userId' => $user->id ?? null, 'siteId' => $site->id ?? null]);
+                return $next($request);
+            }
+        }
+
         $siteSlug = $lock['site_slug'];
         $programSlug = $lock['program_slug'];
         $deviceType = $lock['device_type'];

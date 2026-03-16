@@ -32,6 +32,7 @@ class ProgramPackageExporter
 
         $sections = [];
 
+        $sections['site'] = $site->toArray();
         $sections['program'] = $program->toArray();
 
         $tracks = ServiceTrack::where('program_id', $program->id)
@@ -119,6 +120,7 @@ class ProgramPackageExporter
             'sync_clients' => $syncClients,
             'sync_tts' => $syncTts,
             'checksums' => [
+                'site' => hash('sha256', json_encode($sections['site'])),
                 'program' => hash('sha256', json_encode($sections['program'])),
                 'tracks' => hash('sha256', json_encode($sections['tracks'])),
                 'steps' => hash('sha256', json_encode($sections['steps'])),
@@ -133,6 +135,7 @@ class ProgramPackageExporter
 
         return [
             'manifest' => $manifest,
+            'site' => $sections['site'],
             'program' => $sections['program'],
             'tracks' => $sections['tracks'],
             'steps' => $sections['steps'],

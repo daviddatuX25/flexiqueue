@@ -961,13 +961,13 @@ let stationTtsByName = $state({});
 					<div
 						role="status"
 						class="rounded-container bg-surface-50 border border-surface-200 p-8 md:p-12 flex flex-col items-center justify-center text-center shadow-sm"
-						aria-label="No active program"
+						aria-label="No active published program available"
 					>
 						<div class="bg-surface-100 p-4 rounded-full text-surface-400 mb-4" aria-hidden="true">
 							<FolderOpen class="w-8 h-8" />
 						</div>
-						<h2 class="text-lg font-semibold text-surface-950 mb-2">No active program</h2>
-						<p class="text-surface-600 max-w-sm mt-1">There are no programs available for the display board.</p>
+						<h2 class="text-lg font-semibold text-surface-950 mb-2">No active published program available</h2>
+						<p class="text-surface-600 max-w-sm mt-1">There are no published programs available for the display board.</p>
 					</div>
 				{/if}
 			</div>

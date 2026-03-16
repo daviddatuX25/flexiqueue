@@ -26,16 +26,25 @@
     const role = $derived(user?.role ?? "");
     const isSuperAdmin = $derived(role === "super_admin");
     const currentPath = $derived($page.url ?? "");
+    const pathOnly = $derived(
+        (typeof currentPath === "string" ? currentPath : "").split("?")[0] || "/",
+    );
     const canSwitchProgram = $derived(!!$page.props?.canSwitchProgram);
     const programs = $derived($page.props?.programs ?? []);
-    /** Routes where staff run live sessions (station/triage/overrides). Used for program context + dropdown visibility. */
+    /** Routes where staff run live sessions (station/triage/overrides/display). Used for program context + dropdown visibility. */
     const isLiveSessionRoute = $derived(
-        currentPath === "/station" ||
-            currentPath.startsWith("/station/") ||
-            currentPath === "/triage" ||
-            currentPath === "/track-overrides",
+        pathOnly === "/station" ||
+            pathOnly.startsWith("/station/") ||
+            pathOnly === "/triage" ||
+            pathOnly === "/track-overrides",
     );
-    const isAdminRoute = $derived(currentPath.startsWith("/admin"));
+    const isDisplayRoute = $derived(
+        pathOnly === "/display" || /^\/site\/[^/]+\/display$/.test(pathOnly),
+    );
+    const isDevicesRoute = $derived(
+        pathOnly === "/devices" || pathOnly.startsWith("/devices/"),
+    );
+    const isAdminRoute = $derived(pathOnly.startsWith("/admin"));
     /** Roles that can switch program from footer (admin/supervisor). Single place for future role changes. */
     const isAdminOrSupervisor = $derived(role === "admin" || role === "supervisor");
 
@@ -78,8 +87,14 @@
     /** Show program dropdown: live-session when canSwitchProgram, or admin pages when admin/supervisor; need 2+ programs. */
     let programSwitchOpen = $state(false);
     const showProgramSwitch = $derived(
-        programs.length > 1 &&
-            ((isLiveSessionRoute && canSwitchProgram) || (isAdminRoute && isAdminOrSupervisor)),
+        // Station / triage / overrides: require explicit canSwitchProgram flag
+        (isLiveSessionRoute && canSwitchProgram) ||
+            // Any admin screen: admin/supervisor can always switch
+            (isAdminRoute && isAdminOrSupervisor) ||
+            // Display board: admin/supervisor can always switch
+            (isDisplayRoute && isAdminOrSupervisor) ||
+            // Devices pages: admin/supervisor OR staff with explicit multi-program flag
+            (isDevicesRoute && (isAdminOrSupervisor || canSwitchProgram)),
     );
     const currentProgramId = $derived(activeProgram?.id ?? null);
     /** Main chip click = navigate (program detail or station). Chevron = open program dropdown when showProgramSwitch. */

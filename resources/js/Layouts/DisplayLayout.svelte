@@ -176,7 +176,7 @@
                     >{programName}</span
                 >
             {:else}
-                <span class="text-white/70">No active program</span>
+                <span class="text-white/70">No active published program available</span>
             {/if}
         </div>
         <div

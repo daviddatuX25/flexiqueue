@@ -342,13 +342,52 @@ class DisplayController extends Controller
         $site = Site::find($siteId);
 
         if (! $site) {
-            return redirect()->route('station');
+            return redirect()->route('station')->with('flash', [
+                'error' => 'No site is configured for your account.',
+            ]);
         }
 
         $program = StationPageController::resolveProgramForStaffWithoutStation($request);
 
         if (! $program) {
-            return redirect()->route('station');
+            return redirect()->route('station')->with('flash', [
+                'error' => 'No active program is available for this site.',
+            ]);
+        }
+
+        $isAdminOrSupervisorWithoutStation = ($user->isAdmin() || $user->isSupervisorForAnyProgram()) && $user->assignedStation === null;
+
+        $staffHasMultiProgramAssignments = ! $user->isAdmin()
+            && ! $user->isSupervisorForAnyProgram()
+            && $user->programStationAssignments()
+                ->whereHas('program', fn ($q) => $q->where('is_active', true))
+                ->distinct('program_id')
+                ->count('program_id') > 1;
+
+        $canSwitchProgram = $isAdminOrSupervisorWithoutStation || $staffHasMultiProgramAssignments;
+
+        $programsForSelector = [];
+        if ($canSwitchProgram) {
+            $query = Program::query()
+                ->forSite($siteId)
+                ->where('is_active', true)
+                ->orderBy('name');
+
+            if ($staffHasMultiProgramAssignments) {
+                $assignedProgramIds = $user->programStationAssignments()
+                    ->whereHas('program', fn ($q) => $q->where('is_active', true))
+                    ->pluck('program_id')
+                    ->unique()
+                    ->all();
+
+                $query->whereIn('id', $assignedProgramIds);
+            }
+
+            $programsForSelector = $query
+                ->get(['id', 'name'])
+                ->map(fn (Program $p) => ['id' => $p->id, 'name' => $p->name])
+                ->values()
+                ->all();
         }
 
         $stations = $program->stations()
@@ -361,6 +400,13 @@ class DisplayController extends Controller
 
         $footerStats = $this->stationQueueService->getProgramFooterStats($program);
 
+        $currentProgramPayload = [
+            'id' => $program->id,
+            'name' => $program->name,
+            'is_active' => $program->is_active,
+            'is_paused' => $program->is_paused ?? false,
+        ];
+
         return Inertia::render('Display/DeviceTypeChoose', [
             'site_slug' => $site->slug,
             'program' => [
@@ -371,6 +417,10 @@ class DisplayController extends Controller
             'stations' => $stations,
             'queueCount' => $footerStats['queue_count'],
             'processedToday' => $footerStats['processed_today'],
+            'activeProgram' => $currentProgramPayload,
+            'currentProgram' => $currentProgramPayload,
+            'canSwitchProgram' => $canSwitchProgram,
+            'programs' => $programsForSelector,
         ]);
     }
 

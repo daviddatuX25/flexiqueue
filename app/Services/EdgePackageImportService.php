@@ -64,6 +64,22 @@ class EdgePackageImportService
         }
 
         DB::transaction(function () use ($package, $manifest): void {
+            // Site and users first so program.site_id and program.created_by FKs exist.
+            if (! empty($package['site'])) {
+                $siteRow = self::encodeJsonColumns($package['site'], ['settings', 'edge_settings']);
+                DB::table('sites')->upsert(
+                    [$siteRow],
+                    ['id'],
+                    array_keys($siteRow)
+                );
+            }
+
+            DB::table('users')->upsert(
+                $package['users'],
+                ['id'],
+                ['site_id', 'name', 'email', 'password', 'role', 'override_pin', 'override_qr_token', 'assigned_station_id', 'is_active', 'availability_status', 'staff_triage_allow_hid_barcode', 'staff_triage_allow_camera_scanner', 'updated_at']
+            );
+
             $programRow = self::encodeJsonColumns($package['program'], ['settings']);
             DB::table('programs')->upsert(
                 [$programRow],
@@ -114,12 +130,6 @@ class EdgePackageImportService
                     []
                 );
             }
-
-            DB::table('users')->upsert(
-                $package['users'],
-                ['id'],
-                ['name', 'email', 'password', 'role', 'override_pin', 'override_qr_token', 'assigned_station_id', 'is_active', 'availability_status', 'staff_triage_allow_hid_barcode', 'staff_triage_allow_camera_scanner', 'updated_at']
-            );
 
             if (! empty($manifest['sync_tokens']) && ! empty($package['tokens'])) {
                 $tokenRows = array_map(

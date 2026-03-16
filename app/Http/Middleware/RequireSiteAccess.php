@@ -22,6 +22,21 @@ class RequireSiteAccess
             return $next($request);
         }
 
+        // Authenticated staff/admin for this site should not be forced through the public
+        // site-key flow. When a user is logged in and their account is tied to this site
+        // (or they are an org-wide admin/super_admin), allow access without checking
+        // the known_sites cookie so staff flows like /devices → /site/{slug}/display
+        // work directly.
+        $user = $request->user();
+        if ($user) {
+            $isSameSite = $user->site_id === $site->id;
+            $isAdminLike = method_exists($user, 'isAdmin') && $user->isAdmin();
+            $isSuperAdmin = property_exists($user, 'role') && $user->role === 'super_admin';
+            if ($isSameSite || $isAdminLike || $isSuperAdmin) {
+                return $next($request);
+            }
+        }
+
         $known = $this->parseKnownSites($request->cookie(self::COOKIE_NAME));
         $slugs = array_column($known, 'slug');
         if (! in_array($site->slug, $slugs, true)) {

@@ -6,7 +6,7 @@
 	 */
 	import { usePage } from '@inertiajs/svelte';
 	import { get } from 'svelte/store';
-	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
+	import MobileLayout from '../../Layouts/MobileLayout.svelte';
 	import { toaster } from '../../lib/toaster.js';
 	import { Monitor, ClipboardList, LayoutGrid, ArrowLeft, Loader2 } from 'lucide-svelte';
 
@@ -16,12 +16,20 @@
 		stations,
 		queueCount = 0,
 		processedToday = 0,
+		activeProgram = null,
+		currentProgram = null,
+		canSwitchProgram = false,
+		programs = [],
 	}: {
 		site_slug: string;
 		program: { id: number; name: string; slug: string };
 		stations: { id: number; name: string }[];
 		queueCount?: number;
 		processedToday?: number;
+		activeProgram?: { id: number; name: string; is_active: boolean; is_paused: boolean } | null;
+		currentProgram?: { id: number; name: string; is_active: boolean; is_paused: boolean } | null;
+		canSwitchProgram?: boolean;
+		programs?: { id: number; name: string }[];
 	} = $props();
 
 	const page = usePage();
@@ -114,7 +122,11 @@
 	}
 </script>
 
-<DisplayLayout programName={program.name} date="" {queueCount} {processedToday}>
+<MobileLayout
+	headerTitle="This device"
+	{queueCount}
+	{processedToday}
+>
 	<!-- Form POST so server returns 302 + Set-Cookie; browser then follows with cookie. No Accept: application/json. -->
 	<form
 		bind:this={lockForm}
@@ -130,9 +142,11 @@
 		<input type="hidden" name="device_type" value="display" />
 		<input type="hidden" name="station_id" value="" />
 	</form>
-	<div class="flex flex-1 flex-col items-center justify-center px-6 py-12">
+	<div
+		class="flex w-full flex-col justify-start px-4 py-6 sm:flex-1 sm:items-center sm:justify-center sm:px-6 sm:py-12"
+	>
 		<div
-			class="flex flex-col gap-6 items-center rounded-2xl border border-surface-200 bg-surface-50/90 dark:bg-slate-800/90 dark:border-slate-700 p-8 shadow-lg max-w-md w-full"
+			class="flex max-w-md w-full flex-col items-center gap-6 rounded-2xl border border-surface-200 bg-surface-50/90 p-6 shadow-lg dark:border-slate-700 dark:bg-slate-800/90 sm:p-8"
 		>
 			<h1 class="text-xl font-semibold text-surface-950 dark:text-white text-center">
 				Choose device type
@@ -237,4 +251,4 @@
 			</div>
 		</div>
 	</div>
-</DisplayLayout>
+</MobileLayout>

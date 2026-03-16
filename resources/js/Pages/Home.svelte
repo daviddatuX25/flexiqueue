@@ -303,6 +303,14 @@
     let knownSitesList = $state<KnownSite[]>([]);
 
     function openMonitorQueue() {
+        // Logged-in staff/admin should never see the public site-key modal.
+        // Send them straight to the display entry, which will resolve their site
+        // and bypass RequireSiteAccess via middleware.
+        if (authUser) {
+            router.visit("/display");
+            return;
+        }
+
         const sites = getKnownSites();
         if (sites.length === 0) {
             keyEntryError = "";
