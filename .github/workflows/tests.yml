@@ -3,7 +3,8 @@ name: Tests
 on:
   push:
     branches:
-      - master
+      - main
+      - dev
       - '*.x'
   pull_request:
   schedule:
