@@ -145,59 +145,75 @@ for f in public/build/manifest.json vendor/autoload.php public/.htaccess; do
 done
 
 # ---- Decide whether to upload vendor/ ----
-REMOTE_LOCK_TMP="$(mktemp -t flexiqueue-remote-composer.lock.XXXXXX)"
-LOCAL_LOCK_PATH="$REPO_ROOT/composer.lock"
+REMOTE_LOCK="$(mktemp -t flexiqueue-remote-composer.lock.XXXXXX)"
 
 echo "[release-central] Checking whether vendor/ needs upload (composer.lock diff)..."
 
-if ! lftp -c "
+lftp -c "
 set ssl:verify-certificate no
 set ftp:ssl-allow no
 open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
-cd /
-get composer.lock -o $REMOTE_LOCK_TMP
+get composer.lock -o $REMOTE_LOCK
 bye
-" 2>/dev/null; then
-  echo "[release-central] ERROR: FTP composer.lock fetch failed." >&2
-  exit 1
-fi
+" 2>/dev/null || true
 
-if [ ! -f "$REMOTE_LOCK_TMP" ] || [ ! -s "$REMOTE_LOCK_TMP" ]; then
-  echo "[release-central] Remote composer.lock not found (or empty). Will upload vendor/ this deploy."
-  UPLOAD_VENDOR="true"
-elif [ ! -f "$LOCAL_LOCK_PATH" ]; then
-  echo "[release-central] Local composer.lock not found. Will upload vendor/ this deploy."
-  UPLOAD_VENDOR="true"
-elif diff -q "$LOCAL_LOCK_PATH" "$REMOTE_LOCK_TMP" >/dev/null 2>&1; then
-  echo "[release-central] composer.lock unchanged vs remote. Skipping vendor/ upload."
-  UPLOAD_VENDOR="false"
+# If remote composer.lock is empty (first deploy or fetch failed)
+# treat as "needs upload"
+if [ ! -s "$REMOTE_LOCK" ]; then
+    UPLOAD_VENDOR=true
+    echo "[release-central] No remote composer.lock found — will upload vendor/"
 else
-  echo "[release-central] composer.lock changed vs remote. Will upload vendor/ this deploy."
-  UPLOAD_VENDOR="true"
+    if diff -q "$REPO_ROOT/composer.lock" "$REMOTE_LOCK" > /dev/null 2>&1; then
+        UPLOAD_VENDOR=false
+        echo "[release-central] composer.lock unchanged — skipping vendor/ upload"
+    else
+        UPLOAD_VENDOR=true
+        echo "[release-central] composer.lock changed — uploading vendor/"
+    fi
 fi
 
-rm -f "$REMOTE_LOCK_TMP" >/dev/null 2>&1 || true
+rm -f "$REMOTE_LOCK" >/dev/null 2>&1 || true
 
 # ---- FTP sync ----
 echo "[release-central] Syncing to FTP (whitelist core Laravel files, keep storage/.env server-owned)..."
 
-if ! lftp -c "
+# Cleanup junk and dev-only files from the server before upload
+lftp -c "
 set ssl:verify-certificate no
 set ftp:ssl-allow no
 open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
-rm -rf .cursor
-rm -rf .beads
-rm -rf docs
+
+# Remove junk files that should never be on the server
+rm -f flexiqueue-deploy.tar.gz
+rm -f flexiqueue-*.tar.gz
+rm -f root@*
+rm -f env.edge
+rm -f compose.yaml
+rm -f package.json
+rm -f package-lock.json
+rm -f phpunit.xml
+rm -f playwright.config.js
+rm -f .phpunit.result.cache
+rm -f .styleci.yml
+rm -f .editorconfig
+rm -f .gitattributes
+rm -f .gitignore
+rm -f svelte.config.js
+rm -f vite
+rm -f vite.config.js
+rm -f robots.txt
+rm -f dev
+rm -rf releases
+rm -rf node_modules
+rm -rf .github
 rm -rf tests
 rm -rf e2e
 rm -rf scripts
-rm -rf node_modules
-rm -rf .github
+rm -rf docs
+rm -rf .cursor
+rm -rf .beads
 bye
-" 2>/dev/null; then
-  echo "[release-central] ERROR: FTP cleanup failed." >&2
-  exit 1
-fi
+" 2>/dev/null || true
 
 INCLUDE_LANG="false"
 if [ -d "$REPO_ROOT/lang" ]; then
