@@ -29,28 +29,18 @@ When GitHub Actions is temporarily unavailable, use these scripts to build and d
 ./scripts/release-edge.sh v0.1.0      # Build and publish edge tarball to GitHub Release
 ```
 
-After a central deploy, ensure the server runs `deploy-update.php` (Hestia cron or Run PHP panel) so migrations and config cache run when `bootstrap/cache/deploy_pending` is present.
+After a central deploy, ensure the server runs Laravel's scheduler so migrations and config cache run when `bootstrap/cache/deploy_pending` is present and initial-setup runs once.
 
 ### Hestia cron (central)
 
-Set these two cron jobs on the Hestia server:
+Set **one** cron job on the Hestia server (runs every minute):
 
-- **Job 1 — Initial setup (runs once, self-disabling):**
+```bash
+* * * * * /usr/bin/php8.2 /home/avelinht/web/flexiqueue.click/public_html/artisan schedule:run >> /dev/null 2>&1
+```
 
-  ```bash
-  */2 * * * * [ ! -f /web/flexiqueue.click/public_html/bootstrap/cache/initial_setup_done ] && \
-    php /web/flexiqueue.click/public_html/php-run-scripts/initial-setup.php
-  ```
-
-- **Job 2 — Deploy marker (runs on every deploy):**
-
-  ```bash
-  */2 * * * * [ -f /web/flexiqueue.click/public_html/bootstrap/cache/deploy_pending ] && \
-    php /web/flexiqueue.click/public_html/php-run-scripts/deploy-update.php
-  ```
-
-`deploy-update.php` deletes the `deploy_pending` marker itself; no `rm` needed.  
-`initial-setup.php` writes the `initial_setup_done` flag; the cron becomes a no-op after the first successful run.
+If your server uses a different PHP binary path (for example `/usr/local/bin/php8.2`), adjust the cron accordingly.  
+You can verify the correct path by checking an existing working PHP cron or running `which php8.2` via SSH.
 
 ---
 

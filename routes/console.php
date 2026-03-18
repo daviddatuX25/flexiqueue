@@ -7,6 +7,7 @@ use App\Models\Token;
 use App\Services\ClientService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -69,3 +70,14 @@ Artisan::command('e2e:seed-client {extraArgs?*} {--name=} {--birth-year=} {--mob
 
     return 0;
 })->purpose('Seed a client for Playwright E2E tests (local/testing only).');
+
+// Scheduler: central deploy + initial setup
+Schedule::command('flexiqueue:deploy-update')
+    ->everyMinute()
+    ->name('deploy-update')
+    ->withoutOverlapping();
+
+Schedule::command('flexiqueue:initial-setup')
+    ->everyMinute()
+    ->name('initial-setup')
+    ->withoutOverlapping();
