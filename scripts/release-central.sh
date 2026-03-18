@@ -82,7 +82,9 @@ fi
 
 FTP_HOST=$(grep -E '^FTP_HOST=' "$REPO_ROOT/.env.hosting" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
 FTP_USER=$(grep -E '^FTP_USER=' "$REPO_ROOT/.env.hosting" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
-[ -z "$FTP_USER" ] && FTP_USER=$(grep -E '^FTP_USERNAME=' "$REPO_ROOT/.env.hosting" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+if [ -z "$FTP_USER" ]; then
+    FTP_USER=$(grep -E '^FTP_USERNAME=' "$REPO_ROOT/.env.hosting" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+fi
 FTP_PASSWORD=$(grep -E '^FTP_PASSWORD=' "$REPO_ROOT/.env.hosting" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
 
 VITE_PUSHER_APP_KEY=$(grep -E '^VITE_PUSHER_APP_KEY=' "$REPO_ROOT/.env.hosting" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
