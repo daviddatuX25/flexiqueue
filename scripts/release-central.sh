@@ -152,6 +152,11 @@ echo "[release-central] Checking whether vendor/ needs upload (composer.lock dif
 lftp -c "
 set ssl:verify-certificate no
 set ftp:ssl-allow no
+set cache:enable yes
+set cache:expire 0
+set mirror:use-pget-n 1
+set ftp:use-mdtm no
+set ftp:use-size yes
 open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
 get composer.lock -o $REMOTE_LOCK
 bye
@@ -181,6 +186,11 @@ echo "[release-central] Syncing to FTP (whitelist core Laravel files, keep stora
 lftp -c "
 set ssl:verify-certificate no
 set ftp:ssl-allow no
+set cache:enable yes
+set cache:expire 0
+set mirror:use-pget-n 1
+set ftp:use-mdtm no
+set ftp:use-size yes
 open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
 
 # Remove junk files that should never be on the server
@@ -223,6 +233,11 @@ fi
 LFTP_ALWAYS_UPLOAD_CMD="
 set ssl:verify-certificate no
 set ftp:ssl-allow no
+set cache:enable yes
+set cache:expire 0
+set mirror:use-pget-n 1
+set ftp:use-mdtm no
+set ftp:use-size yes
 open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
 
 # Upload only what Laravel needs — whitelist approach
@@ -230,14 +245,14 @@ lcd $REPO_ROOT
 cd /
 
 # Core Laravel directories
-mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='app/***' app/ app/
-mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='bootstrap/***' bootstrap/ bootstrap/
-mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='config/***' config/ config/
-mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='database/***' database/ database/
-mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='public/***' public/ public/
-mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='resources/***' resources/ resources/
-mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='routes/***' routes/ routes/
-mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='php-run-scripts/***' php-run-scripts/ php-run-scripts/
+mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time app/ app/
+mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time bootstrap/ bootstrap/
+mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time config/ config/
+mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time database/ database/
+mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time public/ public/
+mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time resources/ resources/
+mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time routes/ routes/
+mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time php-run-scripts/ php-run-scripts/
 __LANG_MIRROR__
 
 # Root files only (not directories)
@@ -251,7 +266,7 @@ bye
 "
 
 if [ "$INCLUDE_LANG" = "true" ]; then
-  LFTP_ALWAYS_UPLOAD_CMD="${LFTP_ALWAYS_UPLOAD_CMD/__LANG_MIRROR__/mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='lang/***' lang/ lang/}"
+  LFTP_ALWAYS_UPLOAD_CMD="${LFTP_ALWAYS_UPLOAD_CMD/__LANG_MIRROR__/mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time lang/ lang/}"
 else
   LFTP_ALWAYS_UPLOAD_CMD="${LFTP_ALWAYS_UPLOAD_CMD/__LANG_MIRROR__/}"
 fi
@@ -266,10 +281,15 @@ if [ "$UPLOAD_VENDOR" = "true" ]; then
   if ! lftp -c "
   set ssl:verify-certificate no
   set ftp:ssl-allow no
+  set cache:enable yes
+  set cache:expire 0
+  set mirror:use-pget-n 1
+  set ftp:use-mdtm no
+  set ftp:use-size yes
   open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
   lcd $REPO_ROOT
   cd /
-  mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='vendor/***' vendor/ vendor/
+  mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time vendor/ vendor/
   bye
   "; then
     echo "[release-central] ERROR: FTP vendor upload failed." >&2
@@ -279,25 +299,44 @@ else
   echo "[release-central] Not uploading vendor/."
 fi
 
-# ---- Spot-check upload by downloading a known file ----
-REMOTE_CHECK="$(mktemp -t flexiqueue-remote-check.XXXXXX)"
-if lftp -c "
-set ssl:verify-certificate no
-set ftp:ssl-allow no
-open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
-cd /
-get app/Console/Commands/RunDeployUpdate.php -o $REMOTE_CHECK
-bye
-" 2>/dev/null; then
-  if [ ! -s "$REMOTE_CHECK" ]; then
-      echo "[release-central] WARNING: Spot-check failed — app/Console/Commands/RunDeployUpdate.php not found on server." >&2
-      echo "[release-central] WARNING: The upload may be incomplete. Consider rerunning." >&2
-  fi
-else
-  echo "[release-central] WARNING: Spot-check download failed (lftp error)." >&2
-  echo "[release-central] WARNING: The upload may be incomplete. Consider rerunning." >&2
+# ---- Spot-check upload by downloading critical files ----
+SPOT_CHECK_FILES=(
+    "app/Console/Commands/RunDeployUpdate.php"
+    "app/Console/Commands/RunInitialSetup.php"
+    "routes/console.php"
+    "artisan"
+    "public/.htaccess"
+)
+
+SPOT_FAILED=0
+for remote_file in "${SPOT_CHECK_FILES[@]}"; do
+    TMPFILE=$(mktemp)
+    lftp -c "
+    set ssl:verify-certificate no
+    set ftp:ssl-allow no
+    set cache:enable yes
+    set cache:expire 0
+    set mirror:use-pget-n 1
+    set ftp:use-mdtm no
+    set ftp:use-size yes
+    open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
+    get $remote_file -o $TMPFILE
+    bye
+    " 2>/dev/null
+    if [ ! -s "$TMPFILE" ]; then
+        echo "[release-central] ERROR: Missing on server: $remote_file" >&2
+        SPOT_FAILED=1
+    else
+        echo "[release-central] ✓ Verified: $remote_file"
+    fi
+    rm -f "$TMPFILE"
+done
+
+if [ "$SPOT_FAILED" -eq 1 ]; then
+    echo "[release-central] ERROR: Upload verification failed. Some files are missing on server." >&2
+    echo "[release-central] Re-run ./scripts/release-central.sh $VERSION to retry." >&2
+    exit 1
 fi
-rm -f "$REMOTE_CHECK" >/dev/null 2>&1 || true
 
 echo ""
 echo "=== Deploy complete ==="
