@@ -39,7 +39,6 @@ fi
 
 echo "Extracting $TARBALL into $APP_DIR..."
 sudo tar -xzf "$TARBALL" -C "$APP_DIR"
-sudo rm -f "$APP_DIR/database/migrations/2025_02_15_000013_create_print_settings_table.php" 2>/dev/null || true
 cd "$APP_DIR"
 # On Laragon/laptop, use www-data if available, else current user
 RUN_USER="${RUN_USER:-www-data}"

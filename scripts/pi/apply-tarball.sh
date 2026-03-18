@@ -38,7 +38,6 @@ fi
 
 echo "Extracting $TARBALL into $APP_DIR..."
 sudo tar -xzf "$TARBALL" -C "$APP_DIR"
-sudo rm -f "$APP_DIR/database/migrations/2025_02_15_000013_create_print_settings_table.php" 2>/dev/null || true
 sudo chown -R www-data:www-data "$APP_DIR"
 
 echo "Ensuring storage and database writable..."

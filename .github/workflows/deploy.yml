@@ -1,0 +1,78 @@
+name: Deploy
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+jobs:
+  deploy-central:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+
+      - run: composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: npm ci
+      - run: npm run build
+        env:
+          VITE_BROADCASTER: pusher
+          VITE_PUSHER_APP_KEY: ${{ secrets.VITE_PUSHER_APP_KEY }}
+          VITE_PUSHER_APP_CLUSTER: ${{ secrets.VITE_PUSHER_APP_CLUSTER }}
+
+      - run: echo "${{ github.ref_name }}" > storage/app/version.txt
+      - run: touch bootstrap/cache/deploy_pending
+
+      - uses: SamKirkland/FTP-Deploy-Action@v4
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USER }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          server-dir: /
+          exclude: |
+            **/.env
+            **/storage/**
+
+  deploy-edge-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+
+      - run: composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: npm ci
+      - run: npm run build
+        env:
+          VITE_REVERB_APP_KEY: ${{ secrets.VITE_REVERB_APP_KEY }}
+          VITE_REVERB_HOST: ${{ secrets.VITE_REVERB_HOST }}
+          VITE_REVERB_PORT: ${{ secrets.VITE_REVERB_PORT }}
+          VITE_REVERB_SCHEME: https
+          VITE_REVERB_VIA_PROXY: "true"
+
+      - name: Build edge tarball
+        run: |
+          tar -czf flexiqueue-${{ github.ref_name }}-edge.tar.gz \
+            --exclude='.git' --exclude='node_modules' --exclude='.env' \
+            --exclude='storage' --exclude='tests' --exclude='e2e' \
+            --exclude='.github' --exclude='php-run-scripts' \
+            .
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: flexiqueue-${{ github.ref_name }}-edge.tar.gz

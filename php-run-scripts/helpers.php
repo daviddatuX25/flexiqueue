@@ -13,6 +13,9 @@ if (! function_exists('run_initial_setup')) {
             'key:generate' => [],
             'storage:link' => [],
             'migrate'      => ['--force' => true],
+            // Creates superadmin if not exists. Reads SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD from .env.
+            // Safe to re-run (updateOrCreate). Set these in .env on the server before first deploy.
+            'db:seed'      => ['--class' => 'SuperAdminSeeder', '--force' => true],
             'config:cache' => [],
             'route:cache'  => [],
         ];

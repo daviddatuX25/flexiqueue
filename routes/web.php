@@ -279,6 +279,14 @@ Route::middleware(['auth', 'role:admin,supervisor,staff'])->prefix('api')->group
     Route::put('/stations/{station}/display-settings', [ApiStationController::class, 'updateDisplaySettings']);
 });
 
+// Per CI-CD-and-Edge-plan B7: edge setup and waiting (placeholder; real UI in B-5, B-6)
+Route::get('/edge/setup', function () {
+    return Inertia::render('Edge/Setup'); // TODO: replace with SetupController when B-5 builds wizard
+})->name('edge.setup');
+Route::get('/edge/waiting', function () {
+    return Inertia::render('Edge/Waiting'); // TODO: replace with WaitingController when B-6 builds splash
+})->name('edge.waiting');
+
 // Per 05-SECURITY-CONTROLS §2.4: public routes (no auth)
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login')->middleware('guest');
 Route::post('/login', [LoginController::class, 'login'])->middleware('guest');

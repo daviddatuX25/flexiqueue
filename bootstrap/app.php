@@ -23,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/public/site-key',
         ]);
         $middleware->web(append: [
+            \App\Http\Middleware\EdgeBootGuard::class,
             \App\Http\Middleware\EnforceDeviceLock::class,
             \App\Http\Middleware\HandleInertiaRequests::class,
             \App\Http\Middleware\AddPermissionsPolicy::class,

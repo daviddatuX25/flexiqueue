@@ -28,11 +28,26 @@ trap "rm -f $TARBALL" EXIT
 echo "Downloading from $URL..."
 curl -fsSL -o "$TARBALL" "$URL"
 
+# Preserve existing APP_KEY before overwriting .env (Laravel 500s if APP_KEY is empty).
+SAVED_APP_KEY=""
+if [ -f "$APP_DIR/.env" ]; then
+  SAVED_APP_KEY=$(grep -E '^APP_KEY=' "$APP_DIR/.env" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+fi
+
 echo "Extracting in $APP_DIR..."
 cd "$APP_DIR"
 sudo tar -xzf "$TARBALL"
-sudo rm -f database/migrations/2025_02_15_000013_create_print_settings_table.php
 sudo chown -R www-data:www-data .
+
+# Restore or set APP_KEY (empty APP_KEY causes internal server errors everywhere).
+if [ -n "$SAVED_APP_KEY" ]; then
+  echo "Restoring existing APP_KEY..."
+  if grep -qE '^APP_KEY=' "$APP_DIR/.env" 2>/dev/null; then
+    sudo sed -i "s|^APP_KEY=.*|APP_KEY=${SAVED_APP_KEY}|" "$APP_DIR/.env"
+  else
+    echo "APP_KEY=${SAVED_APP_KEY}" | sudo tee -a "$APP_DIR/.env" > /dev/null
+  fi
+fi
 
 if [ -f .env.prod ] && [ ! -f .env ]; then
   echo "Creating .env from .env.prod (first-time setup)..."
