@@ -14,7 +14,7 @@
  *
  * Or from a hosting panel "Run PHP" pointing at this file.
  */
-$app = require __DIR__ . '/bootstrap.php';
+$app = require __DIR__ . '/bootstrap-laravel.php';
 require __DIR__ . '/helpers.php';
 
 run_initial_setup($app);

@@ -1,39 +1,63 @@
 <?php
 
 /**
- * Bootstrap the Laravel application for php-run-scripts helpers.
- *
- * - Locates the app root (one level above this directory)
- * - Loads Composer autoload
- * - Boots the console kernel
- * - In production, refuses to run when invoked via the web (non-CLI)
- *
- * Returns the bootstrapped Illuminate\Foundation\Application instance.
+ * Emergency bootstrap script.
+ * Runs without Laravel being booted — safe when config cache is broken.
+ * Called by Hestia cron or Run PHP panel to recover a broken deployment.
  */
 
 $appRoot = dirname(__DIR__);
+$php = '/usr/bin/php8.2';
+$artisan = $appRoot . '/artisan';
 
-if (!is_file($appRoot . '/vendor/autoload.php')) {
-    die("Laravel app not found. Expected vendor/ at: {$appRoot}\n");
+function run(string $php, string $artisan, string $command): void
+{
+    echo "Running: php artisan $command\n";
+    $output = shell_exec("$php $artisan $command 2>&1");
+    echo $output . "\n";
 }
 
-chdir($appRoot);
-
-require $appRoot . '/vendor/autoload.php';
-
-$app = require $appRoot . '/bootstrap/app.php';
-$kernel = $app->make(Illuminate\Contracts\Console\Kernel::class);
-$kernel->bootstrap();
-
-// In production, refuse to run via web (defense in depth with .htaccess),
-// except when explicitly allowed by the dispatcher (run.php).
-if (php_sapi_name() !== 'cli' && ! defined('PHP_RUN_SCRIPTS_ALLOW_WEB')) {
-    $env = $app->environment();
-    if ($env === 'production') {
-        header('HTTP/1.1 403 Forbidden');
-        die('This script must be run from the command line or your hosting panel in production.');
+// Step 1 — Generate APP_KEY if missing
+$envFile = $appRoot . '/.env';
+if (is_file($envFile)) {
+    $env = file_get_contents($envFile);
+    if ($env !== false && strpos($env, 'APP_KEY=base64:') === false) {
+        run($php, $artisan, 'key:generate --force');
     }
 }
 
-return $app;
+// Step 2 — Clear broken config cache first
+$cacheFiles = glob($appRoot . '/bootstrap/cache/*.php');
+if (is_array($cacheFiles)) {
+    foreach ($cacheFiles as $f) {
+        if (is_file($f)) {
+            @unlink($f);
+            echo "Deleted cache: " . basename($f) . "\n";
+        }
+    }
+}
 
+// Step 3 — Run migrations
+run($php, $artisan, 'migrate --force');
+
+// Step 4 — Seed superadmin
+run($php, $artisan, 'db:seed --class=SuperAdminSeeder --force');
+
+// Step 5 — Regenerate caches
+run($php, $artisan, 'config:cache');
+run($php, $artisan, 'route:cache');
+run($php, $artisan, 'storage:link');
+
+// Step 6 — Write done flag
+$doneFlag = $appRoot . '/bootstrap/cache/initial_setup_done';
+@file_put_contents($doneFlag, date('Y-m-d H:i:s'));
+echo "Written: initial_setup_done\n";
+
+// Step 7 — Remove deploy_pending marker if exists
+$marker = $appRoot . '/bootstrap/cache/deploy_pending';
+if (file_exists($marker)) {
+    unlink($marker);
+    echo "Removed deploy_pending marker.\n";
+}
+
+echo "\nBootstrap complete. Site should be working now.\n";

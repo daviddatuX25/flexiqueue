@@ -45,6 +45,14 @@ if (! function_exists('run_deploy_update')) {
      */
     function run_deploy_update(Application $app): void
     {
+        // Clear config/route cache first so artisan boots cleanly if cache was broken.
+        $cacheFiles = glob(base_path('bootstrap/cache/*.php'));
+        if (is_array($cacheFiles)) {
+            foreach ($cacheFiles as $f) {
+                @unlink($f);
+            }
+        }
+
         $steps = [
             'migrate'      => ['--force' => true],
             'config:cache' => [],
