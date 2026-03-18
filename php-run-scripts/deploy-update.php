@@ -18,3 +18,10 @@ require __DIR__ . '/helpers.php';
 
 run_deploy_update($app);
 
+// Always clear the deploy_pending marker if present, regardless of success.
+$markerPath = __DIR__ . '/../bootstrap/cache/deploy_pending';
+if (file_exists($markerPath)) {
+    unlink($markerPath);
+    echo "[deploy-update] Marker file removed.\n";
+}
+

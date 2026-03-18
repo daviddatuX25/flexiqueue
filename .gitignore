@@ -31,6 +31,7 @@ flexiqueue-*.tar.gz
 *.img.gz
 /bootstrap/cache/*.php
 /bootstrap/cache/deploy_pending
+/bootstrap/cache/initial_setup_done
 /storage/*.key
 /storage/pail
 /vendor

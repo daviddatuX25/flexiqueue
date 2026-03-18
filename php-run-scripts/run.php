@@ -1,4 +1,10 @@
 <?php
+// DISABLED: Web access to run.php is no longer permitted.
+// All maintenance is handled via the superadmin UI in the Laravel app.
+// This file is kept for reference only.
+http_response_code(403);
+echo "Access denied.";
+exit;
 
 /**
  * php-run-scripts dispatcher with a simple HTML form.

@@ -31,6 +31,27 @@ When GitHub Actions is temporarily unavailable, use these scripts to build and d
 
 After a central deploy, ensure the server runs `deploy-update.php` (Hestia cron or Run PHP panel) so migrations and config cache run when `bootstrap/cache/deploy_pending` is present.
 
+### Hestia cron (central)
+
+Set these two cron jobs on the Hestia server:
+
+- **Job 1 — Initial setup (runs once, self-disabling):**
+
+  ```bash
+  */2 * * * * [ ! -f /web/flexiqueue.click/public_html/bootstrap/cache/initial_setup_done ] && \
+    php /web/flexiqueue.click/public_html/php-run-scripts/initial-setup.php
+  ```
+
+- **Job 2 — Deploy marker (runs on every deploy):**
+
+  ```bash
+  */2 * * * * [ -f /web/flexiqueue.click/public_html/bootstrap/cache/deploy_pending ] && \
+    php /web/flexiqueue.click/public_html/php-run-scripts/deploy-update.php
+  ```
+
+`deploy-update.php` deletes the `deploy_pending` marker itself; no `rm` needed.  
+`initial-setup.php` writes the `initial_setup_done` flag; the cron becomes a no-op after the first successful run.
+
 ---
 
 ## Requirements
