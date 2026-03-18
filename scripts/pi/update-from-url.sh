@@ -49,9 +49,9 @@ if [ -n "$SAVED_APP_KEY" ]; then
   fi
 fi
 
-if [ -f .env.prod ] && [ ! -f .env ]; then
-  echo "Creating .env from .env.prod (first-time setup)..."
-  sudo cp .env.prod .env
+if [ -f .env.edge ] && [ ! -f .env ]; then
+  echo "Creating .env from .env.edge (first-time setup)..."
+  sudo cp .env.edge .env
   sudo chown www-data:www-data .env
 fi
 

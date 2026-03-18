@@ -28,13 +28,21 @@ Overview of all scripts (dev + Pi): [scripts/README.md](../README.md).
 
 ---
 
+## Local hostname
+On your PC or any device accessing the Pi, add to /etc/hosts:
+  192.168.x.x  flexiqueue.edge
+Replace 192.168.x.x with the Pi's actual LAN IP.
+If using dnsmasq or Pi-hole, add an A record for flexiqueue.edge instead.
+
+---
+
 ## Full setup (first-time on Pi)
 
 Prepare the Pi system once (PHP, Nginx, SQLite, app dir, nginx site, Reverb and queue worker). Then deploy the app from your PC.
 
 1. Copy this folder to the Pi (or extract the deploy tarball into `/var/www/flexiqueue`).
-2. On the Pi: `sudo ./scripts/pi/full-setup-pi.sh` (optionally `--hostname=orangepione` for mDNS).
-3. From your PC: `PI_HOST=orangepione.local ./scripts/deploy-to-pi.sh --build` (or use the Pi IP).
+2. On the Pi: `sudo ./scripts/pi/full-setup-pi.sh` (optionally `--hostname=flexiqueue.edge` for mDNS).
+3. From your PC: `PI_HOST=flexiqueue.edge ./scripts/deploy-to-pi.sh --build` (or use the Pi IP).
 
 ---
 
@@ -79,10 +87,10 @@ sudo systemctl restart flexiqueue-queue
 ### WebSocket (Reverb) networking model on the Pi
 
 - **Reverb listens on**: `127.0.0.1:6001` (or `0.0.0.0:6001` as the service bind), managed by `flexiqueue-reverb.service`.
-- **Browsers should connect to**: the **Nginx site** on port **80/443**, path `/app` (example: `ws://orangepione.local/app/...`).
+- **Browsers should connect to**: the **Nginx site** on port **80/443**, path `/app` (example: `ws://flexiqueue.edge/app/...`).
 - **Nginx proxies**: `/app` → `http://127.0.0.1:6001`.
 
-If a browser connects directly to `ws://orangepione.local:6001/app/...` and port `6001` is blocked by firewall / network policy, you’ll see errors like “WebSocket is closed before the connection is established”. Using the Nginx proxy avoids this.
+If a browser connects directly to `ws://flexiqueue.edge:6001/app/...` and port `6001` is blocked by firewall / network policy, you’ll see errors like “WebSocket is closed before the connection is established”. Using the Nginx proxy avoids this.
 
 Full deployment and first-time setup: [docs/architecture/10-DEPLOYMENT.md](../../docs/architecture/10-DEPLOYMENT.md).
 
@@ -90,7 +98,7 @@ Full deployment and first-time setup: [docs/architecture/10-DEPLOYMENT.md](../..
 
 If the backend uses old broadcast credentials (e.g. app id `747972` or key `fwa0z3...`) or Reverb isn’t running:
 
-1. **Set Reverb vars in `.env`** (must match `.env.prod` and the frontend build):
+1. **Set Reverb vars in `.env`** (must match `.env.edge` and the frontend build):
    ```bash
    cd /var/www/flexiqueue
    sudo sed -i 's/^BROADCAST_CONNECTION=.*/BROADCAST_CONNECTION=reverb/' .env
@@ -112,7 +120,7 @@ If the backend uses old broadcast credentials (e.g. app id `747972` or key `fwa0
 
 Use this when you only want to update or add the Pi helper scripts (Reverb and queue worker services, zerotier-when-idle, nginx config) without running a full tarball deploy.
 
-**From your PC** (repo root). Replace `<pi-ip>` with the Pi’s hostname or IP (e.g. `orangepione.local` or `192.168.1.50`), and `root` with your Pi user if different:
+**From your PC** (repo root). Replace `<pi-ip>` with the Pi’s hostname or IP (e.g. `flexiqueue.edge` or `192.168.1.50`), and `root` with your Pi user if different:
 
 ```bash
 # 1. Create scripts dir on Pi if needed, then copy scripts/pi into it
@@ -237,6 +245,18 @@ To make the camera work on phones:
 - Use **HTTPS** when accessing from phones (see [HTTPS on the Pi](#https-on-the-pi-self-signed) below), or
 - Use a hostname that resolves to localhost (e.g. `localhost` on the same device).
 
+## HTTPS and camera access
+
+HTTPS is configured automatically in the golden image.
+Every flashed Pi boots with HTTPS already enabled for https://flexiqueue.edge
+
+On client devices (phones, tablets, PCs):
+- Open https://flexiqueue.edge in the browser
+- Accept the self-signed certificate warning once
+- Camera (QR scanning) will then work normally
+
+No SSH, no terminal, no manual steps on the Pi needed.
+
 ---
 
 ### HTTPS on the Pi (self-signed)
@@ -249,17 +269,17 @@ On a Pi that already has FlexiQueue and Nginx installed, run from the app root:
 
 ```bash
 cd /var/www/flexiqueue
-sudo ./scripts/pi/setup-ssl.sh --hostname=orangepione.local
+sudo ./scripts/pi/setup-ssl.sh --hostname=flexiqueue.edge
 ```
 
-Replace `orangepione.local` with the hostname your phones use to reach the Pi (e.g. `orangepione.local` for mDNS, or your Pi's IP if you use that). The script will:
+Replace `flexiqueue.edge` with the hostname your phones use to reach the Pi (e.g. `flexiqueue.edge` for mDNS, or your Pi's IP if you use that). The script will:
 
 - Create `/etc/nginx/ssl/` and generate a self-signed cert (CN + SAN for the hostname)
 - Install `nginx-flexiqueue-ssl.conf` as the Nginx site (HTTP redirects to HTTPS)
 - Set `APP_URL=https://<hostname>` in `.env` and run `config:cache`
 - Reload Nginx and restart Reverb if present
 
-Then open the app on your phone at `https://orangepione.local` (or your hostname), accept the certificate warning once, and the camera should work.
+Then open the app on your phone at `https://flexiqueue.edge` (or your hostname), accept the certificate warning once, and the camera should work.
 
 **Option B: Manual steps**
 
@@ -270,10 +290,10 @@ sudo mkdir -p /etc/nginx/ssl
 sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
   -keyout /etc/nginx/ssl/flexiqueue.key \
   -out /etc/nginx/ssl/flexiqueue.crt \
-  -subj "/CN=orangepione.local" -addext "subjectAltName=DNS:orangepione.local,IP:127.0.0.1"
+  -subj "/CN=flexiqueue.edge" -addext "subjectAltName=DNS:flexiqueue.edge,IP:127.0.0.1"
 ```
 
-Replace `orangepione.local` with your Pi hostname or add more `DNS:`/`IP:` entries if you use other hostnames or IPs.
+Replace `flexiqueue.edge` with your Pi hostname or add more `DNS:`/`IP:` entries if you use other hostnames or IPs.
 
 **2. Use the HTTPS Nginx config**
 
@@ -289,15 +309,15 @@ On the Pi, set `APP_URL` to `https://` so links and redirects use HTTPS:
 
 ```bash
 cd /var/www/flexiqueue
-sudo sed -i 's|^APP_URL=.*|APP_URL=https://orangepione.local|' .env
+sudo sed -i 's|^APP_URL=.*|APP_URL=https://flexiqueue.edge|' .env
 sudo -u www-data php artisan config:cache
 ```
 
-Replace `orangepione.local` with your hostname. Restart Reverb if you use it: `sudo systemctl restart flexiqueue-reverb`.
+Replace `flexiqueue.edge` with your hostname. Restart Reverb if you use it: `sudo systemctl restart flexiqueue-reverb`.
 
 **4. Open the app on your phone via HTTPS**
 
-Use `https://orangepione.local` (or your hostname). Accept the browser’s certificate warning once; then the camera should work.
+Use `https://flexiqueue.edge` (or your hostname). Accept the browser’s certificate warning once; then the camera should work.
 
 **Let’s Encrypt (optional)**  
 For a trusted cert with no warning, use Let’s Encrypt. You need a public hostname and port 80 (and optionally 443) reachable from the internet for validation. See your distro’s certbot docs; then use the same Nginx SSL pattern with the cert paths certbot provides.

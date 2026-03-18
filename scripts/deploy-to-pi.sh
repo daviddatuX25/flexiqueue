@@ -10,7 +10,7 @@
 #   PI_HOST=... ./scripts/deploy-to-pi.sh --build --migrate=incremental|fresh|skip
 #
 # Requires: flexiqueue-deploy.tar.gz in repo root (or run with --build).
-# Pi must have: /var/www/flexiqueue (and database/database.sqlite for SQLite). If .env is missing, it is created from .env.prod in the tarball on first deploy.
+# Pi must have: /var/www/flexiqueue (and database/database.sqlite for SQLite). If .env is missing, it is created from .env.edge in the tarball on first deploy.
 
 set -e
 cd "$(dirname "$0")/.."

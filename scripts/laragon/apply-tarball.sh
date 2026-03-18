@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run ON THE LARAGON/LAPTOP after the tarball is present (e.g. /tmp/flexiqueue-deploy.tar.gz).
-# Same logic as scripts/pi/apply-tarball.sh: extract, .env from .env.prod if missing, DB to sqlite, cache, migrate, restart Reverb and queue worker.
+# Same logic as scripts/pi/apply-tarball.sh: extract, .env from .env.edge if missing, DB to sqlite, cache, migrate, restart Reverb and queue worker.
 # App dir configurable via LARAGON_APP_DIR (default /var/www/flexiqueue for WSL/Linux).
 #
 # Usage (on the target machine, e.g. via SSH from deploy-to-laragon.sh):
@@ -55,9 +55,9 @@ sudo chown -R "$RUN_USER:$RUN_USER" storage 2>/dev/null || true
 sudo chown -R "$RUN_USER:$RUN_USER" database 2>/dev/null || true
 test -f database/database.sqlite && sudo chmod 664 database/database.sqlite || true
 
-if [ -f .env.prod ] && [ ! -f .env ]; then
-  echo "Creating .env from .env.prod..."
-  sudo cp .env.prod .env
+if [ -f .env.edge ] && [ ! -f .env ]; then
+  echo "Creating .env from .env.edge..."
+  sudo cp .env.edge .env
   sudo chown "$RUN_USER:$RUN_USER" .env 2>/dev/null || true
 fi
 

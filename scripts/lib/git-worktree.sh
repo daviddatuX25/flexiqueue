@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# -----------------------------------------------------------------------------
+# DEPRECATED — Do not use in new scripts.
+# This file is no longer used by the main build/deploy scripts. The new release
+# model builds directly from the current branch using Sail/Docker via
+# scripts/release-central.sh and scripts/release-edge.sh. Kept only because
+# scripts/legacy/ scripts may still source it. Do not delete the file.
+# -----------------------------------------------------------------------------
+
 # Helpers for prod branch and worktree handling. Source from scripts that need prod worktrees.
 # Usage: source "$(dirname "${BASH_SOURCE[0]}")/../lib/git-worktree.sh"  (from scripts/*.sh)
 # Requires: REPO_ROOT set by caller, or we are in a git repo (REPO_ROOT derived from git rev-parse --show-toplevel).

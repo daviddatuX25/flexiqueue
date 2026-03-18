@@ -6,6 +6,33 @@ Helper scripts for local development, building, and deploying to Orange Pi or La
 
 ---
 
+## Manual release (GitHub Actions unavailable)
+
+When GitHub Actions is temporarily unavailable, use these scripts to build and deploy from your machine. They do the same work as `.github/workflows/deploy.yml` (central FTP deploy and edge GitHub Release).
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/release-central.sh [version]` | Build (Sail/Docker) and deploy to Hestia hosting via FTP. Writes `storage/app/version.txt`, touches `bootstrap/cache/deploy_pending`, then mirrors the repo to the server (excluding `.env`, `storage/`, `node_modules/`, `.git/`). |
+| `scripts/release-edge.sh [version]` | Build (Sail/Docker) and publish the edge tarball as a GitHub Release asset. Creates `flexiqueue-<version>-edge.tar.gz`, runs `gh release create` or `gh release upload --clobber`, then removes the local tarball. |
+
+**Version:** Optional. Pass e.g. `v0.1.0` or omit to use the latest git tag (`git describe --tags --abbrev=0`). If no tag exists, the script exits with an error.
+
+**Prerequisites:**
+
+- **Central:** Docker, **lftp** (`sudo apt install lftp`). Credentials in **`.env.hosting`**: `FTP_HOST`, `FTP_USER` (or `FTP_USERNAME`), `FTP_PASSWORD`; and for the frontend build: `VITE_PUSHER_APP_KEY`, `VITE_PUSHER_APP_CLUSTER` (or `PUSHER_APP_KEY`, `PUSHER_APP_CLUSTER`).
+- **Edge:** Docker, **gh CLI** ([install](https://cli.github.com)), then `gh auth login`. Reverb vars in **`.env.edge`**: `VITE_REVERB_APP_KEY`, `VITE_REVERB_HOST`, `VITE_REVERB_PORT` (or `REVERB_APP_KEY`, `REVERB_HOST`, `REVERB_PORT`).
+
+**Examples:**
+
+```bash
+./scripts/release-central.sh v0.1.0   # Deploy central to hosting
+./scripts/release-edge.sh v0.1.0      # Build and publish edge tarball to GitHub Release
+```
+
+After a central deploy, ensure the server runs `deploy-update.php` (Hestia cron or Run PHP panel) so migrations and config cache run when `bootstrap/cache/deploy_pending` is present.
+
+---
+
 ## Requirements
 
 | Context | What you need |
@@ -21,11 +48,11 @@ Helper scripts for local development, building, and deploying to Orange Pi or La
 
 | Location | Purpose |
 |----------|---------|
-| **scripts/** (root) | Build and deploy entry points: `build-deploy-tarball.sh`, `build-deploy-tarball-sail.sh`, `build-deploy-hosting.sh`, `deploy-to-pi.sh`, `deploy-to-laragon.sh`, `deploy-via-prod-to-pi.sh`, `dev-start-sail.sh`, `dev-stop-sail.sh`, `dev-start-local.sh`, `dev-stop-local.sh` |
+| **scripts/** (root) | Build and deploy entry points: `build-deploy-tarball.sh`, `build-deploy-tarball-sail.sh`, `build-deploy-hosting.sh`, `deploy-to-pi.sh`, `deploy-to-laragon.sh`, `dev-start-sail.sh`, `dev-stop-sail.sh`, `dev-start-local.sh`, `dev-stop-local.sh` |
 | **scripts/dev/** | Development: `setup.sh`, `full-setup-dev.sh`, `quick-check.sh`, `cache-clear.sh`, `common.sh` |
 | **scripts/pi/** | Run on the Pi: `apply-tarball.sh`, `full-setup-pi.sh`, `update-from-url.sh`, nginx/Reverb configs |
 | **scripts/laragon/** | Run on Laragon/laptop: `apply-tarball.sh` |
-| **scripts/lib/** | Shared helpers (do not run directly): `git-worktree.sh` — prod branch and worktree handling for build/deploy scripts |
+| **scripts/lib/** | Shared helpers (do not run directly): `git-worktree.sh` — **deprecated**; kept for scripts/legacy/ only |
 
 ---
 
@@ -40,9 +67,8 @@ Helper scripts for local development, building, and deploying to Orange Pi or La
 | Build hosting tarball | Build | `./scripts/build-deploy-hosting.sh` |
 | Deploy to Pi (interactive) | Deploy Pi | `PI_HOST=... ./scripts/deploy-to-pi.sh --build` |
 | Deploy to Pi (one-click) | Deploy Pi | `PI_HOST=... DEPLOY_MIGRATE=1 ./scripts/deploy-to-pi.sh --build` |
-| Deploy to Pi from prod (merge + build + deploy) | Deploy Pi | `PI_HOST=... ./scripts/deploy-via-prod-to-pi.sh --build` |
-| Deploy to Laragon/laptop (merge + build + deploy) | Deploy Laragon | `LARAGON_HOST=... ./scripts/deploy-to-laragon.sh --build` |
-| Pi first-time system setup | On-Pi | On Pi: `sudo ./scripts/pi/full-setup-pi.sh [--hostname=orangepione]` then from PC: `PI_HOST=... ./scripts/deploy-to-pi.sh --build` |
+| Deploy to Laragon/laptop (optional build + deploy) | Deploy Laragon | `LARAGON_HOST=... ./scripts/deploy-to-laragon.sh --build` |
+| Pi first-time system setup | On-Pi | On Pi: `sudo ./scripts/pi/full-setup-pi.sh [--hostname=flexiqueue.edge]` then from PC: `PI_HOST=... ./scripts/deploy-to-pi.sh --build` |
 | Pi one-click update (from URL) | On-Pi | On Pi: `sudo flexiqueue-update "https://...tarball.tar.gz"` (after installing script once) |
 
 ---
@@ -64,23 +90,17 @@ Helper scripts for local development, building, and deploying to Orange Pi or La
 
 ## 2. Build
 
+Build scripts run from the **current branch** (repo root). No prod branch or worktrees are used. Tags on **main** are the only release trigger for the release scripts (`release-central.sh`, `release-edge.sh`).
+
 | Script | Purpose |
 |--------|--------|
-| `build-deploy-tarball.sh` | Build production tarball on host from a **temporary prod worktree** (Composer --no-dev, npm build). Output: `flexiqueue-deploy.tar.gz` in repo root. Main repo and dev environment are untouched. |
-| `build-deploy-tarball-sail.sh` | Same, using Docker (worktree mounted in container). Use when host has no PHP/Node. |
+| `build-deploy-tarball.sh` | Build production tarball on host (Composer --no-dev, npm build). Output: `flexiqueue-deploy.tar.gz` in repo root. |
+| `build-deploy-tarball-sail.sh` | Same, using Sail/Docker (repo root bind-mounted in container). Use when host has no PHP/Node. |
 | `build-deploy-hosting.sh` | Build for **hosting** (PHP 8.2 max, MySQL, Pusher). Requires `.env.hosting` (copy from `.env.hosting.example`). Output: `flexiqueue-hosting.tar.gz`. Uses `VITE_BROADCASTER=pusher` so Echo connects to Pusher.com. |
 
-**Prod worktree and prompts:**
+**Reverb (WebSocket) keys for Pi/Laragon tarball:** The frontend needs `VITE_REVERB_APP_KEY` at build time. The tarball build scripts load `.env.prod` only (unset dev vars first) and pass Reverb vars into the build.
 
-- Builds always use the **prod** branch. If the prod branch does not exist, you are prompted: **"Create prod branch from current? [y/N]"**. Answer **y** to create it and continue.
-- If prod is already checked out in another worktree, you are prompted: **"Prod is already checked out elsewhere. Use that worktree for build? [y/N]"**. Answer **y** to reuse it (no second worktree).
-- Build-only scripts use a **temporary** worktree (unique path, removed on exit). Deploy scripts use a **fixed** worktree path; if that path exists but is invalid, you are prompted to remove it.
-
-**After a build-only run:** If your current branch is not prod, you will see a message suggesting you switch to prod (`git checkout prod`) and run `deploy-to-pi.sh` or `deploy-to-laragon.sh`, or use `deploy-via-prod-to-pi.sh` / `deploy-to-laragon.sh` from your current branch (they merge into prod and deploy). When the build is run from inside a deploy script, this message is not shown.
-
-**Reverb (WebSocket) keys for one-go build:** The frontend needs `VITE_REVERB_APP_KEY` at build time so Echo/Pusher works on the Display. Both build scripts load `.env.prod` only (unset dev vars first) and pass Reverb vars into the build. Defaults in `.env.prod` and `.env.example` (`REVERB_APP_ID`, `REVERB_APP_KEY`, etc.) mean a single build + deploy works.
-
-- **`VITE_REVERB_VIA_PROXY`**: Prod builds use `true` (default) so Echo connects same-origin; nginx proxies `/app` to Reverb. Dev uses `false` in `.env` so Echo connects directly to `localhost:6001` (no proxy on dev server). Set in `.env.prod` to override.
+- **`VITE_REVERB_VIA_PROXY`**: Prod builds use `true` (default) so Echo connects same-origin; nginx proxies `/app` to Reverb. Dev uses `false` in `.env` so Echo connects directly to `localhost:6001`. Set in `.env.prod` to override.
 
 ---
 
@@ -90,22 +110,17 @@ Helper scripts for local development, building, and deploying to Orange Pi or La
 
 | Script | Purpose |
 |--------|--------|
-| `deploy-to-pi.sh` | Optional build, scp tarball to Pi, run `scripts/pi/apply-tarball.sh` with migrate option (interactive or `DEPLOY_MIGRATE=1|2|3` / `--migrate=incremental|fresh|skip`). **Does not change** your current branch. |
-| `deploy-via-prod-to-pi.sh` | **Prod-as-staging:** Merge current branch into prod and push, build from prod worktree, run deploy-to-pi.sh. After a **successful** deploy, the main worktree is switched to **prod**. Option `--no-merge` to skip merge. |
+| `deploy-to-pi.sh` | Optional build (from current branch), scp tarball to Pi, run `scripts/pi/apply-tarball.sh` with migrate option (interactive or `DEPLOY_MIGRATE=1|2|3` / `--migrate=incremental|fresh|skip`). Does not change your current branch. |
 
-**Examples:** `PI_HOST=orangepione.local ./scripts/deploy-to-pi.sh --build` · `PI_HOST=... DEPLOY_MIGRATE=1 ./scripts/deploy-to-pi.sh --build` · `PI_HOST=... ./scripts/deploy-via-prod-to-pi.sh --build`
+**Examples:** `PI_HOST=flexiqueue.edge ./scripts/deploy-to-pi.sh --build` · `PI_HOST=... DEPLOY_MIGRATE=1 ./scripts/deploy-to-pi.sh --build`
 
 ### Deploy to Laragon / laptop
 
 | Script | Purpose |
 |--------|--------|
-| `deploy-to-laragon.sh` | **Prod-as-staging:** Merge current into prod and push, build from prod worktree, scp to LARAGON_HOST, SSH and run `scripts/laragon/apply-tarball.sh`. After a **successful** deploy, the main worktree is switched to **prod**. Option `--no-merge`, `--migrate=...`. |
+| `deploy-to-laragon.sh` | Optional build (from current branch), scp to LARAGON_HOST, SSH and run `scripts/laragon/apply-tarball.sh`. Options: `--build`, `--migrate=incremental|fresh|skip`. |
 
 **Example:** `LARAGON_HOST=laptop.local ./scripts/deploy-to-laragon.sh --build`
-
-**Branch behavior:** Only **deploy-to-laragon.sh** and **deploy-via-prod-to-pi.sh** switch you to the prod branch after deploy. **deploy-to-pi.sh** (when run directly) does not change your branch.
-
-**Deprecated:** `deploy-via-prod.sh` — forwards to deploy-via-prod-to-pi.sh. Use `deploy-via-prod-to-pi.sh` or `deploy-to-laragon.sh` directly.
 
 ---
 
@@ -130,7 +145,7 @@ Details: [scripts/pi/README.md](pi/README.md).
 
 ## 5. Laptop / Laragon (production)
 
-Same tarball as Pi. Use **deploy-to-laragon.sh** with `LARAGON_HOST=...`. Prepare the laptop once: app directory, SSH; nginx, Reverb, and queue worker if you need WebSockets and TTS/queued jobs. After build you see: **"Merged to prod and pushed. Tarball built from prod."**
+Same tarball as Pi. Use **deploy-to-laragon.sh** with `LARAGON_HOST=...`. Prepare the laptop once: app directory, SSH; nginx, Reverb, and queue worker if you need WebSockets and TTS/queued jobs.
 
 See [scripts/laragon/README.md](laragon/README.md) for preparing the target and [docs/architecture/10-DEPLOYMENT.md](../docs/architecture/10-DEPLOYMENT.md) for nginx/Reverb.
 
@@ -174,14 +189,35 @@ No .bat/.ps1 wrappers; all logic is in the bash scripts above.
 
 ---
 
+## Cleaning up old prod/prod-hosting branches and worktrees
+
+The build/deploy scripts no longer use a **prod** or **prod-hosting** branch or worktrees. After you have verified that the updated scripts work, you can remove the old branches and worktree manually:
+
+```bash
+# Delete local prod branch (if it exists)
+git branch -d prod
+
+# Delete remote prod branch (if it was pushed)
+git push origin --delete prod
+
+# Same for prod-hosting
+git branch -d prod-hosting
+git push origin --delete prod-hosting
+
+# Remove the prod-hosting worktree (use the path your repo used, e.g. sibling directory)
+git worktree remove /home/sarmi/projects/flexiqueue-prod-hosting --force
+```
+
+Do not delete branches until you have confirmed the new scripts behave as expected.
+
+---
+
 ## Troubleshooting
 
 | Issue | What to do |
 |-------|------------|
-| **"Prod branch is required"** | Create it: `git branch prod` (or answer **y** when prompted "Create prod branch from current?"). |
 | **"Not inside a git repository"** | Run the script from the FlexiQueue repo root (the directory that contains `composer.json` and `scripts/`). |
 | **"composer not found" / "npm not found"** | Install PHP/Composer and Node/npm on the host, or use the Sail build: `./scripts/build-deploy-tarball-sail.sh` (requires Docker). |
 | **"Docker is required for Sail build"** | Start Docker Desktop (or the Docker daemon). If you have PHP/Node on the host, use `./scripts/build-deploy-tarball.sh` instead. |
-| **"Prod is already checked out elsewhere"** | Answer **y** to use the existing prod worktree, or run the build from that worktree. Deploy scripts (e.g. `deploy-to-laragon.sh`) use a fixed worktree path; build-only scripts use a temporary one. |
 | **SSH / deploy fails** | Ensure `PI_HOST` or `LARAGON_HOST` is set and you can `ssh user@host`. Use SSH keys to avoid repeated password prompts. |
 | **Apply-tarball fails on Pi** | Run with `sudo`. Ensure `/var/www/flexiqueue` exists (run `full-setup-pi.sh` once). Check that `scripts/pi/apply-tarball.sh` exists in the tarball. |

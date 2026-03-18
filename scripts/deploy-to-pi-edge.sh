@@ -7,15 +7,15 @@
 #   tarball + scripts/pi/apply-tarball.sh to the Pi and runs apply-tarball.
 #
 # What this does differently from deploy-to-pi.sh:
-#   1. Uses .env.edge (not .env.prod) as the base .env on the Pi after apply.
+#   1. Uses .env.edge as the base .env on the Pi after apply.
 #   2. After apply, writes APP_MODE=edge, CENTRAL_URL, CENTRAL_API_KEY, SITE_ID into .env.
 #   3. After apply, prompts whether to run edge:import-package to sync a program from central.
 #
 # Central server for all envs: https://flexiqueue.click (set in env.edge and .env.hosting).
 #
 # Usage (from repo root):
-#   PI_HOST=orangepione.local ./scripts/deploy-to-pi-edge.sh
-#   PI_HOST=orangepione.local ./scripts/deploy-to-pi-edge.sh --build
+#   PI_HOST=flexiqueue.edge ./scripts/deploy-to-pi-edge.sh
+#   PI_HOST=flexiqueue.edge ./scripts/deploy-to-pi-edge.sh --build
 #   PI_HOST=... DEPLOY_MIGRATE=1 ./scripts/deploy-to-pi-edge.sh --build
 #   PI_HOST=... CENTRAL_URL=https://central.example.com CENTRAL_API_KEY=sk_live_xxx SITE_ID=1 \
 #     ./scripts/deploy-to-pi-edge.sh --build --import=1
@@ -122,7 +122,7 @@ echo "  ————————————————————————
 
 # ── Pi host ────────────────────────────────────────────────────────────────────
 if [ -z "$PI_HOST" ]; then
-  read -r -p "  Pi host (IP or hostname, e.g. orangepione.local): " PI_HOST
+  read -r -p "  Pi host (IP or hostname, e.g. flexiqueue.edge): " PI_HOST
   PI_HOST="$(echo "$PI_HOST" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
   if [ -z "$PI_HOST" ]; then
     echo "No host given. Exiting."

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Build FlexiQueue deploy tarball locally for Orange Pi deployment.
-# Builds from a temporary prod worktree so the main repo (and dev) is untouched.
-# Run from repo root: ./scripts/build-deploy-tarball.sh
+# Builds directly from the current branch (repo root). Run from repo root: ./scripts/build-deploy-tarball.sh
 # Output: flexiqueue-deploy.tar.gz in repo root.
 
 set -e
@@ -22,12 +21,6 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-source "$SCRIPT_DIR/lib/git-worktree.sh"
-
-ensure_prod_branch "[FlexiQueue]"
-ensure_prod_worktree_temporary
-trap cleanup_prod_worktree_temporary EXIT
-
 # Load Reverb keys so Vite inlines them (Echo needs VITE_REVERB_APP_KEY).
 # For deploy builds, .env.prod is the ONLY source; unset any inherited dev vars.
 # VITE_REVERB_VIA_PROXY=true for prod: Echo uses same-origin (nginx proxies /app to Reverb).
@@ -41,9 +34,8 @@ export VITE_REVERB_PORT="${REVERB_PORT:-6001}"
 export VITE_REVERB_SCHEME="${REVERB_SCHEME:-http}"
 export VITE_REVERB_VIA_PROXY="${VITE_REVERB_VIA_PROXY:-true}"
 
-echo "Building in prod worktree at $PROD_WORKTREE..."
+echo "Building in $REPO_ROOT..."
 echo "  Reverb key: ${VITE_REVERB_APP_KEY:0:8}... | via-proxy: ${VITE_REVERB_VIA_PROXY} (from .env.prod)"
-cd "$PROD_WORKTREE"
 
 echo "Installing Composer dependencies (--no-dev, platform PHP 8.3 for Orange Pi prod)..."
 composer config platform.php 8.3
@@ -105,15 +97,9 @@ tar -czf flexiqueue-deploy.tar.gz \
 composer config --unset platform.php 2>/dev/null || true
 
 if [ ! -f flexiqueue-deploy.tar.gz ]; then
-  echo "Error: Tarball was not created in worktree." >&2
+  echo "Error: Tarball was not created." >&2
   exit 1
 fi
-cp flexiqueue-deploy.tar.gz "$REPO_ROOT/flexiqueue-deploy.tar.gz"
-cd "$REPO_ROOT"
 
 echo "Done. Output: $REPO_ROOT/flexiqueue-deploy.tar.gz"
-if [ -f flexiqueue-deploy.tar.gz ]; then
-  ls -la flexiqueue-deploy.tar.gz
-fi
-
-print_build_complete_message_if_not_prod
+ls -la flexiqueue-deploy.tar.gz

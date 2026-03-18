@@ -4,8 +4,8 @@
 # Run from the Pi, from the app directory (e.g. after extracting tarball to /var/www/flexiqueue).
 #
 # Usage (on the Pi):
-#   sudo ./scripts/pi/full-setup-pi.sh [--hostname=orangepione]
-# Or: FQ_HOSTNAME=orangepione sudo ./scripts/pi/full-setup-pi.sh
+#   sudo ./scripts/pi/full-setup-pi.sh [--hostname=flexiqueue.edge]
+# Or: FQ_HOSTNAME=flexiqueue.edge sudo ./scripts/pi/full-setup-pi.sh
 #
 # Requires: run as root; Armbian/Ubuntu (apt).
 
@@ -17,7 +17,7 @@ APP_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # Must run as root (apt, systemctl, /etc, chown)
 if [ "$(id -u)" -ne 0 ]; then
   echo "This script must be run as root (e.g. sudo)." >&2
-  echo "Usage: sudo $0 [--hostname=orangepione]" >&2
+  echo "Usage: sudo $0 [--hostname=flexiqueue.edge]" >&2
   exit 1
 fi
 

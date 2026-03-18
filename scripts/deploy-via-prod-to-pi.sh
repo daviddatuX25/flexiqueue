@@ -2,7 +2,7 @@
 # Deploy to Pi using prod-as-staging: merge current branch into prod and push, then build from prod worktree and run deploy-to-pi.sh.
 #
 # Usage (from repo root):
-#   PI_HOST=orangepione.local ./scripts/deploy-via-prod-to-pi.sh [--build] [--no-merge] [deploy-to-pi args...]
+#   PI_HOST=flexiqueue.edge ./scripts/deploy-via-prod-to-pi.sh [--build] [--no-merge] [deploy-to-pi args...]
 # Example: PI_HOST=10.22.25.107 ./scripts/deploy-via-prod-to-pi.sh --build DEPLOY_MIGRATE=1
 #
 # Option --no-merge: skip merge (e.g. already on prod). All other args are forwarded to deploy-to-pi.sh.

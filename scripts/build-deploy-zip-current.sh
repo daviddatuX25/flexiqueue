@@ -65,7 +65,7 @@ rsync -a \
   --exclude="storage/logs" \
   --exclude=".env" \
   --exclude=".env.example" \
-  --exclude=".env.prod" \
+  --exclude=".env.edge" \
   --exclude=".env.production" \
   --exclude=".cursor" \
   --exclude=".beads" \

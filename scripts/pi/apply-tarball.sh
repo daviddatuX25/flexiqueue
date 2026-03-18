@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run ON THE PI after the tarball is present (e.g. /tmp/flexiqueue-deploy.tar.gz).
-# Apply tarball: extract, chown, .env from .env.prod if missing, DB to sqlite, cache, migrate, restart Reverb and queue worker.
+# Apply tarball: extract, chown, .env from .env.edge if missing, DB to sqlite, cache, migrate, restart Reverb and queue worker.
 # Callable from deploy-to-pi.sh (via SSH) or manually on the Pi.
 #
 # Usage (on the Pi):
@@ -52,10 +52,10 @@ if [ -f "$APP_DIR/.env" ]; then
   SAVED_APP_KEY=$(grep -E '^APP_KEY=' "$APP_DIR/.env" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
 fi
 
-# Set .env from tarball's .env.prod so BROADCAST_CONNECTION and REVERB_* are correct (avoids 747972 / stale keys).
-if [ -f "$APP_DIR/.env.prod" ]; then
-  echo "Setting .env from .env.prod..."
-  sudo cp "$APP_DIR/.env.prod" "$APP_DIR/.env"
+# Set .env from tarball's .env.edge so BROADCAST_CONNECTION and REVERB_* are correct (avoids 747972 / stale keys).
+if [ -f "$APP_DIR/.env.edge" ]; then
+  echo "Setting .env from .env.edge..."
+  sudo cp "$APP_DIR/.env.edge" "$APP_DIR/.env"
   sudo chown www-data:www-data "$APP_DIR/.env"
 fi
 

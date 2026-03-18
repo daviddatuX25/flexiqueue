@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a hosting-ready folder from the prod-hosting branch (no in-progress dev work).
+# Build a hosting-ready folder from the current branch (no worktree).
 # - Targets PHP 8.2 via composer platform.php
 # - Uses .env.hosting for MySQL + Pusher and RUN_SCRIPTS_PASSWORD=123456
 # - Includes php-run-scripts in the output
@@ -32,49 +32,19 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-# Branch used as the stable source for hosting builds.
-BRANCH="prod-hosting"
-
-# Source branch/ref to mirror into prod-hosting (defaults to current branch, e.g. dev).
-CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-SOURCE_BRANCH="${HOSTING_SOURCE_BRANCH:-$CURRENT_BRANCH}"
-
-PARENT_DIR="$(cd "$REPO_ROOT/.." && pwd)"
-PROD_WORKTREE="$PARENT_DIR/flexiqueue-prod-hosting"
-
-# Always recreate the prod-hosting worktree fresh so it mirrors SOURCE_BRANCH.
-if [ -d "$PROD_WORKTREE" ]; then
-  echo "Removing existing prod-hosting worktree at $PROD_WORKTREE (build artifacts only)..."
-  git worktree remove "$PROD_WORKTREE" --force >/dev/null 2>&1 || true
-fi
-
-# Ensure prod-hosting branch exists and points at SOURCE_BRANCH (e.g. dev).
-if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-  echo "Updating $BRANCH to track $SOURCE_BRANCH..."
-  git branch -f "$BRANCH" "$SOURCE_BRANCH"
-else
-  echo "Creating $BRANCH from $SOURCE_BRANCH..."
-  git branch "$BRANCH" "$SOURCE_BRANCH"
-fi
-
-echo "Creating prod-hosting worktree at $PROD_WORKTREE from $BRANCH..."
-git worktree add "$PROD_WORKTREE" "$BRANCH"
-
 STAMP="$(date +%Y%m%d-%H%M%S)"
 RELEASES_DIR="$REPO_ROOT/releases"
 OUTPUT_DIR="$RELEASES_DIR/flexiqueue-hosting-folder-$STAMP"
 
 mkdir -p "$OUTPUT_DIR"
 
-echo "Building from prod worktree at: $PROD_WORKTREE"
+echo "Building from: $REPO_ROOT"
 echo "Output folder will be: $OUTPUT_DIR"
 
 # Load hosting env so Vite sees hosting values when building.
 set -a
 source "$REPO_ROOT/.env.hosting" 2>/dev/null || true
 set +a
-
-cd "$PROD_WORKTREE"
 
 echo "Running Composer install for PHP 8.2 (no-dev, optimized autoloader)..."
 composer config platform.php 8.2
@@ -105,10 +75,12 @@ rsync -a \
   --exclude='e2e' \
   --exclude='playwright-report' \
   --exclude='test-results' \
-  "$PROD_WORKTREE"/ "$OUTPUT_DIR"/
+  "$REPO_ROOT"/ "$OUTPUT_DIR"/
 
 echo "Injecting hosting env with RUN_SCRIPTS_PASSWORD into output folder as .env..."
 cp "$REPO_ROOT/.env.hosting" "$OUTPUT_DIR/.env"
+
+composer config --unset platform.php 2>/dev/null || true
 
 echo ""
 echo "Done. Hosting folder is ready to upload via FTP:"
@@ -121,4 +93,3 @@ echo "       php php-run-scripts/initial-setup.php   # first time"
 echo "       php php-run-scripts/deploy-update.php   # on future code updates"
 echo ""
 echo "php-run-scripts/run.php will use RUN_SCRIPTS_PASSWORD from .env (currently 123456)."
-

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Build FlexiQueue deploy tarball for hosting (PHP 8.2 max, MySQL, Pusher).
-# Builds from a temporary prod worktree so the main repo (and dev) is untouched.
-# Run from repo root: ./scripts/build-deploy-hosting.sh
+# Builds directly from the current branch. Run from repo root: ./scripts/build-deploy-hosting.sh
 # Requires: .env.hosting (copy from .env.hosting.example, fill in values).
 # Output: flexiqueue-hosting.tar.gz in repo root.
 
@@ -31,12 +30,6 @@ if [ ! -f "$REPO_ROOT/.env.hosting" ]; then
   exit 1
 fi
 
-source "$SCRIPT_DIR/lib/git-worktree.sh"
-
-ensure_prod_branch "[FlexiQueue]"
-ensure_prod_worktree_temporary
-trap cleanup_prod_worktree_temporary EXIT
-
 # Load .env.hosting so Vite inlines Pusher keys for hosting build.
 unset REVERB_APP_ID REVERB_APP_KEY REVERB_APP_SECRET REVERB_HOST REVERB_PORT REVERB_SCHEME
 unset VITE_REVERB_APP_KEY VITE_REVERB_HOST VITE_REVERB_PORT VITE_REVERB_SCHEME VITE_REVERB_VIA_PROXY
@@ -55,10 +48,9 @@ if [ -z "$VITE_PUSHER_APP_KEY" ]; then
   exit 1
 fi
 
-echo "Building for hosting in prod worktree at $PROD_WORKTREE..."
+echo "Building for hosting in $REPO_ROOT..."
 echo "  Broadcaster: $VITE_BROADCASTER"
 echo "  Pusher key: ${VITE_PUSHER_APP_KEY:0:8}..."
-cd "$PROD_WORKTREE"
 
 echo "Installing Composer dependencies (--no-dev, platform PHP 8.2 for hosting)..."
 composer config platform.php 8.2
@@ -121,15 +113,11 @@ tar -czf flexiqueue-hosting.tar.gz \
 composer config --unset platform.php 2>/dev/null || true
 
 if [ ! -f flexiqueue-hosting.tar.gz ]; then
-  echo "Error: Tarball was not created in worktree." >&2
+  echo "Error: Tarball was not created." >&2
   exit 1
 fi
-cp flexiqueue-hosting.tar.gz "$REPO_ROOT/flexiqueue-hosting.tar.gz"
-cd "$REPO_ROOT"
 
 echo "Done. Output: $REPO_ROOT/flexiqueue-hosting.tar.gz"
-if [ -f flexiqueue-hosting.tar.gz ]; then
-  ls -la flexiqueue-hosting.tar.gz
-fi
+ls -la flexiqueue-hosting.tar.gz
 echo ""
 echo "Hosting deploy: extract tarball on server, copy .env.hosting.example to .env, fill DB_* and APP_URL, run migrate."

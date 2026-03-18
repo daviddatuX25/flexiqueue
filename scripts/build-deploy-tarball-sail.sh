@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Build FlexiQueue deploy tarball using Laravel Sail (PHP + Node inside container).
-# Builds from a temporary prod worktree so the main repo (and dev Sail) is untouched.
-# Run from repo root: ./scripts/build-deploy-tarball-sail.sh
-# Output: flexiqueue-deploy.tar.gz in repo root (or in current worktree if run from deploy script).
+# Builds directly from the current branch (bind mount of repo root). Run from repo root: ./scripts/build-deploy-tarball-sail.sh
+# Output: flexiqueue-deploy.tar.gz in repo root.
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -14,48 +13,35 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
   exit 1
 fi
 
-source "$SCRIPT_DIR/lib/git-worktree.sh"
-
-ensure_prod_branch "[FlexiQueue]"
-ensure_prod_worktree_temporary
-trap cleanup_prod_worktree_temporary EXIT
-
-MAIN_REPO_ROOT="$(get_main_repo_root)"
-# Use docker compose run (not sail run) so we can mount the worktree; sail run uses exec (same container/mount).
-if [ -f "$MAIN_REPO_ROOT/compose.yaml" ] || [ -f "$MAIN_REPO_ROOT/docker-compose.yml" ]; then
+if [ -f "$REPO_ROOT/compose.yaml" ] || [ -f "$REPO_ROOT/docker-compose.yml" ]; then
   COMPOSE_CMD="docker compose"
   if ! command -v docker >/dev/null 2>&1; then
     echo "Docker is required for Sail build. Install Docker or run build-deploy-tarball.sh on the host." >&2
     exit 1
   fi
 else
-  echo "compose.yaml not found in $MAIN_REPO_ROOT." >&2
+  echo "compose.yaml not found in $REPO_ROOT." >&2
   exit 1
 fi
 
 # Sail entrypoint expects WWWUSER/WWWGROUP (creates /.composer, then gosu $WWWUSER).
-# Without these, entrypoint fails: "mkdir: cannot create directory '/.composer': Permission denied"
-# and "failed switching to 'bash': no matching entries in passwd file".
 export WWWUSER="${WWWUSER:-$(id -u)}"
 export WWWGROUP="${WWWGROUP:-$(id -g)}"
 
 # Load Reverb keys so Vite inlines them (Echo/Pusher need VITE_REVERB_APP_KEY).
-# For deploy builds, .env.prod is the ONLY source; unset any inherited dev vars so
-# the bundle never gets your local REVERB_APP_KEY (e.g. fwa0z3...).
-# VITE_REVERB_VIA_PROXY=true for prod: Echo uses same-origin (nginx proxies /app to Reverb).
-# Dev uses VITE_REVERB_VIA_PROXY=false so Echo connects directly to localhost:6001.
+# For deploy builds, .env.prod is the ONLY source; unset any inherited dev vars.
 unset REVERB_APP_ID REVERB_APP_KEY REVERB_APP_SECRET REVERB_HOST REVERB_PORT REVERB_SCHEME
 unset VITE_REVERB_APP_KEY VITE_REVERB_HOST VITE_REVERB_PORT VITE_REVERB_SCHEME VITE_REVERB_VIA_PROXY
-[ -f "$MAIN_REPO_ROOT/.env.prod" ] && set -a && source "$MAIN_REPO_ROOT/.env.prod" 2>/dev/null && set +a
+[ -f "$REPO_ROOT/.env.prod" ] && set -a && source "$REPO_ROOT/.env.prod" 2>/dev/null && set +a
 export VITE_REVERB_APP_KEY="${REVERB_APP_KEY:-flexiqueue-app-key}"
 export VITE_REVERB_HOST="${REVERB_HOST:-localhost}"
 export VITE_REVERB_PORT="${REVERB_PORT:-6001}"
 export VITE_REVERB_SCHEME="${REVERB_SCHEME:-http}"
 export VITE_REVERB_VIA_PROXY="${VITE_REVERB_VIA_PROXY:-true}"
 
-echo "Building inside container (prod worktree at $PROD_WORKTREE)..."
+echo "Building inside container (current directory: $REPO_ROOT)..."
 echo "  Reverb key: ${VITE_REVERB_APP_KEY:0:8}... | via-proxy: ${VITE_REVERB_VIA_PROXY} (from .env.prod)"
-(cd "$MAIN_REPO_ROOT" && $COMPOSE_CMD run --rm \
+(cd "$REPO_ROOT" && $COMPOSE_CMD run --rm \
   -e WWWUSER \
   -e WWWGROUP \
   -e VITE_REVERB_APP_KEY \
@@ -63,7 +49,7 @@ echo "  Reverb key: ${VITE_REVERB_APP_KEY:0:8}... | via-proxy: ${VITE_REVERB_VIA
   -e VITE_REVERB_PORT \
   -e VITE_REVERB_SCHEME \
   -e VITE_REVERB_VIA_PROXY \
-  -v "$PROD_WORKTREE:/var/www/html" \
+  -v "$REPO_ROOT:/var/www/html" \
   -w /var/www/html \
   laravel.test bash -c '
   set -e
@@ -126,18 +112,10 @@ echo "  Reverb key: ${VITE_REVERB_APP_KEY:0:8}... | via-proxy: ${VITE_REVERB_VIA
   echo "Done."
 ')
 
-if [ ! -f "$PROD_WORKTREE/flexiqueue-deploy.tar.gz" ]; then
-  echo "Error: Build did not produce tarball in worktree. Check container output above." >&2
+if [ ! -f "$REPO_ROOT/flexiqueue-deploy.tar.gz" ]; then
+  echo "Error: Build did not produce tarball. Check container output above." >&2
   exit 1
 fi
-if [ "$PROD_WORKTREE" != "$REPO_ROOT" ]; then
-  cp "$PROD_WORKTREE/flexiqueue-deploy.tar.gz" "$REPO_ROOT/flexiqueue-deploy.tar.gz"
-fi
 
-cd "$REPO_ROOT"
 echo "Output: $REPO_ROOT/flexiqueue-deploy.tar.gz"
-if [ -f flexiqueue-deploy.tar.gz ]; then
-  ls -la flexiqueue-deploy.tar.gz
-fi
-
-print_build_complete_message_if_not_prod
+ls -la "$REPO_ROOT/flexiqueue-deploy.tar.gz"
