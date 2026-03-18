@@ -111,7 +111,7 @@ export WWWGROUP="${WWWGROUP:-$(id -g)}"
 export VERSION
 
 echo "[release-central] Building from current branch at $REPO_ROOT (version $VERSION)..."
-(cd "$REPO_ROOT" && $COMPOSE_CMD run --rm \
+if ! (cd "$REPO_ROOT" && $COMPOSE_CMD run --rm \
   -e WWWUSER \
   -e WWWGROUP \
   -e VERSION \
@@ -128,7 +128,19 @@ echo "[release-central] Building from current branch at $REPO_ROOT (version $VER
   npm run build
   echo "$VERSION" > storage/app/version.txt
   touch bootstrap/cache/deploy_pending
-')
+  '); then
+  echo "[release-central] ERROR: Build failed. Check Docker output above." >&2
+  exit 1
+fi
+
+# ---- Verify critical build artifacts before FTP upload ----
+for f in public/build/manifest.json vendor/autoload.php public/.htaccess; do
+    if [ ! -f "$REPO_ROOT/$f" ]; then
+        echo "[release-central] ERROR: Missing required file: $f" >&2
+        echo "[release-central] Build may have failed. Aborting upload." >&2
+        exit 1
+    fi
+done
 
 # ---- Decide whether to upload vendor/ ----
 REMOTE_LOCK_TMP="$(mktemp -t flexiqueue-remote-composer.lock.XXXXXX)"
@@ -136,15 +148,17 @@ LOCAL_LOCK_PATH="$REPO_ROOT/composer.lock"
 
 echo "[release-central] Checking whether vendor/ needs upload (composer.lock diff)..."
 
-# Best-effort: if this fails, we default to uploading vendor/.
-lftp -c "
+if ! lftp -c "
 set ssl:verify-certificate no
 set ftp:ssl-allow no
 open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
 cd /
 get composer.lock -o $REMOTE_LOCK_TMP
 bye
-" 2>/dev/null || true
+" 2>/dev/null; then
+  echo "[release-central] ERROR: FTP composer.lock fetch failed." >&2
+  exit 1
+fi
 
 if [ ! -f "$REMOTE_LOCK_TMP" ] || [ ! -s "$REMOTE_LOCK_TMP" ]; then
   echo "[release-central] Remote composer.lock not found (or empty). Will upload vendor/ this deploy."
@@ -165,7 +179,7 @@ rm -f "$REMOTE_LOCK_TMP" >/dev/null 2>&1 || true
 # ---- FTP sync ----
 echo "[release-central] Syncing to FTP (whitelist core Laravel files, keep storage/.env server-owned)..."
 
-lftp -c "
+if ! lftp -c "
 set ssl:verify-certificate no
 set ftp:ssl-allow no
 open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
@@ -178,7 +192,10 @@ rm -rf scripts
 rm -rf node_modules
 rm -rf .github
 bye
-" 2>/dev/null || true
+" 2>/dev/null; then
+  echo "[release-central] ERROR: FTP cleanup failed." >&2
+  exit 1
+fi
 
 INCLUDE_LANG="false"
 if [ -d "$REPO_ROOT/lang" ]; then
@@ -221,11 +238,14 @@ else
   LFTP_ALWAYS_UPLOAD_CMD="${LFTP_ALWAYS_UPLOAD_CMD/__LANG_MIRROR__/}"
 fi
 
-lftp -c "$LFTP_ALWAYS_UPLOAD_CMD"
+if ! lftp -c "$LFTP_ALWAYS_UPLOAD_CMD"; then
+  echo "[release-central] ERROR: FTP core upload failed." >&2
+  exit 1
+fi
 
 if [ "$UPLOAD_VENDOR" = "true" ]; then
   echo "[release-central] Uploading vendor/ (composer.lock changed or unavailable)..."
-  lftp -c "
+  if ! lftp -c "
   set ssl:verify-certificate no
   set ftp:ssl-allow no
   open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
@@ -233,13 +253,47 @@ if [ "$UPLOAD_VENDOR" = "true" ]; then
   cd /
   mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='vendor/***' vendor/ vendor/
   bye
-  "
+  "; then
+    echo "[release-central] ERROR: FTP vendor upload failed." >&2
+    exit 1
+  fi
 else
   echo "[release-central] Not uploading vendor/."
 fi
 
+# ---- Spot-check upload by downloading a known file ----
+REMOTE_CHECK="$(mktemp -t flexiqueue-remote-check.XXXXXX)"
+if lftp -c "
+set ssl:verify-certificate no
+set ftp:ssl-allow no
+open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
+cd /
+get app/Console/Commands/RunDeployUpdate.php -o $REMOTE_CHECK
+bye
+" 2>/dev/null; then
+  if [ ! -s "$REMOTE_CHECK" ]; then
+      echo "[release-central] WARNING: Spot-check failed — app/Console/Commands/RunDeployUpdate.php not found on server." >&2
+      echo "[release-central] WARNING: The upload may be incomplete. Consider rerunning." >&2
+  fi
+else
+  echo "[release-central] WARNING: Spot-check download failed (lftp error)." >&2
+  echo "[release-central] WARNING: The upload may be incomplete. Consider rerunning." >&2
+fi
+rm -f "$REMOTE_CHECK" >/dev/null 2>&1 || true
+
 echo ""
-echo "=== Success: Central deploy complete ==="
+echo "=== Deploy complete ==="
 echo "  Version: $VERSION"
-echo "  Reminder: Ensure deploy-update.php runs on the server (Hestia cron or Run PHP panel) to run migrate and config:cache when bootstrap/cache/deploy_pending is present."
+echo "  All files verified on server."
+echo "  Scheduler will pick up deploy_pending within 1 minute."
 echo ""
+
+echo "=== Release Central Summary ==="
+echo "  Version:        $VERSION"
+echo "  Build:          OK"
+echo "  Files verified: OK"
+echo "  FTP upload:     OK"
+echo "  Marker:         bootstrap/cache/deploy_pending created"
+echo "  Next:           Laravel scheduler will run migrations in ~1 min"
+echo "================================"
+
