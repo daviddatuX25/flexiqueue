@@ -3,7 +3,7 @@
 # - Targets PHP 8.2 via composer platform.php
 # - Uses .env.hosting for MySQL + Pusher and RUN_SCRIPTS_PASSWORD=123456
 # - Includes php-run-scripts in the output
-# - Output: releases/flexiqueue-hosting-folder-<timestamp>/
+# - Output: flexiqueue-hosting-folder-<timestamp>/ in repo root
 
 set -e
 
@@ -33,8 +33,7 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
-RELEASES_DIR="$REPO_ROOT/releases"
-OUTPUT_DIR="$RELEASES_DIR/flexiqueue-hosting-folder-$STAMP"
+OUTPUT_DIR="$REPO_ROOT/flexiqueue-hosting-folder-$STAMP"
 
 mkdir -p "$OUTPUT_DIR"
 

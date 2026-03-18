@@ -2,7 +2,7 @@
 # Build a deployable ZIP from the CURRENT checked-out commit using Sail.
 # - Uses .env.hosting for production settings (including RUN_SCRIPTS_PASSWORD).
 # - Includes php-run-scripts/ in the artifact.
-# - Output: releases/flexiqueue-<short-sha>-<timestamp>.zip
+# - Output: flexiqueue-<short-sha>-<timestamp>.zip (or .tar.gz) in repo root
 
 set -euo pipefail
 
@@ -32,10 +32,9 @@ if [ -f "$REPO_ROOT/vendor/bin/sail" ]; then
 fi
 
 BUILD_DIR="$REPO_ROOT/build-zip-current"
-RELEASES_DIR="$REPO_ROOT/releases"
 
 rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR" "$RELEASES_DIR"
+mkdir -p "$BUILD_DIR"
 
 echo "Installing npm dependencies and building frontend..."
 if [ -n "$SAIL_BIN" ]; then
@@ -83,7 +82,7 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 BASE_NAME="flexiqueue-${SHORT_SHA}-${STAMP}"
 
 if command -v zip >/dev/null 2>&1; then
-  ZIP_PATH="$RELEASES_DIR/${BASE_NAME}.zip"
+  ZIP_PATH="$REPO_ROOT/${BASE_NAME}.zip"
   echo "Creating ZIP at $ZIP_PATH ..."
   (cd "$BUILD_DIR" && zip -r "$ZIP_PATH" . >/dev/null)
 
@@ -91,7 +90,7 @@ if command -v zip >/dev/null 2>&1; then
   echo "Deploy ZIP created:"
   ls -la "$ZIP_PATH"
 else
-  TAR_PATH="$RELEASES_DIR/${BASE_NAME}.tar.gz"
+  TAR_PATH="$REPO_ROOT/${BASE_NAME}.tar.gz"
   echo "zip command not found; creating tar.gz at $TAR_PATH instead..."
   (cd "$BUILD_DIR" && tar -czf "$TAR_PATH" .)
 

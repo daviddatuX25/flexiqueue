@@ -24,6 +24,7 @@ FTP_USER=""
 FTP_PASSWORD=""
 VITE_PUSHER_APP_KEY=""
 VITE_PUSHER_APP_CLUSTER=""
+UPLOAD_VENDOR="true"
 
 cleanup() {
     echo "[release-central] Cleanup on exit."
@@ -129,6 +130,38 @@ echo "[release-central] Building from current branch at $REPO_ROOT (version $VER
   touch bootstrap/cache/deploy_pending
 ')
 
+# ---- Decide whether to upload vendor/ ----
+REMOTE_LOCK_TMP="$(mktemp -t flexiqueue-remote-composer.lock.XXXXXX)"
+LOCAL_LOCK_PATH="$REPO_ROOT/composer.lock"
+
+echo "[release-central] Checking whether vendor/ needs upload (composer.lock diff)..."
+
+# Best-effort: if this fails, we default to uploading vendor/.
+lftp -c "
+set ssl:verify-certificate no
+set ftp:ssl-allow no
+open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
+cd /
+get composer.lock -o $REMOTE_LOCK_TMP
+bye
+" 2>/dev/null || true
+
+if [ ! -f "$REMOTE_LOCK_TMP" ] || [ ! -s "$REMOTE_LOCK_TMP" ]; then
+  echo "[release-central] Remote composer.lock not found (or empty). Will upload vendor/ this deploy."
+  UPLOAD_VENDOR="true"
+elif [ ! -f "$LOCAL_LOCK_PATH" ]; then
+  echo "[release-central] Local composer.lock not found. Will upload vendor/ this deploy."
+  UPLOAD_VENDOR="true"
+elif diff -q "$LOCAL_LOCK_PATH" "$REMOTE_LOCK_TMP" >/dev/null 2>&1; then
+  echo "[release-central] composer.lock unchanged vs remote. Skipping vendor/ upload."
+  UPLOAD_VENDOR="false"
+else
+  echo "[release-central] composer.lock changed vs remote. Will upload vendor/ this deploy."
+  UPLOAD_VENDOR="true"
+fi
+
+rm -f "$REMOTE_LOCK_TMP" >/dev/null 2>&1 || true
+
 # ---- FTP sync ----
 echo "[release-central] Syncing to FTP (whitelist core Laravel files, keep storage/.env server-owned)..."
 
@@ -147,7 +180,12 @@ rm -rf .github
 bye
 " 2>/dev/null || true
 
-lftp -c "
+INCLUDE_LANG="false"
+if [ -d "$REPO_ROOT/lang" ]; then
+  INCLUDE_LANG="true"
+fi
+
+LFTP_ALWAYS_UPLOAD_CMD="
 set ssl:verify-certificate no
 set ftp:ssl-allow no
 open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
@@ -161,12 +199,11 @@ mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='app/***' 
 mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='bootstrap/***' bootstrap/ bootstrap/
 mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='config/***' config/ config/
 mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='database/***' database/ database/
-mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='lang/***' lang/ lang/
 mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='public/***' public/ public/
 mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='resources/***' resources/ resources/
 mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='routes/***' routes/ routes/
-mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='vendor/***' vendor/ vendor/
 mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='php-run-scripts/***' php-run-scripts/ php-run-scripts/
+__LANG_MIRROR__
 
 # Root files only (not directories)
 put artisan
@@ -177,6 +214,29 @@ put bootstrap/cache/deploy_pending -o bootstrap/cache/deploy_pending
 
 bye
 "
+
+if [ "$INCLUDE_LANG" = "true" ]; then
+  LFTP_ALWAYS_UPLOAD_CMD="${LFTP_ALWAYS_UPLOAD_CMD/__LANG_MIRROR__/mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='lang/***' lang/ lang/}"
+else
+  LFTP_ALWAYS_UPLOAD_CMD="${LFTP_ALWAYS_UPLOAD_CMD/__LANG_MIRROR__/}"
+fi
+
+lftp -c "$LFTP_ALWAYS_UPLOAD_CMD"
+
+if [ "$UPLOAD_VENDOR" = "true" ]; then
+  echo "[release-central] Uploading vendor/ (composer.lock changed or unavailable)..."
+  lftp -c "
+  set ssl:verify-certificate no
+  set ftp:ssl-allow no
+  open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
+  lcd $REPO_ROOT
+  cd /
+  mirror --reverse --delete --verbose --exclude-glob='*' --include-glob='vendor/***' vendor/ vendor/
+  bye
+  "
+else
+  echo "[release-central] Not uploading vendor/."
+fi
 
 echo ""
 echo "=== Success: Central deploy complete ==="
