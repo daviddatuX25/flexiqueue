@@ -24,9 +24,11 @@
 	const MSG_NETWORK_ERROR = "Network error. Please try again.";
 
 	const page = usePage();
-	/** First program from shared props (site-scoped) — used so dashboard stats/stations show live data */
 	const programs = $derived((get(page).props as { programs?: { id: number; name: string }[] })?.programs ?? []);
-	const firstProgramId = $derived(programs.length > 0 ? programs[0].id : null);
+	const currentProgramId = $derived(
+		((get(page).props as { currentProgram?: { id: number } | null })?.currentProgram?.id ??
+			(programs.length > 0 ? programs[0].id : null))
+	);
 
 	function getCsrfToken(): string {
 		const p = get(page);
@@ -40,7 +42,8 @@
 	}
 
 	async function fetchStats(): Promise<DashboardStats | null> {
-		const url = firstProgramId != null ? `/api/dashboard/stats?program_id=${firstProgramId}` : '/api/dashboard/stats';
+		const url =
+			currentProgramId != null ? `/api/dashboard/stats?program_id=${currentProgramId}` : '/api/dashboard/stats';
 		const res = await fetch(url, {
 			headers: {
 				Accept: 'application/json',
@@ -58,7 +61,8 @@
 	}
 
 	async function fetchStations(): Promise<DashboardStation[]> {
-		const url = firstProgramId != null ? `/api/dashboard/stations?program_id=${firstProgramId}` : '/api/dashboard/stations';
+		const url =
+			currentProgramId != null ? `/api/dashboard/stations?program_id=${currentProgramId}` : '/api/dashboard/stations';
 		const res = await fetch(url, {
 			headers: {
 				Accept: 'application/json',
@@ -100,16 +104,38 @@
 	}
 
 	onMount(() => {
-		refresh();
+		refresh(); // initial
+
+		let statsIntervalId: ReturnType<typeof setInterval> | null = null;
+		let stationsIntervalId: ReturnType<typeof setInterval> | null = null;
+
+		async function refreshStatsOnly() {
+			try {
+				const s = await fetchStats();
+				if (s) stats = s;
+			} catch {
+				// ignore transient poll errors; full refresh button + next tick will recover
+			}
+		}
+
+		async function refreshStationsOnly() {
+			try {
+				stations = await fetchStations();
+			} catch {
+				// ignore transient poll errors
+			}
+		}
 
 		function startPolling() {
-			refreshIntervalId = setInterval(refresh, 60000); // 60s not 10s — per docs/necessary-fix.md
+			// Tiles need to feel real-time; table can be slower to keep load down.
+			statsIntervalId = setInterval(refreshStatsOnly, 5000);
+			stationsIntervalId = setInterval(refreshStationsOnly, 60000);
 		}
 		function stopPolling() {
-			if (refreshIntervalId) {
-				clearInterval(refreshIntervalId);
-				refreshIntervalId = null;
-			}
+			if (statsIntervalId) clearInterval(statsIntervalId);
+			if (stationsIntervalId) clearInterval(stationsIntervalId);
+			statsIntervalId = null;
+			stationsIntervalId = null;
 		}
 
 		startPolling();

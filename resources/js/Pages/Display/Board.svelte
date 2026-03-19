@@ -1486,7 +1486,7 @@ let stationTtsByName = $state({});
 		onfocusout={handleFooterFocusOut}
 	>
 		<div class="flex items-center gap-4 min-w-0">
-			<span class="text-xs font-semibold uppercase tracking-wider text-surface-300 shrink-0 self-center">Staff on duty</span>
+			<span class="text-xs font-semibold uppercase tracking-wider text-surface-200 shrink-0 self-center">Staff on duty</span>
 			{#if staffForBar.length > 0}
 				<!-- Two modes: marquee (default) or scrollable. Click → scrollable; after idle → back to marquee with opacity transition. Min-height so absolute children have a visible area (container has no in-flow content). -->
 				<div class="display-footer__marquee flex-1 min-w-0 min-h-10 relative" aria-label="Staff availability">
@@ -1561,7 +1561,7 @@ let stationTtsByName = $state({});
 					</div>
 				</div>
 			{:else}
-				<span class="text-xs text-surface-400">No staff assigned</span>
+				<span class="text-xs text-surface-300">No staff assigned</span>
 			{/if}
 		</div>
 	</footer>

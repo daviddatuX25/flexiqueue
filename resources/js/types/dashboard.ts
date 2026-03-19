@@ -1,5 +1,6 @@
 export interface DashboardStats {
 	active_program: { id: number; name: string } | null;
+	program: { is_active: boolean; is_paused: boolean; is_running: boolean };
 	sessions: {
 		active: number;
 		waiting: number;
@@ -9,6 +10,7 @@ export interface DashboardStats {
 		no_show_today: number;
 	};
 	stations: { total: number; active: number; with_queue: number };
+	stations_online: number;
 	staff_online: number;
 	by_track: Array<{ track_name: string; count: number }>;
 }

@@ -24,6 +24,11 @@ class DashboardService
         if (! $program || ! $program->is_active) {
             return [
                 'active_program' => null,
+                'program' => [
+                    'is_active' => false,
+                    'is_paused' => false,
+                    'is_running' => false,
+                ],
                 'sessions' => [
                     'active' => 0,
                     'waiting' => 0,
@@ -37,16 +42,25 @@ class DashboardService
                     'active' => 0,
                     'with_queue' => 0,
                 ],
+                'stations_online' => 0,
                 'staff_online' => 0,
                 'by_track' => [],
             ];
         }
 
         $programId = $program->id;
+        $programIsPaused = (bool) ($program->is_paused ?? false);
+        $programIsRunning = (bool) $program->is_active && ! $programIsPaused;
         $today = Carbon::today();
         $baseQuery = Session::query()->where('program_id', $programId);
 
-        $waiting = (clone $baseQuery)->where('status', 'waiting')->count();
+        // Queue Waiting tile: waiting + held; exclude called/serving (per admin dashboard spec in plan).
+        $waiting = (clone $baseQuery)
+            ->where(function ($q) {
+                $q->where('status', 'waiting')
+                    ->orWhere('is_on_hold', true);
+            })
+            ->count();
         $called = (clone $baseQuery)->where('status', 'called')->count();
         $serving = (clone $baseQuery)->where('status', 'serving')->count();
         $active = $waiting + $called + $serving;
@@ -76,6 +90,14 @@ class DashboardService
             ->filter()
             ->count();
 
+        $stationsOnline = User::query()
+            ->where('availability_status', 'available')
+            ->where('is_active', true)
+            ->whereNotNull('assigned_station_id')
+            ->whereIn('assigned_station_id', $stationIds)
+            ->distinct('assigned_station_id')
+            ->count('assigned_station_id');
+
         // Queue/process fallbacks: only 'available' counts; offline/away = not on duty. Logout sets user to 'away'.
         $staffOnline = User::query()
             ->whereNotNull('assigned_station_id')
@@ -90,6 +112,11 @@ class DashboardService
                 'id' => $program->id,
                 'name' => $program->name,
             ],
+            'program' => [
+                'is_active' => (bool) $program->is_active,
+                'is_paused' => $programIsPaused,
+                'is_running' => $programIsRunning,
+            ],
             'sessions' => [
                 'active' => $active,
                 'waiting' => $waiting,
@@ -103,6 +130,7 @@ class DashboardService
                 'active' => $stations->where('is_active', true)->count(),
                 'with_queue' => $stationsWithQueue,
             ],
+            'stations_online' => $stationsOnline,
             'staff_online' => $staffOnline,
             'by_track' => $byTrack,
         ];

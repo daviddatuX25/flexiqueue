@@ -85,6 +85,7 @@ class DashboardControllerTest extends TestCase
         $response->assertStatus(200);
         $response->assertJsonStructure([
             'active_program' => ['id', 'name'],
+            'program' => ['is_active', 'is_paused', 'is_running'],
             'sessions' => [
                 'active',
                 'waiting',
@@ -94,10 +95,12 @@ class DashboardControllerTest extends TestCase
                 'no_show_today',
             ],
             'stations' => ['total', 'active', 'with_queue'],
+            'stations_online',
             'staff_online',
             'by_track',
         ]);
         $response->assertJsonPath('active_program.name', 'Cash Assistance');
+        $response->assertJsonPath('program.is_running', true);
         $response->assertJsonPath('sessions.active', 1);
         $response->assertJsonPath('sessions.waiting', 1);
         $response->assertJsonPath('stations.total', 1);
@@ -126,8 +129,71 @@ class DashboardControllerTest extends TestCase
 
         $response->assertStatus(200);
         $response->assertJsonPath('active_program', null);
+        $response->assertJsonPath('program.is_running', false);
         $response->assertJsonPath('sessions.active', 0);
         $response->assertJsonPath('stations.total', 0);
+    }
+
+    public function test_stats_queue_waiting_includes_held_but_excludes_called_and_serving(): void
+    {
+        $station = Station::where('program_id', $this->program->id)->firstOrFail();
+        $track = ServiceTrack::where('program_id', $this->program->id)->firstOrFail();
+        $token = Token::query()->firstOrFail();
+
+        Session::create([
+            'token_id' => $token->id,
+            'program_id' => $this->program->id,
+            'track_id' => $track->id,
+            'alias' => 'A2',
+            'client_category' => 'regular',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'status' => 'called',
+        ]);
+
+        Session::create([
+            'token_id' => $token->id,
+            'program_id' => $this->program->id,
+            'track_id' => $track->id,
+            'alias' => 'A3',
+            'client_category' => 'regular',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+        ]);
+
+        Session::create([
+            'token_id' => $token->id,
+            'program_id' => $this->program->id,
+            'track_id' => $track->id,
+            'alias' => 'A4',
+            'client_category' => 'regular',
+            'current_station_id' => $station->id,
+            'current_step_order' => 1,
+            'status' => 'serving',
+            'is_on_hold' => true,
+            'held_at' => now(),
+        ]);
+
+        $response = $this->actingAs($this->admin)->getJson('/api/dashboard/stats?program_id='.$this->program->id);
+        $response->assertStatus(200);
+
+        // From setup(): 1 waiting. From this test: held session counts as waiting, called/serving do not.
+        $response->assertJsonPath('sessions.waiting', 2);
+    }
+
+    public function test_stats_stations_online_counts_distinct_stations_with_available_assigned_staff(): void
+    {
+        $station = Station::where('program_id', $this->program->id)->firstOrFail();
+        $this->admin->update([
+            'assigned_station_id' => $station->id,
+            'availability_status' => 'available',
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($this->admin)->getJson('/api/dashboard/stats?program_id='.$this->program->id);
+        $response->assertStatus(200);
+        $response->assertJsonPath('stations_online', 1);
     }
 
     public function test_stations_returns_200_for_admin(): void

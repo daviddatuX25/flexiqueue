@@ -10,10 +10,10 @@
     <div class="bg-surface-50 rounded-container elevation-card p-5">
         <div class="flex justify-between items-start">
             <div class="stat">
-                <div class="stat-title">Active Sessions</div>
-                <div class="stat-value text-primary-500">{stats.sessions.active}</div>
+                <div class="stat-title">Active Session</div>
+                <div class="stat-value text-primary-500">{stats.program.is_running ? 'YES' : 'NO'}</div>
                 <div class="stat-desc">
-                    {stats.sessions.waiting} waiting &middot; {stats.sessions.serving} serving
+                    Program {stats.program.is_running ? 'running' : (stats.program.is_paused ? 'paused' : 'inactive')}
                 </div>
             </div>
             <div class="stat-figure text-primary-600 bg-primary-100 p-3">
@@ -27,7 +27,9 @@
             <div class="stat">
                 <div class="stat-title">Queue Waiting</div>
                 <div class="stat-value text-warning-500">{stats.sessions.waiting}</div>
-                <div class="stat-desc">Clients in queue</div>
+                <div class="stat-desc">
+                    Excludes called/serving
+                </div>
             </div>
             <div class="stat-figure text-warning-600 bg-warning-100 p-3">
                 <Users class="h-6 w-6" />
@@ -40,7 +42,7 @@
             <div class="stat">
                 <div class="stat-title">Stations Online</div>
                 <div class="stat-value text-success-500">
-                    {stats.stations.active}
+                    {stats.stations_online}
                     <span class="text-lg text-surface-400 font-normal">/{stats.stations.total}</span>
                 </div>
                 <div class="stat-desc">

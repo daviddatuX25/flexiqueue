@@ -2,6 +2,7 @@
 	import type { DashboardStation } from '../../types/dashboard';
 	import { Monitor } from 'lucide-svelte';
 	import UserAvatar from '../UserAvatar.svelte';
+	import AdminTable from '../AdminTable.svelte';
 
 	let { stations }: { stations: DashboardStation[] } = $props();
 
@@ -29,21 +30,21 @@
 				<span>No stations. Add stations to the active program.</span>
 			</div>
 		{:else}
-			<table class="table table-zebra table-sm w-full">
-				<thead class="bg-surface-100/50 text-surface-600 font-medium">
+			<AdminTable scrollable tableClass="w-full" compact={false}>
+				{#snippet head()}
 					<tr>
-						<th class="pl-6 py-3 text-left">Station</th>
-						<th class="py-3 text-left">Staff</th>
-						<th class="py-3 text-left">Queue</th>
-						<th class="py-3 text-left">Current Client</th>
-						<th class="pr-6 py-3 text-right">Status</th>
+						<th>Station</th>
+						<th>Staff</th>
+						<th>Queue</th>
+						<th>Current Client</th>
+						<th>Status</th>
 					</tr>
-				</thead>
-				<tbody class="divide-y divide-surface-100">
+				{/snippet}
+				{#snippet body()}
 					{#each stations as s (s.id)}
-						<tr class="hover:bg-surface-100/30 transition-colors">
-							<td class="pl-6 py-3 font-medium text-surface-900">{s.name}</td>
-							<td class="py-3 text-sm text-surface-600">
+						<tr>
+							<td class="font-medium text-surface-900 dark:text-surface-100">{s.name}</td>
+							<td>
 								<div class="flex flex-wrap items-center gap-2">
 									{#if s.assigned_staff.length > 0}
 										{#each s.assigned_staff as staff (staff.id)}
@@ -53,31 +54,31 @@
 													class="w-2 h-2 rounded-full shrink-0 {availabilityDotClass(staff.availability_status)}"
 													aria-label="{staff.availability_status ?? 'offline'}"
 												></span>
-												<span>{staff.name}</span>
+												<span class="text-surface-800 dark:text-surface-200">{staff.name}</span>
 											</span>
 										{/each}
 									{:else}
-										<span class="text-surface-400">—</span>
+										<span class="text-surface-500 dark:text-surface-400">—</span>
 									{/if}
 								</div>
 							</td>
-							<td class="py-3">
+							<td>
 								{#if s.queue_count > 0}
 									<div class="badge preset-tonal-primary font-bold">{s.queue_count}</div>
 								{:else}
-									<span class="text-surface-400 text-xs italic">Empty</span>
+									<span class="text-surface-500 dark:text-surface-400 text-xs italic">Empty</span>
 								{/if}
 							</td>
-							<td class="py-3">
+							<td>
 								{#if s.current_client}
 									<span class="badge preset-filled-primary-500 font-bold text-sm shadow-sm"
 										>{s.current_client}</span
 									>
 								{:else}
-									<span class="text-surface-400 text-xs italic">—</span>
+									<span class="text-surface-500 dark:text-surface-400 text-xs italic">—</span>
 								{/if}
 							</td>
-							<td class="pr-6 py-3 text-right">
+							<td>
 								<span
 									class="badge text-xs font-medium {s.is_active
 										? 'preset-filled-success-500'
@@ -88,8 +89,8 @@
 							</td>
 						</tr>
 					{/each}
-				</tbody>
-			</table>
+				{/snippet}
+			</AdminTable>
 		{/if}
 	</div>
 </div>

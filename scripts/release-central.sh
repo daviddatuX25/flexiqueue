@@ -24,7 +24,6 @@ FTP_USER=""
 FTP_PASSWORD=""
 VITE_PUSHER_APP_KEY=""
 VITE_PUSHER_APP_CLUSTER=""
-UPLOAD_VENDOR="true"
 
 cleanup() {
     echo "[release-central] Cleanup on exit."
@@ -144,41 +143,6 @@ for f in public/build/manifest.json vendor/autoload.php public/.htaccess; do
     fi
 done
 
-# ---- Decide whether to upload vendor/ ----
-REMOTE_LOCK="$(mktemp -t flexiqueue-remote-composer.lock.XXXXXX)"
-
-echo "[release-central] Checking whether vendor/ needs upload (composer.lock diff)..."
-
-lftp -c "
-set ssl:verify-certificate no
-set ftp:ssl-allow no
-set cache:enable yes
-set cache:expire 0
-set mirror:use-pget-n 1
-set ftp:use-mdtm no
-set ftp:use-size yes
-open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
-get composer.lock -o $REMOTE_LOCK
-bye
-" 2>/dev/null || true
-
-# If remote composer.lock is empty (first deploy or fetch failed)
-# treat as "needs upload"
-if [ ! -s "$REMOTE_LOCK" ]; then
-    UPLOAD_VENDOR=true
-    echo "[release-central] No remote composer.lock found — will upload vendor/"
-else
-    if diff -q "$REPO_ROOT/composer.lock" "$REMOTE_LOCK" > /dev/null 2>&1; then
-        UPLOAD_VENDOR=false
-        echo "[release-central] composer.lock unchanged — skipping vendor/ upload"
-    else
-        UPLOAD_VENDOR=true
-        echo "[release-central] composer.lock changed — uploading vendor/"
-    fi
-fi
-
-rm -f "$REMOTE_LOCK" >/dev/null 2>&1 || true
-
 # ---- FTP sync ----
 echo "[release-central] Syncing to FTP (whitelist core Laravel files, keep storage/.env server-owned)..."
 
@@ -194,6 +158,13 @@ set ftp:use-size yes
 open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
 
 # Remove junk files that should never be on the server
+rm -f public/hot
+rm -f dbtest.php
+rm -f dbtest-output.txt
+rm -f cachetest.php
+rm -f cachetest-output.txt
+rm -f fixcache.php
+rm -f fixcache-output.txt
 rm -f flexiqueue-deploy.tar.gz
 rm -f flexiqueue-*.tar.gz
 rm -f root@*
@@ -250,6 +221,8 @@ mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore
 mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time config/ config/
 mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time database/ database/
 mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time public/ public/
+rm -f public/hot
+put public/build/manifest.json -o public/build/manifest.json
 mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time resources/ resources/
 mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time routes/ routes/
 mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time php-run-scripts/ php-run-scripts/
@@ -276,27 +249,27 @@ if ! lftp -c "$LFTP_ALWAYS_UPLOAD_CMD"; then
   exit 1
 fi
 
-if [ "$UPLOAD_VENDOR" = "true" ]; then
-  echo "[release-central] Uploading vendor/ (composer.lock changed or unavailable)..."
-  if ! lftp -c "
-  set ssl:verify-certificate no
-  set ftp:ssl-allow no
-  set cache:enable yes
-  set cache:expire 0
-  set mirror:use-pget-n 1
-  set ftp:use-mdtm no
-  set ftp:use-size yes
-  open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
-  lcd $REPO_ROOT
-  cd /
-  mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time vendor/ vendor/
-  bye
-  "; then
-    echo "[release-central] ERROR: FTP vendor upload failed." >&2
-    exit 1
-  fi
-else
-  echo "[release-central] Not uploading vendor/."
+echo "[release-central] Uploading vendor/ (always; avoids partial vendor corruption)..."
+if ! lftp -c "
+set ssl:verify-certificate no
+set ftp:ssl-allow no
+set cache:enable yes
+set cache:expire 0
+set mirror:use-pget-n 1
+set ftp:use-mdtm no
+set ftp:use-size yes
+open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
+lcd $REPO_ROOT
+cd /
+mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time vendor/ vendor/
+put vendor/autoload.php -o vendor/autoload.php
+put vendor/composer/autoload_real.php -o vendor/composer/autoload_real.php
+put vendor/composer/autoload_static.php -o vendor/composer/autoload_static.php
+put vendor/composer/autoload_classmap.php -o vendor/composer/autoload_classmap.php
+bye
+"; then
+  echo "[release-central] ERROR: FTP vendor upload failed." >&2
+  exit 1
 fi
 
 # ---- Spot-check upload by downloading critical files ----
@@ -306,6 +279,9 @@ SPOT_CHECK_FILES=(
     "routes/console.php"
     "artisan"
     "public/.htaccess"
+    "public/build/manifest.json"
+    "vendor/autoload.php"
+    "vendor/composer/autoload_static.php"
 )
 
 SPOT_FAILED=0
@@ -331,6 +307,56 @@ for remote_file in "${SPOT_CHECK_FILES[@]}"; do
     fi
     rm -f "$TMPFILE"
 done
+
+# Ensure Vite dev mode is not enabled on prod
+HOT_TMP=$(mktemp)
+lftp -c "
+set ssl:verify-certificate no
+set ftp:ssl-allow no
+set cache:enable yes
+set cache:expire 0
+set mirror:use-pget-n 1
+set ftp:use-mdtm no
+set ftp:use-size yes
+open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
+get public/hot -o $HOT_TMP
+bye
+" 2>/dev/null || true
+if [ -s "$HOT_TMP" ]; then
+    echo "[release-central] WARNING: public/hot exists on server; deleting to avoid Vite dev mode." >&2
+    lftp -c "
+    set ssl:verify-certificate no
+    set ftp:ssl-allow no
+    set cache:enable yes
+    set cache:expire 0
+    set mirror:use-pget-n 1
+    set ftp:use-mdtm no
+    set ftp:use-size yes
+    open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
+    rm -f public/hot
+    bye
+    " 2>/dev/null || true
+fi
+rm -f "$HOT_TMP" >/dev/null 2>&1 || true
+
+# Optional: warn if scheduler hasn't generated caches yet (do not fail deploy)
+CFG_TMP=$(mktemp)
+lftp -c "
+set ssl:verify-certificate no
+set ftp:ssl-allow no
+set cache:enable yes
+set cache:expire 0
+set mirror:use-pget-n 1
+set ftp:use-mdtm no
+set ftp:use-size yes
+open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
+get bootstrap/cache/config.php -o $CFG_TMP
+bye
+" 2>/dev/null || true
+if [ ! -s "$CFG_TMP" ]; then
+    echo "[release-central] WARNING: bootstrap/cache/config.php not found yet. Scheduler may not have run; wait 1-2 minutes or run php-run-scripts/bootstrap.php once." >&2
+fi
+rm -f "$CFG_TMP" >/dev/null 2>&1 || true
 
 if [ "$SPOT_FAILED" -eq 1 ]; then
     echo "[release-central] ERROR: Upload verification failed. Some files are missing on server." >&2
