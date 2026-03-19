@@ -33,14 +33,14 @@ return new class extends Migration
         // Update supervisor -> staff
         DB::table('users')->where('role', 'supervisor')->update(['role' => 'staff']);
 
-        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() === 'mysql') {
             DB::statement("ALTER TABLE users MODIFY COLUMN role ENUM('admin', 'staff') DEFAULT 'staff'");
         }
     }
 
     public function down(): void
     {
-        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() === 'mysql') {
             DB::statement("ALTER TABLE users MODIFY COLUMN role ENUM('admin', 'supervisor', 'staff') DEFAULT 'staff'");
         }
         DB::table('program_supervisors')->truncate();

@@ -71,9 +71,9 @@ When suggesting terminal commands, prefer Sail-based commands:
 
 Point users to **[docs/SETUP-BD-001.md](../../../docs/SETUP-BD-001.md)** for:
 
-- First-time Sail installation (`php artisan sail:install` with **mariadb**)
+- First-time Sail installation (`php artisan sail:install` with **mysql**)
 - Daily workflow (starting containers, running migrations, npm)
-- Bare metal alternative (Option B) for those who prefer local PHP/Node/MariaDB
+- Bare metal alternative (Option B) for those who prefer local PHP/Node/MySQL
 
 ### Not Enforced In
 
@@ -84,6 +84,6 @@ Point users to **[docs/SETUP-BD-001.md](../../../docs/SETUP-BD-001.md)** for:
 
 ## Why Sail?
 
-- **Stack alignment**: Phase 1 requires MariaDB 10.6+; Sail can be configured with MariaDB (not default MySQL).
+- **Stack alignment**: Phase 1 uses MySQL; Sail provides it consistently across machines.
 - **Environment parity**: Avoids "works on my machine" issues, WSL/UNC path problems, and missing PHP/Composer.
 - **Already included**: `laravel/sail` is in `composer.json` require-dev; installation is the missing step.

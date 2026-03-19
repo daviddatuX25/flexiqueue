@@ -25,14 +25,14 @@ return new class extends Migration
                 'status' => 'available',
             ]);
 
-        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() === 'mysql') {
             DB::statement("ALTER TABLE tokens MODIFY COLUMN status ENUM('available', 'in_use') DEFAULT 'available'");
         }
     }
 
     public function down(): void
     {
-        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() === 'mysql') {
             DB::statement("ALTER TABLE tokens MODIFY COLUMN status ENUM('available', 'in_use', 'lost', 'damaged') DEFAULT 'available'");
         }
 

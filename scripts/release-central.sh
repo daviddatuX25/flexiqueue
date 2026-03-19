@@ -7,12 +7,15 @@
 #   version   Optional. e.g. v1.0.0. If omitted, uses latest git tag (git describe --tags --abbrev=0).
 #
 # Prerequisites:
-#   - Docker (for Sail build)
 #   - lftp (apt install lftp)
+#   - Build tools:
+#       - Default: Docker (for Sail build)
+#       - Local mode (--local): PHP 8.2+, Composer, Node 20+, npm (Laragon OK)
 #   - .env.hosting with FTP_HOST, FTP_USER (or FTP_USERNAME), FTP_PASSWORD,
 #     and optionally VITE_PUSHER_APP_KEY, VITE_PUSHER_APP_CLUSTER (or prompted).
 #
-# Build runs from the CURRENT branch (no prod worktree). FTP sync excludes .env, storage/, node_modules/, .git/.
+# Build runs from a detached worktree at HEAD so your current working tree is not modified.
+# Upload uses a staging folder (copy of required deploy files).
 
 set -e
 
@@ -24,36 +27,80 @@ FTP_USER=""
 FTP_PASSWORD=""
 VITE_PUSHER_APP_KEY=""
 VITE_PUSHER_APP_CLUSTER=""
+PUSHER_APP_KEY=""
+PUSHER_APP_CLUSTER=""
+BUILD_MODE="docker" # docker|local
+KEEP_WORKTREE="0"
+DO_FTP="1"
+WORKTREE_DIR=""
+STAGE_DIR=""
+BUILD_ROOT=""
 
 cleanup() {
     echo "[release-central] Cleanup on exit."
+    if [ -n "${WORKTREE_DIR:-}" ] && [ -d "${WORKTREE_DIR:-}" ] && [ "$KEEP_WORKTREE" != "1" ]; then
+        # Best-effort cleanup; don't fail the script on cleanup errors.
+        (cd "$REPO_ROOT" && git worktree remove --force "$WORKTREE_DIR" >/dev/null 2>&1) || true
+    fi
 }
 trap cleanup EXIT
 
 usage() {
     echo "Usage: $0 [version]"
     echo "       $0 --help"
+    echo "       $0 --local [version]"
+    echo "       $0 --keep-worktree [--local] [version]"
+    echo "       $0 --no-ftp [--local] [version]"
+    echo "       $0 --build-only [--local] [version]"
     echo ""
     echo "  version   Optional. e.g. v1.0.0. If omitted, uses latest git tag."
     echo ""
-    echo "Prerequisites: Docker, lftp. Credentials in .env.hosting (FTP_HOST, FTP_USER or FTP_USERNAME, FTP_PASSWORD; VITE_PUSHER_APP_KEY, VITE_PUSHER_APP_CLUSTER for build)."
+    echo "Options:"
+    echo "  --local          Build on this machine (no Docker). Requires php/composer/node/npm on PATH."
+    echo "  --keep-worktree  Do not delete the temporary worktree (debugging)."
+    echo "  --no-ftp         Skip lftp upload; build + stage only (manual FTP upload)."
+    echo "  --build-only     Alias of --no-ftp."
+    echo ""
+    echo "Prerequisites: lftp. Credentials in .env.hosting (FTP_HOST, FTP_USER or FTP_USERNAME, FTP_PASSWORD; PUSHER_* for build)."
     exit 0
 }
 
+ARGS=()
 for arg in "$@"; do
     if [ "$arg" = "--help" ] || [ "$arg" = "-h" ]; then
         usage
+    elif [ "$arg" = "--local" ]; then
+        BUILD_MODE="local"
+    elif [ "$arg" = "--keep-worktree" ]; then
+        KEEP_WORKTREE="1"
+    elif [ "$arg" = "--no-ftp" ] || [ "$arg" = "--build-only" ]; then
+        DO_FTP="0"
+    else
+        ARGS+=("$arg")
     fi
 done
 
 # ---- Prerequisites ----
-if ! command -v docker >/dev/null 2>&1; then
-    echo "Error: docker is required. Install Docker and ensure it is running." >&2
-    exit 1
+if [ "$DO_FTP" = "1" ]; then
+    if ! command -v lftp >/dev/null 2>&1; then
+        echo "Error: lftp is required for FTP upload. Install it or run with --no-ftp to build only." >&2
+        exit 1
+    fi
 fi
-if ! command -v lftp >/dev/null 2>&1; then
-    echo "Error: lftp is required. Install with: sudo apt install lftp" >&2
-    exit 1
+if [ "$BUILD_MODE" = "docker" ]; then
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Error: docker is required for the default build mode. Re-run with --local to build on this machine." >&2
+        exit 1
+    fi
+else
+    if ! command -v composer >/dev/null 2>&1; then
+        echo "Error: composer not found. Install PHP+Composer (Laragon OK) or run without --local to use Docker." >&2
+        exit 1
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "Error: npm not found. Install Node.js (20+) or run without --local to use Docker." >&2
+        exit 1
+    fi
 fi
 
 cd "$REPO_ROOT"
@@ -63,8 +110,8 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 # ---- Version ----
-if [ -n "${1:-}" ]; then
-    VERSION="$1"
+if [ -n "${ARGS[0]:-}" ]; then
+    VERSION="${ARGS[0]}"
 else
     VERSION=$(git describe --tags --abbrev=0 2>/dev/null || true)
     if [ -z "$VERSION" ]; then
@@ -73,23 +120,45 @@ else
     fi
 fi
 
-# ---- Credentials from .env.hosting (grep, no sourcing) ----
+# ---- Credentials from .env.hosting ----
 if [ ! -f "$REPO_ROOT/.env.hosting" ]; then
     echo "Error: .env.hosting not found. Copy .env.hosting.example to .env.hosting and set FTP_HOST, FTP_USER (or FTP_USERNAME), FTP_PASSWORD." >&2
     exit 1
 fi
 
-FTP_HOST=$(grep -E '^FTP_HOST=' "$REPO_ROOT/.env.hosting" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
-FTP_USER=$(grep -E '^FTP_USER=' "$REPO_ROOT/.env.hosting" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
-if [ -z "$FTP_USER" ]; then
-    FTP_USER=$(grep -E '^FTP_USERNAME=' "$REPO_ROOT/.env.hosting" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
-fi
-FTP_PASSWORD=$(grep -E '^FTP_PASSWORD=' "$REPO_ROOT/.env.hosting" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+unset FTP_HOST FTP_USER FTP_USERNAME FTP_PASSWORD
+unset PUSHER_APP_KEY PUSHER_APP_CLUSTER VITE_PUSHER_APP_KEY VITE_PUSHER_APP_CLUSTER VITE_BROADCASTER
+set -a
+# shellcheck disable=SC1090
+source "$REPO_ROOT/.env.hosting" 2>/dev/null || true
+set +a
 
-VITE_PUSHER_APP_KEY=$(grep -E '^VITE_PUSHER_APP_KEY=' "$REPO_ROOT/.env.hosting" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
-[ -z "$VITE_PUSHER_APP_KEY" ] && VITE_PUSHER_APP_KEY=$(grep -E '^PUSHER_APP_KEY=' "$REPO_ROOT/.env.hosting" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
-VITE_PUSHER_APP_CLUSTER=$(grep -E '^VITE_PUSHER_APP_CLUSTER=' "$REPO_ROOT/.env.hosting" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
-[ -z "$VITE_PUSHER_APP_CLUSTER" ] && VITE_PUSHER_APP_CLUSTER=$(grep -E '^PUSHER_APP_CLUSTER=' "$REPO_ROOT/.env.hosting" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+FTP_HOST="${FTP_HOST:-}"
+FTP_USER="${FTP_USER:-${FTP_USERNAME:-}}"
+FTP_PASSWORD="${FTP_PASSWORD:-}"
+
+PUSHER_APP_KEY="${PUSHER_APP_KEY:-}"
+PUSHER_APP_CLUSTER="${PUSHER_APP_CLUSTER:-}"
+
+is_interpolated() {
+    case "${1:-}" in
+        *'${'*'}'* ) return 0 ;;
+        *'$('*')'* ) return 0 ;;
+        *'`'* ) return 0 ;;
+        * ) return 1 ;;
+    esac
+}
+
+# Resolve Vite vars safely even if .env.hosting uses VITE_PUSHER_APP_KEY="${PUSHER_APP_KEY}".
+VITE_PUSHER_APP_KEY="${VITE_PUSHER_APP_KEY:-}"
+if [ -z "$VITE_PUSHER_APP_KEY" ] || is_interpolated "$VITE_PUSHER_APP_KEY"; then
+    VITE_PUSHER_APP_KEY="$PUSHER_APP_KEY"
+fi
+
+VITE_PUSHER_APP_CLUSTER="${VITE_PUSHER_APP_CLUSTER:-}"
+if [ -z "$VITE_PUSHER_APP_CLUSTER" ] || is_interpolated "$VITE_PUSHER_APP_CLUSTER"; then
+    VITE_PUSHER_APP_CLUSTER="$PUSHER_APP_CLUSTER"
+fi
 
 if [ -z "$FTP_HOST" ] || [ -z "$FTP_USER" ] || [ -z "$FTP_PASSWORD" ]; then
     echo "Error: FTP credentials missing in .env.hosting. Set FTP_HOST, FTP_USER (or FTP_USERNAME), and FTP_PASSWORD." >&2
@@ -104,44 +173,99 @@ if [ -z "$VITE_PUSHER_APP_CLUSTER" ]; then
     exit 1
 fi
 
-# ---- Build with Sail (current branch) ----
-COMPOSE_CMD="docker compose"
-[ -f "$REPO_ROOT/compose.yaml" ] || [ -f "$REPO_ROOT/docker-compose.yml" ] || { echo "Error: compose.yaml not found." >&2; exit 1; }
-export WWWUSER="${WWWUSER:-$(id -u)}"
-export WWWGROUP="${WWWGROUP:-$(id -g)}"
-export VERSION
+# ---- Build in a detached worktree (keeps current working tree clean) ----
+TS="$(date +%Y%m%d%H%M%S)"
+WORKTREE_DIR="$REPO_ROOT/.build/worktrees/release-central-${VERSION}-${TS}"
+STAGE_DIR="$REPO_ROOT/.build/stage/release-central-${VERSION}-${TS}"
+mkdir -p "$WORKTREE_DIR" "$STAGE_DIR"
 
-echo "[release-central] Building from current branch at $REPO_ROOT (version $VERSION)..."
-if ! (cd "$REPO_ROOT" && $COMPOSE_CMD run --rm \
-  -e WWWUSER \
-  -e WWWGROUP \
-  -e VERSION \
-  -e VITE_BROADCASTER=pusher \
-  -e VITE_PUSHER_APP_KEY \
-  -e VITE_PUSHER_APP_CLUSTER \
-  -v "$REPO_ROOT:/var/www/html" \
-  -w /var/www/html \
-  laravel.test bash -c '
-  set -e
-  composer config platform.php 8.2
-  composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --ignore-platform-reqs
-  npm ci
-  npm run build
-  echo "$VERSION" > storage/app/version.txt
-  touch bootstrap/cache/deploy_pending
-  '); then
-  echo "[release-central] ERROR: Build failed. Check Docker output above." >&2
-  exit 1
+echo "[release-central] Creating detached worktree at $WORKTREE_DIR ..."
+git worktree add --detach "$WORKTREE_DIR" HEAD >/dev/null
+
+export VERSION
+export VITE_BROADCASTER="pusher"
+export VITE_PUSHER_APP_KEY
+export VITE_PUSHER_APP_CLUSTER
+
+echo "[release-central] Building (mode: $BUILD_MODE) from $WORKTREE_DIR (version $VERSION)..."
+if [ "$BUILD_MODE" = "docker" ]; then
+    COMPOSE_CMD="docker compose"
+    [ -f "$REPO_ROOT/compose.yaml" ] || [ -f "$REPO_ROOT/docker-compose.yml" ] || { echo "Error: compose.yaml not found." >&2; exit 1; }
+    export WWWUSER="${WWWUSER:-$(id -u)}"
+    export WWWGROUP="${WWWGROUP:-$(id -g)}"
+
+    if ! (cd "$REPO_ROOT" && $COMPOSE_CMD run --rm \
+      -e WWWUSER \
+      -e WWWGROUP \
+      -e VERSION \
+      -e VITE_BROADCASTER \
+      -e VITE_PUSHER_APP_KEY \
+      -e VITE_PUSHER_APP_CLUSTER \
+      -v "$WORKTREE_DIR:/var/www/html" \
+      -w /var/www/html \
+      laravel.test bash -c '
+      set -e
+      composer config platform.php 8.2
+      composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --ignore-platform-reqs
+      npm ci
+      npm run build
+      echo "$VERSION" > storage/app/version.txt
+      touch bootstrap/cache/deploy_pending
+      '); then
+      echo "[release-central] ERROR: Build failed. Check Docker output above." >&2
+      exit 1
+    fi
+else
+    if ! (cd "$WORKTREE_DIR" && \
+      composer config platform.php 8.2 && \
+      composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --ignore-platform-reqs && \
+      npm ci && \
+      npm run build && \
+      mkdir -p storage/app bootstrap/cache && \
+      echo "$VERSION" > storage/app/version.txt && \
+      touch bootstrap/cache/deploy_pending); then
+      echo "[release-central] ERROR: Local build failed. Check the output above." >&2
+      exit 1
+    fi
+    (cd "$WORKTREE_DIR" && composer config --unset platform.php >/dev/null 2>&1) || true
 fi
 
-# ---- Verify critical build artifacts before FTP upload ----
+BUILD_ROOT="$WORKTREE_DIR"
+
+# ---- Verify critical build artifacts before staging ----
 for f in public/build/manifest.json vendor/autoload.php public/.htaccess; do
-    if [ ! -f "$REPO_ROOT/$f" ]; then
+    if [ ! -f "$BUILD_ROOT/$f" ]; then
         echo "[release-central] ERROR: Missing required file: $f" >&2
         echo "[release-central] Build may have failed. Aborting upload." >&2
         exit 1
     fi
 done
+
+# ---- Stage deploy folder (what gets FTP'd) ----
+echo "[release-central] Staging deploy folder at $STAGE_DIR ..."
+mkdir -p "$STAGE_DIR/storage/app" "$STAGE_DIR/bootstrap/cache"
+for d in app bootstrap config database public resources routes php-run-scripts vendor; do
+    rm -rf "$STAGE_DIR/$d" >/dev/null 2>&1 || true
+    cp -R "$BUILD_ROOT/$d" "$STAGE_DIR/$d"
+done
+if [ -d "$BUILD_ROOT/lang" ]; then
+    rm -rf "$STAGE_DIR/lang" >/dev/null 2>&1 || true
+    cp -R "$BUILD_ROOT/lang" "$STAGE_DIR/lang"
+fi
+cp "$BUILD_ROOT/artisan" "$STAGE_DIR/artisan"
+cp "$BUILD_ROOT/composer.json" "$STAGE_DIR/composer.json"
+cp "$BUILD_ROOT/composer.lock" "$STAGE_DIR/composer.lock"
+cp "$BUILD_ROOT/storage/app/version.txt" "$STAGE_DIR/storage/app/version.txt"
+cp "$BUILD_ROOT/bootstrap/cache/deploy_pending" "$STAGE_DIR/bootstrap/cache/deploy_pending"
+
+# ---- Optional: stop after build/stage ----
+if [ "$DO_FTP" != "1" ]; then
+    echo "[release-central] Build complete (no FTP upload)."
+    echo "[release-central] Staged deploy folder:"
+    echo "  $STAGE_DIR"
+    echo "[release-central] Upload the contents of that folder to your server root (public_html)."
+    exit 0
+fi
 
 # ---- FTP sync ----
 echo "[release-central] Syncing to FTP (whitelist core Laravel files, keep storage/.env server-owned)..."
@@ -212,7 +336,7 @@ set ftp:use-size yes
 open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
 
 # Upload only what Laravel needs — whitelist approach
-lcd $REPO_ROOT
+lcd $STAGE_DIR
 cd /
 
 # Core Laravel directories
@@ -259,7 +383,7 @@ set mirror:use-pget-n 1
 set ftp:use-mdtm no
 set ftp:use-size yes
 open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST
-lcd $REPO_ROOT
+lcd $STAGE_DIR
 cd /
 mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time vendor/ vendor/
 put vendor/autoload.php -o vendor/autoload.php

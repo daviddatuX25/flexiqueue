@@ -9,11 +9,11 @@ return new class extends Migration
     /**
      * Run the migrations.
      * Per plan: add 'call' and 'reorder' action types for audit trail.
-     * ENUM MODIFY is MySQL/MariaDB only; on SQLite we recreate table so action_type accepts new values.
+     * ENUM MODIFY is MySQL only; on SQLite we recreate table so action_type accepts new values.
      */
     public function up(): void
     {
-        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() === 'mysql') {
             DB::statement("ALTER TABLE transaction_logs MODIFY COLUMN action_type ENUM(
                 'bind', 'call', 'check_in', 'transfer', 'override',
                 'complete', 'cancel', 'no_show', 'reorder', 'force_complete', 'identity_mismatch'
@@ -51,7 +51,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() === 'mysql') {
             DB::statement("ALTER TABLE transaction_logs MODIFY COLUMN action_type ENUM(
                 'bind', 'check_in', 'transfer', 'override',
                 'complete', 'cancel', 'no_show', 'force_complete', 'identity_mismatch'

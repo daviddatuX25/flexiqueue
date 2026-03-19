@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() === 'mysql') {
             DB::statement("ALTER TABLE tokens MODIFY COLUMN status ENUM('available', 'in_use', 'deactivated') DEFAULT 'available'");
         }
     }
@@ -19,7 +19,7 @@ return new class extends Migration
     public function down(): void
     {
         DB::table('tokens')->where('status', 'deactivated')->update(['status' => 'available']);
-        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() === 'mysql') {
             DB::statement("ALTER TABLE tokens MODIFY COLUMN status ENUM('available', 'in_use') DEFAULT 'available'");
         }
     }

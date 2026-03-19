@@ -55,8 +55,8 @@ class TransactionLogTriggersTest extends TestCase
 
     public function test_mysql_triggers_prevent_update_and_delete_via_raw_queries(): void
     {
-        if (! in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
-            $this->markTestSkipped('MySQL/MariaDB trigger behavior only verified on mysql/mariadb drivers.');
+        if (DB::getDriverName() !== 'mysql') {
+            $this->markTestSkipped('MySQL trigger behavior only verified on mysql driver.');
         }
 
         $log = $this->createTransactionLog();

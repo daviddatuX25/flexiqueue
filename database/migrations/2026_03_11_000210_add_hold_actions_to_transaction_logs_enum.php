@@ -9,11 +9,11 @@ return new class extends Migration
      * Run the migrations.
      * Per station holding-area plan: add 'hold' and 'resume_from_hold' transaction log actions.
      *
-     * MariaDB/MySQL use ENUM; SQLite already uses VARCHAR so no schema change is required there.
+     * MySQL uses ENUM; SQLite already uses VARCHAR so no schema change is required there.
      */
     public function up(): void
     {
-        if (! in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() !== 'mysql') {
             return;
         }
 
@@ -39,7 +39,7 @@ return new class extends Migration
      */
     public function down(): void
     {
-        if (! in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() !== 'mysql') {
             return;
         }
 
