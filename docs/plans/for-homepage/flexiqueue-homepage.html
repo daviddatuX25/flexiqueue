@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FlexiQueue</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Syne:wght@400;600;700;800&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0f0e;
+      --surface:   #141714;
+      --border:    #232623;
+      --border-hi: #2e3330;
+      --text:      #e8ede9;
+      --muted:     #6b7a6d;
+      --faint:     #2a302b;
+      --accent:    #4efa7e;
+      --accent-dim:#1c4a2c;
+      --amber:     #f5c842;
+      --amber-dim: #3a2e0a;
+      --red:       #f5504a;
+      --red-dim:   #3a1210;
+      --blue:      #5ab4f5;
+      --blue-dim:  #0d2a3a;
+
+      --font-display: 'Syne', sans-serif;
+      --font-body:    'Instrument Sans', sans-serif;
+      --font-mono:    'DM Mono', monospace;
+
+      --radius: 6px;
+      --radius-lg: 12px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 16px;
+      line-height: 1.6;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── NOISE OVERLAY ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+      opacity: 0.022;
+      pointer-events: none;
+      z-index: 1000;
+    }
+
+    /* ── AUTH STRIP ── */
+    .auth-strip {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 32px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--muted);
+      animation: slideDown 0.4s ease both;
+    }
+    .auth-strip .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+      flex-shrink: 0;
+    }
+    .auth-strip strong { color: var(--text); font-weight: 500; }
+    .auth-strip .role-badge {
+      background: var(--accent-dim);
+      color: var(--accent);
+      border: 1px solid var(--accent-dim);
+      padding: 1px 8px;
+      border-radius: 3px;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .auth-strip .go-link {
+      margin-left: auto;
+      color: var(--accent);
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      transition: gap 0.2s ease;
+    }
+    .auth-strip .go-link:hover { gap: 10px; }
+    .auth-strip .sep { color: var(--border-hi); }
+    .auth-strip a.plain { color: var(--muted); text-decoration: none; }
+    .auth-strip a.plain:hover { color: var(--text); }
+
+    /* ── NAV ── */
+    nav {
+      display: flex;
+      align-items: center;
+      padding: 20px 40px;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: rgba(13,15,14,0.92);
+      backdrop-filter: blur(12px);
+      z-index: 100;
+      animation: fadeIn 0.5s ease both 0.1s;
+    }
+    .nav-logo {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .nav-logo .logo-mark {
+      width: 28px; height: 28px;
+      background: var(--accent);
+      border-radius: 6px;
+      display: grid;
+      place-items: center;
+    }
+    .nav-logo .logo-mark svg { width: 16px; height: 16px; }
+    .nav-links {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .nav-links a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 14px;
+      padding: 6px 14px;
+      border-radius: var(--radius);
+      transition: color 0.2s, background 0.2s;
+    }
+    .nav-links a:hover { color: var(--text); background: var(--faint); }
+    .nav-links .btn-login {
+      background: var(--faint);
+      border: 1px solid var(--border-hi);
+      color: var(--text);
+      font-size: 13px;
+      padding: 7px 18px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      text-decoration: none;
+    }
+    .nav-links .btn-login:hover { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+
+    /* ── HERO ── */
+    .hero {
+      padding: 100px 40px 80px;
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 420px;
+      gap: 80px;
+      align-items: center;
+    }
+    .hero-left { animation: slideUp 0.7s cubic-bezier(0.16,1,0.3,1) both 0.2s; }
+    .hero-eyebrow {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .hero-eyebrow::before {
+      content: '';
+      display: block;
+      width: 24px; height: 1px;
+      background: var(--accent);
+    }
+    .hero h1 {
+      font-family: var(--font-display);
+      font-size: clamp(42px, 5.5vw, 72px);
+      font-weight: 800;
+      line-height: 1.02;
+      letter-spacing: -0.03em;
+      color: var(--text);
+      margin-bottom: 24px;
+    }
+    .hero h1 em {
+      font-style: normal;
+      color: var(--accent);
+    }
+    .hero-desc {
+      font-size: 17px;
+      color: var(--muted);
+      line-height: 1.7;
+      max-width: 480px;
+      margin-bottom: 36px;
+    }
+    .hero-desc strong { color: var(--text); font-weight: 500; }
+    .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      border: 1px solid transparent;
+      font-family: var(--font-body);
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #0a1a0f;
+      border-color: var(--accent);
+    }
+    .btn-primary:hover {
+      background: #6ffb94;
+      box-shadow: 0 0 24px rgba(78,250,126,0.3);
+      transform: translateY(-1px);
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--text);
+      border-color: var(--border-hi);
+    }
+    .btn-ghost:hover { border-color: var(--muted); background: var(--faint); }
+
+    /* ── HERO LIVE CARD ── */
+    .hero-right {
+      animation: slideUp 0.7s cubic-bezier(0.16,1,0.3,1) both 0.35s;
+    }
+    .live-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      position: relative;
+    }
+    .live-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      opacity: 0.6;
+    }
+    .live-card-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .live-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+      animation: pulse 2s ease infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--accent); }
+      50% { opacity: 0.5; box-shadow: 0 0 4px var(--accent); }
+    }
+    .live-card-body { padding: 18px; }
+    .queue-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      margin-bottom: 6px;
+      font-size: 13px;
+      animation: fadeIn 0.5s ease both;
+    }
+    .queue-row:nth-child(1) { animation-delay: 0.5s; }
+    .queue-row:nth-child(2) { animation-delay: 0.65s; }
+    .queue-row:nth-child(3) { animation-delay: 0.8s; }
+    .queue-row:nth-child(4) { animation-delay: 0.95s; }
+    .queue-row.serving {
+      background: var(--accent-dim);
+      border: 1px solid rgba(78,250,126,0.2);
+    }
+    .queue-row.waiting {
+      background: var(--faint);
+      border: 1px solid var(--border);
+    }
+    .token-num {
+      font-family: var(--font-mono);
+      font-weight: 500;
+      font-size: 15px;
+    }
+    .queue-row.serving .token-num { color: var(--accent); }
+    .queue-row.waiting .token-num { color: var(--muted); }
+    .status-pill {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 3px;
+    }
+    .pill-serving { background: rgba(78,250,126,0.12); color: var(--accent); }
+    .pill-waiting { color: var(--muted); }
+    .pill-called  { background: var(--amber-dim); color: var(--amber); }
+    .station-label { font-size: 12px; color: var(--muted); }
+    .live-card-footer {
+      padding: 12px 18px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 20px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .live-stat strong { color: var(--text); font-size: 16px; display: block; font-family: var(--font-display); font-weight: 700; }
+
+    /* ── SECTION BASE ── */
+    section { padding: 80px 40px; max-width: 1100px; margin: 0 auto; }
+    .section-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .section-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+      max-width: 60px;
+    }
+    .section-title {
+      font-family: var(--font-display);
+      font-size: clamp(26px, 3vw, 38px);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      margin-bottom: 14px;
+    }
+    .section-desc {
+      font-size: 15px;
+      color: var(--muted);
+      max-width: 520px;
+      line-height: 1.7;
+    }
+    .full-divider {
+      width: 100%;
+      height: 1px;
+      background: var(--border);
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    /* ── FEATURES ── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      margin-top: 52px;
+    }
+    .feature-card {
+      background: var(--surface);
+      padding: 28px;
+      position: relative;
+      transition: background 0.25s ease;
+      animation: fadeIn 0.5s ease both;
+    }
+    .feature-card:hover { background: #181c18; }
+    .feature-card:hover .feat-icon { transform: scale(1.1); }
+    .feat-icon {
+      width: 40px; height: 40px;
+      border-radius: var(--radius);
+      display: grid;
+      place-items: center;
+      margin-bottom: 16px;
+      transition: transform 0.2s ease;
+      font-size: 18px;
+    }
+    .feat-icon.green  { background: var(--accent-dim); }
+    .feat-icon.amber  { background: var(--amber-dim); }
+    .feat-icon.blue   { background: var(--blue-dim); }
+    .feat-icon.red    { background: var(--red-dim); }
+    .feat-title {
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+    .feat-desc {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+    .feat-tag {
+      margin-top: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+    }
+
+    /* ── PUBLIC ACCESS ── */
+    .access-section { padding: 80px 40px; }
+    .access-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .access-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+      margin-top: 48px;
+    }
+    .access-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px 30px;
+      display: flex;
+      align-items: flex-start;
+      gap: 20px;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 0.2s, background 0.2s, transform 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+    .access-card::after {
+      content: '→';
+      position: absolute;
+      right: 24px;
+      top: 50%;
+      transform: translateY(-50%) translateX(4px);
+      font-size: 20px;
+      color: var(--muted);
+      transition: transform 0.2s, color 0.2s;
+    }
+    .access-card:hover { border-color: var(--accent); background: #151a15; transform: translateY(-2px); }
+    .access-card:hover::after { transform: translateY(-50%) translateX(8px); color: var(--accent); }
+    .access-card.span-2 { grid-column: span 2; }
+    .access-icon {
+      width: 48px; height: 48px;
+      border-radius: var(--radius);
+      display: grid;
+      place-items: center;
+      font-size: 22px;
+      flex-shrink: 0;
+    }
+    .access-card-title {
+      font-family: var(--font-display);
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 5px;
+      letter-spacing: -0.01em;
+    }
+    .access-card-desc {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.55;
+      max-width: 380px;
+    }
+    .access-card-meta {
+      margin-top: 8px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--border-hi);
+      letter-spacing: 0.08em;
+    }
+
+    /* ── HOW IT WORKS ── */
+    .how-section { background: var(--surface); }
+    .how-wrap { max-width: 1100px; margin: 0 auto; padding: 80px 40px; }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0;
+      margin-top: 52px;
+      position: relative;
+    }
+    .steps::before {
+      content: '';
+      position: absolute;
+      top: 22px;
+      left: 10%;
+      right: 10%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--border-hi), var(--border-hi), transparent);
+    }
+    .step {
+      padding: 0 20px;
+      position: relative;
+      animation: slideUp 0.5s ease both;
+    }
+    .step:nth-child(1) { animation-delay: 0.1s; }
+    .step:nth-child(2) { animation-delay: 0.2s; }
+    .step:nth-child(3) { animation-delay: 0.3s; }
+    .step:nth-child(4) { animation-delay: 0.4s; }
+    .step-num {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      background: var(--bg);
+      border: 1px solid var(--border-hi);
+      display: grid;
+      place-items: center;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 20px;
+      position: relative;
+      z-index: 1;
+    }
+    .step.active .step-num {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      color: var(--accent);
+      box-shadow: 0 0 16px rgba(78,250,126,0.2);
+    }
+    .step-title {
+      font-family: var(--font-display);
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+    .step-desc { font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 40px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      font-size: 13px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+    }
+    footer .footer-logo {
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: -0.02em;
+      margin-right: 8px;
+    }
+    footer .env-badge {
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      background: var(--amber-dim);
+      color: var(--amber);
+      padding: 2px 8px;
+      border-radius: 3px;
+    }
+    footer .footer-links {
+      margin-left: auto;
+      display: flex;
+      gap: 20px;
+    }
+    footer .footer-links a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 12px;
+      transition: color 0.2s;
+    }
+    footer .footer-links a:hover { color: var(--text); }
+
+    /* ── ANIMATIONS ── */
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateY(-8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 900px) {
+      .hero { grid-template-columns: 1fr; gap: 48px; padding: 60px 24px 48px; }
+      .features-grid { grid-template-columns: 1fr 1fr; }
+      .access-grid { grid-template-columns: 1fr; }
+      .access-card.span-2 { grid-column: span 1; }
+      .steps { grid-template-columns: repeat(2, 1fr); gap: 32px; }
+      .steps::before { display: none; }
+      section, .access-section .access-inner, .how-wrap { padding: 60px 24px; }
+      nav { padding: 16px 24px; }
+      footer { padding: 24px; flex-wrap: wrap; }
+    }
+    @media (max-width: 600px) {
+      .features-grid { grid-template-columns: 1fr; }
+      .steps { grid-template-columns: 1fr; }
+      nav .nav-links a:not(.btn-login) { display: none; }
+    }
+
+    /* ── SCROLL ANIMATIONS ── */
+    .reveal {
+      opacity: 0;
+      transform: translateY(16px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- AUTH STRIP (shown when logged in) -->
+  <div class="auth-strip">
+    <div class="dot"></div>
+    <span>Logged in as <strong>Maria Santos</strong></span>
+    <span class="role-badge">Admin</span>
+    <span class="sep">·</span>
+    <a href="/profile" class="plain">Profile</a>
+    <span class="sep">·</span>
+    <a href="/logout" class="plain">Log out</a>
+    <a href="/admin/dashboard" class="go-link">Go to your dashboard <span>→</span></a>
+  </div>
+
+  <!-- NAV -->
+  <nav>
+    <a href="/" class="nav-logo">
+      <div class="logo-mark">
+        <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="2" y="3" width="12" height="2" rx="1" fill="#0a1a0f"/>
+          <rect x="2" y="7" width="8" height="2" rx="1" fill="#0a1a0f"/>
+          <rect x="2" y="11" width="5" height="2" rx="1" fill="#0a1a0f"/>
+          <circle cx="13" cy="12" r="2" fill="#0a1a0f"/>
+        </svg>
+      </div>
+      FlexiQueue
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#access">Public Access</a>
+      <a href="/login" class="btn-login">Log in →</a>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <div style="max-width:1100px;margin:0 auto;">
+    <div class="hero">
+      <div class="hero-left">
+        <div class="hero-eyebrow">Queue management system</div>
+        <h1>Serve your clients.<br /><em>Faster.</em></h1>
+        <p class="hero-desc">
+          FlexiQueue manages your entire queue lifecycle — from <strong>token issuance</strong> to <strong>station serving</strong>, triage flows, live displays, and analytics. Built for teams that move quickly.
+        </p>
+        <div class="hero-actions">
+          <a href="/display" class="btn btn-primary">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="2" width="12" height="9" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M4 11h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M7 11v1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+            View Queue Display
+          </a>
+          <a href="/login" class="btn btn-ghost">Staff login →</a>
+        </div>
+      </div>
+
+      <!-- LIVE QUEUE PREVIEW CARD -->
+      <div class="hero-right">
+        <div class="live-card">
+          <div class="live-card-header">
+            <div class="live-dot"></div>
+            LIVE · General Services · Track A
+          </div>
+          <div class="live-card-body">
+            <div class="queue-row serving">
+              <div>
+                <div class="token-num">A-042</div>
+                <div class="station-label">Window 3 — Serving now</div>
+              </div>
+              <span class="status-pill pill-serving">Serving</span>
+            </div>
+            <div class="queue-row waiting">
+              <div>
+                <div class="token-num">A-043</div>
+                <div class="station-label">Called to Window 2</div>
+              </div>
+              <span class="status-pill pill-called">Called</span>
+            </div>
+            <div class="queue-row waiting">
+              <div>
+                <div class="token-num">A-044</div>
+                <div class="station-label">Waiting</div>
+              </div>
+              <span class="status-pill pill-waiting">Queue</span>
+            </div>
+            <div class="queue-row waiting">
+              <div>
+                <div class="token-num">A-045</div>
+                <div class="station-label">Waiting</div>
+              </div>
+              <span class="status-pill pill-waiting">Queue</span>
+            </div>
+          </div>
+          <div class="live-card-footer">
+            <div class="live-stat"><strong>8</strong> in queue</div>
+            <div class="live-stat"><strong>63</strong> processed today</div>
+            <div class="live-stat"><strong>4</strong> stations active</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="full-divider"></div>
+
+  <!-- FEATURES -->
+  <section id="features">
+    <div class="section-label">What it does</div>
+    <h2 class="section-title">Everything your queue operation needs.</h2>
+    <p class="section-desc">From a single window to a multi-track, multi-station setup — FlexiQueue handles the complexity so your team doesn't have to.</p>
+
+    <div class="features-grid reveal">
+      <div class="feature-card">
+        <div class="feat-icon green">🗂️</div>
+        <div class="feat-title">Programs & Tracks</div>
+        <p class="feat-desc">Organize services into programs with multiple tracks and steps. Activate, pause, or deactivate in real time.</p>
+        <div class="feat-tag">admin · programs · tracks</div>
+      </div>
+      <div class="feature-card">
+        <div class="feat-icon green">🎟️</div>
+        <div class="feat-title">Token Management</div>
+        <p class="feat-desc">Batch-generate, print, and manage tokens. Assign QR codes or PINs for client identification.</p>
+        <div class="feat-tag">admin · tokens · print</div>
+      </div>
+      <div class="feature-card">
+        <div class="feat-icon amber">🖥️</div>
+        <div class="feat-title">Live Station Serving</div>
+        <p class="feat-desc">Call, serve, transfer, complete, or no-show from the station interface. Real-time via WebSocket.</p>
+        <div class="feat-tag">staff · station · reverb</div>
+      </div>
+      <div class="feature-card">
+        <div class="feat-icon blue">🔀</div>
+        <div class="feat-title">Triage & Binding</div>
+        <p class="feat-desc">Bind physical tokens to sessions by scan or lookup. Route clients to the right track from the start.</p>
+        <div class="feat-tag">staff · triage · binding</div>
+      </div>
+      <div class="feature-card">
+        <div class="feat-icon amber">📺</div>
+        <div class="feat-title">Queue Displays</div>
+        <p class="feat-desc">Public queue board and per-station boards update in real time. No refresh needed. No login required.</p>
+        <div class="feat-tag">public · display · live</div>
+      </div>
+      <div class="feature-card">
+        <div class="feat-icon blue">🔊</div>
+        <div class="feat-title">Text-to-Speech</div>
+        <p class="feat-desc">Server-side TTS announcements per token call. Configurable voice and account via ElevenLabs integration.</p>
+        <div class="feat-tag">admin · tts · elevenlabs</div>
+      </div>
+      <div class="feature-card">
+        <div class="feat-icon green">📊</div>
+        <div class="feat-title">Analytics</div>
+        <p class="feat-desc">Throughput, wait distribution, station utilization, funnel analysis, busiest hours, and token health.</p>
+        <div class="feat-tag">admin · analytics · export</div>
+      </div>
+      <div class="feature-card">
+        <div class="feat-icon red">🔐</div>
+        <div class="feat-title">Role-Based Access</div>
+        <p class="feat-desc">Admin, supervisor, and staff roles with scoped permissions. Supervisor approval flows and permission requests.</p>
+        <div class="feat-tag">auth · roles · permissions</div>
+      </div>
+      <div class="feature-card">
+        <div class="feat-icon red">📋</div>
+        <div class="feat-title">Logs & Audit</div>
+        <p class="feat-desc">Full session logs and audit trail. Export program sessions. Track every action across your queue operation.</p>
+        <div class="feat-tag">admin · logs · audit</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="full-divider"></div>
+
+  <!-- HOW IT WORKS -->
+  <div class="how-section">
+    <div class="how-wrap">
+      <div class="section-label">Lifecycle</div>
+      <h2 class="section-title">How a session works.</h2>
+      <p class="section-desc">Every client interaction follows a clear, trackable lifecycle from start to finish.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">01</div>
+          <div class="step-title">Token issued</div>
+          <p class="step-desc">A client receives a token — printed, scanned, or via QR code. Bound to a session by triage staff.</p>
+        </div>
+        <div class="step active">
+          <div class="step-num">02</div>
+          <div class="step-title">Called to station</div>
+          <p class="step-desc">Staff calls the next token. Display boards update instantly. TTS announces the number aloud.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">03</div>
+          <div class="step-title">Served or transferred</div>
+          <p class="step-desc">Client is served at the window. Staff can transfer, override, add notes, or escalate as needed.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">04</div>
+          <div class="step-title">Completed & logged</div>
+          <p class="step-desc">Session marked complete. Data feeds into analytics, logs, and throughput reports.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="full-divider"></div>
+
+  <!-- PUBLIC ACCESS -->
+  <div class="access-section" id="access">
+    <div class="access-inner">
+      <div class="section-label">No login needed</div>
+      <h2 class="section-title">Public access points.</h2>
+      <p class="section-desc">Clients and visitors can check queue status and start their flow — no account required.</p>
+
+      <div class="access-grid reveal">
+        <a href="/display" class="access-card">
+          <div class="access-icon" style="background:var(--accent-dim);">📺</div>
+          <div>
+            <div class="access-card-title">Queue Display Board</div>
+            <div class="access-card-desc">Live view of the full queue — who's being called, who's waiting, how many are ahead.</div>
+            <div class="access-card-meta">/display</div>
+          </div>
+        </a>
+        <a href="/display/station/1" class="access-card">
+          <div class="access-icon" style="background:var(--blue-dim);">🖥️</div>
+          <div>
+            <div class="access-card-title">Station Board</div>
+            <div class="access-card-desc">Per-station view of who's currently being served and who's next at that window.</div>
+            <div class="access-card-meta">/display/station/{id}</div>
+          </div>
+        </a>
+        <a href="/triage/start" class="access-card">
+          <div class="access-icon" style="background:var(--amber-dim);">🔀</div>
+          <div>
+            <div class="access-card-title">Start Triage</div>
+            <div class="access-card-desc">Begin the intake flow. Present your token or QR code to bind your session and get routed to the right track.</div>
+            <div class="access-card-meta">/triage/start · requires active program</div>
+          </div>
+        </a>
+        <a href="/display/status" class="access-card">
+          <div class="access-icon" style="background:var(--red-dim);">🔍</div>
+          <div>
+            <div class="access-card-title">Check My Status</div>
+            <div class="access-card-desc">Enter your QR code or token number to see your current position in the queue and estimated wait.</div>
+            <div class="access-card-meta">/display/status/{hash}</div>
+          </div>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer>
+    <span class="footer-logo">FlexiQueue</span>
+    <span class="env-badge">Development</span>
+    <span style="font-size:11px;">v1.0.0-dev</span>
+    <div class="footer-links">
+      <a href="/login">Staff Login</a>
+      <a href="/display">Queue Display</a>
+    </div>
+  </footer>
+
+  <script>
+    // Scroll reveal
+    const reveals = document.querySelectorAll('.reveal');
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (e.isIntersecting) { e.target.classList.add('visible'); observer.unobserve(e.target); }
+      });
+    }, { threshold: 0.1 });
+    reveals.forEach(el => observer.observe(el));
+
+    // Simulate live queue ticker (cosmetic)
+    const nums = ['A-043', 'A-044', 'A-045', 'A-046'];
+    let idx = 0;
+    setInterval(() => {
+      const rows = document.querySelectorAll('.queue-row.waiting .token-num');
+      if (rows.length) {
+        rows[0].textContent = nums[idx % nums.length];
+        idx++;
+      }
+    }, 3500);
+  </script>
+</body>
+</html>

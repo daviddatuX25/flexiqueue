@@ -1,0 +1,757 @@
+Let me read the remaining models and the AnalyticsService to make sure the seeder data hits every query the analytics page runs.Now I have everything. I know exactly what every analytics query reads — `started_at`, `completed_at`, `status`, `track_id`, `program_id`, `action_type` in transaction logs with `created_at`, and the wait time calculation from `bind` → `call` timestamps. I can now write a precise, complete plan.
+
+---
+
+# Seeder Final Plan
+
+---
+
+## Overview
+
+Two completely independent seeder sets. Each is runnable alone on a fresh migrated database.
+
+**Central Set** — for the cloud/central server. Two organizations, rich multi-day history, all analytics charts populated.
+
+**Edge Set** — for the Orange Pi standalone. One organization, AICS only, 10 days of field-realistic history, 3 stale sessions left over from yesterday to show the edge dashboard is alive.
+
+---
+
+## Files to Create
+
+```
+database/seeders/
+├── CentralSeeder.php              ← entry point for central
+├── EdgeSeeder.php                 ← entry point for edge
+├── Shared/
+│   └── HistoryHelper.php          ← shared static methods used by both history seeders
+├── Central/
+│   ├── CentralSiteSeeder.php
+│   ├── CentralUsersSeeder.php
+│   ├── CentralProgramSeeder.php
+│   ├── CentralTokenSeeder.php
+│   ├── CentralClientSeeder.php
+│   └── CentralHistorySeeder.php
+└── Edge/
+    ├── EdgeSiteSeeder.php
+    ├── EdgeUsersSeeder.php
+    ├── EdgeProgramSeeder.php
+    ├── EdgeTokenSeeder.php
+    ├── EdgeClientSeeder.php
+    └── EdgeHistorySeeder.php
+```
+
+---
+
+## How to Run
+
+```bash
+# Central — full reset
+php artisan migrate:fresh --force
+php artisan db:seed --class=CentralSeeder
+
+# Edge — full reset
+php artisan migrate:fresh --force
+php artisan db:seed --class=EdgeSeeder
+
+# Verify row counts after seeding
+php artisan tinker --execute="
+  echo 'sessions: ' . DB::table('queue_sessions')->count() . PHP_EOL;
+  echo 'logs: '     . DB::table('transaction_logs')->count() . PHP_EOL;
+  echo 'clients: '  . DB::table('clients')->count() . PHP_EOL;
+  echo 'tokens: '   . DB::table('tokens')->count() . PHP_EOL;
+"
+```
+
+Expected after central seed: ~560 sessions, ~2,800 logs, 160 clients, 120 tokens.
+Expected after edge seed: ~145 sessions, ~660 logs, 50 clients, 40 tokens.
+
+---
+
+## Section 1 — Entry Points
+
+---
+
+### `CentralSeeder.php`
+
+Namespace `Database\Seeders`. Extends `Seeder`.
+
+Calls sub-seeders in this exact order:
+
+```
+1. DefaultSiteSeeder          ← already exists, creates the 'default' site
+2. SuperAdminSeeder           ← already exists, creates superadmin@flexiqueue.app
+3. Central\CentralSiteSeeder  ← creates the two org sites
+4. Central\CentralUsersSeeder
+5. Central\CentralProgramSeeder
+6. Central\CentralTokenSeeder
+7. Central\CentralClientSeeder
+8. Central\CentralHistorySeeder
+```
+
+---
+
+### `EdgeSeeder.php`
+
+Calls sub-seeders in this exact order:
+
+```
+1. Edge\EdgeSiteSeeder
+2. Edge\EdgeUsersSeeder
+3. Edge\EdgeProgramSeeder
+4. Edge\EdgeTokenSeeder
+5. Edge\EdgeClientSeeder
+6. Edge\EdgeHistorySeeder
+```
+
+No super admin on edge. No `DefaultSiteSeeder` call — the edge creates its own single site directly.
+
+---
+
+## Section 2 — Shared Helper
+
+### `Shared/HistoryHelper.php`
+
+Namespace `Database\Seeders\Shared`. A plain class, not a seeder. Contains static methods used by both history seeders to avoid duplication.
+
+**Static methods:**
+
+`makeTokenPhysicalId(int $index): string`
+Converts a 0-based index to a physical ID. 0–8 = A1–A9, 9–17 = B1–B9, etc.
+```php
+$letter = chr(65 + intdiv($index, 9));
+$number = ($index % 9) + 1;
+return $letter . $number;
+```
+
+`makeQrHash(string $siteSlug, string $physicalId): string`
+Returns `hash('sha256', 'TOKEN_' . $siteSlug . '_' . $physicalId)`.
+
+`spreadSessionsAcrossDay(int $count, Carbon $baseDate): array`
+Returns an array of `$count` Carbon timestamps spread across a workday (8:00 AM–4:30 PM) with a morning peak. Distribution: 8–11 AM = 50%, 1–3 PM = 35%, 3–4:30 PM = 15%. Returns sorted ascending.
+
+Implementation:
+```php
+$morning = (int) round($count * 0.50);
+$afternoon = (int) round($count * 0.35);
+$lateAfternoon = $count - $morning - $afternoon;
+
+$times = [];
+for ($i = 0; $i < $morning; $i++) {
+    $times[] = $baseDate->copy()->setTime(8, 0)->addMinutes(rand(0, 179));
+}
+for ($i = 0; $i < $afternoon; $i++) {
+    $times[] = $baseDate->copy()->setTime(13, 0)->addMinutes(rand(0, 119));
+}
+for ($i = 0; $i < $lateAfternoon; $i++) {
+    $times[] = $baseDate->copy()->setTime(15, 0)->addMinutes(rand(0, 89));
+}
+sort($times); // sort Carbon objects — use usort with $a->lt($b)
+return $times;
+```
+
+`pickCategory(string $trackName): string`
+If trackName contains 'Priority': return 'Senior Citizen' 60% / 'PWD' 40%.
+If trackName is 'Regular': return 'Regular'.
+
+`pickOutcome(int $dayIndex): string`
+Returns 'completed', 'no_show', or 'cancelled' based on weighted random.
+```php
+$roll = rand(1, 100);
+if ($roll <= 75) return 'completed';
+if ($roll <= 85) return 'no_show';
+return 'cancelled';
+```
+
+`insertLog(int $sessionId, ?int $stationId, ?int $staffId, string $actionType, ?int $prevStationId, ?int $nextStationId, string $createdAt): void`
+Inserts one row into `transaction_logs` using `DB::table()->insert()`.
+```php
+DB::table('transaction_logs')->insert([
+    'session_id'          => $sessionId,
+    'station_id'          => $stationId,
+    'staff_user_id'       => $staffId,
+    'action_type'         => $actionType,
+    'previous_station_id' => $prevStationId,
+    'next_station_id'     => $nextStationId,
+    'remarks'             => null,
+    'metadata'            => null,
+    'created_at'          => $createdAt,
+]);
+```
+
+---
+
+## Section 3 — Central Site Seeder
+
+### `Central/CentralSiteSeeder.php`
+
+Creates two sites. Uses `EdgeSettingsValidator` (same as `DefaultSiteSeeder`).
+
+**Site 1:**
+```
+slug: tagudin-mswdo
+name: Tagudin MSWDO
+is_default: false
+api_key_hash: Hash::make(Str::random(40))  ← raw key discarded, not needed for seeding
+settings: []
+edge_settings: validate(['sync_tokens'=>true, 'sync_clients'=>true, 'sync_tts'=>true, 'bridge_enabled'=>false])
+```
+
+**Site 2:**
+```
+slug: candon-mswdo
+name: Candon City MSWDO
+is_default: false
+api_key_hash: Hash::make(Str::random(40))
+settings: []
+edge_settings: validate(['sync_tokens'=>true, 'sync_clients'=>false, 'sync_tts'=>true, 'bridge_enabled'=>true])
+```
+
+Use `Site::firstOrCreate(['slug' => ...], [...])` for idempotency.
+
+---
+
+## Section 4 — Central Users Seeder
+
+### `Central/CentralUsersSeeder.php`
+
+Creates 1 admin + 6 staff per site. All passwords: `Hash::make('password')`. Override PIN: `Hash::make('123456')`.
+
+**Tagudin MSWDO users:**
+
+| Role | Name | Email |
+|---|---|---|
+| admin | Lourdes Valdez | admin@tagudinmswdo.gov.ph |
+| staff | Maria Santos | staff1@tagudinmswdo.gov.ph |
+| staff | Juan Dela Cruz | staff2@tagudinmswdo.gov.ph |
+| staff | Rosa Reyes | staff3@tagudinmswdo.gov.ph |
+| Jose Garcia | staff4@tagudinmswdo.gov.ph |
+| staff | Ana Flores | staff5@tagudinmswdo.gov.ph |
+| staff | Pedro Villanueva | staff6@tagudinmswdo.gov.ph |
+
+**Candon City MSWDO users:**
+
+| Role | Name | Email |
+|---|---|---|
+| admin | Carmen Aquino | admin@candonmswdo.gov.ph |
+| staff | Elena Bautista | staff1@candonmswdo.gov.ph |
+| staff | Ramon Castillo | staff2@candonmswdo.gov.ph |
+| staff | Nora Espiritu | staff3@candonmswdo.gov.ph |
+| staff | Dante Hernandez | staff4@candonmswdo.gov.ph |
+| staff | Celia Ignacio | staff5@candonmswdo.gov.ph |
+| staff | Felix Jacinto | staff6@candonmswdo.gov.ph |
+
+Use `User::updateOrCreate(['email' => ...], [...])`.
+
+All users get `site_id` of their respective site. `is_active = true`, `availability_status = 'available'`.
+
+---
+
+## Section 5 — Central Program Seeder
+
+### `Central/CentralProgramSeeder.php`
+
+Creates 3 programs per site. AICS is active, the other two are inactive. Structure is identical between sites — only `site_id`, `created_by` differ.
+
+**Program 1 — AICS (active)**
+
+Settings:
+```php
+'priority_first' => true,
+'balance_mode' => 'alternate',
+'alternate_ratio' => [2, 1],
+'no_show_timer_seconds' => 10,
+'require_permission_before_override' => true,
+'station_selection_mode' => 'fixed',
+'display_scan_timeout_seconds' => 20,
+'display_audio_muted' => false,
+'display_audio_volume' => 1,
+'allow_public_triage' => true,
+```
+
+4 processes (in order):
+- Screening
+- Interview & Assessment
+- Verification
+- Cash Release
+
+4 stations, each linked to one process via `station->processes()->sync([$proc->id])`:
+- Window 1 – Screening → Screening process, capacity=1, client_capacity=2
+- Window 2 – Interview → Interview & Assessment process
+- Window 3 – Verification → Verification process
+- Window 4 – Cash Release → Cash Release process
+
+2 tracks:
+- Regular: `is_default=true`, color `#22c55e`, 4 steps pointing to stations 1–4 in order
+- Priority: `is_default=false`, color `#eab308`, same 4 steps as Regular
+
+Staff assignments (via `ProgramStationAssignment`):
+- staff[0] → Window 1
+- staff[1] → Window 2
+- staff[2] → Window 3
+- staff[3] → Window 4
+
+Update `staff[0..3]->assigned_station_id` to their station.
+
+Staff[5] (Pedro Villanueva / Felix Jacinto) = supervisor. Add via `$aics->supervisedBy()->syncWithoutDetaching([$staff[5]->id])`.
+
+**Program 2 — Social Pension (inactive)**
+
+Settings: `priority_first=true, balance_mode=fifo, allow_public_triage=false`. Same other defaults.
+
+3 processes: Eligibility Check, Interview, Payout
+3 stations: Window 1 – Eligibility, Window 2 – Interview, Window 3 – Payout
+1 track: Regular, `is_default=true`, color `#3b82f6`, 3 steps.
+
+**Program 3 — PWD ID and Assistance (inactive)**
+
+3 processes: Document Verification, Assessment, ID Release
+3 stations: Verification Window, Assessment Window, Release Window
+1 track: Regular, `is_default=true`, color `#ec4899`, 3 steps.
+
+---
+
+## Section 6 — Central Token Seeder
+
+### `Central/CentralTokenSeeder.php`
+
+Creates 60 tokens per site. Assigns all to the AICS program via `program_token` pivot.
+
+```php
+$letters = ['A','B','C','D','E','F','G'];
+// A1–A9, B1–B9, ..., F1–F9 = 54 tokens. G1–G6 = 6 more. Total 60.
+```
+
+Per token:
+```php
+DB::table('tokens')->insertOrIgnore([
+    'site_id'      => $site->id,
+    'physical_id'  => $physicalId,     // e.g. 'A1'
+    'pronounce_as' => null,
+    'qr_code_hash' => hash('sha256', 'TOKEN_' . $site->slug . '_' . $physicalId),
+    'status'       => 'available',
+    'is_global'    => false,
+    'tts_status'   => null,
+    'tts_settings' => null,
+    'created_at'   => now(),
+    'updated_at'   => now(),
+]);
+```
+
+After inserting all tokens, insert `program_token` pivot rows:
+```php
+DB::table('program_token')->insertOrIgnore(
+    Token::where('site_id', $site->id)->pluck('id')->map(fn($id) => [
+        'program_id' => $aics->id,
+        'token_id'   => $id,
+        'created_at' => now(),
+    ])->all()
+);
+```
+
+Use `insertOrIgnore` — safe to re-run.
+
+---
+
+## Section 7 — Central Client Seeder
+
+### `Central/CentralClientSeeder.php`
+
+Creates 80 clients per site. Uses Filipino names and Ilocano place data.
+
+**Name pools:**
+
+First names (20): Maria, Jose, Juan, Rosa, Ana, Pedro, Carmen, Ramon, Nora, Dante, Elena, Felix, Celia, Lourdes, Ernesto, Corazon, Rodrigo, Lydia, Ricardo, Teresita
+
+Middle names (10, used as initials): Santos, Dela Cruz, Reyes, Garcia, Flores, Bautista, Castillo, Espiritu, Hernandez, Ignacio
+
+Last names (20): Santos, Dela Cruz, Reyes, Garcia, Flores, Bautista, Castillo, Espiritu, Hernandez, Ignacio, Jacinto, Lopez, Manalo, Navarro, Ocampo, Padilla, Quiambao, Ramos, Salvador, Torres
+
+**Birth date distribution** (80 clients per site):
+- 25 seniors: birth year 1940–1960 → `birth_date = YYYY-MM-DD` with random month/day
+- 30 middle-aged: birth year 1961–1985
+- 25 young adult: birth year 1986–2000
+
+**Address data (Tagudin site):**
+- address_line_1: one of `['Barangay San Antonio', 'Barangay Poblacion', 'Barangay Bitalag', 'Barangay Damortis', 'Barangay Patpata', 'Barangay Patoc-ao']`
+- city: `Tagudin`
+- state: `Ilocos Sur`
+- postal_code: `2727`
+- country: `Philippines`
+
+**Address data (Candon site):**
+- address_line_1: one of `['Barangay San Nicolas', 'Barangay Poblacion', 'Barangay Caterman', 'Barangay Darapidap', 'Barangay Palacapac']`
+- city: `Candon City`
+- state: `Ilocos Sur`
+- postal_code: `2710`
+- country: `Philippines`
+
+**identity_hash:**
+```php
+hash('sha256', strtoupper($lastName . '|' . $firstName . '|' . $birthDate->format('Y-m-d')))
+```
+
+No `mobile_encrypted`, no `mobile_hash`. These are optional and not needed for seeding.
+
+Use `DB::table('clients')->insert([...])` in one batch per site (80 rows per batch). Do NOT use Eloquent `Client::create()` — the mobile crypto service is not needed here and would add unnecessary overhead.
+
+---
+
+## Section 8 — Central History Seeder
+
+### `Central/CentralHistorySeeder.php`
+
+**Idempotency guard at the top:**
+```php
+if (DB::table('queue_sessions')->count() > 0) {
+    $this->command->info('History already exists, skipping CentralHistorySeeder.');
+    return;
+}
+```
+
+**Daily volumes (10 days, both sites):**
+
+| Day offset | Day | Tagudin volume | Candon volume |
+|---|---|---|---|
+| -10 | Monday | 28 | 22 |
+| -9 | Tuesday | 35 | 30 |
+| -8 | Wednesday | 41 | 38 |
+| -7 | Thursday | 32 | 27 |
+| -6 | Friday | 20 | 18 |
+| -5 | Saturday | 8 | 6 |
+| -4 | Sunday | 0 | 0 |
+| -3 | Monday | 31 | 25 |
+| -2 | Tuesday | 38 | 33 |
+| -1 | Wednesday (yesterday) | 44 | 40 |
+
+**For each site, on each non-zero day, for each session:**
+
+Resolve data needed:
+```php
+$site    = Site::where('slug', $siteSlug)->firstOrFail();
+$aics    = Program::where('site_id', $site->id)->where('name', 'like', '%AICS%')->firstOrFail();
+$tracks  = ServiceTrack::where('program_id', $aics->id)->get()->keyBy('name');
+$regular = $tracks['Regular'];
+$priority= $tracks['Priority'];
+$stations= Station::where('program_id', $aics->id)->orderBy('id')->get();
+// stations[0]=Screening, [1]=Interview, [2]=Verification, [3]=Cash Release
+$staff   = User::where('site_id', $site->id)->where('role', 'staff')->orderBy('id')->get();
+$tokens  = Token::where('site_id', $site->id)->orderBy('id')->get();
+$clients = DB::table('clients')->where('site_id', $site->id)->get();
+$admin   = User::where('site_id', $site->id)->where('role', 'admin')->firstOrFail();
+```
+
+Staff to station mapping (index-based):
+- station 0 → staff[0]
+- station 1 → staff[1]
+- station 2 → staff[2]
+- station 3 → staff[3]
+
+**Session building loop:**
+
+Spread `$volume` bind times across the day using `HistoryHelper::spreadSessionsAcrossDay($volume, $baseDate)`.
+
+Token pool: use tokens in sequence, wrapping with modulo (`$tokenIndex % count($tokens)`). This is correct — historically the same token can be reused on different days.
+
+Client pool: pick randomly from clients with `$clients[array_rand($clientsArray)]`.
+
+Track: 80% Regular, 20% Priority.
+
+Category: `HistoryHelper::pickCategory($track->name)`.
+
+Outcome: `HistoryHelper::pickOutcome($dayIndex)`.
+
+**Building timestamps for a completed session (4-step AICS):**
+
+```
+$bindAt    = $bindTime (from spreadSessionsAcrossDay)
+$callAt    = $bindAt + 2–8 minutes (rand wait in queue)
+$step1In   = $callAt + 1 minute
+$step1Out  = $step1In + rand(4, 12) minutes
+$step2In   = $step1Out + 1 minute
+$step2Out  = $step2In + rand(4, 12) minutes
+$step3In   = $step2Out + 1 minute
+$step3Out  = $step3In + rand(4, 12) minutes
+$step4In   = $step3Out + 1 minute
+$step4Out  = $step4In + rand(4, 12) minutes  ← completed_at
+```
+
+**Insert queue_sessions row (raw DB):**
+
+```php
+$sessionRows[] = [
+    'token_id'                  => $token->id,
+    'client_id'                 => $client->id,
+    'program_id'                => $aics->id,
+    'track_id'                  => $track->id,
+    'alias'                     => $token->physical_id,
+    'client_category'           => $category,
+    'current_station_id'        => $lastStationId,
+    'current_step_order'        => $lastStep,
+    'status'                    => $outcome,
+    'started_at'                => $bindAt->toDateTimeString(),
+    'completed_at'              => $completedAt?->toDateTimeString(),
+    'no_show_attempts'          => $outcome === 'no_show' ? rand(1, 2) : 0,
+    'is_on_hold'                => 0,
+    'held_at'                   => null,
+    'held_order'                => null,
+    'holding_station_id'        => null,
+    'station_queue_position'    => rand(1, 8),
+    'queued_at_station'         => $bindAt->toDateTimeString(),
+    'override_steps'            => null,
+    'identity_registration_id'  => null,
+    'created_at'                => $bindAt->toDateTimeString(),
+    'updated_at'                => ($completedAt ?? $callAt)->toDateTimeString(),
+];
+```
+
+Do NOT insert one by one. Collect all sessions for a day into an array and do one bulk insert:
+```php
+DB::table('queue_sessions')->insert($sessionRows);
+```
+
+After bulk insert, retrieve the inserted IDs. On SQLite this requires fetching by `token_id + started_at` since `lastInsertId()` only returns the last one. Simplest approach: after inserting a day's sessions, query them back:
+```php
+$insertedSessions = DB::table('queue_sessions')
+    ->where('program_id', $aics->id)
+    ->whereDate('started_at', $baseDate->toDateString())
+    ->orderBy('id')
+    ->get(['id', 'token_id', 'started_at', 'status', 'track_id', 'current_station_id']);
+```
+
+**Transaction logs per session:**
+
+Collect all log rows for all sessions in the day into one array, insert bulk at the end of the day.
+
+For each `$session` from `$insertedSessions`, match it back to your in-memory session plan (by `token_id + started_at`) to get the computed timestamps.
+
+Log rows by outcome:
+
+**Completed (4 steps):**
+```
+bind         station=null,       staff=$admin->id,    action=bind,       at=$bindAt
+call         station=$stations[0], staff=$staff[0],    action=call,       at=$callAt
+check_in     station=$stations[0], staff=$staff[0],    action=check_in,   at=$step1In
+transfer     station=$stations[0], staff=$staff[0],    action=transfer,   at=$step1Out,  next=$stations[1]
+check_in     station=$stations[1], staff=$staff[1],    action=check_in,   at=$step2In
+transfer     station=$stations[1], staff=$staff[1],    action=transfer,   at=$step2Out,  next=$stations[2]
+check_in     station=$stations[2], staff=$staff[2],    action=check_in,   at=$step3In
+transfer     station=$stations[2], staff=$staff[2],    action=transfer,   at=$step3Out,  next=$stations[3]
+check_in     station=$stations[3], staff=$staff[3],    action=check_in,   at=$step4In
+complete     station=$stations[3], staff=$staff[3],    action=complete,   at=$completedAt
+```
+
+**No-show:**
+```
+bind         station=null,       staff=$admin->id,    action=bind,       at=$bindAt
+call         station=$stations[0], staff=$staff[0],    action=call,       at=$callAt
+no_show      station=$stations[0], staff=$staff[0],    action=no_show,    at=$callAt+12min
+```
+Set session `completed_at` to `$callAt+12min`. Set `current_station_id` to `$stations[0]->id`. Set `status=no_show`.
+
+**Cancelled (cancelled at station 1 or 2):**
+```
+bind         action=bind,   at=$bindAt
+call         action=call,   at=$callAt,   station=$stations[0]
+check_in     action=check_in, at=$step1In, station=$stations[0]
+cancel       action=cancel, at=$step1In + rand(5,15)min, station=$stations[0]
+```
+Set session `completed_at` to the cancel time. Set `status=cancelled`. Set `current_station_id` to `$stations[0]->id`.
+
+Bulk insert all log rows at end of each day:
+```php
+DB::table('transaction_logs')->insert($logRows);
+```
+
+**After all sessions across all days are inserted, reset token statuses:**
+```php
+DB::table('tokens')->where('site_id', $site->id)->update([
+    'status'             => 'available',
+    'current_session_id' => null,
+    'updated_at'         => now(),
+]);
+```
+
+**Important: `started_at` vs `queued_at_station` vs wait time.**
+
+The analytics `getWaitMinutesBySessionId` computes wait as `started_at` → `MIN(call log created_at)`. So `started_at` must be the bind time and the `call` log timestamp must be bind time + wait minutes. This is exactly what the plan above does. The wait time distribution will show values between 2–8 minutes, which hits all buckets from `0–5 min` and `5–10 min`.
+
+---
+
+## Section 9 — Edge Site Seeder
+
+### `Edge/EdgeSiteSeeder.php`
+
+One site:
+```
+slug: tagudin-mswdo-field
+name: Tagudin MSWDO Field Office
+is_default: true
+api_key_hash: Hash::make(Str::random(40))
+edge_settings: validate(['sync_tokens'=>true, 'sync_clients'=>true, 'sync_tts'=>true, 'bridge_enabled'=>false])
+```
+
+---
+
+## Section 10 — Edge Users Seeder
+
+### `Edge/EdgeUsersSeeder.php`
+
+1 admin + 4 staff.
+
+| Role | Name | Email |
+|---|---|---|
+| admin | Lourdes Valdez | admin@tagudinfield.gov.ph |
+| staff | Maria Santos | staff1@tagudinfield.gov.ph |
+| staff | Juan Dela Cruz | staff2@tagudinfield.gov.ph |
+| staff | Rosa Reyes | staff3@tagudinfield.gov.ph |
+| staff | Jose Garcia | staff4@tagudinfield.gov.ph |
+
+Staff[3] (Jose Garcia) = supervisor. Add after program is created.
+
+---
+
+## Section 11 — Edge Program Seeder
+
+### `Edge/EdgeProgramSeeder.php`
+
+AICS only, active.
+
+Settings same as central except `allow_public_triage=false` (field office has no public kiosk).
+
+4 stations, 4 processes, 2 tracks (Regular + Priority) — identical structure to central AICS.
+
+Staff assignments: staff[0]→Window1, staff[1]→Window2, staff[2]→Window3, staff[3]→Window4.
+
+Update `assigned_station_id` on each staff user.
+
+Jose Garcia = supervisor: `$aics->supervisedBy()->syncWithoutDetaching([$staff[3]->id])`.
+
+---
+
+## Section 12 — Edge Token Seeder
+
+### `Edge/EdgeTokenSeeder.php`
+
+40 tokens: A1–A9, B1–B9, C1–C9, D1–D9, E1–E4.
+
+Same insertion logic as central but only one site.
+
+---
+
+## Section 13 — Edge Client Seeder
+
+### `Edge/EdgeClientSeeder.php`
+
+50 clients. Same structure as central. All from Tagudin barangays. Use the same name pools. Birth date distribution: 15 seniors, 20 middle-aged, 15 young adult.
+
+---
+
+## Section 14 — Edge History Seeder
+
+### `Edge/EdgeHistorySeeder.php`
+
+**Idempotency guard** same as central.
+
+**Daily volumes (10 days):**
+
+| Day offset | Volume |
+|---|---|
+| -10 Monday | 12 |
+| -9 Tuesday | 18 |
+| -8 Wednesday | 22 |
+| -7 Thursday | 15 |
+| -6 Friday | 10 |
+| -5 Saturday | 5 |
+| -4 Sunday | 0 |
+| -3 Monday | 16 |
+| -2 Tuesday | 20 |
+| -1 Wednesday (yesterday) | 24 |
+
+Total: ~142 sessions.
+
+**Outcome distribution** same as central (75% completed, 10% no_show, 8% cancelled, etc.).
+
+**Same session/log building logic** as central — same bulk insert pattern, same timestamp math, same log structure.
+
+**Edge-specific: 3 stale waiting sessions from yesterday.**
+
+After inserting all history, insert 3 additional sessions representing clients who are still in queue from yesterday afternoon (simulates a day that didn't fully close out):
+
+```php
+$yesterday = Carbon::yesterday()->setTime(16, 15); // 4:15 PM yesterday
+foreach (range(0, 2) as $i) {
+    $token = $tokens[$i]; // use first 3 available tokens
+    $client = $clients[array_rand($clientsArray)];
+    DB::table('queue_sessions')->insert([
+        'token_id'               => $token->id,
+        'client_id'              => $client->id,
+        'program_id'             => $aics->id,
+        'track_id'               => $regular->id,
+        'alias'                  => $token->physical_id,
+        'client_category'        => 'Regular',
+        'current_station_id'     => $stations[0]->id,
+        'current_step_order'     => 1,
+        'status'                 => 'waiting',
+        'started_at'             => $yesterday->copy()->addMinutes($i * 5)->toDateTimeString(),
+        'completed_at'           => null,
+        'no_show_attempts'       => 0,
+        'is_on_hold'             => 0,
+        'station_queue_position' => $i + 1,
+        'queued_at_station'      => $yesterday->copy()->addMinutes($i * 5)->toDateTimeString(),
+        'override_steps'         => null,
+        'identity_registration_id' => null,
+        'created_at'             => $yesterday->copy()->addMinutes($i * 5)->toDateTimeString(),
+        'updated_at'             => $yesterday->copy()->addMinutes($i * 5)->toDateTimeString(),
+    ]);
+    $sessionId = DB::getPdo()->lastInsertId();
+    // Insert bind log only — they were queued but never called
+    HistoryHelper::insertLog($sessionId, null, $admin->id, 'bind', null, null,
+        $yesterday->copy()->addMinutes($i * 5)->toDateTimeString());
+}
+```
+
+Also update these 3 tokens to `status=in_use` and `current_session_id` pointing to their session:
+```php
+// After inserting each stale session, update the token
+DB::table('tokens')->where('id', $token->id)->update([
+    'status'             => 'in_use',
+    'current_session_id' => $sessionId,
+    'updated_at'         => now(),
+]);
+```
+
+This means when you open the edge admin dashboard, it shows 3 active sessions waiting at Window 1 from yesterday — the edge Pi looks operational.
+
+Reset all OTHER tokens (not these 3) to `available`:
+```php
+DB::table('tokens')
+    ->where('site_id', $site->id)
+    ->whereNotIn('id', $staleTokenIds)
+    ->update(['status' => 'available', 'current_session_id' => null]);
+```
+
+---
+
+## Section 15 — What the Analytics Page Will Show
+
+After running `CentralSeeder`:
+
+**KPI strip:** ~560 total sessions, ~420 completed (75% completion rate), median wait ~5 minutes, P90 wait ~8 minutes.
+
+**Throughput chart:** 10-day trend with a visible Mon-Wed peak, Saturday dip, Sunday zero. Distinct upward trend finishing on Wednesday (yesterday) at 84 combined sessions.
+
+**Wait time distribution:** Mostly 0–5 min and 5–10 min buckets, matching the 2–8 min wait range seeded.
+
+**Heatmap:** Clear 8–11 AM and 1–3 PM hotspots on Mon-Wed-Thu. Saturday shows a thin morning strip. Sunday empty.
+
+**Drop-off funnel:** All sessions start at "Ticket Issued". ~85% reach "Called". ~75% reach "Completed". ~10% fall off at "No-show". ~8% at "Cancelled". Classic funnel shape.
+
+**Station utilization:** All 4 AICS stations show meaningful busy minutes. Window 4 (Cash Release) slightly lower than others since cancelled sessions rarely make it that far.
+
+**Track performance:** Regular track has higher volume (80% of sessions). Priority track has slightly higher completion rate (simulated — priority clients are typically more persistent).
+
+**Token/TTS health:** 120 tokens seeded, all `available` (history reset them), `tts_status = null` (no TTS files seeded).
+
+After running `EdgeSeeder`:
+
+Same analytics charts but smaller numbers. Plus the dashboard shows 3 active "waiting" sessions from yesterday, making the edge Pi look like it is mid-operation.
