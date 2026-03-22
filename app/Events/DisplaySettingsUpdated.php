@@ -27,10 +27,11 @@ class DisplaySettingsUpdated implements ShouldBroadcastNow
         public int $displayTtsRepeatCount = 1,
         public int $displayTtsRepeatDelayMs = 2000,
         public bool $enablePublicTriageCameraScanner = true,
+        public bool $kioskHidPersistentWhenScanModalClosed = false,
     ) {}
 
     /**
-     * @return array<int, \Illuminate\Broadcasting\Channel>
+     * @return array<int, Channel>
      */
     public function broadcastOn(): array
     {
@@ -58,6 +59,7 @@ class DisplaySettingsUpdated implements ShouldBroadcastNow
             'enable_public_triage_camera_scanner' => $this->enablePublicTriageCameraScanner,
             'display_tts_repeat_count' => $this->displayTtsRepeatCount,
             'display_tts_repeat_delay_ms' => $this->displayTtsRepeatDelayMs,
+            'kiosk_hid_persistent_when_scan_modal_closed' => $this->kioskHidPersistentWhenScanModalClosed,
         ];
     }
 }

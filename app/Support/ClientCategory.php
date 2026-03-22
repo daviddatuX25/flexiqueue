@@ -5,6 +5,9 @@ namespace App\Support;
 /**
  * Centralized client category handling. Per Philippine law, PWD, Senior, Pregnant are priority.
  * Normalize at bind time; use exact-match checks only.
+ *
+ * Staff "Other" free-text is stored as "Other: {detail}" (≤50 chars). It is never a priority lane —
+ * same treatment as Regular for alternate/priority queue algorithms (see isPriority).
  */
 final class ClientCategory
 {
@@ -48,6 +51,7 @@ final class ClientCategory
 
     /**
      * Whether the category is in the priority lane (exact match).
+     * "Other: …" labels from staff triage are never priority.
      */
     public static function isPriority(?string $category): bool
     {
@@ -55,6 +59,11 @@ final class ClientCategory
             return false;
         }
 
-        return in_array(strtolower(trim($category)), self::PRIORITY_KEYS, true);
+        $trim = strtolower(trim($category));
+        if (str_starts_with($trim, 'other:')) {
+            return false;
+        }
+
+        return in_array($trim, self::PRIORITY_KEYS, true);
     }
 }

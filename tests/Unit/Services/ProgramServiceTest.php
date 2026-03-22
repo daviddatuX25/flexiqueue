@@ -136,6 +136,91 @@ class ProgramServiceTest extends TestCase
         $this->assertSame($station->id, $staff->assigned_station_id);
     }
 
+    public function test_activate_sets_assigned_staff_availability_to_away_by_default(): void
+    {
+        Auth::login($this->admin);
+
+        $staff = User::factory()->create([
+            'role' => 'staff',
+            'assigned_station_id' => null,
+            'availability_status' => User::AVAILABILITY_AVAILABLE,
+        ]);
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'S1',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $process = Process::create([
+            'program_id' => $program->id,
+            'name' => 'P1',
+            'description' => null,
+        ]);
+        DB::table('station_process')->insert([
+            'station_id' => $station->id,
+            'process_id' => $process->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        ProgramStationAssignment::create([
+            'program_id' => $program->id,
+            'user_id' => $staff->id,
+            'station_id' => $station->id,
+        ]);
+        ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'T1',
+            'is_default' => true,
+        ]);
+
+        $this->service->activate($program);
+
+        $staff->refresh();
+        $this->assertSame(User::AVAILABILITY_AWAY, $staff->availability_status);
+    }
+
+    public function test_pause_and_resume_update_assigned_staff_availability(): void
+    {
+        Auth::login($this->admin);
+
+        $staff = User::factory()->create([
+            'role' => 'staff',
+            'availability_status' => User::AVAILABILITY_AVAILABLE,
+        ]);
+        $program = Program::create([
+            'name' => 'P',
+            'description' => null,
+            'is_active' => true,
+            'is_paused' => false,
+            'created_by' => $this->admin->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'S1',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        ProgramStationAssignment::create([
+            'program_id' => $program->id,
+            'user_id' => $staff->id,
+            'station_id' => $station->id,
+        ]);
+
+        $this->service->pause($program);
+        $staff->refresh();
+        $this->assertSame(User::AVAILABILITY_ON_BREAK, $staff->availability_status);
+
+        $this->service->resume($program->fresh());
+        $staff->refresh();
+        $this->assertSame(User::AVAILABILITY_AWAY, $staff->availability_status);
+    }
+
     public function test_activate_exclusive_deactivates_other_and_activates_given_program(): void
     {
         Auth::login($this->admin);

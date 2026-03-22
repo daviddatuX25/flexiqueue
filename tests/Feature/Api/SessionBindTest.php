@@ -3,16 +3,21 @@
 namespace Tests\Feature\Api;
 
 use App\Events\StationActivity;
-use App\Models\Client;
+use App\Http\Controllers\StationPageController;
 use App\Models\Process;
 use App\Models\Program;
 use App\Models\ServiceTrack;
+use App\Models\Session;
+use App\Models\Site;
 use App\Models\Station;
 use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\User;
+use App\Services\ClientService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -51,7 +56,7 @@ class SessionBindTest extends TestCase
         ]);
         $this->staff->update(['assigned_station_id' => $this->station->id]);
         $process = Process::create(['program_id' => $this->program->id, 'name' => 'First Station', 'description' => null]);
-        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+        DB::table('station_process')->insert([
             'station_id' => $this->station->id,
             'process_id' => $process->id,
         ]);
@@ -166,7 +171,7 @@ class SessionBindTest extends TestCase
 
     public function test_bind_token_in_use_returns_409(): void
     {
-        $session = \App\Models\Session::create([
+        $session = Session::create([
             'token_id' => $this->token->id,
             'program_id' => $this->program->id,
             'track_id' => $this->track->id,
@@ -191,10 +196,10 @@ class SessionBindTest extends TestCase
 
     public function test_bind_returns_409_when_client_already_has_active_session(): void
     {
-        $clientService = app(\App\Services\ClientService::class);
-        $site = \App\Models\Site::firstOrCreate(
+        $clientService = app(ClientService::class);
+        $site = Site::firstOrCreate(
             ['slug' => 'default'],
-            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make('key'), 'settings' => [], 'edge_settings' => []]
+            ['name' => 'Default', 'api_key_hash' => Hash::make('key'), 'settings' => [], 'edge_settings' => []]
         );
         $client = $clientService->createClient('Juan', 'Cruz', '1985-01-01', $site->id, '09171234567');
 
@@ -204,7 +209,7 @@ class SessionBindTest extends TestCase
         $firstToken->status = 'in_use';
         $firstToken->save();
 
-        $existingSession = \App\Models\Session::create([
+        $existingSession = Session::create([
             'token_id' => $firstToken->id,
             'program_id' => $this->program->id,
             'track_id' => $this->track->id,
@@ -296,7 +301,7 @@ class SessionBindTest extends TestCase
             'name' => 'Verification',
             'description' => null,
         ]);
-        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+        DB::table('station_process')->insert([
             'station_id' => $this->station->id,
             'process_id' => $process->id,
         ]);
@@ -364,7 +369,7 @@ class SessionBindTest extends TestCase
     {
         $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
 
-        $this->withSession([\App\Http\Controllers\StationPageController::SESSION_KEY_PROGRAM_ID => $this->program->id]);
+        $this->withSession([StationPageController::SESSION_KEY_PROGRAM_ID => $this->program->id]);
 
         $response = $this->actingAs($admin)->postJson('/api/sessions/bind', [
             'qr_hash' => $this->token->qr_code_hash,
@@ -399,6 +404,67 @@ class SessionBindTest extends TestCase
         ]);
 
         $response->assertStatus(401);
+    }
+
+    public function test_bind_stores_priority_lane_override_for_other_category(): void
+    {
+        $tokenB = new Token;
+        $tokenB->qr_code_hash = hash('sha256', Str::random(32).'B2');
+        $tokenB->physical_id = 'B2';
+        $tokenB->status = 'available';
+        $tokenB->save();
+
+        $response = $this->actingAs($this->staff)->postJson('/api/sessions/bind', [
+            'qr_hash' => $tokenB->qr_code_hash,
+            'track_id' => $this->track->id,
+            'client_category' => 'Other: referral',
+            'priority_lane_override' => true,
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('session.client_category', 'Other: referral');
+        $this->assertTrue((bool) $response->json('session.priority_lane_override'));
+        $this->assertDatabaseHas('queue_sessions', [
+            'alias' => 'B2',
+            'client_category' => 'Other: referral',
+            'priority_lane_override' => true,
+        ]);
+    }
+
+    public function test_bind_stores_priority_lane_override_false_for_other_category(): void
+    {
+        $tokenC = new Token;
+        $tokenC->qr_code_hash = hash('sha256', Str::random(32).'C3');
+        $tokenC->physical_id = 'C3';
+        $tokenC->status = 'available';
+        $tokenC->save();
+
+        $response = $this->actingAs($this->staff)->postJson('/api/sessions/bind', [
+            'qr_hash' => $tokenC->qr_code_hash,
+            'track_id' => $this->track->id,
+            'client_category' => 'Other: agency',
+            'priority_lane_override' => false,
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertFalse((bool) $response->json('session.priority_lane_override'));
+        $this->assertDatabaseHas('queue_sessions', [
+            'alias' => 'C3',
+            'priority_lane_override' => false,
+        ]);
+    }
+
+    public function test_bind_rejects_priority_lane_override_when_not_other_category(): void
+    {
+        $response = $this->actingAs($this->staff)->postJson('/api/sessions/bind', [
+            'qr_hash' => $this->token->qr_code_hash,
+            'track_id' => $this->track->id,
+            'client_category' => 'PWD',
+            'priority_lane_override' => true,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['priority_lane_override']);
     }
 
     public function test_token_lookup_returns_qr_hash(): void

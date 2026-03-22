@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Station extends Model
 {
@@ -44,6 +45,20 @@ class Station extends Model
         return (float) max(0, min(1, $v));
     }
 
+    /**
+     * Page zoom for /display/station/{id} (Chromium html zoom). Set from staff /station; applies on public display.
+     *
+     * @return float One of 0.75, 0.85, 1, 1.1, 1.25; default 1.
+     */
+    public function getDisplayPageZoom(): float
+    {
+        $z = $this->settings['display_page_zoom'] ?? 1;
+        $n = is_numeric($z) ? (float) $z : 1.0;
+        $allowed = [0.75, 0.85, 1.0, 1.1, 1.25];
+
+        return in_array($n, $allowed, true) ? $n : 1.0;
+    }
+
     public function program(): BelongsTo
     {
         return $this->belongsTo(Program::class);
@@ -73,7 +88,7 @@ class Station extends Model
         return $this->hasMany(User::class, 'assigned_station_id');
     }
 
-    public function note(): \Illuminate\Database\Eloquent\Relations\HasOne
+    public function note(): HasOne
     {
         return $this->hasOne(StationNote::class);
     }

@@ -14,11 +14,14 @@ use App\Models\IdentityRegistration;
 use App\Models\Program;
 use App\Models\ServiceTrack;
 use App\Models\Session;
-use App\Support\ClientCategory;
 use App\Models\Station;
 use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\TransactionLog;
+use App\Models\User;
+use App\Repositories\TokenTtsSettingRepository;
+use App\Services\Tts\AnnouncementBuilder;
+use App\Support\ClientCategory;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -31,7 +34,25 @@ class SessionService
         private PinService $pinService,
         private StationSelectionService $stationSelectionService,
         private IdentityBindingService $identityBindingService,
+        private TokenTtsSettingRepository $tokenTtsSettingRepository,
+        private AnnouncementBuilder $announcementBuilder,
     ) {}
+
+    /**
+     * Per-language spoken token body for display board fallback TTS (matches GenerateTokenTtsJob + token_phrase).
+     *
+     * @return array<string, string>|null
+     */
+    private function tokenSpokenByLangForBroadcast(?Token $token): ?array
+    {
+        if ($token === null) {
+            return null;
+        }
+
+        $site = $this->tokenTtsSettingRepository->getInstance();
+
+        return $this->announcementBuilder->tokenSpokenByLangForBroadcast($token, $site);
+    }
 
     /**
      * Bind token to a new session. Throws domain exceptions for 400/409 cases.
@@ -39,9 +60,9 @@ class SessionService
      * When $identityRegistrationId is set (public flow with "request identification registration"), client_id is null and session is linked to the registration.
      * When $programId is not null (staff triage), program is resolved by ID; otherwise uses single active program (e.g. public triage).
      *
-     * @return array{session: \App\Models\Session, token: array}
+     * @return array{session: Session, token: array}
      */
-    public function bind(string $qrHash, int $trackId, ?string $clientCategory, ?int $staffUserId = null, ?array $clientBindingPayload = null, ?string $bindingSource = null, ?int $identityRegistrationId = null, ?int $programId = null): array
+    public function bind(string $qrHash, int $trackId, ?string $clientCategory, ?int $staffUserId = null, ?array $clientBindingPayload = null, ?string $bindingSource = null, ?int $identityRegistrationId = null, ?int $programId = null, ?bool $priorityLaneOverride = null): array
     {
         // Per central-edge Phase A: programId from request context only; no single-active fallback.
         if ($programId === null) {
@@ -124,7 +145,7 @@ class SessionService
             }
         }
 
-        return DB::transaction(function () use ($token, $program, $track, $firstStep, $firstStationId, $clientCategory, $staffUserId, $bindingResult, $identityRegistrationId) {
+        return DB::transaction(function () use ($token, $program, $track, $firstStationId, $clientCategory, $staffUserId, $bindingResult, $identityRegistrationId, $priorityLaneOverride) {
             $clientCategory = ClientCategory::normalize($clientCategory) ?? $clientCategory ?? 'Regular';
             $nextPos = $this->getNextQueuePositionAtStation($firstStationId);
             $sessionPayload = [
@@ -140,10 +161,13 @@ class SessionService
                 'status' => 'waiting',
                 'queued_at_station' => now(),
             ];
+            if ($priorityLaneOverride !== null && self::isOtherCategoryLabel($clientCategory)) {
+                $sessionPayload['priority_lane_override'] = $priorityLaneOverride;
+            }
             if ($identityRegistrationId !== null) {
                 $sessionPayload['identity_registration_id'] = $identityRegistrationId;
             }
-            $session = \App\Models\Session::create($sessionPayload);
+            $session = Session::create($sessionPayload);
 
             if ($identityRegistrationId !== null) {
                 IdentityRegistration::where('id', $identityRegistrationId)->update(['session_id' => $session->id]);
@@ -188,7 +212,8 @@ class SessionService
                 'bind',
                 now()->toIso8601String(),
                 $token->pronounce_as ?? 'letters',
-                $session->token_id
+                $session->token_id,
+                $this->tokenSpokenByLangForBroadcast($token)
             ));
 
             return [
@@ -199,6 +224,18 @@ class SessionService
                 ],
             ];
         });
+    }
+
+    /**
+     * Staff triage stores free-text as "Other: …"; only those labels may carry priority_lane_override.
+     */
+    private static function isOtherCategoryLabel(?string $category): bool
+    {
+        if ($category === null || $category === '') {
+            return false;
+        }
+
+        return str_starts_with(strtolower(trim($category)), 'other:');
     }
 
     /**
@@ -260,7 +297,8 @@ class SessionService
                 'call',
                 now()->toIso8601String(),
                 $session->token?->pronounce_as ?? 'letters',
-                $session->token_id
+                $session->token_id,
+                $this->tokenSpokenByLangForBroadcast($session->token)
             ));
 
             return [
@@ -384,7 +422,8 @@ class SessionService
                 'check_in',
                 now()->toIso8601String(),
                 $session->token?->pronounce_as ?? 'letters',
-                $session->token_id
+                $session->token_id,
+                $this->tokenSpokenByLangForBroadcast($session->token)
             ));
 
             return ['session' => $session];
@@ -453,7 +492,7 @@ class SessionService
             ]);
 
             $session = $session->fresh(['currentStation', 'serviceTrack', 'token']);
-            $prevStation = \App\Models\Station::find($previousStationId);
+            $prevStation = Station::find($previousStationId);
 
             event(new StatusUpdate($previousStationId, $session));
             event(new ClientArrived($session, $targetStationId));
@@ -686,12 +725,14 @@ class SessionService
         if ($extend) {
             $session->increment('no_show_attempts');
             $session->refresh();
+
             return $this->applyNoShowBackToWaiting($session, $staffUserId, $enqueueBack, true);
         }
 
         if ($attempts < $max) {
             $session->increment('no_show_attempts');
             $session->refresh();
+
             return $this->applyNoShowBackToWaiting($session, $staffUserId, $enqueueBack, false);
         }
 
@@ -778,6 +819,7 @@ class SessionService
      * Per 08-API-SPEC-PHASE1 §3.3: Override (supervisor route deviation). Caller must validate auth first.
      *
      * @deprecated Use overrideByTrack() with customSteps instead. TODO: remove after PermissionRequestService migration.
+     *
      * @return array{session: Session, override: array}
      */
     public function override(Session $session, int $targetStationId, string $reason, int $supervisorUserId, int $staffUserId): array
@@ -823,7 +865,7 @@ class SessionService
             ]);
 
             $session = $session->fresh(['currentStation', 'serviceTrack']);
-            $supervisor = \App\Models\User::find($supervisorUserId);
+            $supervisor = User::find($supervisorUserId);
 
             event(new StatusUpdate($previousStationId, $session));
             event(new ClientArrived($session, $targetStationId));
@@ -957,7 +999,7 @@ class SessionService
                 'status' => 'waiting',
                 'queued_at_station' => now(),
                 'no_show_attempts' => 0,
-        ]);
+            ]);
 
             TransactionLog::create([
                 'session_id' => $session->id,
@@ -972,7 +1014,7 @@ class SessionService
             ]);
 
             $session = $session->fresh(['currentStation', 'serviceTrack']);
-            $supervisor = \App\Models\User::find($supervisorUserId);
+            $supervisor = User::find($supervisorUserId);
 
             if ($previousStationId !== null) {
                 event(new StatusUpdate($previousStationId, $session));
@@ -1017,7 +1059,7 @@ class SessionService
             throw new \InvalidArgumentException('First station of track not found or inactive.', 422);
         }
 
-        return DB::transaction(function () use ($session, $track, $firstStationId, $staffUserId) {
+        return DB::transaction(function () use ($session, $track, $firstStationId) {
             $nextPos = $this->getNextQueuePositionAtStation($firstStationId);
             $session->update([
                 'track_id' => $track->id,
@@ -1083,7 +1125,7 @@ class SessionService
             }
 
             $session = $session->fresh(['currentStation', 'serviceTrack']);
-            $supervisor = \App\Models\User::find($supervisorUserId ?? 0);
+            $supervisor = User::find($supervisorUserId ?? 0);
 
             if ($prevId !== null) {
                 event(new StatusUpdate($prevId, $session));

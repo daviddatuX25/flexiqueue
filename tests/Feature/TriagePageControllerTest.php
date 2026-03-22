@@ -10,6 +10,7 @@ use App\Models\Station;
 use App\Models\TrackStep;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -27,11 +28,79 @@ class TriagePageControllerTest extends TestCase
             ['slug' => 'default'],
             [
                 'name' => 'Default',
-                'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+                'api_key_hash' => Hash::make(Str::random(40)),
                 'settings' => [],
                 'edge_settings' => [],
             ]
         );
+    }
+
+    public function test_triage_redirects_to_station_when_staff_triage_page_disabled(): void
+    {
+        config(['flexiqueue.staff_triage_page_enabled' => false]);
+
+        $site = $this->defaultSite();
+        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $program = Program::create([
+            'site_id' => $site->id,
+            'name' => 'P',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $staff->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'S',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $staff->update(['assigned_station_id' => $station->id]);
+        $track = ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'Default',
+            'is_default' => true,
+            'color_code' => '#333',
+        ]);
+        $process = Process::create(['program_id' => $program->id, 'name' => 'Triage', 'description' => null]);
+        TrackStep::create([
+            'track_id' => $track->id,
+            'process_id' => $process->id,
+            'step_order' => 1,
+            'is_required' => true,
+        ]);
+
+        $response = $this->actingAs($staff)->get(route('triage'));
+
+        $response->assertRedirect('/station');
+    }
+
+    public function test_triage_disabled_redirect_preserves_program_query_to_station(): void
+    {
+        config(['flexiqueue.staff_triage_page_enabled' => false]);
+
+        $site = $this->defaultSite();
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $admin->update(['assigned_station_id' => null]);
+
+        $programA = Program::create([
+            'site_id' => $site->id,
+            'name' => 'Program A',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $admin->id,
+        ]);
+        Program::create([
+            'site_id' => $site->id,
+            'name' => 'Program B',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $admin->id,
+        ]);
+        ServiceTrack::create(['program_id' => $programA->id, 'name' => 'Default', 'is_default' => true, 'color_code' => '#333']);
+
+        $response = $this->actingAs($admin)->get('/triage?program='.$programA->id);
+
+        $response->assertRedirect('/station?program='.$programA->id);
     }
 
     public function test_staff_with_assigned_station_can_load_triage_and_gets_active_program(): void
@@ -115,7 +184,7 @@ class TriagePageControllerTest extends TestCase
         ServiceTrack::create(['program_id' => $programA->id, 'name' => 'Default', 'is_default' => true, 'color_code' => '#333']);
         ServiceTrack::create(['program_id' => $programB->id, 'name' => 'Default', 'is_default' => true, 'color_code' => '#333']);
 
-        $response = $this->actingAs($admin)->get('/triage?program=' . $programB->id);
+        $response = $this->actingAs($admin)->get('/triage?program='.$programB->id);
         $response->assertRedirect('/triage');
         $this->assertEquals($programB->id, $response->getSession()->get('staff_selected_program_id'));
 

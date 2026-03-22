@@ -20,6 +20,8 @@ class SuperAdminSeeder extends Seeder
 {
     public function run(): void
     {
+        $this->call(PermissionCatalogSeeder::class);
+
         $email = env('SUPER_ADMIN_EMAIL', 'superadmin@flexiqueue.local');
         $password = env('SUPER_ADMIN_PASSWORD', 'password');
 

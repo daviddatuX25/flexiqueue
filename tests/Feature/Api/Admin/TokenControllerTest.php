@@ -2,15 +2,22 @@
 
 namespace Tests\Feature\Api\Admin;
 
-use App\Models\Program;
-use App\Models\Site;
-use App\Models\Token;
-use App\Models\User;
 use App\Jobs\GenerateTokenTtsJob;
+use App\Models\Program;
+use App\Models\ServiceTrack;
+use App\Models\Session;
+use App\Models\Site;
+use App\Models\Station;
+use App\Models\Token;
+use App\Models\TrackStep;
+use App\Models\User;
 use App\Repositories\TokenTtsSettingRepository;
+use App\Services\TtsService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -32,7 +39,7 @@ class TokenControllerTest extends TestCase
         $this->site = Site::create([
             'name' => 'Default Site',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -74,11 +81,11 @@ class TokenControllerTest extends TestCase
         $this->createToken('A3', 'available');
         // Create session to make A2 in_use
         $user = User::factory()->create(['site_id' => $this->site->id]);
-        $program = \App\Models\Program::create(['site_id' => $this->site->id, 'name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
-        $station = \App\Models\Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
-        $track = \App\Models\ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
-        \App\Models\TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);
-        $session = \App\Models\Session::create([
+        $program = Program::create(['site_id' => $this->site->id, 'name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
+        $station = Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
+        $track = ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
+        TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);
+        $session = Session::create([
             'token_id' => $t2->id,
             'program_id' => $program->id,
             'track_id' => $track->id,
@@ -319,6 +326,23 @@ class TokenControllerTest extends TestCase
         $this->assertDatabaseHas('tokens', ['physical_id' => 'B1', 'pronounce_as' => 'word']);
     }
 
+    public function test_batch_create_with_token_phrase_coerces_pronounce_as_to_custom(): void
+    {
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/tokens/batch', [
+            'prefix' => 'C',
+            'count' => 1,
+            'start_number' => 1,
+            'pronounce_as' => 'word',
+            'generate_tts' => false,
+            'tts' => [
+                'en' => ['token_phrase' => 'Counter'],
+            ],
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('tokens', ['physical_id' => 'C1', 'pronounce_as' => 'custom']);
+    }
+
     public function test_batch_create_with_is_global_true_sets_global_on_tokens(): void
     {
         $response = $this->actingAs($this->admin)->postJson('/api/admin/tokens/batch', [
@@ -385,6 +409,76 @@ class TokenControllerTest extends TestCase
         $response->assertJsonPath('token.status', 'available');
     }
 
+    public function test_update_token_custom_pronounce_persists_token_phrase(): void
+    {
+        $token = $this->createToken('Z9', 'available');
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/tokens/{$token->id}", [
+            'pronounce_as' => 'custom',
+            'tts' => [
+                'en' => ['token_phrase' => 'Window', 'pre_phrase' => 'Calling'],
+            ],
+        ]);
+        $response->assertStatus(200);
+        $response->assertJsonPath('token.pronounce_as', 'custom');
+        $token->refresh();
+        $this->assertSame('Window', $token->getTtsConfigFor('en')['token_phrase']);
+    }
+
+    public function test_update_token_word_strips_stored_token_phrase(): void
+    {
+        $token = $this->createToken('Y1', 'available');
+        $token->tts_settings = [
+            'languages' => [
+                'en' => ['token_phrase' => 'Old'],
+            ],
+        ];
+        $token->pronounce_as = 'custom';
+        $token->save();
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/tokens/{$token->id}", [
+            'pronounce_as' => 'word',
+            'tts' => [
+                'en' => [
+                    'pre_phrase' => null,
+                    'token_phrase' => null,
+                ],
+            ],
+        ]);
+        $response->assertStatus(200);
+        $token->refresh();
+        $this->assertSame('word', $token->pronounce_as);
+        $this->assertNull($token->getTtsConfigFor('en')['token_phrase'] ?? null);
+    }
+
+    public function test_update_pronounce_letters_without_tts_clears_per_lang_overrides(): void
+    {
+        $token = $this->createToken('X1', 'available');
+        $token->tts_settings = [
+            'languages' => [
+                'en' => [
+                    'voice_id' => 'v-test',
+                    'rate' => 1.2,
+                    'pre_phrase' => 'Hi',
+                    'token_phrase' => 'Old',
+                ],
+            ],
+        ];
+        $token->pronounce_as = 'custom';
+        $token->save();
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/tokens/{$token->id}", [
+            'pronounce_as' => 'letters',
+        ]);
+        $response->assertStatus(200);
+        $token->refresh();
+        $this->assertSame('letters', $token->pronounce_as);
+        $en = $token->getTtsConfigFor('en');
+        $this->assertNull($en['voice_id'] ?? null);
+        $this->assertNull($en['pre_phrase'] ?? null);
+        $this->assertNull($en['token_phrase'] ?? null);
+        $this->assertArrayNotHasKey('rate', $en);
+    }
+
     public function test_destroy_soft_deletes_available_token_returns_200(): void
     {
         $token = $this->createToken('A1', 'available');
@@ -400,11 +494,11 @@ class TokenControllerTest extends TestCase
     {
         $token = $this->createToken('A1', 'available');
         $user = User::factory()->create(['site_id' => $this->site->id]);
-        $program = \App\Models\Program::create(['site_id' => $this->site->id, 'name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
-        $station = \App\Models\Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
-        $track = \App\Models\ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
-        \App\Models\TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);
-        $session = \App\Models\Session::create([
+        $program = Program::create(['site_id' => $this->site->id, 'name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
+        $station = Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
+        $track = ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
+        TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);
+        $session = Session::create([
             'token_id' => $token->id,
             'program_id' => $program->id,
             'track_id' => $track->id,
@@ -439,7 +533,7 @@ class TokenControllerTest extends TestCase
     public function test_token_delete_cleans_up_tts_files(): void
     {
         $token = $this->createToken('A1', 'available');
-        \Illuminate\Support\Facades\Storage::fake('local');
+        Storage::fake('local');
 
         // Simulate legacy single-file and per-language audio paths.
         $token->tts_audio_path = 'tts/tokens/'.$token->id.'.mp3';
@@ -450,15 +544,15 @@ class TokenControllerTest extends TestCase
         ];
         $token->save();
 
-        \Illuminate\Support\Facades\Storage::put($token->tts_audio_path, 'audio');
-        \Illuminate\Support\Facades\Storage::put('tts/tokens/'.$token->id.'/en.mp3', 'audio');
+        Storage::put($token->tts_audio_path, 'audio');
+        Storage::put('tts/tokens/'.$token->id.'/en.mp3', 'audio');
 
         $response = $this->actingAs($this->admin)->deleteJson("/api/admin/tokens/{$token->id}");
 
         $response->assertStatus(200);
         $this->assertSoftDeleted('tokens', ['id' => $token->id]);
-        \Illuminate\Support\Facades\Storage::assertMissing($token->tts_audio_path);
-        \Illuminate\Support\Facades\Storage::assertMissing('tts/tokens/'.$token->id.'/en.mp3');
+        Storage::assertMissing($token->tts_audio_path);
+        Storage::assertMissing('tts/tokens/'.$token->id.'/en.mp3');
     }
 
     public function test_batch_delete_with_in_use_returns_409(): void
@@ -466,11 +560,11 @@ class TokenControllerTest extends TestCase
         $t1 = $this->createToken('A1', 'available');
         $t2 = $this->createToken('A2', 'available');
         $user = User::factory()->create(['site_id' => $this->site->id]);
-        $program = \App\Models\Program::create(['site_id' => $this->site->id, 'name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
-        $station = \App\Models\Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
-        $track = \App\Models\ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
-        \App\Models\TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);
-        $session = \App\Models\Session::create([
+        $program = Program::create(['site_id' => $this->site->id, 'name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
+        $station = Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
+        $track = ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
+        TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);
+        $session = Session::create([
             'token_id' => $t2->id,
             'program_id' => $program->id,
             'track_id' => $track->id,
@@ -519,11 +613,11 @@ class TokenControllerTest extends TestCase
     {
         $token = $this->createToken('A1', 'available');
         $user = User::factory()->create(['site_id' => $this->site->id]);
-        $program = \App\Models\Program::create(['site_id' => $this->site->id, 'name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
-        $station = \App\Models\Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
-        $track = \App\Models\ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
-        \App\Models\TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);
-        $session = \App\Models\Session::create([
+        $program = Program::create(['site_id' => $this->site->id, 'name' => 'P', 'description' => null, 'is_active' => true, 'created_by' => $user->id]);
+        $station = Station::create(['program_id' => $program->id, 'name' => 'S', 'capacity' => 1, 'is_active' => true]);
+        $track = ServiceTrack::create(['program_id' => $program->id, 'name' => 'T', 'is_default' => true]);
+        TrackStep::create(['track_id' => $track->id, 'station_id' => $station->id, 'step_order' => 1, 'is_required' => true]);
+        $session = Session::create([
             'token_id' => $token->id,
             'program_id' => $program->id,
             'track_id' => $track->id,
@@ -622,11 +716,11 @@ class TokenControllerTest extends TestCase
         $this->app['config']->set('tts.elevenlabs.api_key', 'fake-key');
         $this->app->make(TokenTtsSettingRepository::class)->getInstance()->update(['voice_id' => 'voice-1', 'rate' => 1.0]);
 
-        $ttsService = $this->createMock(\App\Services\TtsService::class);
+        $ttsService = $this->createMock(TtsService::class);
         $ttsService->method('isEnabled')->willReturn(true);
         $ttsService->method('storeSegment')->willReturn('tts/tokens/1/en.mp3');
         $ttsService->method('storeTokenTts')->willReturn('tts/tokens/1.mp3');
-        $this->app->instance(\App\Services\TtsService::class, $ttsService);
+        $this->app->instance(TtsService::class, $ttsService);
 
         $cutoff = now()->subMinutes(3)->timestamp;
         DB::table('jobs')->insert([

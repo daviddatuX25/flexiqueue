@@ -26,7 +26,7 @@ class PublicDeviceLockController extends Controller
         $validated = $request->validate([
             'site_slug' => ['required', 'string', 'max:255'],
             'program_slug' => ['required', 'string', 'max:255'],
-            'device_type' => ['required', 'string', 'in:display,triage,station'],
+            'device_type' => ['required', 'string', 'in:display,triage,kiosk,station'],
             'station_id' => ['required_if:device_type,station', 'nullable', 'integer'],
         ]);
 
@@ -72,7 +72,8 @@ class PublicDeviceLockController extends Controller
 
         $redirectUrl = match ($deviceType) {
             DeviceLock::TYPE_DISPLAY => '/site/'.$site->slug.'/display?program='.$program->id,
-            DeviceLock::TYPE_TRIAGE => '/site/'.$site->slug.'/public-triage/'.$program->slug,
+            DeviceLock::TYPE_TRIAGE => '/site/'.$site->slug.'/kiosk/'.$program->slug,
+            DeviceLock::TYPE_KIOSK => '/site/'.$site->slug.'/kiosk/'.$program->slug,
             DeviceLock::TYPE_STATION => '/site/'.$site->slug.'/display/station/'.$stationId,
         };
 

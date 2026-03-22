@@ -35,6 +35,8 @@
 		diagram_track_id = null,
 		/** When set (per-site URL), dismiss and status links use /site/{site_slug}/display so context is preserved. */
 		site_slug = null,
+		/** Sanitized server-side: safe in-app path (e.g. kiosk) for timer + Go back instead of display board. */
+		return_url = null,
 	} = $props();
 
 	const showDiagram = $derived(
@@ -58,7 +60,7 @@
 		countdown -= 1;
 		if (countdown <= 0) {
 			clearInterval(timerId);
-			router.visit(displayBase);
+			router.visit(dismissTarget);
 		}
 	}, 1000);
 
@@ -206,7 +208,7 @@
 			</button>
 		</div>
 		<div>
-			<Link href={displayBase} class="btn preset-filled-primary-500 w-full">Go back</Link>
+			<Link href={dismissTarget} class="btn preset-filled-primary-500 w-full">Go back</Link>
 		</div>
 	</div>
 </DisplayLayout>

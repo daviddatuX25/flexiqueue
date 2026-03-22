@@ -1,5 +1,18 @@
 # Orange Pi setup helpers
 
+Canonical role-first entrypoints (from repo root):
+
+- Edge setup: `./scripts/edge/setup/pi/setup-edge-pi.sh`
+- Edge SSL setup: `./scripts/edge/setup/pi/setup-edge-ssl.sh --hostname=flexiqueue.edge`
+- Edge deploy (edge mode): `./scripts/edge/deploy/pi/deploy-edge-pi.sh --build`
+- Edge deploy (generic tar): `./scripts/edge/deploy/pi/deploy-edge-pi-tar.sh --build`
+- Edge golden build: `./scripts/edge/build/golden/build-edge-golden-image.sh --board=orangepi-one <base-img> <edge-tarball> [version]`
+
+## Edge Golden vs Edge Tar
+
+- Use **Edge Tar** when the device is already provisioned and reachable over SSH.
+- Use **Edge Golden** when you need repeatable SD-card images for multiple devices or fresh rollouts.
+
 **New? Start with [Beginner deployment guide](../../docs/BEGINNER-DEPLOYMENT-GUIDE.md).**
 
 **Full deployment runbook** (first-time install, SQLite for prod to save RAM, Nginx, verify): see [docs/architecture/10-DEPLOYMENT.md](../../docs/architecture/10-DEPLOYMENT.md). Use SQLite on Orange Pi One to avoid running MariaDB and save memory.
@@ -42,7 +55,7 @@ Prepare the Pi system once (PHP, Nginx, SQLite, app dir, nginx site, Reverb and 
 
 1. Copy this folder to the Pi (or extract the deploy tarball into `/var/www/flexiqueue`).
 2. On the Pi: `sudo ./scripts/pi/full-setup-pi.sh` (optionally `--hostname=flexiqueue.edge` for mDNS).
-3. From your PC: `PI_HOST=flexiqueue.edge ./scripts/deploy-to-pi.sh --build` (or use the Pi IP).
+3. From your PC: `PI_HOST=flexiqueue.edge ./scripts/edge/deploy/pi/deploy-edge-pi.sh --build` (or use the Pi IP).
 
 ---
 

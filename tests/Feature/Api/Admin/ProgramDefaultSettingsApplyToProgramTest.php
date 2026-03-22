@@ -10,6 +10,7 @@ use App\Services\DeviceAuthorizationService;
 use App\Support\DeviceLock;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -25,7 +26,7 @@ class ProgramDefaultSettingsApplyToProgramTest extends TestCase
         $site = Site::create([
             'name' => 'Default',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -115,12 +116,12 @@ class ProgramDefaultSettingsApplyToProgramTest extends TestCase
         $result = $service->authorize($program, 'test-device-'.$program->id, DeviceAuthorization::SCOPE_SESSION);
         $cookieName = DeviceAuthorizationService::cookieNameForProgram($program);
         $site = $program->site;
-        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_TRIAGE, null);
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_KIOSK, null);
         $knownSitesValue = json_encode([['slug' => $site->slug, 'name' => $site->name]]);
         $response = $this->withUnencryptedCookie('known_sites', $knownSitesValue)
             ->withCookie($cookieName, $result['cookie_value'])
             ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockCookie->getValue())
-            ->get('/site/'.$site->slug.'/public-triage/'.$program->slug);
+            ->get('/site/'.$site->slug.'/kiosk/'.$program->slug);
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
             ->component('Triage/PublicStart')
@@ -132,4 +133,3 @@ class ProgramDefaultSettingsApplyToProgramTest extends TestCase
         );
     }
 }
-

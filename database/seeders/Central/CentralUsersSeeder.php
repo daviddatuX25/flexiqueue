@@ -41,7 +41,7 @@ class CentralUsersSeeder extends Seeder
                     'role' => $u['role'],
                     'site_id' => $tagudin->id,
                     'is_active' => true,
-                    'availability_status' => 'available',
+                    'availability_status' => User::AVAILABILITY_AWAY,
                     'override_pin' => $overridePin,
                     'override_qr_token' => Hash::make(Str::random(64)),
                 ]
@@ -67,7 +67,7 @@ class CentralUsersSeeder extends Seeder
                     'role' => $u['role'],
                     'site_id' => $candon->id,
                     'is_active' => true,
-                    'availability_status' => 'available',
+                    'availability_status' => User::AVAILABILITY_AWAY,
                     'override_pin' => $overridePin,
                     'override_qr_token' => Hash::make(Str::random(64)),
                 ]

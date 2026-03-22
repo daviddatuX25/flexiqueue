@@ -2,26 +2,32 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use App\Services\SpatieRbacSyncService;
+use Illuminate\Database\Eloquent\Relations\Pivot;
 
 /**
- * Program-specific supervisor assignment.
- * Per refactor plan: supervisor is a permission per program, not a global role.
+ * Pivot for program ↔ supervisor staff. Keeps Spatie supervisor direct permissions in sync when the pivot changes.
  */
-class ProgramSupervisor extends Model
+class ProgramSupervisor extends Pivot
 {
     protected $table = 'program_supervisors';
 
-    protected $fillable = ['program_id', 'user_id'];
-
-    public function program(): BelongsTo
+    protected static function booted(): void
     {
-        return $this->belongsTo(Program::class);
+        static::created(function (ProgramSupervisor $pivot): void {
+            self::syncUserPermissions((int) $pivot->user_id);
+        });
+
+        static::deleted(function (ProgramSupervisor $pivot): void {
+            self::syncUserPermissions((int) $pivot->user_id);
+        });
     }
 
-    public function user(): BelongsTo
+    private static function syncUserPermissions(int $userId): void
     {
-        return $this->belongsTo(User::class);
+        $user = User::query()->find($userId);
+        if ($user) {
+            app(SpatieRbacSyncService::class)->syncSupervisorDirectPermissions($user);
+        }
     }
 }

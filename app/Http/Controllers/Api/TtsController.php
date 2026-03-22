@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\TtsStreamRequest;
+use App\Models\Station;
 use App\Models\Token;
 use App\Repositories\TokenTtsSettingRepository;
 use App\Services\TtsService;
@@ -13,7 +14,7 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * GET /api/public/tts — stream generated or cached TTS audio. Public, rate-limited.
+ * GET /api/public/tts — stream generated or cached TTS audio. Authenticated admin/super_admin, rate-limited.
  * When TTS is disabled or generation fails, returns 503 so client can fall back to browser TTS.
  */
 class TtsController extends Controller
@@ -46,7 +47,8 @@ class TtsController extends Controller
                 ->header('Cache-Control', 'no-store');
         }
 
-        $path = $this->ttsService->getPath($text, $voiceId, $rate);
+        $siteId = auth()->user()?->site_id;
+        $path = $this->ttsService->getPath($text, $voiceId, $rate, $siteId, 'preview');
 
         if ($path === null) {
             return response('', Response::HTTP_SERVICE_UNAVAILABLE)
@@ -71,6 +73,9 @@ class TtsController extends Controller
     public function token(Token $token): BinaryFileResponse|Response
     {
         $path = $token->tts_audio_path;
+        if (($path === null || $path === '') && is_array($token->tts_settings)) {
+            $path = data_get($token->tts_settings, 'languages.en.audio_path');
+        }
         if ($path === null || $path === '') {
             return response('', Response::HTTP_NOT_FOUND)->header('Cache-Control', 'no-store');
         }
@@ -78,6 +83,37 @@ class TtsController extends Controller
         // Restrict to tts/tokens/ to prevent path traversal
         $normalized = str_replace('\\', '/', $path);
         if (str_starts_with($normalized, 'tts/tokens/') === false) {
+            return response('', Response::HTTP_NOT_FOUND)->header('Cache-Control', 'no-store');
+        }
+
+        if (! Storage::exists($path)) {
+            return response('', Response::HTTP_NOT_FOUND)->header('Cache-Control', 'no-store');
+        }
+
+        $fullPath = Storage::path($path);
+
+        return response()->file($fullPath, [
+            'Content-Type' => 'audio/mpeg',
+            'Cache-Control' => 'public, max-age=86400',
+        ]);
+    }
+
+    /**
+     * GET /api/public/tts/station/{station}/{lang} — stream pre-generated station directions audio. 404 if none.
+     */
+    public function stationDirections(Station $station, string $lang): BinaryFileResponse|Response
+    {
+        if (! in_array($lang, ['en', 'fil', 'ilo'], true)) {
+            return response('', Response::HTTP_NOT_FOUND)->header('Cache-Control', 'no-store');
+        }
+
+        $path = data_get($station->settings, "tts.languages.{$lang}.audio_path");
+        if (! is_string($path) || trim($path) === '') {
+            return response('', Response::HTTP_NOT_FOUND)->header('Cache-Control', 'no-store');
+        }
+
+        $normalized = str_replace('\\', '/', $path);
+        if (str_starts_with($normalized, 'tts/stations/') === false) {
             return response('', Response::HTTP_NOT_FOUND)->header('Cache-Control', 'no-store');
         }
 

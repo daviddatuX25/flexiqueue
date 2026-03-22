@@ -29,6 +29,7 @@ class EdgePackageImportService
                 $row[$key] = json_encode($value);
             }
         }
+
         return $row;
     }
 
@@ -40,12 +41,12 @@ class EdgePackageImportService
     public function runImport(int $programId, string $centralUrl, string $apiKey): void
     {
         $response = Http::withHeaders([
-            'Authorization' => 'Bearer ' . $apiKey,
+            'Authorization' => 'Bearer '.$apiKey,
             'Accept' => 'application/json',
         ])->timeout(60)->get("{$centralUrl}/api/admin/programs/{$programId}/package");
 
         if ($response->failed()) {
-            throw new RuntimeException('Failed to fetch package. HTTP ' . $response->status());
+            throw new RuntimeException('Failed to fetch package. HTTP '.$response->status());
         }
 
         $package = $response->json();
@@ -61,6 +62,11 @@ class EdgePackageImportService
             if ($actual !== $expectedHash) {
                 throw new RuntimeException("Checksum mismatch for section: {$section}.");
             }
+        }
+
+        $contractVersion = (int) ($manifest['tts_asset_contract_version'] ?? 1);
+        if ($contractVersion >= 2 && ! array_key_exists('tts_asset_references', $package)) {
+            throw new RuntimeException('Invalid package: missing tts_asset_references for contract version >= 2.');
         }
 
         DB::transaction(function () use ($package, $manifest): void {
@@ -164,7 +170,7 @@ class EdgePackageImportService
             foreach ($package['tts_files'] as $filePath) {
                 $encoded = implode('/', array_map('rawurlencode', explode('/', $filePath)));
                 $fileResponse = Http::withHeaders([
-                    'Authorization' => 'Bearer ' . $apiKey,
+                    'Authorization' => 'Bearer '.$apiKey,
                 ])->timeout(30)->get("{$centralUrl}/api/admin/programs/{$programId}/tts-files/{$encoded}");
 
                 if ($fileResponse->ok()) {
@@ -181,6 +187,8 @@ class EdgePackageImportService
             'sync_tokens' => $manifest['sync_tokens'],
             'sync_clients' => $manifest['sync_clients'],
             'sync_tts' => $manifest['sync_tts'],
+            'tts_asset_contract_version' => $contractVersion,
+            'tts_asset_references_count' => is_array($package['tts_asset_references'] ?? null) ? count($package['tts_asset_references']) : 0,
             'status' => 'complete',
         ]));
     }

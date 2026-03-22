@@ -33,6 +33,52 @@ export function getLocalAllowHidOnThisDevice(context) {
 }
 
 /**
+ * Device-local allow HID for settings UI: explicit override wins; otherwise mirrors program.
+ *
+ * @param {'display' | 'triage' | 'staff_binder'} context
+ * @param {boolean} programHidEnabled
+ * @returns {boolean}
+ */
+export function getEffectiveLocalAllowHid(context, programHidEnabled) {
+	const local = getLocalAllowHidOnThisDevice(context);
+	if (local !== null) return local;
+	return programHidEnabled;
+}
+
+/**
+ * Persistent HID refocus: localStorage override wins; otherwise program default (kiosk: program setting).
+ *
+ * @param {'display' | 'triage' | 'staff_binder'} context
+ * @param {boolean} programDefaultPersistent
+ * @returns {boolean}
+ */
+export function getEffectivePersistentHid(context, programDefaultPersistent) {
+	if (typeof window === 'undefined' || !window.localStorage) return programDefaultPersistent;
+	try {
+		const raw = window.localStorage.getItem(PERSISTENT_HID_KEYS[context]);
+		if (raw === null) return programDefaultPersistent;
+		if (raw === 'true') return true;
+		if (raw === 'false') return false;
+		return programDefaultPersistent;
+	} catch {
+		return programDefaultPersistent;
+	}
+}
+
+/**
+ * @param {'display' | 'triage' | 'staff_binder'} context
+ * @returns {boolean} true if user has saved a per-device persistent-HID preference
+ */
+export function hasLocalPersistentHidOverride(context) {
+	if (typeof window === 'undefined' || !window.localStorage) return false;
+	try {
+		return window.localStorage.getItem(PERSISTENT_HID_KEYS[context]) !== null;
+	} catch {
+		return false;
+	}
+}
+
+/**
  * @param {'display' | 'triage' | 'staff_binder'} context
  * @param {boolean} value
  */
@@ -54,8 +100,8 @@ export function isMobileTouch() {
 }
 
 /**
- * Whether we should focus the HID barcode input: both program and device-local must allow.
- * When local not set: default true on non-mobile, false on mobile.
+ * Whether we should focus the HID barcode input: program must allow; device-local may override.
+ * When local is unset, mirror the program HID flag (kiosk/display/staff program toggles).
  *
  * @param {boolean} programHidEnabled
  * @param {'display' | 'triage' | 'staff_binder'} context
@@ -65,7 +111,8 @@ export function shouldFocusHidInput(programHidEnabled, context) {
 	if (!programHidEnabled) return false;
 	const local = getLocalAllowHidOnThisDevice(context);
 	if (local !== null) return local;
-	return !isMobileTouch(); // default true on desktop, false on mobile
+	// No device override: mirror program (kiosk/display/staff program toggles).
+	return programHidEnabled;
 }
 
 /**
@@ -76,7 +123,11 @@ export function shouldFocusHidInput(programHidEnabled, context) {
  * @returns {boolean}
  */
 export function shouldUseInputModeNone(programHidEnabled, context) {
-	return isMobileTouch() && programHidEnabled && getLocalAllowHidOnThisDevice(context) === true;
+	if (!isMobileTouch() || !programHidEnabled) return false;
+	const local = getLocalAllowHidOnThisDevice(context);
+	if (local === false) return false;
+	// local null or true: suppress soft keyboard when program allows HID
+	return true;
 }
 
 /**
@@ -107,6 +158,17 @@ export function setLocalPersistentHidOnThisDevice(context, value) {
 	if (typeof window === 'undefined' || !window.localStorage) return;
 	try {
 		window.localStorage.setItem(PERSISTENT_HID_KEYS[context], value ? 'true' : 'false');
+	} catch {
+		// ignore
+	}
+}
+
+/** Clear triage/kiosk device-local HID preferences so program defaults apply again. */
+export function clearTriageDeviceLocalHidSettings() {
+	if (typeof window === 'undefined' || !window.localStorage) return;
+	try {
+		window.localStorage.removeItem(STORAGE_KEYS.triage);
+		window.localStorage.removeItem(PERSISTENT_HID_KEYS.triage);
 	} catch {
 		// ignore
 	}

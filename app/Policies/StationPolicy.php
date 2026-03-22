@@ -4,7 +4,9 @@ namespace App\Policies;
 
 use App\Models\Station;
 use App\Models\User;
+use App\Services\RbacContextService;
 use App\Services\StaffAssignmentService;
+use App\Support\PermissionCatalog;
 use Illuminate\Auth\Access\Response;
 
 /**
@@ -13,7 +15,8 @@ use Illuminate\Auth\Access\Response;
 class StationPolicy
 {
     public function __construct(
-        private StaffAssignmentService $staffAssignmentService
+        private StaffAssignmentService $staffAssignmentService,
+        private RbacContextService $rbacContextService
     ) {}
 
     /**
@@ -22,7 +25,22 @@ class StationPolicy
      */
     public function view(User $user, Station $station): Response
     {
-        if ($user->isAdmin() || $user->isSupervisorForProgram($station->program_id)) {
+        $program = $station->program;
+        $site = $program?->site;
+
+        if ($this->rbacContextService->hasPermissionInContext($user, PermissionCatalog::ADMIN_MANAGE, $site, $program)) {
+            return Response::allow();
+        }
+
+        if ($user->can(PermissionCatalog::PLATFORM_MANAGE)) {
+            return Response::allow();
+        }
+
+        if ($program && $this->rbacContextService->canInProgramTeamOnly($user, PermissionCatalog::PROGRAMS_SUPERVISE, $program)) {
+            return Response::allow();
+        }
+
+        if ($user->can(PermissionCatalog::PROGRAMS_SUPERVISE) && $user->isSupervisorForProgram($station->program_id)) {
             return Response::allow();
         }
 

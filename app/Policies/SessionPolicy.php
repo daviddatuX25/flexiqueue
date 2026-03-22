@@ -4,7 +4,9 @@ namespace App\Policies;
 
 use App\Models\Session;
 use App\Models\User;
+use App\Services\RbacContextService;
 use App\Services\StaffAssignmentService;
+use App\Support\PermissionCatalog;
 
 /**
  * Per 05-SECURITY-CONTROLS §3.3: staff can only act on sessions at their assigned station.
@@ -12,7 +14,8 @@ use App\Services\StaffAssignmentService;
 class SessionPolicy
 {
     public function __construct(
-        private StaffAssignmentService $staffAssignmentService
+        private StaffAssignmentService $staffAssignmentService,
+        private RbacContextService $rbacContextService
     ) {}
 
     /**
@@ -20,7 +23,22 @@ class SessionPolicy
      */
     public function view(User $user, Session $session): bool
     {
-        if ($user->isAdmin() || $user->isSupervisorForProgram($session->program_id)) {
+        $program = $session->program;
+        $site = $program?->site;
+
+        if ($this->rbacContextService->hasPermissionInContext($user, PermissionCatalog::ADMIN_MANAGE, $site, $program)) {
+            return true;
+        }
+
+        if ($user->can(PermissionCatalog::PLATFORM_MANAGE)) {
+            return true;
+        }
+
+        if ($program && $this->rbacContextService->canInProgramTeamOnly($user, PermissionCatalog::PROGRAMS_SUPERVISE, $program)) {
+            return true;
+        }
+
+        if ($user->can(PermissionCatalog::PROGRAMS_SUPERVISE) && $user->isSupervisorForProgram($session->program_id)) {
             return true;
         }
 
@@ -35,7 +53,22 @@ class SessionPolicy
      */
     public function update(User $user, Session $session): bool
     {
-        if ($user->isAdmin() || $user->isSupervisorForProgram($session->program_id)) {
+        $program = $session->program;
+        $site = $program?->site;
+
+        if ($this->rbacContextService->hasPermissionInContext($user, PermissionCatalog::ADMIN_MANAGE, $site, $program)) {
+            return true;
+        }
+
+        if ($user->can(PermissionCatalog::PLATFORM_MANAGE)) {
+            return true;
+        }
+
+        if ($program && $this->rbacContextService->canInProgramTeamOnly($user, PermissionCatalog::PROGRAMS_SUPERVISE, $program)) {
+            return true;
+        }
+
+        if ($user->can(PermissionCatalog::PROGRAMS_SUPERVISE) && $user->isSupervisorForProgram($session->program_id)) {
             return true;
         }
 

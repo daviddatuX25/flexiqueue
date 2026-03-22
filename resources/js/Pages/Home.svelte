@@ -49,6 +49,7 @@
         appVersion?: string;
         default_site_slug?: string | null;
         heroImageUrl?: string;
+        homeStats?: { served_count: number; session_hours: number };
     }
 
     const FEATURES = [
@@ -251,6 +252,7 @@
         appVersion = "1.0.0-dev",
         default_site_slug = null,
         heroImageUrl = "/images/mswdo_tagudin.jpg",
+        homeStats: initialHomeStats = { served_count: 0, session_hours: 0 },
     }: Props = $props();
 
     const page = usePage();
@@ -262,25 +264,10 @@
         ($page?.props as { csrf_token?: string })?.csrf_token ?? "",
     );
 
-    /** Per public-site plan: global stats from /api/home-stats, poll every 30s. */
-    let homeStats = $state<{ served_count: number; session_hours: number } | null>(null);
-
-    function fetchHomeStats() {
-        fetch("/api/home-stats", { credentials: "same-origin" })
-            .then((res) => (res.ok ? res.json() : null))
-            .then((data) => {
-                if (data && typeof data.served_count === "number" && typeof data.session_hours === "number") {
-                    homeStats = { served_count: data.served_count, session_hours: data.session_hours };
-                }
-            })
-            .catch(() => {});
-    }
-
-    $effect(() => {
-        if (typeof fetch === "undefined") return;
-        fetchHomeStats();
-        const id = setInterval(fetchHomeStats, 30000);
-        return () => clearInterval(id);
+    /** Render safe defaults from backend and avoid noisy 404 polling in local setups. */
+    const homeStats = $derived({
+        served_count: initialHomeStats?.served_count ?? 0,
+        session_hours: initialHomeStats?.session_hours ?? 0,
     });
 
     /** When URL has site_key_for + program_key_prompt and user already has that site, redirect to site landing so program key modal shows there. */
@@ -543,7 +530,7 @@
                         <div
                             class="text-5xl font-black text-surface-800 dark:text-white"
                         >
-                            {homeStats ? homeStats.served_count : "—"}
+                            {homeStats.served_count}
                         </div>
                         <div
                             class="text-xs font-bold text-surface-500 dark:text-surface-300 uppercase tracking-widest mt-2"
@@ -557,7 +544,7 @@
                         <div
                             class="text-5xl font-black text-primary-600 dark:text-primary-400"
                         >
-                            {homeStats ? homeStats.session_hours : "—"}
+                            {homeStats.session_hours}
                         </div>
                         <div
                             class="text-xs font-bold text-surface-500 dark:text-surface-300 uppercase tracking-widest mt-2"

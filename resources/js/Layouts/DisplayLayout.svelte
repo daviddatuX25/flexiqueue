@@ -26,9 +26,7 @@
     const deviceLockedRedirectUrl = $derived((get(page)?.props?.device_locked_redirect_url) ?? null);
     const auth = $derived(get(page)?.props?.auth ?? null);
     /** Staff/admin on program or device-selection page: show nav bar + StatusFooter like MobileLayout. */
-    const showStaffFooter = $derived(
-        auth?.user && auth.user.role && ["staff", "admin", "super_admin"].includes(auth.user.role)
-    );
+    const showStaffFooter = $derived(auth?.can?.public_device_authorize === true);
     const currentPath = $derived((get(page)?.url ?? "").split("?")[0]);
     const isStation = $derived(currentPath === "/station" || currentPath.startsWith("/station/"));
     const isTriage = $derived(currentPath === "/triage");
@@ -38,7 +36,7 @@
             currentPath.startsWith("/devices/") ||
             /\/site\/[^/]+\/program\/[^/]+(\/devices)?$/.test(currentPath)
     );
-    const showFooterQrButton = $derived(!!auth?.can_approve_requests);
+    const showFooterQrButton = $derived(!!(auth?.can?.approve_requests ?? auth?.can_approve_requests));
     let showFooterQrScanner = $state(false);
     let localAllowHid = $state(true);
     let localAllowCamera = $state(true);
@@ -51,7 +49,7 @@
         if (!showFooterQrScanner) return;
         const hidLocal = getLocalAllowHidOnThisDevice("staff_binder");
         localAllowHid = hidLocal !== null ? hidLocal : !isMobileTouch();
-        localAllowCamera = shouldAllowCameraScanner("staff_binder");
+        localAllowCamera = shouldAllowCameraScanner("staff_binder", accountAllowCamera);
     });
 
     function onFooterQrScan(decodedText) {
@@ -74,6 +72,37 @@
         return deviceLockedRedirectUrl ?? (typeof sessionStorage !== "undefined" ? sessionStorage.getItem(STORAGE_KEY) : null);
     }
 
+    function isPrivilegedStaffUser() {
+        return auth?.can?.public_device_authorize === true;
+    }
+
+    let clearingDeviceLock = false;
+    async function clearDeviceLockForPrivilegedUser() {
+        if (clearingDeviceLock) return;
+        clearingDeviceLock = true;
+        try {
+            const csrf = (get(page)?.props?.csrf_token ??
+                document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") ??
+                "");
+            await fetch("/api/public/device-lock/clear", {
+                method: "POST",
+                credentials: "include",
+                headers: {
+                    "X-CSRF-TOKEN": csrf,
+                    Accept: "application/json",
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+            });
+        } catch {
+            // Ignore clear failures; keep navigation unblocked for staff/admin.
+        } finally {
+            if (typeof sessionStorage !== "undefined") {
+                sessionStorage.removeItem(STORAGE_KEY);
+            }
+            clearingDeviceLock = false;
+        }
+    }
+
     function enforceLockClientSide() {
         const path = window.location.pathname;
         if (deviceLocked && deviceLockedRedirectUrl && typeof sessionStorage !== "undefined") {
@@ -82,6 +111,10 @@
         // Do not clear sessionStorage when device_locked is false—cached back-nav pages can have stale false; clear only after consume (unlock).
         const redirectUrl = getEffectiveRedirectUrl();
         if (!redirectUrl) return;
+        if (isPrivilegedStaffUser()) {
+            void clearDeviceLockForPrivilegedUser();
+            return;
+        }
         const allowed = isPathAllowedWhenLocked(path, redirectUrl);
         if (!allowed) {
             router.visit(redirectUrl, { replace: true });

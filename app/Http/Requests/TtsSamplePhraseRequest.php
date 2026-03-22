@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
@@ -15,7 +16,7 @@ class TtsSamplePhraseRequest extends FormRequest
     }
 
     /**
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
@@ -23,7 +24,8 @@ class TtsSamplePhraseRequest extends FormRequest
             'lang' => ['required', 'string', 'in:en,fil,ilo'],
             'pre_phrase' => ['sometimes', 'nullable', 'string', 'max:500'],
             'alias' => ['sometimes', 'nullable', 'string', 'max:100'],
-            'pronounce_as' => ['sometimes', 'string', 'in:letters,word'],
+            'pronounce_as' => ['sometimes', 'string', 'in:letters,word,custom'],
+            'token_phrase' => ['sometimes', 'nullable', 'string', 'max:255'],
         ];
     }
 
@@ -39,6 +41,9 @@ class TtsSamplePhraseRequest extends FormRequest
             'pre_phrase' => isset($v['pre_phrase']) ? trim((string) $v['pre_phrase']) : '',
             'alias' => isset($v['alias']) ? trim((string) $v['alias']) : 'A1',
             'pronounce_as' => $v['pronounce_as'] ?? 'letters',
+            'token_phrase' => isset($v['token_phrase']) && is_string($v['token_phrase']) && trim($v['token_phrase']) !== ''
+                ? trim($v['token_phrase'])
+                : null,
         ];
     }
 }

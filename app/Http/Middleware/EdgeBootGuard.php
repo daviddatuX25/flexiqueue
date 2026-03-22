@@ -20,6 +20,11 @@ class EdgeBootGuard
             return $next($request);
         }
 
+        // API routes return JSON (401/403/409/…) — do not redirect to browser setup/waiting screens.
+        if ($request->is('api/*')) {
+            return $next($request);
+        }
+
         $state = EdgeDeviceState::current();
 
         if ($state->paired_at === null) {

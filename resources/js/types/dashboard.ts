@@ -1,5 +1,7 @@
 export interface DashboardStats {
 	active_program: { id: number; name: string } | null;
+	/** Site-scoped count of programs with is_active (activated), including paused. */
+	active_programs_count: number;
 	program: { is_active: boolean; is_paused: boolean; is_running: boolean };
 	sessions: {
 		active: number;

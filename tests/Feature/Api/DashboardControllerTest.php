@@ -5,11 +5,13 @@ namespace Tests\Feature\Api;
 use App\Models\Program;
 use App\Models\ServiceTrack;
 use App\Models\Session;
+use App\Models\Site;
 use App\Models\Station;
 use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -28,13 +30,23 @@ class DashboardControllerTest extends TestCase
 
     private Program $program;
 
+    private Site $site;
+
     protected function setUp(): void
     {
         parent::setUp();
-        $this->admin = User::factory()->admin()->create();
-        $this->supervisor = User::factory()->supervisor()->create();
-        $this->staff = User::factory()->create(['role' => 'staff']);
+        $this->site = Site::create([
+            'name' => 'Test Site',
+            'slug' => 'test-site',
+            'api_key_hash' => Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $this->admin = User::factory()->admin()->create(['site_id' => $this->site->id]);
+        $this->supervisor = User::factory()->supervisor()->create(['site_id' => $this->site->id]);
+        $this->staff = User::factory()->create(['role' => 'staff', 'site_id' => $this->site->id]);
         $this->program = Program::create([
+            'site_id' => $this->site->id,
             'name' => 'Cash Assistance',
             'description' => null,
             'is_active' => true,
@@ -85,6 +97,7 @@ class DashboardControllerTest extends TestCase
         $response->assertStatus(200);
         $response->assertJsonStructure([
             'active_program' => ['id', 'name'],
+            'active_programs_count',
             'program' => ['is_active', 'is_paused', 'is_running'],
             'sessions' => [
                 'active',
@@ -100,6 +113,7 @@ class DashboardControllerTest extends TestCase
             'by_track',
         ]);
         $response->assertJsonPath('active_program.name', 'Cash Assistance');
+        $response->assertJsonPath('active_programs_count', 1);
         $response->assertJsonPath('program.is_running', true);
         $response->assertJsonPath('sessions.active', 1);
         $response->assertJsonPath('sessions.waiting', 1);
@@ -129,9 +143,32 @@ class DashboardControllerTest extends TestCase
 
         $response->assertStatus(200);
         $response->assertJsonPath('active_program', null);
+        $response->assertJsonPath('active_programs_count', 0);
         $response->assertJsonPath('program.is_running', false);
         $response->assertJsonPath('sessions.active', 0);
         $response->assertJsonPath('stations.total', 0);
+    }
+
+    public function test_stats_active_programs_count_counts_only_activated_programs_on_viewer_site(): void
+    {
+        Program::create([
+            'site_id' => $this->site->id,
+            'name' => 'Second Active',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $this->admin->id,
+        ]);
+        Program::create([
+            'site_id' => $this->site->id,
+            'name' => 'Inactive Program',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+
+        $response = $this->actingAs($this->admin)->getJson('/api/dashboard/stats?program_id='.$this->program->id);
+        $response->assertStatus(200);
+        $response->assertJsonPath('active_programs_count', 2);
     }
 
     public function test_stats_queue_waiting_includes_held_but_excludes_called_and_serving(): void

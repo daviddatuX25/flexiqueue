@@ -10,6 +10,7 @@ use App\Http\Requests\UpdateStationDisplaySettingsRequest;
 use App\Models\Program;
 use App\Models\Station;
 use App\Models\Token;
+use App\Services\StaffProgramAccessService;
 use App\Services\StationQueueService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,7 +22,8 @@ use Illuminate\Support\Facades\Gate;
 class StationController extends Controller
 {
     public function __construct(
-        private StationQueueService $stationQueueService
+        private StationQueueService $stationQueueService,
+        private StaffProgramAccessService $staffProgramAccessService,
     ) {}
 
     /**
@@ -68,17 +70,22 @@ class StationController extends Controller
         if ($request->has('display_audio_volume')) {
             $settings['display_audio_volume'] = (float) max(0, min(1, $request->input('display_audio_volume', 1)));
         }
+        if ($request->has('display_page_zoom')) {
+            $settings['display_page_zoom'] = (float) $request->input('display_page_zoom');
+        }
         $station->update(['settings' => $settings]);
 
         event(new StationDisplaySettingsUpdated(
             $station->id,
             $station->getDisplayAudioMuted(),
             $station->getDisplayAudioVolume(),
+            $station->getDisplayPageZoom(),
         ));
 
         return response()->json([
             'display_audio_muted' => $station->getDisplayAudioMuted(),
             'display_audio_volume' => $station->getDisplayAudioVolume(),
+            'display_page_zoom' => $station->getDisplayPageZoom(),
         ]);
     }
 
@@ -153,7 +160,7 @@ class StationController extends Controller
 
         // Per central-edge follow-up: admin/supervisor with no assigned station uses session-selected program context.
         if ($programId === null) {
-            if (! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
+            if (! $this->staffProgramAccessService->mayUseProgramPickerWithoutAssignedStation($user)) {
                 return response()->json([
                     'message' => 'No station assigned.',
                 ], 422);
@@ -164,7 +171,7 @@ class StationController extends Controller
             if (! $program) {
                 return response()->json(['message' => 'Program not selected or inactive.'], 422);
             }
-            if (! $user->isAdmin() && ! $user->isSupervisorForProgram($program->id)) {
+            if (! $this->staffProgramAccessService->mayAccessProgramWhenUnassigned($user, $program)) {
                 return response()->json(['message' => 'Forbidden.'], 403);
             }
 

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\DeviceUnlockRequest;
+use App\Services\ProgramDeviceApprovalService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -12,6 +13,10 @@ use Illuminate\Http\Request;
  */
 class DeviceUnlockRequestController extends Controller
 {
+    public function __construct(
+        private ProgramDeviceApprovalService $programDeviceApprovalService
+    ) {}
+
     public function approve(Request $request, DeviceUnlockRequest $device_unlock_request): JsonResponse
     {
         $user = $request->user();
@@ -20,8 +25,7 @@ class DeviceUnlockRequestController extends Controller
             return response()->json(['message' => 'Program not found or inactive.'], 400);
         }
 
-        $canApprove = ($user->isAdmin() && $user->site_id === $program->site_id)
-            || $user->isSupervisorForProgram($program->id);
+        $canApprove = $this->programDeviceApprovalService->canApproveForProgram($user, $program);
         if (! $canApprove) {
             return response()->json(['message' => 'You may only approve device unlock for your program or site.'], 403);
         }

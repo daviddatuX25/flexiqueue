@@ -25,7 +25,7 @@ class DashboardController extends Controller
         $programId = $request->query('program_id');
         $programId = is_numeric($programId) ? (int) $programId : null;
 
-        return response()->json($this->dashboardService->getStats($programId));
+        return response()->json($this->dashboardService->getStats($programId, $request->user()));
     }
 
     /**

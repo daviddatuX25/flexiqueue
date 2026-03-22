@@ -7,6 +7,9 @@ use App\Http\Requests\StoreSiteRequest;
 use App\Http\Requests\UpdateSiteRequest;
 use App\Models\AdminActionLog;
 use App\Models\Site;
+use App\Models\TtsPlatformBudget;
+use App\Repositories\PrintSettingRepository;
+use App\Repositories\ProgramDefaultSettingRepository;
 use App\Services\EdgeModeService;
 use App\Services\SiteApiKeyService;
 use App\Support\SiteResolver;
@@ -24,7 +27,9 @@ class SiteController extends Controller
 {
     public function __construct(
         private SiteApiKeyService $siteApiKeyService,
-        private EdgeSettingsValidator $edgeSettingsValidator
+        private EdgeSettingsValidator $edgeSettingsValidator,
+        private PrintSettingRepository $printSettingRepository,
+        private ProgramDefaultSettingRepository $programDefaultSettingRepository
     ) {}
 
     /**
@@ -64,6 +69,11 @@ class SiteController extends Controller
             : $this->edgeSettingsValidator->validate([]);
         $site->api_key_hash = Hash::make(Str::random(32)); // temporary; assignNewKey overwrites
         $site->save();
+
+        // Platform print template (super_admin, site_id null) is copied into the new site — same source as Print platform defaults UI.
+        $this->printSettingRepository->copyPlatformTemplateToSite($site->id);
+        // Platform program defaults (site_id null) seed this site's program-default row — same pattern as print.
+        $this->programDefaultSettingRepository->copyPlatformTemplateToSite($site->id);
 
         $rawKey = $this->siteApiKeyService->assignNewKey($site);
 
@@ -124,10 +134,23 @@ class SiteController extends Controller
             $site->edge_settings = $this->edgeSettingsValidator->validate($validated['edge_settings']);
         }
         if (array_key_exists('settings', $validated) && is_array($validated['settings'])) {
-            $allowed = ['public_access_key', 'landing_hero_title', 'landing_hero_description', 'landing_sections', 'landing_show_stats'];
+            $allowed = ['public_access_key', 'landing_hero_title', 'landing_hero_description', 'landing_sections', 'landing_show_stats', 'tts_budget'];
             $current = $site->settings ?? [];
             foreach ($allowed as $key) {
-                if (array_key_exists($key, $validated['settings'])) {
+                if (! array_key_exists($key, $validated['settings'])) {
+                    continue;
+                }
+                if ($key === 'tts_budget') {
+                    // Per TTS platform governance: per-site policy is not editable while global budgeting is on.
+                    if (TtsPlatformBudget::settings()->global_enabled) {
+                        continue;
+                    }
+                    if (is_array($validated['settings'][$key])) {
+                        $current[$key] = array_merge($current[$key] ?? [], $validated['settings'][$key]);
+                    } else {
+                        $current[$key] = $validated['settings'][$key];
+                    }
+                } else {
                     $current[$key] = $validated['settings'][$key];
                 }
             }

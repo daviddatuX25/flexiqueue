@@ -13,8 +13,11 @@ use App\Models\TrackStep;
 use App\Models\User;
 use App\Services\SiteApiKeyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /**
@@ -36,7 +39,7 @@ class ProgramPackageExportTest extends TestCase
         $this->site = Site::create([
             'name' => 'Export Site',
             'slug' => 'export-site',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [
                 'sync_tokens' => true,
@@ -59,7 +62,7 @@ class ProgramPackageExportTest extends TestCase
             'is_active' => true,
         ]);
         $process = Process::create(['program_id' => $this->program->id, 'name' => 'P1', 'description' => null]);
-        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+        DB::table('station_process')->insert([
             'station_id' => $station->id,
             'process_id' => $process->id,
         ]);
@@ -79,12 +82,12 @@ class ProgramPackageExportTest extends TestCase
         User::factory()->create(['site_id' => $this->site->id, 'role' => 'staff']);
     }
 
-    private function getPackageWithSiteKey(): \Illuminate\Testing\TestResponse
+    private function getPackageWithSiteKey(): TestResponse
     {
         $key = app(SiteApiKeyService::class)->assignNewKey($this->site);
 
         return $this->getJson("/api/admin/programs/{$this->program->id}/package", [
-            'Authorization' => 'Bearer ' . $key,
+            'Authorization' => 'Bearer '.$key,
         ]);
     }
 
@@ -106,6 +109,7 @@ class ProgramPackageExportTest extends TestCase
         $this->assertArrayHasKey('program_token', $data);
         $this->assertArrayHasKey('clients', $data);
         $this->assertArrayHasKey('tts_files', $data);
+        $this->assertArrayHasKey('tts_asset_references', $data);
     }
 
     public function test_manifest_contains_correct_sha256_checksums_for_each_section(): void
@@ -115,7 +119,7 @@ class ProgramPackageExportTest extends TestCase
         $data = $response->json();
         $checksums = $data['manifest']['checksums'] ?? [];
 
-        $sections = ['program', 'tracks', 'steps', 'processes', 'stations', 'station_process', 'users', 'tokens', 'clients'];
+        $sections = ['program', 'tracks', 'steps', 'processes', 'stations', 'station_process', 'users', 'tokens', 'clients', 'tts_asset_references'];
         foreach ($sections as $section) {
             $this->assertArrayHasKey($section, $checksums);
             $expected = hash('sha256', json_encode($data[$section]));
@@ -150,7 +154,7 @@ class ProgramPackageExportTest extends TestCase
         $otherSite = Site::create([
             'name' => 'Other',
             'slug' => 'other',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -164,7 +168,7 @@ class ProgramPackageExportTest extends TestCase
 
         $key = app(SiteApiKeyService::class)->assignNewKey($this->site);
         $response = $this->getJson("/api/admin/programs/{$otherProgram->id}/package", [
-            'Authorization' => 'Bearer ' . $key,
+            'Authorization' => 'Bearer '.$key,
         ]);
 
         $response->assertStatus(404);
@@ -176,7 +180,7 @@ class ProgramPackageExportTest extends TestCase
         $key = $siteApiKeyService->assignNewKey($this->site);
 
         $response = $this->getJson("/api/admin/programs/{$this->program->id}/package", [
-            'Authorization' => 'Bearer ' . $key,
+            'Authorization' => 'Bearer '.$key,
         ]);
 
         $response->assertStatus(200);
@@ -192,7 +196,7 @@ class ProgramPackageExportTest extends TestCase
         $token->site_id = $this->site->id;
         $token->status = 'available';
         $token->save();
-        \Illuminate\Support\Facades\DB::table('program_token')->insert([
+        DB::table('program_token')->insert([
             'program_id' => $this->program->id,
             'token_id' => $token->id,
             'created_at' => now(),
@@ -205,7 +209,7 @@ class ProgramPackageExportTest extends TestCase
         $key = $siteApiKeyService->assignNewKey($this->site);
 
         $response = $this->get("/api/admin/programs/{$this->program->id}/tts-files/{$path}", [
-            'Authorization' => 'Bearer ' . $key,
+            'Authorization' => 'Bearer '.$key,
         ]);
 
         $response->assertStatus(200);
@@ -216,7 +220,7 @@ class ProgramPackageExportTest extends TestCase
         $otherSite = Site::create([
             'name' => 'Other',
             'slug' => 'other',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -233,7 +237,7 @@ class ProgramPackageExportTest extends TestCase
         $token->site_id = $otherSite->id;
         $token->status = 'available';
         $token->save();
-        \Illuminate\Support\Facades\DB::table('program_token')->insert([
+        DB::table('program_token')->insert([
             'program_id' => $otherProgram->id,
             'token_id' => $token->id,
             'created_at' => now(),
@@ -246,7 +250,7 @@ class ProgramPackageExportTest extends TestCase
         $key = $siteApiKeyService->assignNewKey($this->site);
 
         $response = $this->get("/api/admin/programs/{$this->program->id}/tts-files/{$path}", [
-            'Authorization' => 'Bearer ' . $key,
+            'Authorization' => 'Bearer '.$key,
         ]);
 
         $response->assertStatus(403);
@@ -258,7 +262,7 @@ class ProgramPackageExportTest extends TestCase
         $key = $siteApiKeyService->assignNewKey($this->site);
 
         $response = $this->get("/api/admin/programs/{$this->program->id}/tts-files/../etc/passwd", [
-            'Authorization' => 'Bearer ' . $key,
+            'Authorization' => 'Bearer '.$key,
         ]);
 
         $response->assertStatus(403);

@@ -5,6 +5,29 @@ Two deployments exist:
 - Central — the hosted web app at flexiqueue.click (Hestia hosting)
 - Edge — Orange Pi One devices at venues (runs offline-capable)
 
+### Spatie permissions (RBAC)
+
+After any deploy that changes **roles, permissions, seeders**, or **migrations** touching Spatie tables (`roles`, `permissions`, pivots), run on the target environment:
+
+```bash
+php artisan permission:cache-reset
+```
+
+Spatie caches permission lookups; a stale cache can cause **403** for users who should pass. Run this **after** `php artisan migrate` when migrations alter permission data. See [`docs/plans/RBAC_SPATIE_PERMISSIONS_MIGRATION_PLAN.md`](plans/RBAC_SPATIE_PERMISSIONS_MIGRATION_PLAN.md) and [`docs/architecture/PERMISSIONS.md`](architecture/PERMISSIONS.md).
+
+#### Phase 6 — Spatie teams + `RbacTeam` (scoped site/program permissions)
+
+Deploys that include **`rbac_teams`** and **nullable `team_id`** on Spatie tables must run migrations **before** relying on authorization. Order:
+
+1. **Backup** the database (structural change; rollback = restore backup).
+2. `php artisan migrate` — creates `rbac_teams`, adds `team_id` columns, seeds global team id `1` per migration.
+3. `php artisan rbac:sync-teams` — idempotent: ensures every `sites` / `programs` row has a matching `RbacTeam` (safe on fresh or upgraded DBs).
+4. `php artisan permission:cache-reset` — required after permission/team schema changes.
+
+Global HTTP requests use team id `1` via middleware (`SetGlobalPermissionsTeam`). Scoped direct grants use **non-global** `RbacTeam` rows; see [`docs/architecture/PERMISSIONS-TEAMS-AND-UI.md`](architecture/PERMISSIONS-TEAMS-AND-UI.md).
+
+**Rollback:** Restore the DB backup from step 1; do not partially remove `team_id` columns without a migration.
+
 ---
 
 ## Part 1 — Deploying Central (Hestia)

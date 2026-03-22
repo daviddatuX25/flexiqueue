@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\DeviceUnlockWithAuthRequest;
 use App\Models\DeviceUnlockRequest;
 use App\Models\Program;
+use App\Models\User;
 use App\Services\PinService;
 use App\Support\DeviceLock;
+use App\Support\PermissionCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -48,15 +50,20 @@ class PublicDeviceUnlockRequestController extends Controller
         $hasPin = is_string($pin) && trim($pin) !== '';
         $hasQr = is_string($qr) && trim($qr) !== '';
 
-        $verified = false;
+        $verified = null;
         if ($hasPin) {
-            $verified = $this->pinService->validatePinForProgram($program->id, trim($pin)) !== null;
+            $verified = $this->pinService->validatePinForProgram($program->id, trim($pin));
         } elseif ($hasQr) {
-            $verified = $this->pinService->validateQrForProgram($program->id, trim($qr)) !== null;
+            $verified = $this->pinService->validateQrForProgram($program->id, trim($qr));
         }
 
         if (! $verified) {
             return response()->json(['message' => 'Invalid PIN or QR code.'], 401);
+        }
+
+        $authorizer = User::find((int) $verified['user_id']);
+        if (! $authorizer || ! $authorizer->can(PermissionCatalog::PUBLIC_DEVICE_AUTHORIZE)) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
         DeviceLock::clearFromSession($request);

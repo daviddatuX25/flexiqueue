@@ -3,15 +3,15 @@
 namespace Tests\Feature\Api\Admin;
 
 use App\Events\TokenTtsStatusUpdated;
+use App\Jobs\GenerateTokenTtsJob;
 use App\Models\Site;
+use App\Models\Token;
 use App\Models\User;
 use App\Repositories\TokenTtsSettingRepository;
-use App\Models\Token;
-use App\Jobs\GenerateTokenTtsJob;
-use App\Services\TtsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -28,7 +28,7 @@ class TokenTtsSettingsTest extends TestCase
             $this->site = Site::create([
                 'name' => 'Default Site',
                 'slug' => 'default',
-                'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+                'api_key_hash' => Hash::make(Str::random(40)),
                 'settings' => [],
                 'edge_settings' => [],
             ]);
@@ -63,9 +63,88 @@ class TokenTtsSettingsTest extends TestCase
         $response = $this->actingAs($admin)->getJson('/api/admin/token-tts-settings');
 
         $response->assertStatus(200);
-        $response->assertJsonStructure(['token_tts_settings' => ['voice_id', 'rate']]);
+        $response->assertJsonStructure(['token_tts_settings' => ['voice_id', 'rate', 'playback']]);
         $data = $response->json('token_tts_settings');
         $this->assertArrayHasKey('rate', $data);
+        $this->assertTrue($data['playback']['prefer_generated_audio']);
+        $this->assertTrue($data['playback']['segment_2_enabled']);
+    }
+
+    public function test_update_saves_playback_flags(): void
+    {
+        $admin = $this->admin();
+        $this->app->make(TokenTtsSettingRepository::class)->getInstance();
+
+        $response = $this->actingAs($admin)->putJson('/api/admin/token-tts-settings', [
+            'playback' => [
+                'prefer_generated_audio' => false,
+                'allow_custom_pronunciation' => false,
+                'segment_2_enabled' => false,
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('token_tts_settings.playback.prefer_generated_audio', false);
+        $response->assertJsonPath('token_tts_settings.playback.allow_custom_pronunciation', false);
+        $response->assertJsonPath('token_tts_settings.playback.segment_2_enabled', false);
+    }
+
+    public function test_preview_text_segment1_and_segment2(): void
+    {
+        $admin = $this->admin();
+
+        $r1 = $this->actingAs($admin)->getJson('/api/admin/tts/preview-text?segment=1&lang=en&alias=A1&pronounce_as=letters');
+        $r1->assertStatus(200);
+        $this->assertStringContainsString('Calling', $r1->json('text'));
+
+        $r2 = $this->actingAs($admin)->getJson('/api/admin/tts/preview-text?segment=2&lang=en&connector_phrase=Go%20to&station_name=Win');
+        $r2->assertStatus(200);
+        $this->assertSame('Go to Win', $r2->json('text'));
+
+        $rCustom = $this->actingAs($admin)->getJson('/api/admin/tts/preview-text?segment=1&lang=en&alias=A1&pronounce_as=custom&token_phrase=Counter');
+        $rCustom->assertStatus(200);
+        $this->assertStringContainsString('Counter', $rCustom->json('text'));
+
+        $rWord = $this->actingAs($admin)->getJson('/api/admin/tts/preview-text?segment=1&lang=en&alias=A1&pronounce_as=word&token_phrase=Ignored');
+        $rWord->assertStatus(200);
+        $this->assertStringContainsString('A 1', $rWord->json('text'));
+        $this->assertStringNotContainsString('Ignored', $rWord->json('text'));
+    }
+
+    public function test_update_merges_default_languages_preserving_unsent_phrase_fields(): void
+    {
+        $admin = $this->admin();
+        $settings = $this->app->make(TokenTtsSettingRepository::class)->getInstance();
+        $settings->update([
+            'default_languages' => [
+                'en' => [
+                    'pre_phrase' => 'Hello',
+                    'token_bridge_tail' => 'please go to',
+                    'rate' => 0.9,
+                    'voice_id' => 'v-en',
+                ],
+                'fil' => ['pre_phrase' => 'Fil pre'],
+                'ilo' => [],
+            ],
+        ]);
+
+        $response = $this->actingAs($admin)->putJson('/api/admin/token-tts-settings', [
+            'languages' => [
+                'en' => [
+                    'rate' => 1.15,
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('token_tts_settings.languages.en.pre_phrase', 'Hello');
+        $response->assertJsonPath('token_tts_settings.languages.en.token_bridge_tail', 'please go to');
+        $response->assertJsonPath('token_tts_settings.languages.en.rate', 1.15);
+        $response->assertJsonPath('token_tts_settings.languages.en.voice_id', 'v-en');
+        $response->assertJsonPath('token_tts_settings.languages.fil.pre_phrase', 'Fil pre');
+
+        $settings->refresh();
+        $this->assertSame('Hello', $settings->getDefaultLanguages()['en']['pre_phrase'] ?? null);
     }
 
     public function test_update_saves_settings(): void
@@ -209,12 +288,12 @@ class TokenTtsSettingsTest extends TestCase
         $response->assertJsonPath('queued', 0);
     }
 
-    public function test_sample_phrase_returns_ilocano_phonetics_for_letter_a(): void
+    public function test_preview_token_spoken_part_returns_ilocano_phonetics_for_letter_a(): void
     {
         $admin = $this->admin();
 
         $response = $this->actingAs($admin)->getJson(
-            '/api/admin/tts/sample-phrase?lang=ilo&alias=A1&pronounce_as=letters'
+            '/api/admin/tts/preview-token-spoken-part?lang=ilo&alias=A1&pronounce_as=letters'
         );
 
         $response->assertStatus(200);
@@ -222,6 +301,32 @@ class TokenTtsSettingsTest extends TestCase
         $text = $response->json('text');
         $this->assertIsString($text);
         $this->assertStringContainsString('eyy', $text);
+    }
+
+    public function test_preview_token_spoken_part_supports_custom_token_phrase(): void
+    {
+        $admin = $this->admin();
+
+        $response = $this->actingAs($admin)->getJson(
+            '/api/admin/tts/preview-token-spoken-part?lang=en&alias=A1&pronounce_as=custom&token_phrase=Counter'
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonStructure(['text']);
+        $this->assertSame('Counter', $response->json('text'));
+    }
+
+    public function test_preview_token_spoken_part_word_mode_keeps_letter_runs_and_digits(): void
+    {
+        $admin = $this->admin();
+
+        $response = $this->actingAs($admin)->getJson(
+            '/api/admin/tts/preview-token-spoken-part?lang=en&alias=AAB3&pronounce_as=word'
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonStructure(['text']);
+        $this->assertSame('AAB 3', $response->json('text'));
     }
 
     public function test_sample_phrase_with_pre_phrase_returns_combined_text(): void
@@ -237,12 +342,21 @@ class TokenTtsSettingsTest extends TestCase
         $this->assertStringStartsWith('Calling', $text);
     }
 
+    public function test_super_admin_cannot_access_token_tts_settings(): void
+    {
+        $super = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+
+        $this->actingAs($super)->getJson('/api/admin/token-tts-settings')->assertStatus(403);
+    }
+
     public function test_non_admin_cannot_access(): void
     {
         $staff = User::factory()->create(['role' => 'staff']);
 
         $this->actingAs($staff)->getJson('/api/admin/token-tts-settings')->assertStatus(403);
         $this->actingAs($staff)->getJson('/api/admin/tts/sample-phrase?lang=en')->assertStatus(403);
+        $this->actingAs($staff)->getJson('/api/admin/tts/preview-text?segment=1&lang=en')->assertStatus(403);
+        $this->actingAs($staff)->getJson('/api/admin/tts/preview-token-spoken-part?lang=en&alias=A1&pronounce_as=letters')->assertStatus(403);
         $token = csrf_token();
         $this->actingAs($staff)
             ->withHeader('X-CSRF-TOKEN', $token)
@@ -262,10 +376,7 @@ class TokenTtsSettingsTest extends TestCase
         Event::fake([TokenTtsStatusUpdated::class]);
 
         $job = new GenerateTokenTtsJob([$t1->id, $t2->id]);
-        $job->handle(
-            $this->app->make(TtsService::class),
-            $this->app->make(TokenTtsSettingRepository::class)
-        );
+        $this->app->call([$job, 'handle']);
 
         Event::assertDispatched(TokenTtsStatusUpdated::class, 2);
         Event::assertDispatched(TokenTtsStatusUpdated::class, function ($event) use ($t1) {
@@ -276,4 +387,3 @@ class TokenTtsSettingsTest extends TestCase
         });
     }
 }
-

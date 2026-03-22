@@ -10,7 +10,15 @@
 	import { compressImage, HERO_BANNER_PRESET, getUploadHint } from "../../../lib/imageUtils.js";
 	import { Printer, ChevronDown } from "lucide-svelte";
 
+	let { variant = "site" }: { variant?: "site" | "platform" } = $props();
+
 	const page = usePage();
+
+	function printApiBase(): string {
+		return variant === "platform"
+			? "/api/admin/print-platform-default-settings"
+			: "/api/admin/print-settings";
+	}
 	function getCsrfToken(): string {
 		const p = get(page);
 		const fromProps = (p?.props as { csrf_token?: string } | undefined)?.csrf_token;
@@ -71,7 +79,10 @@
 
 	async function fetchPrintSettings() {
 		loading = true;
-		const { ok, data } = await api<{ print_settings?: Record<string, unknown> }>("GET", "/api/admin/print-settings");
+		const { ok, data } = await api<{ print_settings?: Record<string, unknown> }>(
+			"GET",
+			printApiBase(),
+		);
 		loading = false;
 		if (ok && data?.print_settings) {
 			const s = data.print_settings;
@@ -91,7 +102,7 @@
 	async function savePrintSettings() {
 		submitting = true;
 		printSettingsSaved = false;
-		const { ok, data, message } = await api<{ print_settings?: Record<string, unknown> }>("PUT", "/api/admin/print-settings", {
+		const { ok, data, message } = await api<{ print_settings?: Record<string, unknown> }>("PUT", printApiBase(), {
 			cards_per_page: printSettings.cards_per_page,
 			paper: printSettings.paper,
 			orientation: printSettings.orientation,
@@ -159,7 +170,11 @@
 </script>
 
 <p class="text-sm text-surface-600 mb-4">
-	Cards per page, paper size, logo, footer text, and background image for token card printing. These apply when you print from the Tokens page.
+	{#if variant === "platform"}
+		Platform defaults for token card printing. New sites receive a copy of these settings when created. Site admins can still customize their site&apos;s print settings separately.
+	{:else}
+		Cards per page, paper size, logo, footer text, and background image for token card printing. These apply when you print from the Tokens page.
+	{/if}
 </p>
 
 {#if loading}
@@ -293,7 +308,13 @@
 
 		<div class="flex justify-end gap-3 pt-4 border-t border-surface-100">
 			<button type="button" class="btn preset-filled-primary-500 shadow-sm" onclick={savePrintSettings} disabled={submitting}>
-				{printSettingsSaved ? "Saved" : submitting ? "Saving…" : "Save as default"}
+				{printSettingsSaved
+					? "Saved"
+					: submitting
+						? "Saving…"
+						: variant === "platform"
+							? "Save platform defaults"
+							: "Save as default"}
 			</button>
 		</div>
 	</div>

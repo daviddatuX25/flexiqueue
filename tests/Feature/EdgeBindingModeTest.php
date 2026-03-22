@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\EdgeDeviceState;
 use App\Models\IdentityRegistration;
 use App\Models\Process;
 use App\Models\Program;
@@ -11,6 +12,8 @@ use App\Models\Station;
 use App\Models\TrackStep;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -37,7 +40,7 @@ class EdgeBindingModeTest extends TestCase
         $this->site = Site::create([
             'name' => 'Test Site',
             'slug' => 'test-site',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -65,7 +68,7 @@ class EdgeBindingModeTest extends TestCase
             'is_active' => true,
         ]);
         $process = Process::create(['program_id' => $this->programRequired->id, 'name' => 'P1', 'description' => null]);
-        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+        DB::table('station_process')->insert([
             'station_id' => $this->station->id,
             'process_id' => $process->id,
         ]);
@@ -91,6 +94,10 @@ class EdgeBindingModeTest extends TestCase
 
     public function test_triage_passes_identity_binding_mode_optional_when_program_required_and_app_mode_edge(): void
     {
+        EdgeDeviceState::current()->update([
+            'paired_at' => now(),
+            'active_program_id' => $this->programRequired->id,
+        ]);
         config(['app.mode' => 'edge']);
 
         $response = $this->actingAs($this->staff)->get(route('triage'));
@@ -126,7 +133,7 @@ class EdgeBindingModeTest extends TestCase
         ]);
         $this->staff->update(['assigned_station_id' => $stationDisabled->id]);
         $process = Process::create(['program_id' => $this->programDisabled->id, 'name' => 'P2', 'description' => null]);
-        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+        DB::table('station_process')->insert([
             'station_id' => $stationDisabled->id,
             'process_id' => $process->id,
         ]);
@@ -144,6 +151,10 @@ class EdgeBindingModeTest extends TestCase
             'is_required' => true,
         ]);
 
+        EdgeDeviceState::current()->update([
+            'paired_at' => now(),
+            'active_program_id' => $this->programDisabled->id,
+        ]);
         config(['app.mode' => 'edge']);
         $responseEdge = $this->actingAs($this->staff)->get(route('triage'));
         $responseEdge->assertStatus(200);

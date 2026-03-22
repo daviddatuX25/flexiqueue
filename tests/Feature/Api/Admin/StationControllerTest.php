@@ -351,4 +351,25 @@ class StationControllerTest extends TestCase
         $response->assertStatus(201);
         Bus::assertDispatched(GenerateStationTtsJob::class);
     }
+
+    public function test_store_does_not_dispatch_station_tts_job_when_generate_tts_is_false(): void
+    {
+        $this->program->update([
+            'settings' => array_merge($this->program->settings ?? [], [
+                'tts' => ['auto_generate_station_tts' => true],
+            ]),
+        ]);
+
+        Bus::fake();
+
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$this->program->id}/stations", [
+            'name' => 'No Auto Audio',
+            'capacity' => 2,
+            'process_ids' => [$this->process->id],
+            'generate_tts' => false,
+        ]);
+
+        $response->assertStatus(201);
+        Bus::assertNotDispatched(GenerateStationTtsJob::class);
+    }
 }

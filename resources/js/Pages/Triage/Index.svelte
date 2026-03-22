@@ -3,11 +3,7 @@
 	import Modal from '../../Components/Modal.svelte';
 	import ScanModal from '../../Components/ScanModal.svelte';
 	import CreateRegistrationModal from '../../Components/CreateRegistrationModal.svelte';
-	import TriageClientBinder, {
-		type BindingMode as BinderBindingMode,
-		type BinderStatus as BinderComponentStatus,
-		type ClientBindingPayload,
-	} from '../../Components/TriageClientBinder.svelte';
+	import StaffTriageBindPanel from '../../Components/StaffTriageBindPanel.svelte';
 	import IdNumberInput from '../../Components/IdNumberInput.svelte';
 	import AuthChoiceButtons from '../../Components/AuthChoiceButtons.svelte';
 	import PinOrQrInput from '../../Components/PinOrQrInput.svelte';
@@ -78,10 +74,6 @@
 		{ label: 'Incomplete Documents', value: 'Incomplete Documents' },
 	] as const;
 
-	/** When track count is at or below this, show buttons instead of dropdown. */
-	const MAX_TRACKS_FOR_BUTTONS = 4;
-	const showTrackButtons = $derived((effectiveProgram?.tracks?.length ?? 0) <= MAX_TRACKS_FOR_BUTTONS);
-
 	let showScanner = $state(false);
 	/** When 'verify_id', scan verifies stored ID; when 'capture_id_accept', scan fills optional ID in Accept modal; when 'capture_id_new_reg', scan fills ID in New registration modal; else token lookup. */
 	/** Token scan only; no ID/phone scan until printable ID and scan feature exist. */
@@ -95,7 +87,6 @@
 	/** Per plan: category hidden in staff triage normal bind; default to Regular. */
 	let selectedCategory = $state<string>('Regular');
 	let selectedTrackId = $state<number | null>(null);
-	let isSubmitting = $state(false);
 	let scanCountdown = $state(0);
 	let scanCountdownIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
 	/** Account-level preferences (from props, updated after PUT). */
@@ -130,12 +121,6 @@
 	let triageSettingsRequestToken = $state<string | null>(null);
 	let triageSettingsRequestState = $state<'idle' | 'waiting' | 'approved' | 'rejected'>('idle');
 	let triageSettingsPollIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
-
-	let bindingMode = $derived<BinderBindingMode>(
-		(effectiveProgram?.identity_binding_mode as BinderBindingMode | undefined) ?? 'disabled',
-	);
-	let clientBinding = $state<ClientBindingPayload | null>(null);
-	let binderStatus = $state<BinderComponentStatus>('idle');
 
 	/** Identity registration accept modal */
 	let acceptRegModalReg = $state<typeof pending_identity_registrations[0] | null>(null);
@@ -222,19 +207,6 @@
 		return { ok, message: msg };
 	}
 
-	function setDefaultTrack() {
-		if (effectiveProgram?.tracks?.length) {
-			const def = effectiveProgram.tracks.find((t) => t.is_default);
-			selectedTrackId = def?.id ?? effectiveProgram.tracks[0]?.id ?? null;
-		}
-	}
-
-	$effect(() => {
-		if (effectiveProgram?.tracks?.length && selectedTrackId === null) {
-			setDefaultTrack();
-		}
-	});
-
 	$effect(() => {
 		accountAllowHid = staff_triage_allow_hid_barcode !== false;
 		accountAllowCamera = staff_triage_allow_camera_scanner !== false;
@@ -244,7 +216,7 @@
 		const hidLocal = getLocalAllowHidOnThisDevice('staff_binder');
 		localAllowHid = hidLocal !== null ? hidLocal : !isMobileTouch();
 		localPersistentHid = getLocalPersistentHidOnThisDevice('staff_binder');
-		localAllowCamera = shouldAllowCameraScanner('staff_binder');
+		localAllowCamera = shouldAllowCameraScanner('staff_binder', staff_triage_allow_camera_scanner !== false);
 	});
 
 	/** When persistent HID is on, refocus global HID every 2s when scan modal is closed. */
@@ -390,8 +362,6 @@
 		scannedToken = null;
 		scanHandled = true;
 		manualPhysicalId = '';
-		selectedCategory = 'Regular';
-		setDefaultTrack();
 		showScanner = false;
 		scannerMode = 'token';
 	}
@@ -552,47 +522,6 @@
 	/** Per ISSUES-ELABORATION §12: clear error and allow scan/lookup again without refresh (e.g. after token freed elsewhere). */
 	function tryAgain() {
 		scanHandled = false;
-	}
-
-	async function handleConfirm() {
-		if (!scannedToken || selectedTrackId === null) return;
-		if (bindingMode === 'required' && binderStatus !== 'bound' && !(binderStatus === 'binding_ready' && clientBinding)) {
-			toaster.error({
-				title: 'Client identity binding is required before completing triage.',
-			});
-			return;
-		}
-		isSubmitting = true;
-		const payload: Record<string, unknown> = {
-			qr_hash: scannedToken.qr_hash,
-			track_id: Number(selectedTrackId),
-			client_category: selectedCategory,
-		};
-		if (effectiveProgram?.id != null) {
-			payload.program_id = effectiveProgram.id;
-		}
-		if (clientBinding) {
-			payload.client_binding = clientBinding;
-		}
-
-		const { ok, data, message } = await api('POST', '/api/sessions/bind', payload);
-		isSubmitting = false;
-		if (ok) {
-			resetScan();
-			toaster.success({ title: 'Visit started.' });
-			router.reload();
-			return;
-		}
-		const d = data as { active_session?: { alias: string }; token_status?: string; error_code?: string; message?: string } | undefined;
-		if (d?.error_code === 'client_already_queued' && d?.active_session) {
-			toaster.error({ title: `Client already has an active visit (Token ${d.active_session.alias}).` });
-		} else if (d?.active_session) {
-			toaster.error({ title: `Token already in use (${d.active_session.alias}).` });
-		} else if (d?.token_status) {
-			toaster.error({ title: `Token is marked as ${d.token_status}.` });
-		} else {
-			toaster.error({ title: (d?.message ?? message) ?? 'Bind failed.' });
-		}
 	}
 
 	// Identity registration accept/reject
@@ -1108,77 +1037,19 @@
 					submitRequest={submitNewRegistrationRequest}
 				/>
 			{:else}
-				<!-- Category + track + binder + confirm -->
-				<div
-					class="rounded-container border border-surface-200 bg-surface-50 elevation-card p-4 md:p-6 space-y-4"
-					data-testid="triage-confirm-card"
-				>
-					<p class="font-medium text-surface-950">Token: <span class="font-mono text-primary-500">{scannedToken.physical_id}</span></p>
-
-					<div>
-						<p class="text-sm font-medium text-surface-950 mb-2">Track</p>
-						{#if showTrackButtons}
-							<div class="flex flex-wrap gap-2">
-								{#each effectiveProgram?.tracks ?? [] as track (track.id)}
-									<button
-										type="button"
-										class="btn touch-target-h px-4 py-2 {selectedTrackId === track.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
-										data-testid={track.name === 'Regular'
-											? 'triage-track-regular'
-											: 'triage-track-priority'}
-										onclick={() => (selectedTrackId = track.id)}
-									>
-										{track.name}
-									</button>
-								{/each}
-							</div>
-						{:else}
-<select
-							id="triage-track"
-							class="select select-theme w-full rounded-container border border-surface-200 px-3 py-2 touch-target-h"
-								bind:value={selectedTrackId}
-							>
-								{#each effectiveProgram?.tracks ?? [] as track (track.id)}
-									<option value={track.id}>{track.name}</option>
-								{/each}
-							</select>
-						{/if}
-					</div>
-
-					{#if bindingMode !== 'disabled'}
-						<div class="border-t border-surface-200 pt-4" data-testid="triage-client-binder-wrapper">
-							<TriageClientBinder
-								bindingMode={bindingMode}
-								programId={effectiveProgram?.id ?? null}
-								allowHid={effectiveHid}
-								allowCamera={effectiveCamera}
-								onBindingChange={({ status, client_binding }) => {
-									binderStatus = status;
-									clientBinding = client_binding;
-								}}
-							/>
-						</div>
-					{/if}
-
-					<div class="flex gap-2 pt-2">
-						<button type="button" class="btn preset-tonal flex-1 touch-target-h" onclick={resetScan} disabled={isSubmitting}>
-							Cancel
-						</button>
-						<button
-							type="button"
-							class="btn preset-filled-primary-500 flex-1 touch-target-h"
-							data-testid="triage-confirm-button"
-							onclick={handleConfirm}
-							disabled={
-								isSubmitting ||
-								selectedTrackId === null ||
-								(bindingMode === 'required' && binderStatus !== 'bound' && !(binderStatus === 'binding_ready' && clientBinding))
-							}
-						>
-							{isSubmitting ? 'Binding…' : 'Confirm'}
-						</button>
-					</div>
-				</div>
+				<StaffTriageBindPanel
+					program={effectiveProgram}
+					token={scannedToken}
+					effectiveHid={effectiveHid}
+					effectiveCamera={effectiveCamera}
+					getCsrfToken={getCsrfToken}
+					onCancel={resetScan}
+					onBound={() => {
+						resetScan();
+						toaster.success({ title: 'Visit started.' });
+						router.reload();
+					}}
+				/>
 			{/if}
 		{/if}
 

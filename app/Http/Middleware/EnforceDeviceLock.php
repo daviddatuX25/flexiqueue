@@ -23,14 +23,6 @@ class EnforceDeviceLock
 
     public function handle(Request $request, Closure $next): Response
     {
-        // #region agent log
-        $logPath = base_path('.cursor/debug-4aa17b.log');
-        $log = static function (array $data) use ($logPath): void {
-            $line = json_encode(array_merge(['timestamp' => (int) (microtime(true) * 1000), 'location' => 'EnforceDeviceLock::handle'], $data))."\n";
-            @file_put_contents($logPath, $line, FILE_APPEND | LOCK_EX);
-        };
-        // #endregion
-
         if (! $request->isMethod('GET')) {
             return $next($request);
         }
@@ -38,7 +30,6 @@ class EnforceDeviceLock
         // Per public-site plan: read-only board and program info page allowed without device lock.
         $routeName = $request->route()?->getName();
         if (in_array($routeName, ['site.program.public-view', 'site.program.info'], true)) {
-            $log(['hypothesisId' => 'H5', 'message' => 'skip route name', 'routeName' => $routeName]);
             return $next($request);
         }
 
@@ -56,38 +47,12 @@ class EnforceDeviceLock
         $segments = explode('/', $path);
         $first = $segments[0] ?? '';
         if (in_array($first, self::SKIP_PATHS, true)) {
-            $log(['hypothesisId' => 'H5', 'message' => 'skip first segment', 'first' => $first]);
             return $next($request);
         }
 
         $lock = DeviceLock::decode($request);
-        $log(['hypothesisId' => 'H3,H4', 'message' => 'lock decode', 'path' => $path, 'hasLock' => $lock !== null, 'deviceType' => $lock['device_type'] ?? null, 'routeName' => $routeName]);
         if ($lock === null) {
             return $next($request);
-        }
-
-        // Authenticated staff/admin for this site should not be forced to stay on the locked
-        // device URL. When a user is logged in and their account is tied to this site (or they
-        // are an org-wide admin/super_admin), allow navigation anywhere even if a device_lock
-        // cookie is present.
-        $user = $request->user();
-        if ($user) {
-            $siteSlugFromLock = $lock['site_slug'] ?? null;
-            if (is_string($siteSlugFromLock) && $siteSlugFromLock !== '') {
-                $site = Site::query()->where('slug', $siteSlugFromLock)->first();
-                $isSameSite = $site && $user->site_id === $site->id;
-            } else {
-                $site = null;
-                $isSameSite = false;
-            }
-
-            $isAdminLike = method_exists($user, 'isAdmin') && $user->isAdmin();
-            $isSuperAdmin = method_exists($user, 'isSuperAdmin') && $user->isSuperAdmin();
-
-            if ($isSameSite || $isAdminLike || $isSuperAdmin) {
-                $log(['hypothesisId' => 'H6', 'message' => 'skip for staff/admin user', 'userId' => $user->id ?? null, 'siteId' => $site->id ?? null]);
-                return $next($request);
-            }
         }
 
         $siteSlug = $lock['site_slug'];
@@ -104,7 +69,6 @@ class EnforceDeviceLock
             }
         }
         $redirectUrl = $this->redirectUrlForLock($siteSlug, $programSlug, $deviceType, $stationId);
-        $log(['hypothesisId' => 'H4', 'message' => 'path check', 'path' => $path, 'allowedPrefixes' => $allowedPrefixes, 'allowed' => $allowed, 'redirectUrl' => $redirectUrl]);
         if ($allowed) {
             return $next($request);
         }
@@ -112,7 +76,6 @@ class EnforceDeviceLock
             return $next($request);
         }
 
-        $log(['hypothesisId' => 'H2,H4', 'message' => 'redirecting', 'path' => $path, 'redirectUrl' => $redirectUrl]);
         return redirect()->to($redirectUrl, 302);
     }
 
@@ -131,6 +94,10 @@ class EnforceDeviceLock
             ],
             DeviceLock::TYPE_TRIAGE => [
                 $base.'/public-triage/'.$programSlug,
+                $base.'/kiosk/'.$programSlug,
+            ],
+            DeviceLock::TYPE_KIOSK => [
+                $base.'/kiosk/'.$programSlug,
             ],
             DeviceLock::TYPE_STATION => [
                 $base.'/display/station/'.$stationId,
@@ -146,7 +113,8 @@ class EnforceDeviceLock
     {
         return match ($deviceType) {
             DeviceLock::TYPE_DISPLAY => $this->displayLockRedirectUrl($siteSlug, $programSlug),
-            DeviceLock::TYPE_TRIAGE => '/site/'.$siteSlug.'/public-triage/'.$programSlug,
+            DeviceLock::TYPE_TRIAGE => '/site/'.$siteSlug.'/kiosk/'.$programSlug,
+            DeviceLock::TYPE_KIOSK => '/site/'.$siteSlug.'/kiosk/'.$programSlug,
             DeviceLock::TYPE_STATION => '/site/'.$siteSlug.'/display/station/'.$stationId,
             default => null,
         };

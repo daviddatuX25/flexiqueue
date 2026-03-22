@@ -1,8 +1,21 @@
 <?php
 
+use App\Http\Middleware\AddPermissionsPolicy;
+use App\Http\Middleware\AuthenticateSiteByApiKey;
+use App\Http\Middleware\EdgeBootGuard;
+use App\Http\Middleware\EnforceDeviceLock;
+use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\RedirectIfAuthenticated;
+use App\Http\Middleware\RequireProgramAccess;
+use App\Http\Middleware\RequireSiteAccess;
+use App\Http\Middleware\SetGlobalPermissionsTeam;
+use App\Support\DeviceLock;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Spatie\Permission\Middleware\PermissionMiddleware;
+use Spatie\Permission\Middleware\RoleMiddleware;
+use Spatie\Permission\Middleware\RoleOrPermissionMiddleware;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -13,7 +26,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->encryptCookies(except: [
-            \App\Support\DeviceLock::COOKIE_NAME,
+            DeviceLock::COOKIE_NAME,
             'known_sites',
             'known_programs',
         ]);
@@ -23,17 +36,20 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/public/site-key',
         ]);
         $middleware->web(append: [
-            \App\Http\Middleware\EdgeBootGuard::class,
-            \App\Http\Middleware\EnforceDeviceLock::class,
-            \App\Http\Middleware\HandleInertiaRequests::class,
-            \App\Http\Middleware\AddPermissionsPolicy::class,
+            SetGlobalPermissionsTeam::class,
+            EdgeBootGuard::class,
+            EnforceDeviceLock::class,
+            HandleInertiaRequests::class,
+            AddPermissionsPolicy::class,
         ]);
         $middleware->alias([
-            'guest' => \App\Http\Middleware\RedirectIfAuthenticated::class,
-            'role' => \App\Http\Middleware\EnsureRole::class,
-            'site.api_key' => \App\Http\Middleware\AuthenticateSiteByApiKey::class,
-            'require.site.access' => \App\Http\Middleware\RequireSiteAccess::class,
-            'require.program.access' => \App\Http\Middleware\RequireProgramAccess::class,
+            'guest' => RedirectIfAuthenticated::class,
+            'permission' => PermissionMiddleware::class,
+            'role.permission' => RoleOrPermissionMiddleware::class,
+            'spatie.role' => RoleMiddleware::class,
+            'site.api_key' => AuthenticateSiteByApiKey::class,
+            'require.site.access' => RequireSiteAccess::class,
+            'require.program.access' => RequireProgramAccess::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

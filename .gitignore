@@ -56,4 +56,9 @@ last23*.jsonl
 nul
 root@*
 *.docx
+
+# Code Mapper (github.com/daviddatuX25/codemapper): clone + generated TTS maps
+.tmp-codemapper/
+codemapper-output/*
+!codemapper-output/admin_tokens_program_station_map.txt
 codemapper/

@@ -2,6 +2,8 @@
 
 namespace App\Http\Requests;
 
+use App\Models\User;
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -17,7 +19,7 @@ class UpdatePublicDisplaySettingsRequest extends FormRequest
     }
 
     /**
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
@@ -30,14 +32,14 @@ class UpdatePublicDisplaySettingsRequest extends FormRequest
                 'string',
                 'size:6',
                 'regex:/^\d{6}$/',
-                Rule::requiredIf(! $this->has('qr_scan_token') && ! $this->has('auth_type')),
+                Rule::requiredIf(fn () => $this->pinOrQrRequired() && ! $this->has('qr_scan_token') && ! $this->has('auth_type')),
             ],
             'qr_scan_token' => [
                 'nullable',
                 'string',
                 'min:1',
                 'max:128',
-                Rule::requiredIf(! $this->has('pin') && ! $this->has('auth_type')),
+                Rule::requiredIf(fn () => $this->pinOrQrRequired() && ! $this->has('pin') && ! $this->has('auth_type')),
             ],
             // Legacy/compat inputs (ignored by simplified UI, but supported).
             'auth_type' => ['sometimes', 'string', 'in:preset_pin,preset_qr,temp_pin,temp_qr,pin,qr'],
@@ -49,6 +51,21 @@ class UpdatePublicDisplaySettingsRequest extends FormRequest
             'enable_public_triage_hid_barcode' => ['sometimes', 'boolean'],
             'enable_display_camera_scanner' => ['sometimes', 'boolean'],
             'enable_public_triage_camera_scanner' => ['sometimes', 'boolean'],
+            'kiosk_hid_persistent_when_scan_modal_closed' => ['sometimes', 'boolean'],
         ];
+    }
+
+    /**
+     * Staff/admin signed in on the same browser may omit PIN/QR (verified in PublicDisplaySettingsAuthService).
+     */
+    private function pinOrQrRequired(): bool
+    {
+        $user = $this->user();
+        $programId = $this->input('program_id');
+        if (! $user instanceof User || $programId === null || $programId === '') {
+            return true;
+        }
+
+        return ! $user->canBypassPublicDisplaySettingsPinForProgram((int) $programId);
     }
 }

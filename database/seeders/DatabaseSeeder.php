@@ -11,6 +11,7 @@ use App\Models\Site;
 use App\Models\Station;
 use App\Models\TrackStep;
 use App\Models\User;
+use App\Services\SpatieRbacSyncService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -40,6 +41,8 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call(DefaultSiteSeeder::class);
+
+        $this->call(PermissionCatalogSeeder::class);
 
         $defaultSite = Site::where('slug', 'default')->firstOrFail();
 
@@ -77,7 +80,7 @@ class DatabaseSeeder extends Seeder
         $staff = [];
         foreach ($staffNames as $i => $name) {
             $staff[] = User::updateOrCreate(
-                ['email' => 'staff' . ($i + 1) . '@tagudinmswdo.gov.ph'],
+                ['email' => 'staff'.($i + 1).'@tagudinmswdo.gov.ph'],
                 [
                     'name' => $name,
                     'password' => $password,
@@ -709,5 +712,9 @@ class DatabaseSeeder extends Seeder
 
         // AICS is active by default; staff assigned_station_id reflects their AICS station
         // (ProgramService::syncAssignedStationId runs on activate; AICS is already active)
+
+        foreach (User::all() as $user) {
+            app(SpatieRbacSyncService::class)->syncUser($user);
+        }
     }
 }

@@ -4,7 +4,6 @@ namespace Tests\Feature\Api\Admin;
 
 use App\Models\Process;
 use App\Models\Program;
-use App\Models\ProgramAuditLog;
 use App\Models\ProgramStationAssignment;
 use App\Models\ServiceTrack;
 use App\Models\Session;
@@ -12,9 +11,11 @@ use App\Models\Site;
 use App\Models\Station;
 use App\Models\Token;
 use App\Models\User;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -34,7 +35,7 @@ class ProgramControllerTest extends TestCase
         $this->site = Site::create([
             'name' => 'Default Site',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -73,6 +74,33 @@ class ProgramControllerTest extends TestCase
         $response->assertJsonPath('program.name', 'Cash Assistance');
         $response->assertJsonPath('program.is_active', false);
         $this->assertDatabaseHas('programs', ['name' => 'Cash Assistance']);
+    }
+
+    public function test_store_applies_saved_program_default_settings(): void
+    {
+        $this->actingAs($this->admin)->putJson('/api/admin/program-default-settings', [
+            'settings' => [
+                'no_show_timer_seconds' => 77,
+                'balance_mode' => 'alternate',
+                'tts' => ['active_language' => 'fil'],
+            ],
+        ])->assertStatus(200);
+
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/programs', [
+            'name' => 'From Defaults',
+            'description' => null,
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('program.settings.no_show_timer_seconds', 77);
+        $response->assertJsonPath('program.settings.balance_mode', 'alternate');
+        $response->assertJsonPath('program.settings.tts.active_language', 'fil');
+
+        $program = Program::query()->where('name', 'From Defaults')->first();
+        $this->assertNotNull($program);
+        $this->assertSame(77, $program->settings['no_show_timer_seconds']);
+        $this->assertSame('alternate', $program->settings['balance_mode']);
+        $this->assertSame('fil', $program->settings['tts']['active_language'] ?? null);
     }
 
     public function test_store_validates_name_required(): void
@@ -666,6 +694,54 @@ class ProgramControllerTest extends TestCase
         $this->assertSame($station->id, $staff->assigned_station_id);
     }
 
+    public function test_activate_sets_assigned_staff_availability_to_away(): void
+    {
+        $staff = User::factory()->create([
+            'role' => 'staff',
+            'assigned_station_id' => null,
+            'availability_status' => User::AVAILABILITY_AVAILABLE,
+        ]);
+        $program = Program::create([
+            'site_id' => $this->siteId(),
+            'name' => 'To Activate',
+            'description' => null,
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Verification',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $process = Process::create([
+            'program_id' => $program->id,
+            'name' => 'P1',
+            'description' => null,
+        ]);
+        DB::table('station_process')->insert([
+            'station_id' => $station->id,
+            'process_id' => $process->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        ProgramStationAssignment::create([
+            'program_id' => $program->id,
+            'user_id' => $staff->id,
+            'station_id' => $station->id,
+        ]);
+        ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'T1',
+            'is_default' => true,
+        ]);
+
+        $this->actingAs($this->admin)->postJson("/api/admin/programs/{$program->id}/activate");
+
+        $staff->refresh();
+        $this->assertSame(User::AVAILABILITY_AWAY, $staff->availability_status);
+    }
+
     public function test_deactivate_fails_when_active_sessions_exist(): void
     {
         $program = Program::create([
@@ -795,7 +871,7 @@ class ProgramControllerTest extends TestCase
             'created_by' => $this->admin->id,
         ]);
 
-        \Illuminate\Support\Facades\Storage::fake('local');
+        Storage::fake('local');
 
         $station = Station::create([
             'program_id' => $program->id,
@@ -811,13 +887,13 @@ class ProgramControllerTest extends TestCase
             ],
         ]);
 
-        \Illuminate\Support\Facades\Storage::put('tts/stations/'.$station->id.'/en.mp3', 'audio');
+        Storage::put('tts/stations/'.$station->id.'/en.mp3', 'audio');
 
         $response = $this->actingAs($this->admin)->deleteJson("/api/admin/stations/{$station->id}");
 
         $response->assertStatus(204);
         $this->assertDatabaseMissing('stations', ['id' => $station->id]);
-        \Illuminate\Support\Facades\Storage::assertMissing('tts/stations/'.$station->id.'/en.mp3');
+        Storage::assertMissing('tts/stations/'.$station->id.'/en.mp3');
     }
 
     public function test_pause_sets_program_paused(): void
@@ -835,6 +911,38 @@ class ProgramControllerTest extends TestCase
         $response->assertStatus(200);
         $response->assertJsonPath('program.is_paused', true);
         $this->assertTrue($program->fresh()->is_paused);
+    }
+
+    public function test_pause_sets_available_assigned_staff_to_on_break(): void
+    {
+        $staff = User::factory()->create([
+            'role' => 'staff',
+            'availability_status' => User::AVAILABILITY_AVAILABLE,
+        ]);
+        $program = Program::create([
+            'site_id' => $this->siteId(),
+            'name' => 'P',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $this->admin->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Station 1',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        ProgramStationAssignment::create([
+            'program_id' => $program->id,
+            'user_id' => $staff->id,
+            'station_id' => $station->id,
+        ]);
+
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$program->id}/pause");
+
+        $response->assertStatus(200);
+        $staff->refresh();
+        $this->assertSame(User::AVAILABILITY_ON_BREAK, $staff->availability_status);
     }
 
     public function test_resume_clears_program_paused(): void

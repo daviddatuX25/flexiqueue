@@ -2,10 +2,11 @@
 
 namespace App\Http\Requests;
 
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
- * Per ISSUES-ELABORATION §2: update global default program settings.
+ * Update program default settings payload (platform or site-scoped controllers).
  * Same rules as UpdateProgramRequest for the settings subset.
  */
 class UpdateProgramDefaultSettingsRequest extends FormRequest
@@ -16,7 +17,7 @@ class UpdateProgramDefaultSettingsRequest extends FormRequest
     }
 
     /**
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
@@ -39,6 +40,11 @@ class UpdateProgramDefaultSettingsRequest extends FormRequest
             'settings.display_tts_repeat_count' => ['sometimes', 'integer', 'min:1', 'max:3'],
             'settings.display_tts_repeat_delay_ms' => ['sometimes', 'integer', 'min:500', 'max:10000'],
             'settings.allow_public_triage' => ['sometimes', 'boolean'],
+            'settings.kiosk_self_service_triage_enabled' => ['sometimes', 'boolean'],
+            'settings.kiosk_status_checker_enabled' => ['sometimes', 'boolean'],
+            'settings.kiosk_enable_hid_barcode' => ['sometimes', 'boolean'],
+            'settings.kiosk_enable_camera_scanner' => ['sometimes', 'boolean'],
+            'settings.kiosk_modal_idle_seconds' => ['sometimes', 'integer', 'min:0', 'max:600'],
             'settings.allow_unverified_entry' => ['sometimes', 'boolean'],
             'settings.identity_binding_mode' => ['sometimes', 'string', 'in:disabled,required'],
             'settings.enable_display_hid_barcode' => ['sometimes', 'boolean'],

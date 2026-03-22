@@ -18,7 +18,8 @@ return new class extends Migration
             $table->string('slug', 100)->unique();
             $table->string('api_key_hash', 255)->unique();
             $table->json('settings')->nullable();
-            $table->json('edge_settings')->default('{}');
+            // MySQL does not allow default values on JSON columns.
+            $table->json('edge_settings')->nullable();
             $table->timestamps();
         });
     }
@@ -28,4 +29,3 @@ return new class extends Migration
         Schema::dropIfExists('sites');
     }
 };
-

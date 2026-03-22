@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -16,7 +17,7 @@ class StoreStationRequest extends FormRequest
     }
 
     /**
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
@@ -55,6 +56,7 @@ class StoreStationRequest extends FormRequest
             'tts.languages.ilo.voice_id' => ['nullable', 'string', 'max:200'],
             'tts.languages.ilo.rate' => ['nullable', 'numeric', 'between:0.5,2.0'],
             'tts.languages.ilo.station_phrase' => ['nullable', 'string', 'max:255'],
+            'generate_tts' => ['sometimes', 'boolean'],
         ];
     }
 

@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Models\TtsAccount;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Session;
 use Tests\TestCase;
@@ -71,8 +72,8 @@ class ElevenLabsIntegrationTest extends TestCase
             ]);
 
         $response->assertCreated();
-        $response->assertJsonStructure(['id', 'label', 'model_id', 'is_active', 'masked_api_key']);
-        $this->assertDatabaseHas('tts_accounts', ['label' => 'Test account']);
+        $response->assertJsonStructure(['id', 'label', 'provider', 'model_id', 'is_active', 'masked_api_key']);
+        $this->assertDatabaseHas('tts_accounts', ['label' => 'Test account', 'provider' => 'elevenlabs']);
     }
 
     public function test_admin_can_activate_elevenlabs_account(): void
@@ -80,7 +81,7 @@ class ElevenLabsIntegrationTest extends TestCase
         $admin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
         $account = TtsAccount::create([
             'label' => 'Inactive',
-            'api_key' => \Illuminate\Support\Facades\Crypt::encryptString('sk_test'),
+            'api_key' => Crypt::encryptString('sk_test'),
             'model_id' => 'eleven_multilingual_v2',
             'is_active' => false,
         ]);
@@ -100,7 +101,7 @@ class ElevenLabsIntegrationTest extends TestCase
         $admin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
         $account = TtsAccount::create([
             'label' => 'To delete',
-            'api_key' => \Illuminate\Support\Facades\Crypt::encryptString('sk_test'),
+            'api_key' => Crypt::encryptString('sk_test'),
             'model_id' => 'eleven_multilingual_v2',
             'is_active' => false,
         ]);
@@ -117,6 +118,8 @@ class ElevenLabsIntegrationTest extends TestCase
 
     public function test_admin_can_fetch_voices(): void
     {
+        config(['tts.driver' => 'elevenlabs']);
+
         Http::fake([
             'api.elevenlabs.io/v1/voices' => Http::response([
                 'voices' => [
@@ -128,7 +131,7 @@ class ElevenLabsIntegrationTest extends TestCase
         $admin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
         TtsAccount::create([
             'label' => 'Active',
-            'api_key' => \Illuminate\Support\Facades\Crypt::encryptString('sk_test_key'),
+            'api_key' => Crypt::encryptString('sk_test_key'),
             'model_id' => 'eleven_multilingual_v2',
             'is_active' => true,
         ]);
@@ -172,6 +175,8 @@ class ElevenLabsIntegrationTest extends TestCase
 
     public function test_admin_can_fetch_usage_when_active_account_exists(): void
     {
+        config(['tts.driver' => 'elevenlabs']);
+
         Http::fake([
             'api.elevenlabs.io/v1/user/subscription' => Http::response([
                 'character_count' => 12500,
@@ -188,7 +193,7 @@ class ElevenLabsIntegrationTest extends TestCase
         $admin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
         TtsAccount::create([
             'label' => 'Active',
-            'api_key' => \Illuminate\Support\Facades\Crypt::encryptString('sk_test_key'),
+            'api_key' => Crypt::encryptString('sk_test_key'),
             'model_id' => 'eleven_multilingual_v2',
             'is_active' => true,
         ]);

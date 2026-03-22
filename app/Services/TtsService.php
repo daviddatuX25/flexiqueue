@@ -4,80 +4,91 @@ namespace App\Services;
 
 use App\Models\Token;
 use App\Models\TtsAccount;
-use App\Support\TtsPhrase;
+use App\Repositories\TokenTtsSettingRepository;
+use App\Services\Tts\AnnouncementBuilder;
+use App\Services\Tts\Contracts\TtsEngine;
+use App\Services\Tts\DTO\SynthesisRequest;
+use App\Services\Tts\ElevenLabsCredentials;
+use App\Services\Tts\TtsBudgetGuard;
+use App\Services\Tts\TtsGenerationMeter;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Facades\App;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Server-side TTS: generate or serve cached audio. Keyed by hash(text + voice_id + rate).
- * Per plan: one driver (ElevenLabs); file cache under storage.
- * Credentials resolved from TtsAccount (active) first, then config.
+ * Server-side TTS: generate or serve cached audio. Keyed by hash(engine identity + text + voice_id + rate).
+ * Synthesis delegates to {@see TtsEngine}; credentials resolved from TtsAccount (active + matching driver) first, then config.
  */
 class TtsService
 {
     private const CACHE_EXT = '.mp3';
 
     public function __construct(
-        private readonly string $driver,
+        private readonly TtsEngine $engine,
         private readonly string $defaultVoiceId,
         private readonly float $defaultRate,
-        private readonly string $cachePath
-    ) {
-    }
+        private readonly string $cachePath,
+        private readonly ?TtsGenerationMeter $meter = null,
+        private readonly ?TtsBudgetGuard $budgetGuard = null
+    ) {}
 
     public static function fromConfig(): self
     {
         return new self(
-            config('tts.driver', 'null'),
+            App::make(TtsEngine::class),
             config('tts.default_voice_id', ''),
             (float) config('tts.default_rate', 0.84),
-            config('tts.cache_path', 'app/tts')
+            config('tts.cache_path', 'app/tts'),
+            App::make(TtsGenerationMeter::class),
+            App::make(TtsBudgetGuard::class)
         );
+    }
+
+    public function getProviderKey(): string
+    {
+        return $this->engine->getProviderKey();
+    }
+
+    public function getAssetIdentityModelKey(): string
+    {
+        return $this->engine->getAssetIdentityModelKey();
     }
 
     /** Whether server TTS is configured and usable. */
     public function isEnabled(): bool
     {
-        if ($this->driver === 'null' || $this->driver === '') {
-            return false;
-        }
-        if ($this->driver === 'elevenlabs') {
-            return $this->getResolvedApiKey() !== '';
-        }
-
-        return false;
+        return $this->engine->isConfigured();
     }
 
-    /** Resolve API key: active TtsAccount first, then config. */
+    /** Resolve API key: active matching account first, then config (ElevenLabs only). */
     public function getResolvedApiKey(): string
     {
-        $active = TtsAccount::getActive();
-        if ($active !== null) {
-            $key = $active->getApiKey();
-            if ($key !== '') {
-                return $key;
-            }
+        if ($this->engine->getProviderKey() !== 'elevenlabs') {
+            return '';
         }
 
-        return (string) config('tts.elevenlabs.api_key', '');
+        return ElevenLabsCredentials::resolveApiKey();
     }
 
-    /** Resolve model ID: active TtsAccount first, then config. */
+    /** Resolve model ID: active matching account first, then config (ElevenLabs only). */
     public function getResolvedModelId(): string
     {
-        $active = TtsAccount::getActive();
-        if ($active !== null && $active->model_id !== '') {
-            return $active->model_id;
+        if ($this->engine->getProviderKey() !== 'elevenlabs') {
+            return '';
         }
 
-        return (string) config('tts.elevenlabs.model_id', 'eleven_multilingual_v2');
+        return ElevenLabsCredentials::resolveModelId();
     }
 
     /**
      * Get path to audio file (from cache or generate). Returns null on failure or when disabled.
      *
      * @param  non-empty-string  $voiceId  Engine voice ID (e.g. ElevenLabs voice_id)
+     * @param  string  $source  Metering source: 'job' | 'preview'
      */
-    public function getPath(string $text, string $voiceId, float $rate): ?string
+    public function getPath(string $text, string $voiceId, float $rate, ?int $siteId = null, string $source = 'preview'): ?string
     {
         $text = trim($text);
         if ($text === '') {
@@ -97,74 +108,111 @@ class TtsService
         $path = $this->cachePath.'/'.$key.self::CACHE_EXT;
 
         if (Storage::exists($path)) {
+            if (config('tts.runtime_diagnostics_enabled', false)) {
+                Log::debug('tts.cache_hit', [
+                    'provider' => $this->engine->getProviderKey(),
+                    'cache_hit' => true,
+                ]);
+            }
+
             return Storage::path($path);
         }
 
-        $content = $this->generate($text, $voiceId, $rate);
-        if ($content === null) {
+        if (config('tts.runtime_diagnostics_enabled', false)) {
+            Log::debug('tts.cache_miss', [
+                'provider' => $this->engine->getProviderKey(),
+                'cache_hit' => false,
+            ]);
+        }
+
+        $lockScope = $this->budgetGuard?->lockScope($siteId);
+        if ($lockScope !== null) {
+            try {
+                return Cache::lock('tts:budget:'.$lockScope, 15)->block(
+                    5,
+                    fn () => $this->generateAndStorePath($text, $voiceId, $rate, $siteId, $source, $path)
+                );
+            } catch (LockTimeoutException) {
+                Log::notice('tts.budget_lock_timeout', [
+                    'provider' => $this->engine->getProviderKey(),
+                    'site_id' => $siteId,
+                    'scope' => $lockScope,
+                ]);
+
+                return null;
+            }
+        }
+
+        return $this->generateAndStorePath($text, $voiceId, $rate, $siteId, $source, $path);
+    }
+
+    private function generateAndStorePath(string $text, string $voiceId, float $rate, ?int $siteId, string $source, string $path): ?string
+    {
+        $charsToAdd = mb_strlen($text);
+        if ($this->budgetGuard !== null && ! $this->budgetGuard->canGenerate($siteId, $charsToAdd)) {
+            Log::notice('tts.budget_exceeded', [
+                'provider' => $this->engine->getProviderKey(),
+                'site_id' => $siteId,
+            ]);
+
+            return null;
+        }
+
+        $result = $this->generateWithUsage($text, $voiceId, $rate);
+        if ($result === null) {
+            Log::notice('tts.synthesis_failed', [
+                'provider' => $this->engine->getProviderKey(),
+                'outcome' => 'provider_error',
+            ]);
+
             return null;
         }
 
         Storage::makeDirectory($this->cachePath);
-        Storage::put($path, $content);
+        Storage::put($path, $result['bytes']);
+
+        if ($this->meter !== null) {
+            $chars = $result['chars'];
+            $this->meter->record($siteId, $this->engine->getProviderKey(), $chars, $source);
+        }
 
         return Storage::path($path);
     }
 
     /**
-     * Generate audio via driver. Returns raw audio bytes or null.
+     * Generate audio via engine. Returns ['bytes' => string, 'chars' => int] or null.
      *
      * @param  non-empty-string  $voiceId
+     * @return array{bytes: string, chars: int}|null
      */
-    private function generate(string $text, string $voiceId, float $rate): ?string
+    private function generateWithUsage(string $text, string $voiceId, float $rate): ?array
     {
-        if ($this->driver === 'elevenlabs') {
-            return $this->generateElevenLabs($text, $voiceId, $rate);
-        }
+        $request = new SynthesisRequest($text, $voiceId, $rate);
+        $result = $this->engine->synthesize($request);
 
-        return null;
-    }
-
-    /**
-     * Per REFACTORING-ISSUE-LIST Issue 16 / flexiqueue-g693: delegate to ElevenLabsClient.
-     */
-    private function generateElevenLabs(string $text, string $voiceId, float $rate): ?string
-    {
-        $apiKey = $this->getResolvedApiKey();
-        if ($apiKey === '') {
+        if ($result === null) {
             return null;
         }
 
-        $voiceSettings = $rate !== 1.0 ? ['stability' => 0.5, 'similarity_boost' => 0.75] : null;
-        $client = new ElevenLabsClient($apiKey);
+        $chars = isset($result->usage['chars']) ? (int) $result->usage['chars'] : mb_strlen($text);
 
-        return $client->generateSpeech($text, $voiceId, $this->getResolvedModelId(), $voiceSettings);
+        return [
+            'bytes' => $result->audioBytes,
+            'chars' => $chars,
+        ];
     }
 
     private function cacheKey(string $text, string $voiceId, float $rate): string
     {
-        return hash('sha256', $text."\n".$voiceId."\n".((string) $rate));
+        $segment = $this->engine->getCacheIdentitySegment();
+
+        return hash('sha256', $segment."\n".$text."\n".$voiceId."\n".((string) $rate));
     }
 
-    /** Voices for admin dropdown: from ElevenLabs API when key available, else config fallback. */
+    /** Voices for admin dropdown: from active engine when configured, else config fallback. */
     public function getVoicesList(): array
     {
-        $apiKey = $this->getResolvedApiKey();
-        if ($apiKey !== '') {
-            $client = new ElevenLabsClient($apiKey);
-            $apiVoices = $client->getVoices();
-            if ($apiVoices !== []) {
-                return array_map(static function (array $v) {
-                    return [
-                        'id' => $v['voice_id'] ?? '',
-                        'name' => $v['name'] ?? 'Unknown',
-                        'lang' => $v['labels']['accent'] ?? ($v['labels']['language'] ?? null),
-                    ];
-                }, array_filter($apiVoices, fn ($v) => ! empty($v['voice_id'] ?? '')));
-            }
-        }
-
-        return config('tts.voices', []);
+        return $this->engine->listVoices();
     }
 
     public function getDefaultVoiceId(): string
@@ -183,8 +231,9 @@ class TtsService
      *
      * @param  string|null  $voiceId  Engine voice ID; null = use default
      * @param  float|null  $rate  Playback rate; null = use default
+     * @param  string  $source  Metering source: 'job' | 'preview'
      */
-    public function storeSegment(string $text, ?string $voiceId, ?float $rate, string $relativePath): ?string
+    public function storeSegment(string $text, ?string $voiceId, ?float $rate, string $relativePath, ?int $siteId = null, string $source = 'job'): ?string
     {
         if (! $this->isEnabled()) {
             return null;
@@ -198,7 +247,7 @@ class TtsService
         $voiceId = $voiceId ?? $this->defaultVoiceId;
         $rate = $rate ?? $this->defaultRate;
 
-        $cachePath = $this->getPath($text, $voiceId, $rate);
+        $cachePath = $this->getPath($text, $voiceId, $rate, $siteId, $source);
         if ($cachePath === null || ! is_file($cachePath)) {
             return null;
         }
@@ -227,9 +276,10 @@ class TtsService
      */
     public function storeTokenTts(Token $token, ?string $voiceId = null, ?float $rate = null): ?string
     {
-        $phrase = TtsPhrase::buildCallPhraseForToken($token);
+        $site = app(TokenTtsSettingRepository::class)->getInstance();
+        $phrase = app(AnnouncementBuilder::class)->buildSegment1($token, $site, 'en');
         $tokenPath = 'tts/tokens/'.$token->id.'.mp3';
-        $stored = $this->storeSegment($phrase, $voiceId, $rate, $tokenPath);
+        $stored = $this->storeSegment($phrase, $voiceId, $rate, $tokenPath, $token->site_id, 'job');
         if ($stored === null) {
             return null;
         }

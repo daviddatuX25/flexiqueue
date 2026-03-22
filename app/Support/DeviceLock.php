@@ -10,7 +10,7 @@ use Symfony\Component\HttpFoundation\Cookie;
 
 /**
  * Per plan: device lock (cookie-based) so a public device stays on the chosen interface
- * (display / triage / station) until unlocked via QR approval.
+ * (display / triage / kiosk / station) until unlocked via QR approval.
  *
  * Cookie schema: single cookie "device_lock" with JSON-encoded payload.
  */
@@ -24,6 +24,9 @@ class DeviceLock
 
     public const TYPE_TRIAGE = 'triage';
 
+    /** Self-service kiosk (canonical URL `/site/{site}/kiosk/{program}`). */
+    public const TYPE_KIOSK = 'kiosk';
+
     public const TYPE_STATION = 'station';
 
     /** One-time lock token expiry in seconds (redirect follow-up must happen within this). */
@@ -32,7 +35,7 @@ class DeviceLock
     /**
      * Create a one-time token for the lock payload (used when redirect response Set-Cookie is not sent on follow-up).
      *
-     * @param  'display'|'triage'|'station'  $deviceType
+     * @param  'display'|'triage'|'kiosk'|'station'  $deviceType
      */
     public static function createLockToken(string $siteSlug, string $programSlug, string $deviceType, ?int $stationId = null): string
     {
@@ -70,7 +73,7 @@ class DeviceLock
             return null;
         }
         $type = $data['device_type'];
-        if (! in_array($type, [self::TYPE_DISPLAY, self::TYPE_TRIAGE, self::TYPE_STATION], true)) {
+        if (! in_array($type, [self::TYPE_DISPLAY, self::TYPE_TRIAGE, self::TYPE_KIOSK, self::TYPE_STATION], true)) {
             return null;
         }
         $lock = [
@@ -155,7 +158,7 @@ class DeviceLock
         }
 
         $type = $data['device_type'];
-        if (! in_array($type, [self::TYPE_DISPLAY, self::TYPE_TRIAGE, self::TYPE_STATION], true)) {
+        if (! in_array($type, [self::TYPE_DISPLAY, self::TYPE_TRIAGE, self::TYPE_KIOSK, self::TYPE_STATION], true)) {
             return null;
         }
 
@@ -207,7 +210,8 @@ class DeviceLock
 
         return match ($deviceType) {
             self::TYPE_DISPLAY => self::displayRedirectUrl($siteSlug, $programSlug),
-            self::TYPE_TRIAGE => '/site/'.$siteSlug.'/public-triage/'.$programSlug,
+            self::TYPE_TRIAGE => '/site/'.$siteSlug.'/kiosk/'.$programSlug,
+            self::TYPE_KIOSK => '/site/'.$siteSlug.'/kiosk/'.$programSlug,
             self::TYPE_STATION => $stationId !== null ? '/site/'.$siteSlug.'/display/station/'.$stationId : null,
             default => null,
         };
@@ -236,7 +240,7 @@ class DeviceLock
     /**
      * Build cookie to set on response. Caller attaches via response->cookie().
      *
-     * @param  'display'|'triage'|'station'  $deviceType
+     * @param  'display'|'triage'|'kiosk'|'station'  $deviceType
      * @param  int|null  $stationId  Required when deviceType is 'station'
      */
     public static function encode(string $siteSlug, string $programSlug, string $deviceType, ?int $stationId = null): Cookie
@@ -291,7 +295,7 @@ class DeviceLock
     }
 
     /**
-     * @return 'display'|'triage'|'station'|null
+     * @return 'display'|'triage'|'kiosk'|'station'|null
      */
     public static function getLockType(Request $request): ?string
     {

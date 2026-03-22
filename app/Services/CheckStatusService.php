@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Token;
+use App\Models\TrackStep;
 use Illuminate\Support\Collection;
 
 /**
@@ -57,6 +58,7 @@ class CheckStatusService
             'track' => $track?->name ?? '—',
             'track_id' => $track?->id,
             'program_id' => $session->program_id,
+            'site_id' => $token->site_id,
             'client_category' => $session->client_category ?? 'Regular',
             'status' => $session->status,
             'current_station' => $session->currentStation?->name ?? '—',
@@ -74,7 +76,7 @@ class CheckStatusService
      * Per flexiqueue-5l7: estimated wait = sum of remaining steps' estimated_minutes;
      * if step has no estimated_minutes, use process expected_time_seconds/60.
      *
-     * @param  Collection<int, \App\Models\TrackStep>  $steps
+     * @param  Collection<int, TrackStep>  $steps
      */
     private function computeEstimatedWaitMinutes(Collection $steps, int $currentOrder): ?int
     {
@@ -98,7 +100,7 @@ class CheckStatusService
     /**
      * Per PROCESS-STATION-REFACTOR: use process_name; fallback to station_name for dual-read.
      *
-     * @param  Collection<int, \App\Models\TrackStep>  $steps
+     * @param  Collection<int, TrackStep>  $steps
      * @return array<int, array{name: string, station_name: string, status: string}>
      */
     private function buildProgressSteps(Collection $steps, int $currentOrder): array

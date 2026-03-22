@@ -10,7 +10,7 @@ use Illuminate\Queue\SerializesModels;
 
 /**
  * Per plan: broadcast station display audio settings to display.station.{id}
- * so the station display page updates mute/volume in real time when staff change them on /station/*.
+ * so the station display page updates mute/volume/zoom in real time when staff change them on /station/*.
  */
 class StationDisplaySettingsUpdated implements ShouldBroadcastNow
 {
@@ -20,10 +20,11 @@ class StationDisplaySettingsUpdated implements ShouldBroadcastNow
         public int $stationId,
         public bool $displayAudioMuted,
         public float $displayAudioVolume,
+        public float $displayPageZoom,
     ) {}
 
     /**
-     * @return array<int, \Illuminate\Broadcasting\Channel>
+     * @return array<int, Channel>
      */
     public function broadcastOn(): array
     {
@@ -45,6 +46,7 @@ class StationDisplaySettingsUpdated implements ShouldBroadcastNow
         return [
             'display_audio_muted' => $this->displayAudioMuted,
             'display_audio_volume' => $this->displayAudioVolume,
+            'display_page_zoom' => $this->displayPageZoom,
         ];
     }
 }

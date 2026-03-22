@@ -41,7 +41,7 @@ class TtsAccountServiceTest extends TestCase
 
         $this->assertTrue($inactive->fresh()->is_active);
         $this->assertFalse($active->fresh()->is_active);
-        $this->assertSame($inactive->id, TtsAccount::getActive()?->id);
+        $this->assertSame($inactive->id, TtsAccount::getActiveForProvider('elevenlabs')?->id);
     }
 
     public function test_set_active_when_only_one_account_succeeds(): void
@@ -56,6 +56,39 @@ class TtsAccountServiceTest extends TestCase
         $this->service->setActive($account);
 
         $this->assertTrue($account->fresh()->is_active);
-        $this->assertSame($account->id, TtsAccount::getActive()?->id);
+        $this->assertSame($account->id, TtsAccount::getActiveForProvider('elevenlabs')?->id);
+    }
+
+    public function test_set_active_does_not_deactivate_other_providers(): void
+    {
+        $elevenActive = TtsAccount::create([
+            'label' => 'EL active',
+            'provider' => 'elevenlabs',
+            'api_key' => '',
+            'model_id' => 'eleven_multilingual_v2',
+            'is_active' => true,
+        ]);
+        $azureActive = TtsAccount::create([
+            'label' => 'Azure active',
+            'provider' => 'azure',
+            'api_key' => '',
+            'model_id' => 'azure-model',
+            'is_active' => true,
+        ]);
+        $elevenInactive = TtsAccount::create([
+            'label' => 'EL inactive',
+            'provider' => 'elevenlabs',
+            'api_key' => '',
+            'model_id' => 'eleven_multilingual_v2',
+            'is_active' => false,
+        ]);
+
+        $this->service->setActive($elevenInactive);
+
+        $this->assertTrue($elevenInactive->fresh()->is_active);
+        $this->assertFalse($elevenActive->fresh()->is_active);
+        $this->assertTrue($azureActive->fresh()->is_active);
+        $this->assertSame($elevenInactive->id, TtsAccount::getActiveForProvider('elevenlabs')?->id);
+        $this->assertSame($azureActive->id, TtsAccount::getActiveForProvider('azure')?->id);
     }
 }

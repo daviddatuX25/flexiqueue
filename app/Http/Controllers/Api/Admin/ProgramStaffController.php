@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Program;
 use App\Models\ProgramStationAssignment;
+use App\Models\Station;
 use App\Models\User;
+use App\Services\SpatieRbacSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -81,7 +83,7 @@ class ProgramStaffController extends Controller
             'station_id' => ['required', 'integer', 'exists:stations,id'],
         ]);
 
-        $station = \App\Models\Station::findOrFail($valid['station_id']);
+        $station = Station::findOrFail($valid['station_id']);
         if ((int) $station->program_id !== (int) $program->id) {
             return response()->json(['message' => 'Station does not belong to this program.'], 422);
         }
@@ -194,6 +196,8 @@ class ProgramStaffController extends Controller
 
         $program->supervisedBy()->syncWithoutDetaching([$user->id]);
 
+        app(SpatieRbacSyncService::class)->syncSupervisorDirectPermissions($user->fresh());
+
         return response()->json([
             'user_id' => $user->id,
             'name' => $user->name,
@@ -209,6 +213,8 @@ class ProgramStaffController extends Controller
         $this->ensureUserInSite($request, $user);
 
         $program->supervisedBy()->detach($user->id);
+
+        app(SpatieRbacSyncService::class)->syncSupervisorDirectPermissions($user->fresh());
 
         return response()->json(['user_id' => $user->id]);
     }

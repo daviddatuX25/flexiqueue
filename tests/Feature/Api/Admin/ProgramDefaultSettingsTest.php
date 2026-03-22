@@ -2,13 +2,16 @@
 
 namespace Tests\Feature\Api\Admin;
 
+use App\Models\Site;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
- * Per ISSUES-ELABORATION §2: GET/PUT program-default-settings. Admin only.
+ * Site-scoped program defaults: GET/PUT /api/admin/program-default-settings (role:admin + site_id).
  */
 class ProgramDefaultSettingsTest extends TestCase
 {
@@ -16,10 +19,19 @@ class ProgramDefaultSettingsTest extends TestCase
 
     private User $admin;
 
+    private Site $site;
+
     protected function setUp(): void
     {
         parent::setUp();
-        $this->admin = User::factory()->admin()->create();
+        $this->site = Site::create([
+            'name' => 'Default Site',
+            'slug' => 'default',
+            'api_key_hash' => Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $this->admin = User::factory()->admin()->create(['site_id' => $this->site->id]);
     }
 
     public function test_show_returns_default_settings(): void
@@ -43,7 +55,7 @@ class ProgramDefaultSettingsTest extends TestCase
         $this->assertCount(2, $settings['alternate_ratio']);
     }
 
-    public function test_update_saves_default_settings(): void
+    public function test_update_saves_default_settings_for_site_row(): void
     {
         $response = $this->actingAs($this->admin)->putJson('/api/admin/program-default-settings', [
             'settings' => [
@@ -93,7 +105,7 @@ class ProgramDefaultSettingsTest extends TestCase
         $response->assertJsonPath('settings.enable_display_camera_scanner', false);
         $response->assertJsonPath('settings.tts.active_language', 'fil');
 
-        $row = DB::table('program_default_settings')->first();
+        $row = DB::table('program_default_settings')->where('site_id', $this->site->id)->first();
         $this->assertNotNull($row);
         $decoded = json_decode($row->settings, true);
         $this->assertSame(30, $decoded['no_show_timer_seconds']);
@@ -144,5 +156,41 @@ class ProgramDefaultSettingsTest extends TestCase
         $this->actingAs($staff)->putJson('/api/admin/program-default-settings', [
             'settings' => ['no_show_timer_seconds' => 15],
         ])->assertStatus(403);
+    }
+
+    public function test_super_admin_without_site_cannot_use_site_scoped_program_defaults(): void
+    {
+        $super = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+
+        $this->actingAs($super)->getJson('/api/admin/program-default-settings')->assertStatus(403);
+        $this->actingAs($super)->putJson('/api/admin/program-default-settings', [
+            'settings' => ['no_show_timer_seconds' => 15],
+        ])->assertStatus(403);
+    }
+
+    public function test_site_admin_update_does_not_change_other_site_defaults(): void
+    {
+        $otherSite = Site::create([
+            'name' => 'Other',
+            'slug' => 'other',
+            'api_key_hash' => Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $otherAdmin = User::factory()->admin()->create(['site_id' => $otherSite->id]);
+        // Lazy-create site row (same as first GET would).
+        $this->actingAs($otherAdmin)->getJson('/api/admin/program-default-settings')->assertStatus(200);
+
+        $this->actingAs($this->admin)->putJson('/api/admin/program-default-settings', [
+            'settings' => [
+                'no_show_timer_seconds' => 88,
+                'max_no_show_attempts' => 3,
+            ],
+        ])->assertStatus(200);
+
+        $otherRow = DB::table('program_default_settings')->where('site_id', $otherSite->id)->first();
+        $this->assertNotNull($otherRow);
+        $otherDecoded = json_decode($otherRow->settings, true);
+        $this->assertNotSame(88, $otherDecoded['no_show_timer_seconds'] ?? null);
     }
 }

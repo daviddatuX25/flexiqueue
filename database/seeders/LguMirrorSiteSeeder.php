@@ -42,6 +42,8 @@ class LguMirrorSiteSeeder extends Seeder
 {
     public function run(): void
     {
+        $this->call(PermissionCatalogSeeder::class);
+
         $edgeSettingsValidator = app(EdgeSettingsValidator::class);
 
         $site = Site::firstOrCreate(
@@ -87,7 +89,7 @@ class LguMirrorSiteSeeder extends Seeder
         $staff = [];
         foreach ($staffNames as $i => $name) {
             $staff[] = User::updateOrCreate(
-                ['email' => 'staff' . ($i + 1) . '@tagudinlgu.gov.ph'],
+                ['email' => 'staff'.($i + 1).'@tagudinlgu.gov.ph'],
                 [
                     'name' => $name,
                     'password' => $password,
@@ -706,4 +708,3 @@ class LguMirrorSiteSeeder extends Seeder
         }
     }
 }
-

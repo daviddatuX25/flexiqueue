@@ -22,7 +22,7 @@ use Illuminate\Support\Facades\RateLimiter;
 
 /**
  * Public triage API: token lookup and bind when program allows public self-serve.
- * No auth. Rate limited. Returns 403 when allow_public_triage is false.
+ * No auth. Rate limited. Bind/verify require kiosk self-service; token lookup requires any kiosk feature enabled.
  */
 class PublicTriageController extends Controller
 {
@@ -53,7 +53,26 @@ class PublicTriageController extends Controller
             return null;
         }
         $program = Program::with('site')->find($programId);
-        if (! $program || ! $program->is_active || ! $program->settings()->getAllowPublicTriage()) {
+        if (! $program || ! $program->is_active || ! $program->settings()->getKioskSelfServiceTriageEnabled()) {
+            return null;
+        }
+        if (! $program->site) {
+            return null;
+        }
+
+        return $program;
+    }
+
+    /**
+     * Token lookup is allowed when the kiosk surface is enabled (self-service and/or status checker).
+     */
+    private function resolveProgramForPublicTokenLookup(?int $programId): ?Program
+    {
+        if ($programId === null) {
+            return null;
+        }
+        $program = Program::with('site')->find($programId);
+        if (! $program || ! $program->is_active || ! $program->settings()->getKioskSurfaceEnabled()) {
             return null;
         }
         if (! $program->site) {
@@ -75,9 +94,9 @@ class PublicTriageController extends Controller
         }
 
         $programId = $request->query('program_id') !== null ? (int) $request->query('program_id') : null;
-        $program = $this->resolveProgramForPublicTriage($programId);
+        $program = $this->resolveProgramForPublicTokenLookup($programId);
         if (! $program) {
-            return response()->json(['message' => 'Public self-serve triage is not available.'], 403);
+            return response()->json(['message' => 'Kiosk is not available for this program.'], 403);
         }
 
         $physicalId = $request->query('physical_id');

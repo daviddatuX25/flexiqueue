@@ -10,7 +10,9 @@ use App\Jobs\GenerateStationTtsJob;
 use App\Models\Program;
 use App\Models\ProgramAccessToken;
 use App\Models\SiteShortLink;
+use App\Repositories\ProgramDefaultSettingRepository;
 use App\Services\ProgramService;
+use App\Support\ProgramSettings;
 use App\Support\QueueWorkerIdleCheck;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,7 +24,8 @@ use Illuminate\Http\Request;
 class ProgramController extends Controller
 {
     public function __construct(
-        private ProgramService $programService
+        private ProgramService $programService,
+        private ProgramDefaultSettingRepository $programDefaultSettingRepository
     ) {}
 
     /**
@@ -57,6 +60,7 @@ class ProgramController extends Controller
             'description' => $request->validated('description'),
             'is_active' => false,
             'created_by' => $user->id,
+            'settings' => $this->programDefaultSettingRepository->getNormalizedForSite((int) $user->site_id),
         ]);
 
         return response()->json(['program' => $this->programResource($program)], 201);
@@ -102,6 +106,10 @@ class ProgramController extends Controller
                 }
                 $merged[$k] = $v;
             }
+            if (array_key_exists('allow_public_triage', $settings) && ! array_key_exists('kiosk_self_service_triage_enabled', $settings)) {
+                $merged['kiosk_self_service_triage_enabled'] = (bool) $merged['allow_public_triage'];
+            }
+            $merged = ProgramSettings::syncKioskKeysToLegacyAliases($merged);
             $validated['settings'] = $merged;
         }
 
@@ -122,7 +130,7 @@ class ProgramController extends Controller
         }
 
         $program = $program->fresh();
-        if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('enable_display_hid_barcode', $settings) || array_key_exists('enable_public_triage_hid_barcode', $settings) || array_key_exists('enable_display_camera_scanner', $settings) || array_key_exists('enable_public_triage_camera_scanner', $settings) || array_key_exists('display_tts_repeat_count', $settings) || array_key_exists('display_tts_repeat_delay_ms', $settings))) {
+        if ($settings !== null && (array_key_exists('display_audio_muted', $settings) || array_key_exists('display_audio_volume', $settings) || array_key_exists('enable_display_hid_barcode', $settings) || array_key_exists('enable_public_triage_hid_barcode', $settings) || array_key_exists('enable_display_camera_scanner', $settings) || array_key_exists('enable_public_triage_camera_scanner', $settings) || array_key_exists('display_tts_repeat_count', $settings) || array_key_exists('display_tts_repeat_delay_ms', $settings) || array_key_exists('kiosk_enable_hid_barcode', $settings) || array_key_exists('kiosk_enable_camera_scanner', $settings) || array_key_exists('kiosk_hid_persistent_when_scan_modal_closed', $settings))) {
             event(new DisplaySettingsUpdated(
                 $program->id,
                 $program->settings()->getDisplayAudioMuted(),
@@ -133,6 +141,7 @@ class ProgramController extends Controller
                 $program->settings()->getDisplayTtsRepeatCount(),
                 $program->settings()->getDisplayTtsRepeatDelayMs(),
                 $program->settings()->getEnablePublicTriageCameraScanner(),
+                $program->settings()->getKioskHidPersistentWhenScanModalClosed(),
             ));
         }
         $requiresRegeneration = false;
@@ -346,9 +355,18 @@ class ProgramController extends Controller
                 'display_audio_volume' => $programSettings->getDisplayAudioVolume(),
                 'display_tts_repeat_count' => $programSettings->getDisplayTtsRepeatCount(),
                 'display_tts_repeat_delay_ms' => $programSettings->getDisplayTtsRepeatDelayMs(),
-                'allow_public_triage' => $programSettings->getAllowPublicTriage(),
+                'allow_public_triage' => $programSettings->getKioskSelfServiceTriageEnabled(),
+                'kiosk_self_service_triage_enabled' => $programSettings->getKioskSelfServiceTriageEnabled(),
+                'kiosk_status_checker_enabled' => $programSettings->getKioskStatusCheckerEnabled(),
+                'kiosk_enable_hid_barcode' => $programSettings->getKioskEnableHidBarcode(),
+                'kiosk_enable_camera_scanner' => $programSettings->getKioskEnableCameraScanner(),
+                'kiosk_modal_idle_seconds' => $programSettings->getKioskModalIdleSeconds(),
                 'allow_unverified_entry' => $programSettings->getAllowUnverifiedEntry(),
                 'identity_binding_mode' => $programSettings->getIdentityBindingMode(),
+                'enable_display_hid_barcode' => $programSettings->getEnableDisplayHidBarcode(),
+                'enable_public_triage_hid_barcode' => $programSettings->getEnablePublicTriageHidBarcode(),
+                'enable_display_camera_scanner' => $programSettings->getEnableDisplayCameraScanner(),
+                'enable_public_triage_camera_scanner' => $programSettings->getEnablePublicTriageCameraScanner(),
                 'public_access_key' => $programSettings->getPublicAccessKey(),
                 'public_access_expiry_hours' => $programSettings->getPublicAccessExpiryHours(),
                 'page_description' => $programSettings->getPageDescription(),

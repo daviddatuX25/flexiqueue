@@ -4,13 +4,14 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
-use App\Models\AdminActionLog;
 use App\Http\Requests\ResetPasswordRequest;
 use App\Http\Requests\StoreUserRequest;
 use App\Http\Requests\UpdateUserRequest;
+use App\Models\AdminActionLog;
 use App\Models\ProgramStationAssignment;
 use App\Models\Station;
 use App\Models\User;
+use App\Support\PermissionCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -30,13 +31,14 @@ class UserController extends Controller
     public function index(Request $request): JsonResponse
     {
         $authUser = $request->user();
-        $query = User::query()->with(['assignedStation', 'site'])->orderBy('name');
+        $query = User::query()->with(['assignedStation', 'site', 'roles', 'permissions'])->orderBy('name');
 
         if ($authUser->isSuperAdmin()) {
-            $query->where('role', UserRole::Admin->value);
-            $siteId = $request->query('site_id');
-            if (is_numeric($siteId)) {
-                $query->forSite((int) $siteId);
+            $filterSiteId = $request->query('site_id');
+            if (is_numeric($filterSiteId)) {
+                $query->forSite((int) $filterSiteId);
+            } else {
+                $query->where('role', UserRole::Admin->value);
             }
         } else {
             $siteId = $authUser->site_id;
@@ -58,6 +60,8 @@ class UserController extends Controller
                 'name' => $u->assignedStation->name,
             ] : null,
             'site' => $u->site ? ['id' => $u->site->id, 'name' => $u->site->name, 'slug' => $u->site->slug] : null,
+            'spatie_roles' => $u->roles->pluck('name')->values()->all(),
+            'direct_permissions' => $u->getDirectPermissions()->pluck('name')->values()->all(),
         ]);
 
         return response()->json(['users' => $users]);
@@ -190,6 +194,15 @@ class UserController extends Controller
 
         $valid = $request->validated();
 
+        if (isset($valid['role']) && $valid['role'] !== UserRole::Admin->value
+            && $user->role === UserRole::Admin && $user->site_id !== null) {
+            $this->assertAnotherActiveAdminExistsForSite($user, 'role');
+        }
+        if (array_key_exists('is_active', $valid) && $valid['is_active'] === false
+            && $user->role === UserRole::Admin && $user->site_id !== null) {
+            $this->assertAnotherActiveAdminExistsForSite($user, 'is_active');
+        }
+
         if (isset($valid['name'])) {
             $user->name = $valid['name'];
         }
@@ -213,6 +226,9 @@ class UserController extends Controller
             $user->role = $requestedRole;
         }
         if (array_key_exists('is_active', $valid)) {
+            if ($user->id === $request->user()->id) {
+                throw ValidationException::withMessages(['is_active' => ['You cannot change your own login status.']]);
+            }
             $user->is_active = (bool) $valid['is_active'];
         }
         if (array_key_exists('override_pin', $valid)) {
@@ -224,10 +240,17 @@ class UserController extends Controller
 
         $user->save();
 
+        if (array_key_exists('direct_permissions', $valid)) {
+            $this->assertCanAssignDirectPermissions($request->user(), $valid['direct_permissions']);
+            // Authoritative list from admin UI; do not run syncSupervisorDirectPermissions after — it would revoke
+            // supervisor-managed names that are also valid direct grants (see SpatieRbacSyncService).
+            $user->syncPermissions($valid['direct_permissions']);
+        }
+
         AdminActionLog::log($request->user()->id, 'user_updated', 'User', $user->id, ['email' => $user->email]);
 
         return response()->json([
-            'user' => $this->userResource($user),
+            'user' => $this->userResource($user->fresh()),
         ]);
     }
 
@@ -286,7 +309,7 @@ class UserController extends Controller
 
     private function userResource(User $user): array
     {
-        $user->load(['assignedStation', 'site']);
+        $user->load(['assignedStation', 'site', 'roles', 'permissions']);
 
         return [
             'id' => $user->id,
@@ -300,6 +323,50 @@ class UserController extends Controller
                 'name' => $user->assignedStation->name,
             ] : null,
             'site' => $user->site ? ['id' => $user->site->id, 'name' => $user->site->name, 'slug' => $user->site->slug] : null,
+            'spatie_roles' => $user->roles->pluck('name')->values()->all(),
+            'direct_permissions' => $user->getDirectPermissions()->pluck('name')->values()->all(),
+            'permissions' => $user->getAllPermissions()->pluck('name')->values()->all(),
         ];
+    }
+
+    /**
+     * Only super_admin may grant platform.manage via direct permissions.
+     *
+     * @param  list<string>  $names
+     */
+    private function assertCanAssignDirectPermissions(User $auth, array $names): void
+    {
+        if (in_array(PermissionCatalog::PLATFORM_MANAGE, $names, true) && ! $auth->isSuperAdmin()) {
+            throw ValidationException::withMessages([
+                'direct_permissions' => ['Only a super admin may assign platform.manage.'],
+            ]);
+        }
+    }
+
+    /**
+     * Prevent demoting or deactivating the only active admin for a site.
+     *
+     * @param  'role'|'is_active'  $field
+     */
+    private function assertAnotherActiveAdminExistsForSite(User $user, string $field): void
+    {
+        $hasOther = User::query()
+            ->where('site_id', $user->site_id)
+            ->where('role', UserRole::Admin)
+            ->where('is_active', true)
+            ->where('id', '!=', $user->id)
+            ->exists();
+
+        if ($hasOther) {
+            return;
+        }
+
+        $message = $field === 'is_active'
+            ? 'Cannot deactivate the last active admin for this site.'
+            : 'Cannot change the role of the last active admin for this site.';
+
+        throw ValidationException::withMessages([
+            $field => [$message],
+        ]);
     }
 }

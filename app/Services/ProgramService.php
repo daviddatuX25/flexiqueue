@@ -3,8 +3,8 @@
 namespace App\Services;
 
 use App\Events\ProgramStatusChanged;
+use App\Events\StaffAvailabilityUpdated;
 use App\Models\Program;
-use App\Services\DeviceAuthorizationService;
 use App\Models\ProgramAuditLog;
 use App\Models\ProgramStationAssignment;
 use App\Models\User;
@@ -68,6 +68,7 @@ class ProgramService
             }
 
             $this->syncAssignedStationForProgram($program);
+            $this->setAssignedStaffAvailability($program, User::AVAILABILITY_AWAY);
 
             return $program->fresh();
         });
@@ -108,6 +109,7 @@ class ProgramService
             }
 
             $this->syncAssignedStationForProgram($program);
+            $this->setAssignedStaffAvailability($program, User::AVAILABILITY_AWAY);
 
             return $program->fresh();
         });
@@ -154,6 +156,43 @@ class ProgramService
     }
 
     /**
+     * Update availability for staff assigned to this program's stations.
+     * Optionally limit updates to specific source statuses.
+     *
+     * @param  list<string>|null  $fromStatuses
+     */
+    private function setAssignedStaffAvailability(Program $program, string $toStatus, ?array $fromStatuses = null): void
+    {
+        $staff = User::query()
+            ->where('role', 'staff')
+            ->whereIn('id', function ($q) use ($program) {
+                $q->select('user_id')
+                    ->from('program_station_assignments')
+                    ->where('program_id', $program->id);
+            })
+            ->when($fromStatuses !== null, fn ($q) => $q->whereIn('availability_status', $fromStatuses))
+            ->get(['id', 'name', 'availability_status']);
+
+        foreach ($staff as $user) {
+            if (($user->availability_status ?? User::AVAILABILITY_OFFLINE) === $toStatus) {
+                continue;
+            }
+
+            $user->update([
+                'availability_status' => $toStatus,
+                'availability_updated_at' => now(),
+            ]);
+
+            broadcast(new StaffAvailabilityUpdated(
+                $program->id,
+                $user->id,
+                $user->availability_status ?? User::AVAILABILITY_OFFLINE,
+                $user->name ?? ''
+            ));
+        }
+    }
+
+    /**
      * Pause program. Queue times do not count while paused.
      */
     public function pause(Program $program): Program
@@ -163,6 +202,7 @@ class ProgramService
         }
 
         $program->update(['is_paused' => true]);
+        $this->setAssignedStaffAvailability($program, User::AVAILABILITY_ON_BREAK, [User::AVAILABILITY_AVAILABLE]);
 
         broadcast(new ProgramStatusChanged($program->id, true, true));
 
@@ -179,6 +219,7 @@ class ProgramService
         }
 
         $program->update(['is_paused' => false]);
+        $this->setAssignedStaffAvailability($program, User::AVAILABILITY_AWAY, [User::AVAILABILITY_ON_BREAK]);
 
         broadcast(new ProgramStatusChanged($program->id, false, true));
 

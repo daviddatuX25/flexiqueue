@@ -3,8 +3,11 @@
 namespace Tests\Feature;
 
 use App\Models\Program;
+use App\Models\Site;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -123,6 +126,74 @@ class PublicDisplaySettingsTest extends TestCase
             'program_id' => $program->id,
             'pin' => '12345', // 5 digits
             'enable_display_hid_barcode' => false,
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_logged_in_staff_same_site_can_update_without_pin(): void
+    {
+        $site = Site::create([
+            'name' => 'Test Site',
+            'slug' => 'test-site-'.Str::random(6),
+            'api_key_hash' => Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id, 'role' => 'staff']);
+        $program = Program::create([
+            'site_id' => $site->id,
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $admin->id,
+            'settings' => [
+                'display_audio_muted' => false,
+                'display_audio_volume' => 1,
+            ],
+        ]);
+
+        $response = $this->actingAs($staff)->postJson('/api/public/display-settings', [
+            'program_id' => $program->id,
+            'display_audio_muted' => true,
+            'display_audio_volume' => 0.4,
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('display_audio_muted', true);
+        $response->assertJsonPath('display_audio_volume', 0.4);
+    }
+
+    public function test_logged_in_staff_other_site_still_requires_pin(): void
+    {
+        $siteA = Site::create([
+            'name' => 'Site A',
+            'slug' => 'site-a-'.Str::random(6),
+            'api_key_hash' => Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $siteB = Site::create([
+            'name' => 'Site B',
+            'slug' => 'site-b-'.Str::random(6),
+            'api_key_hash' => Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $admin = User::factory()->admin()->withOverridePin('123456')->create(['site_id' => $siteA->id]);
+        $staffB = User::factory()->create(['site_id' => $siteB->id, 'role' => 'staff']);
+        $program = Program::create([
+            'site_id' => $siteA->id,
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $admin->id,
+        ]);
+
+        $response = $this->actingAs($staffB)->postJson('/api/public/display-settings', [
+            'program_id' => $program->id,
+            'display_audio_muted' => true,
         ]);
 
         $response->assertStatus(422);

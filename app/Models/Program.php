@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Support\ProgramSettings;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -69,6 +70,7 @@ class Program extends Model
 
     /**
      * @return array{0: int, 1: int} [priority_count, regular_count] e.g. [2, 1] = 2 priority per 1 regular
+     *
      * @deprecated Use `$program->settings()->getAlternateRatio()`
      */
     public function getAlternateRatio(): array
@@ -176,6 +178,7 @@ class Program extends Model
     /**
      * Active TTS language for this program (used by displays and generation).
      * Defaults to 'en' when not explicitly configured.
+     *
      * @deprecated Use `$program->settings()->getTtsActiveLanguage()`
      */
     public function getTtsActiveLanguage(): string
@@ -191,6 +194,7 @@ class Program extends Model
     public function supervisedBy(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'program_supervisors')
+            ->using(ProgramSupervisor::class)
             ->withTimestamps();
     }
 
@@ -238,12 +242,12 @@ class Program extends Model
         return $query->where('is_published', true);
     }
 
-    public function programAccessTokens(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function programAccessTokens(): HasMany
     {
         return $this->hasMany(ProgramAccessToken::class);
     }
 
-    public function shortLinks(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function shortLinks(): HasMany
     {
         return $this->hasMany(SiteShortLink::class, 'program_id');
     }
@@ -253,8 +257,8 @@ class Program extends Model
      * Per central-edge B.4: admin program list and single-resource access are site-scoped.
      * When $siteId is null, returns no rows (admin with no site cannot see any program).
      *
-     * @param  \Illuminate\Database\Eloquent\Builder<Program>  $query
-     * @return \Illuminate\Database\Eloquent\Builder<Program>
+     * @param  Builder<Program>  $query
+     * @return Builder<Program>
      */
     public function scopeForSite($query, ?int $siteId)
     {

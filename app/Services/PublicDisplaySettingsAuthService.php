@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Program;
 use App\Models\User;
+use App\Support\PermissionCatalog;
 use App\Support\SupervisorAuthResult;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -22,19 +23,30 @@ use Illuminate\Support\Facades\RateLimiter;
 class PublicDisplaySettingsAuthService
 {
     private const PRESET_PIN_FAIL_THROTTLE_PREFIX = 'public_display_settings:preset_pin_fail:';
+
     private const PRESET_PIN_FAIL_MAX_ATTEMPTS = 5;
+
     private const PRESET_PIN_FAIL_DECAY_MINUTES = 15;
 
     public function __construct(
         private PinService $pinService,
-    ) {
-    }
+        private PublicAuthCapabilityService $publicAuthCapability,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $validated
      */
     public function verify(array $validated, Program $program, Request $request): SupervisorAuthResult
     {
+        $sessionUser = $request->user();
+        if ($sessionUser instanceof User && $this->publicAuthCapability->userMaySkipInteractiveAuthFor(
+            $sessionUser,
+            PermissionCatalog::PUBLIC_DISPLAY_SETTINGS_APPLY,
+            $program
+        )) {
+            return SupervisorAuthResult::success((int) $sessionUser->id);
+        }
+
         $authType = $this->resolveAuthType($validated);
         // Simplified flow: no auth_type required; we infer based on provided pin or qr token and auto-detect.
         // Legacy flow: auth_type can still be provided.
@@ -106,14 +118,20 @@ class PublicDisplaySettingsAuthService
         $pin = (string) ($validated['pin'] ?? '');
         if ($pin !== '') {
             $temp = $this->pinService->validateTemporaryPin($pin);
-            if ($temp) return $temp;
+            if ($temp) {
+                return $temp;
+            }
+
             return $this->pinService->validatePinForProgram($program->id, $pin);
         }
 
         $qr = (string) ($validated['qr_scan_token'] ?? '');
         if ($qr !== '') {
             $temp = $this->pinService->validateTemporaryQr($qr);
-            if ($temp) return $temp;
+            if ($temp) {
+                return $temp;
+            }
+
             return $this->pinService->validatePresetQr($qr);
         }
 
@@ -136,7 +154,11 @@ class PublicDisplaySettingsAuthService
 
     private function canAuthorizeForProgram(User $authorizer, int $programId): bool
     {
-        if ($authorizer->isAdmin()) {
+        if (! $authorizer->can(PermissionCatalog::PUBLIC_DISPLAY_SETTINGS_APPLY)) {
+            return false;
+        }
+
+        if ($authorizer->isAdmin() || $authorizer->isSuperAdmin()) {
             return true;
         }
 
@@ -153,4 +175,3 @@ class PublicDisplaySettingsAuthService
         return sha1($ip.'|'.$ua);
     }
 }
-

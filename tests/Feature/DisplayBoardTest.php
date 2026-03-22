@@ -3,18 +3,25 @@
 namespace Tests\Feature;
 
 use App\Models\DeviceAuthorization;
+use App\Models\Process;
 use App\Models\Program;
+use App\Models\ProgramDiagram;
 use App\Models\ProgramStationAssignment;
-use App\Models\Session;
 use App\Models\ServiceTrack;
+use App\Models\Session;
 use App\Models\Site;
 use App\Models\Station;
+use App\Models\Token;
+use App\Models\TrackStep;
 use App\Models\TransactionLog;
 use App\Models\User;
 use App\Services\DeviceAuthorizationService;
 use App\Support\DeviceLock;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /**
@@ -28,7 +35,7 @@ class DisplayBoardTest extends TestCase
     {
         return Site::firstOrCreate(
             ['slug' => 'default'],
-            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
+            ['name' => 'Default', 'api_key_hash' => Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
         );
     }
 
@@ -39,7 +46,7 @@ class DisplayBoardTest extends TestCase
     }
 
     /** Per-site display base URL (e.g. /site/default/display). */
-    private function displayBase(Site $site = null): string
+    private function displayBase(?Site $site = null): string
     {
         $site = $site ?? $this->defaultSite();
 
@@ -67,7 +74,7 @@ class DisplayBoardTest extends TestCase
     }
 
     /** Call get() with device auth + device lock cookie (for per-site display/station tests). */
-    private function getWithDeviceAuth(string $url, Program $program, ?Station $station = null): \Illuminate\Testing\TestResponse
+    private function getWithDeviceAuth(string $url, Program $program, ?Station $station = null): TestResponse
     {
         [$name, $value] = $this->deviceAuthCookie($program);
         $site = $program->site;
@@ -98,8 +105,8 @@ class DisplayBoardTest extends TestCase
      */
     public function test_display_shows_scan_qr_message_when_no_site_exists(): void
     {
-        \App\Models\Site::query()->delete();
-        \Illuminate\Support\Facades\Cache::forget('default_site');
+        Site::query()->delete();
+        Cache::forget('default_site');
 
         $response = $this->get('/display');
 
@@ -214,7 +221,7 @@ class DisplayBoardTest extends TestCase
     }
 
     /**
-     * Per plan: when locked to triage, GET program page redirects to locked triage URL.
+     * Per plan: when locked to self-service kiosk, GET program page redirects to locked kiosk URL.
      */
     public function test_enforce_device_lock_redirects_program_page_to_locked_triage_url(): void
     {
@@ -228,14 +235,14 @@ class DisplayBoardTest extends TestCase
             'created_by' => $user->id,
         ]);
         $program->refresh();
-        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_TRIAGE, null);
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_KIOSK, null);
         $lockValue = $lockCookie->getValue();
 
         $response = $this->withKnownSiteCookie($site)
             ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockValue)
             ->get('/site/'.$site->slug.'/program/'.$program->slug);
 
-        $response->assertRedirect('/site/'.$site->slug.'/public-triage/'.$program->slug);
+        $response->assertRedirect('/site/'.$site->slug.'/kiosk/'.$program->slug);
     }
 
     /**
@@ -266,6 +273,71 @@ class DisplayBoardTest extends TestCase
             ->get('/site/'.$site->slug.'/program/'.$program->slug);
 
         $response->assertRedirect('/site/'.$site->slug.'/display/station/'.$station->id);
+    }
+
+    /**
+     * Per EnforceDeviceLock: lock applies to all roles; staff are redirected when cookie is still present.
+     */
+    public function test_enforce_device_lock_redirects_authenticated_staff_when_lock_cookie_still_present(): void
+    {
+        $site = $this->defaultSite();
+        $owner = User::factory()->create();
+        $program = Program::create([
+            'site_id' => $site->id,
+            'name' => 'Staff Lock Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $owner->id,
+        ]);
+        $program->refresh();
+        $staff = User::factory()->create([
+            'role' => 'staff',
+            'site_id' => $site->id,
+        ]);
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_DISPLAY, null);
+        $lockValue = $lockCookie->getValue();
+
+        $response = $this->withKnownSiteCookie($site)
+            ->actingAs($staff)
+            ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockValue)
+            ->get('/dashboard');
+
+        $response->assertRedirect();
+        $target = $response->headers->get('Location');
+        $this->assertStringContainsString('/site/'.$site->slug.'/display', $target);
+        $this->assertStringContainsString('program='.$program->id, $target);
+    }
+
+    /**
+     * Per EnforceDeviceLock: lock applies to all roles; admin are redirected when cookie is still present.
+     */
+    public function test_enforce_device_lock_redirects_authenticated_admin_when_lock_cookie_still_present(): void
+    {
+        $site = $this->defaultSite();
+        $owner = User::factory()->create();
+        $program = Program::create([
+            'site_id' => $site->id,
+            'name' => 'Admin Lock Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $owner->id,
+        ]);
+        $program->refresh();
+        $admin = User::factory()->create([
+            'role' => 'admin',
+        ]);
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_DISPLAY, null);
+        $lockValue = $lockCookie->getValue();
+
+        $response = $this->withKnownSiteCookie($site)
+            ->actingAs($admin)
+            ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockValue)
+            ->get('/admin/dashboard');
+
+        $response->assertRedirect();
+        $target = $response->headers->get('Location');
+        $this->assertStringContainsString('/site/'.$site->slug.'/display', $target);
+        $this->assertStringContainsString('program='.$program->id, $target);
     }
 
     /**
@@ -336,7 +408,7 @@ class DisplayBoardTest extends TestCase
             'name' => 'Priority',
             'is_default' => true,
         ]);
-        $token = new \App\Models\Token;
+        $token = new Token;
         $token->qr_code_hash = hash('sha256', Str::random(32));
         $token->physical_id = 'A1';
         $token->status = 'in_use';
@@ -435,7 +507,7 @@ class DisplayBoardTest extends TestCase
             'name' => 'Priority',
             'is_default' => true,
         ]);
-        $token = new \App\Models\Token;
+        $token = new Token;
         $token->qr_code_hash = hash('sha256', Str::random(32));
         $token->physical_id = 'A1';
         $token->status = 'in_use';
@@ -542,7 +614,7 @@ class DisplayBoardTest extends TestCase
             'name' => 'Default',
             'is_default' => true,
         ]);
-        $token = new \App\Models\Token;
+        $token = new Token;
         $token->qr_code_hash = hash('sha256', Str::random(32));
         $token->physical_id = 'B1';
         $token->status = 'in_use';
@@ -612,7 +684,7 @@ class DisplayBoardTest extends TestCase
             'name' => 'Default',
             'is_default' => true,
         ]);
-        $token = new \App\Models\Token;
+        $token = new Token;
         $token->qr_code_hash = hash('sha256', Str::random(32));
         $token->physical_id = 'C1';
         $token->status = 'in_use';
@@ -656,7 +728,7 @@ class DisplayBoardTest extends TestCase
 
     public function test_display_status_returns_200_for_valid_qr_hash(): void
     {
-        $token = new \App\Models\Token;
+        $token = new Token;
         $token->site_id = $this->defaultSite()->id;
         $hash = hash('sha256', 'test-qr');
         $token->qr_code_hash = $hash;
@@ -671,6 +743,50 @@ class DisplayBoardTest extends TestCase
             ->component('Display/Status')
             ->where('alias', 'B2')
             ->where('status', 'available')
+        );
+    }
+
+    public function test_display_status_includes_sanitized_return_url_from_query(): void
+    {
+        $token = new Token;
+        $token->site_id = $this->defaultSite()->id;
+        $hash = hash('sha256', 'test-qr-return');
+        $token->qr_code_hash = $hash;
+        $token->physical_id = 'B2';
+        $token->status = 'available';
+        $token->save();
+
+        $site = $this->defaultSite();
+        $returnTo = '/site/'.$site->slug.'/public-triage/my-program';
+        $response = $this->withKnownSiteCookie($site)->get(
+            $this->displayBase($site).'/status/'.$hash.'?return_to='.rawurlencode($returnTo)
+        );
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->component('Display/Status')
+            ->where('return_url', $returnTo)
+        );
+    }
+
+    public function test_display_status_rejects_external_return_to_query(): void
+    {
+        $token = new Token;
+        $token->site_id = $this->defaultSite()->id;
+        $hash = hash('sha256', 'test-qr-return-invalid');
+        $token->qr_code_hash = $hash;
+        $token->physical_id = 'B2';
+        $token->status = 'available';
+        $token->save();
+
+        $response = $this->withKnownSiteCookie($this->defaultSite())->get(
+            $this->displayBase().'/status/'.$hash.'?return_to='.rawurlencode('https://evil.example/phish')
+        );
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->component('Display/Status')
+            ->where('return_url', null)
         );
     }
 
@@ -706,14 +822,14 @@ class DisplayBoardTest extends TestCase
             'name' => 'Default',
             'is_default' => true,
         ]);
-        \App\Models\TrackStep::create([
+        TrackStep::create([
             'track_id' => $track->id,
             'station_id' => $station->id,
             'step_order' => 1,
             'is_required' => true,
         ]);
         $hash = hash('sha256', 'status-'.Str::random(8));
-        $token = new \App\Models\Token;
+        $token = new Token;
         $token->site_id = $this->defaultSite()->id;
         $token->qr_code_hash = $hash;
         $token->physical_id = 'F6';
@@ -766,7 +882,7 @@ class DisplayBoardTest extends TestCase
             'capacity' => 1,
             'is_active' => true,
         ]);
-        $process = \App\Models\Process::create([
+        $process = Process::create([
             'program_id' => $program->id,
             'name' => 'Check-in',
         ]);
@@ -776,14 +892,14 @@ class DisplayBoardTest extends TestCase
             'name' => 'Main',
             'is_default' => true,
         ]);
-        \App\Models\TrackStep::create([
+        TrackStep::create([
             'track_id' => $track->id,
             'station_id' => $station->id,
             'process_id' => $process->id,
             'step_order' => 1,
             'is_required' => true,
         ]);
-        \App\Models\ProgramDiagram::create([
+        ProgramDiagram::create([
             'program_id' => $program->id,
             'layout' => [
                 'nodes' => [
@@ -793,7 +909,7 @@ class DisplayBoardTest extends TestCase
             ],
         ]);
         $hash = hash('sha256', 'diagram-'.Str::random(8));
-        $token = new \App\Models\Token;
+        $token = new Token;
         $token->site_id = $this->defaultSite()->id;
         $token->qr_code_hash = $hash;
         $token->physical_id = 'D1';
@@ -983,13 +1099,13 @@ class DisplayBoardTest extends TestCase
             'name' => 'Default',
             'is_default' => true,
         ]);
-        \App\Models\TrackStep::create([
+        TrackStep::create([
             'track_id' => $track->id,
             'station_id' => $station->id,
             'step_order' => 1,
             'is_required' => true,
         ]);
-        $token1 = new \App\Models\Token;
+        $token1 = new Token;
         $token1->qr_code_hash = hash('sha256', Str::random(16));
         $token1->physical_id = 'A1';
         $token1->status = 'in_use';
@@ -1005,7 +1121,7 @@ class DisplayBoardTest extends TestCase
             'started_at' => now(),
         ]);
         $token1->update(['current_session_id' => $session1->id]);
-        $token2 = new \App\Models\Token;
+        $token2 = new Token;
         $token2->qr_code_hash = hash('sha256', Str::random(16));
         $token2->physical_id = 'A2';
         $token2->status = 'in_use';
@@ -1175,7 +1291,7 @@ class DisplayBoardTest extends TestCase
             'name' => 'Priority',
             'is_default' => true,
         ]);
-        $token = new \App\Models\Token;
+        $token = new Token;
         $token->qr_code_hash = hash('sha256', Str::random(32));
         $token->physical_id = 'A1';
         $token->status = 'in_use';
@@ -1271,7 +1387,7 @@ class DisplayBoardTest extends TestCase
             'name' => 'Track A',
             'is_default' => true,
         ]);
-        $tokenA = new \App\Models\Token;
+        $tokenA = new Token;
         $tokenA->qr_code_hash = hash('sha256', Str::random(32));
         $tokenA->physical_id = 'A1';
         $tokenA->status = 'in_use';
@@ -1306,7 +1422,7 @@ class DisplayBoardTest extends TestCase
             'name' => 'Track B',
             'is_default' => true,
         ]);
-        $tokenB = new \App\Models\Token;
+        $tokenB = new Token;
         $tokenB->qr_code_hash = hash('sha256', Str::random(32));
         $tokenB->physical_id = 'B1';
         $tokenB->status = 'in_use';
@@ -1321,7 +1437,6 @@ class DisplayBoardTest extends TestCase
             'status' => 'serving',
         ]);
         $tokenB->update(['current_session_id' => Session::where('alias', 'B1')->first()->id]);
-
 
         // Board for Program A: only A1 visible
         $responseA = $this->getWithDeviceAuth($this->displayBase().'?program='.$programA->id, $programA);

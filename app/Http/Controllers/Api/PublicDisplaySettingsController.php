@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\UpdatePublicDisplaySettingsRequest;
 use App\Models\Program;
 use App\Services\PublicDisplaySettingsAuthService;
+use App\Support\ProgramSettings;
 use Illuminate\Http\JsonResponse;
 
 /**
@@ -52,11 +53,13 @@ class PublicDisplaySettingsController extends Controller
             $payload['temp_code']
         );
 
-        foreach (['display_audio_muted', 'display_audio_volume', 'enable_display_hid_barcode', 'enable_public_triage_hid_barcode', 'enable_display_camera_scanner', 'enable_public_triage_camera_scanner'] as $key) {
+        foreach (['display_audio_muted', 'display_audio_volume', 'enable_display_hid_barcode', 'enable_public_triage_hid_barcode', 'enable_display_camera_scanner', 'enable_public_triage_camera_scanner', 'kiosk_hid_persistent_when_scan_modal_closed'] as $key) {
             if (array_key_exists($key, $payload)) {
                 $settings[$key] = $payload[$key];
             }
         }
+
+        $settings = ProgramSettings::syncKioskKeysToLegacyAliases($settings);
 
         $program->update(['settings' => $settings]);
         $program = $program->fresh();
@@ -71,6 +74,7 @@ class PublicDisplaySettingsController extends Controller
             $program->settings()->getDisplayTtsRepeatCount(),
             $program->settings()->getDisplayTtsRepeatDelayMs(),
             $program->settings()->getEnablePublicTriageCameraScanner(),
+            $program->settings()->getKioskHidPersistentWhenScanModalClosed(),
         ));
 
         return response()->json([
@@ -80,6 +84,7 @@ class PublicDisplaySettingsController extends Controller
             'enable_public_triage_hid_barcode' => $program->settings()->getEnablePublicTriageHidBarcode(),
             'enable_display_camera_scanner' => $program->settings()->getEnableDisplayCameraScanner(),
             'enable_public_triage_camera_scanner' => $program->settings()->getEnablePublicTriageCameraScanner(),
+            'kiosk_hid_persistent_when_scan_modal_closed' => $program->settings()->getKioskHidPersistentWhenScanModalClosed(),
         ]);
     }
 }

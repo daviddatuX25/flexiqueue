@@ -53,7 +53,7 @@
 		return (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content ?? '';
 	}
 
-	function setLockAndGo(deviceType: 'display' | 'triage' | 'station', stationId?: number) {
+	function setLockAndGo(deviceType: 'display' | 'kiosk' | 'station', stationId?: number) {
 		if (loading) return;
 		const csrf = getCsrfToken();
 		if (!csrf) {
@@ -82,8 +82,8 @@
 		setLockAndGo('display');
 	}
 
-	function choosePublicTriage() {
-		setLockAndGo('triage');
+	function chooseSelfServiceKiosk() {
+		setLockAndGo('kiosk');
 	}
 
 	function chooseStation(stationId: number) {
@@ -213,12 +213,12 @@
 						type="button"
 						class="btn preset-tonal flex items-center gap-3 p-4 touch-target-h justify-start text-left"
 						disabled={loading}
-						onclick={choosePublicTriage}
+						onclick={chooseSelfServiceKiosk}
 					>
 						<ClipboardList class="h-6 w-6 shrink-0 text-primary-600 dark:text-primary-400" />
 						<div>
-							<span class="font-medium block">Public triage</span>
-							<span class="text-sm text-surface-600 dark:text-slate-400">Self-serve check-in</span>
+							<span class="font-medium block">Self-service kiosk</span>
+							<span class="text-sm text-surface-600 dark:text-slate-400">Check-in and token status</span>
 						</div>
 					</button>
 					<button

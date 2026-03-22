@@ -10,7 +10,6 @@
         Users as UsersIcon,
         UserPlus,
         Edit2,
-        Key,
         Ban,
         CheckCircle,
         CheckCircle2,
@@ -19,6 +18,7 @@
     } from "lucide-svelte";
     import UserAvatar from "../../../Components/UserAvatar.svelte";
     import PasswordInput from "../../../Components/PasswordInput.svelte";
+    import UserDirectPermissionsEditor from "../../../Components/admin/UserDirectPermissionsEditor.svelte";
 
     interface SiteOption {
         id: number;
@@ -46,6 +46,7 @@
         auth_user_id,
         allowed_roles_for_create = ["staff"],
         allowed_roles_for_edit = ["staff"],
+        assignable_permissions = [],
     }: {
         users: UserItem[];
         sites?: SiteOption[];
@@ -53,15 +54,15 @@
         auth_user_id?: number;
         allowed_roles_for_create?: ("admin" | "staff")[];
         allowed_roles_for_edit?: ("admin" | "staff")[];
+        /** Assignable direct permission names (same as GET /api/admin/permissions). */
+        assignable_permissions?: string[];
     } = $props();
 
     let submitting = $state(false);
     let showCreateModal = $state(false);
     let showEditModal = $state(false);
-    let showResetModal = $state(false);
     let deactivateConfirmUser = $state<UserItem | null>(null);
     let editUser = $state<UserItem | null>(null);
-    let resetUser = $state<UserItem | null>(null);
     let createName = $state("");
     let createEmail = $state("");
     let createPassword = $state("");
@@ -76,8 +77,13 @@
     let editPassword = $state("");
     let editOverridePin = $state("");
     let editSiteId = $state<string | number>("");
-    let resetPassword = $state("");
-    let resetPasswordConfirm = $state("");
+    let editDirectPermissions = $state<string[]>([]);
+    let editInitialDirectPermissions = $state<string[]>([]);
+    let editEffectivePermissions = $state<string[]>([]);
+    let editSupervisorProgramCount = $state(0);
+    let editValidationErrors = $state<
+        Record<string, string[] | string | undefined>
+    >({});
 
     const page = usePage();
     function getCsrfToken(): string {
@@ -107,6 +113,8 @@
         ok: boolean;
         data?: { user?: UserItem } | object;
         message?: string;
+        errors?: Record<string, string[]>;
+        status?: number;
     }> {
         try {
             const res = await fetch(url, {
@@ -124,11 +132,16 @@
                 toaster.error({ title: MSG_SESSION_EXPIRED });
                 return { ok: false, message: MSG_SESSION_EXPIRED };
             }
-            const data = await res.json().catch(() => ({}));
+            const data = (await res.json().catch(() => ({}))) as {
+                message?: string;
+                errors?: Record<string, string[]>;
+            };
             return {
                 ok: res.ok,
                 data,
-                message: (data as { message?: string })?.message,
+                message: data?.message,
+                errors: data?.errors,
+                status: res.status,
             };
         } catch (e) {
             toaster.error({ title: MSG_NETWORK_ERROR });
@@ -212,35 +225,49 @@
         editPassword = "";
         editOverridePin = "";
         editSiteId = u.site?.id ?? "";
+        editDirectPermissions = [...(u.direct_permissions ?? [])];
+        editInitialDirectPermissions = [...(u.direct_permissions ?? [])];
+        editEffectivePermissions = [...(u.effective_permissions ?? [])];
+        editSupervisorProgramCount = u.supervisor_program_count ?? 0;
+        editValidationErrors = {};
         showEditModal = true;
     }
 
     async function handleEdit() {
         if (!editUser || !editName.trim() || !editEmail.trim()) return;
         submitting = true;
+        editValidationErrors = {};
         const body: {
             name: string;
             email: string;
-            role: string;
-            is_active: boolean;
+            role?: string;
+            is_active?: boolean;
             password?: string;
             override_pin?: string | null;
             site_id?: number | null;
+            direct_permissions?: string[];
         } = {
             name: editName.trim(),
             email: editEmail.trim(),
-            role: editRole,
-            is_active: editIsActive,
         };
+        // API rejects role / is_active on self-update — omit so profile save works.
+        if (editUser.id !== auth_user_id) {
+            body.role = editRole;
+            body.is_active = editIsActive;
+        }
         if (editPassword.trim()) body.password = editPassword.trim();
         if (editOverridePin.trim()) body.override_pin = editOverridePin.trim();
         else body.override_pin = null;
         if (auth_is_super_admin)
             body.site_id = (editSiteId === "" || editSiteId == null) ? null : Number(editSiteId);
+        body.direct_permissions = [...editDirectPermissions].sort((a, b) =>
+            a.localeCompare(b),
+        );
         const {
             ok,
             data,
             message: msg,
+            errors,
         } = await api("PUT", `/api/admin/users/${editUser.id}`, body);
         submitting = false;
         if (ok && (data as { user?: UserItem })?.user) {
@@ -248,41 +275,16 @@
             showEditModal = false;
             editUser = null;
             router.reload();
-        } else toaster.error({ title: msg ?? "Failed to update user." });
-    }
-
-    function openReset(u: UserItem) {
-        resetUser = u;
-        resetPassword = "";
-        resetPasswordConfirm = "";
-        showResetModal = true;
-    }
-
-    async function handleReset() {
-        if (!resetUser || !resetPassword.trim() || resetPassword.length < 8) {
-            toaster.error({ title: "Password must be at least 8 characters." });
             return;
         }
-        if (resetPassword !== resetPasswordConfirm) {
-            toaster.error({ title: "Passwords don't match." });
-            return;
+        if (errors) {
+            editValidationErrors = errors;
+            const flat = Object.values(errors).flat();
+            const first = flat[0];
+            if (first) toaster.error({ title: String(first) });
+        } else {
+            toaster.error({ title: msg ?? "Failed to update user." });
         }
-        submitting = true;
-        const { ok, message: msg } = await api(
-            "POST",
-            `/api/admin/users/${resetUser.id}/reset-password`,
-            {
-                password: resetPassword,
-            },
-        );
-        submitting = false;
-        if (ok) {
-            toaster.success({ title: "Password reset." });
-            showResetModal = false;
-            resetUser = null;
-            resetPassword = "";
-            resetPasswordConfirm = "";
-        } else toaster.error({ title: msg ?? "Failed to reset password." });
     }
 
     function openDeactivateConfirm(u: UserItem) {
@@ -312,10 +314,9 @@
     function closeModals() {
         showCreateModal = false;
         showEditModal = false;
-        showResetModal = false;
         deactivateConfirmUser = null;
         editUser = null;
-        resetUser = null;
+        editValidationErrors = {};
     }
 </script>
 
@@ -475,14 +476,6 @@
                                 >
                                     <Edit2 class="w-3.5 h-3.5" /> Edit
                                 </button>
-                                <button
-                                    type="button"
-                                    class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
-                                    onclick={() => openReset(user)}
-                                    disabled={submitting}
-                                >
-                                    <Key class="w-3.5 h-3.5" /> Reset
-                                </button>
                                 {#if user.id !== auth_user_id}
                                     <button
                                         type="button"
@@ -620,14 +613,6 @@
                             disabled={submitting}
                         >
                             <Edit2 class="w-3.5 h-3.5" /> Edit
-                        </button>
-                        <button
-                            type="button"
-                            class="btn btn-sm flex-1 preset-outlined bg-surface-50 text-surface-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
-                            onclick={() => openReset(user)}
-                            disabled={submitting}
-                        >
-                            <Key class="w-3.5 h-3.5" /> Reset
                         </button>
                         {#if user.id !== auth_user_id}
                             <button
@@ -768,37 +753,46 @@
                     bind:value={editEmail}
                 />
             </div>
-            <div class="form-control">
-                <label class="label"
-                    ><span class="label-text font-medium">Role</span></label
-                >
-                <select
-                    class="select select-theme rounded-container border border-surface-200 px-3 py-2 pr-8 w-full bg-surface-50 shadow-sm"
-                    bind:value={editRole}
-                    disabled={editUser?.id === auth_user_id}
-                >
-                    {#each allowed_roles_for_edit ?? ["staff"] as r}
-                        <option value={r}>{r === "admin" ? "Admin" : "Staff"}</option>
-                    {/each}
-                </select>
-                {#if editUser?.id === auth_user_id}
-                    <p class="label-text-alt text-surface-500 mt-1">You cannot change your own role.</p>
-                {/if}
-            </div>
-            <div
-                class="form-control mt-2 mb-2 p-3 border border-surface-100 rounded-container bg-surface-50/50"
-            >
-                <label class="label cursor-pointer justify-start gap-3 w-full">
-                    <input
-                        type="checkbox"
-                        class="checkbox"
-                        bind:checked={editIsActive}
-                    />
-                    <span class="label-text font-medium"
-                        >Active (can log in)</span
+            {#if editUser.id !== auth_user_id}
+                <div class="form-control">
+                    <label class="label"
+                        ><span class="label-text font-medium">Role</span></label
                     >
-                </label>
-            </div>
+                    <select
+                        class="select select-theme rounded-container border border-surface-200 px-3 py-2 pr-8 w-full bg-surface-50 shadow-sm"
+                        bind:value={editRole}
+                    >
+                        {#each allowed_roles_for_edit ?? ["staff"] as r}
+                            <option value={r}>{r === "admin" ? "Admin" : "Staff"}</option>
+                        {/each}
+                    </select>
+                </div>
+                <div
+                    class="form-control mt-2 mb-2 p-3 border border-surface-100 rounded-container bg-surface-50/50"
+                >
+                    <label
+                        for="edit-user-active-switch"
+                        class="label cursor-pointer justify-between gap-3 w-full items-center"
+                    >
+                        <span class="label-text font-medium text-surface-950"
+                            >Active (can log in)</span
+                        >
+                        <div class="relative inline-block w-11 h-5 shrink-0">
+                            <input
+                                id="edit-user-active-switch"
+                                type="checkbox"
+                                class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                bind:checked={editIsActive}
+                                disabled={submitting}
+                            />
+                            <span
+                                class="absolute top-0 left-0 w-5 h-5 bg-surface-950 rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none"
+                                aria-hidden="true"
+                            ></span>
+                        </div>
+                    </label>
+                </div>
+            {/if}
             <div class="form-control">
                 <label class="label"
                     ><span class="label-text font-medium"
@@ -833,6 +827,39 @@
                     added as supervisor in Program → Staff.</span
                 >
             </div>
+            {#if (assignable_permissions?.length ?? 0) > 0}
+                <div class="border-t border-surface-200 pt-4 mt-4">
+                    <UserDirectPermissionsEditor
+                        bind:selected={editDirectPermissions}
+                        assignablePermissions={assignable_permissions ?? []}
+                        effectivePermissions={editEffectivePermissions}
+                        supervisorProgramCount={editSupervisorProgramCount}
+                        canAssignPlatformManage={auth_is_super_admin}
+                        disabled={submitting}
+                        errors={editValidationErrors}
+                    />
+                </div>
+            {/if}
+            {#if editValidationErrors.role}
+                <div
+                    class="rounded-container border border-error-200 bg-error-50 text-error-800 text-sm px-3 py-2"
+                    role="alert"
+                >
+                    {#each (Array.isArray(editValidationErrors.role) ? editValidationErrors.role : [editValidationErrors.role]) as err}
+                        <p>{err}</p>
+                    {/each}
+                </div>
+            {/if}
+            {#if editValidationErrors.is_active}
+                <div
+                    class="rounded-container border border-error-200 bg-error-50 text-error-800 text-sm px-3 py-2"
+                    role="alert"
+                >
+                    {#each (Array.isArray(editValidationErrors.is_active) ? editValidationErrors.is_active : [editValidationErrors.is_active]) as err}
+                        <p>{err}</p>
+                    {/each}
+                </div>
+            {/if}
             <div
                 class="flex justify-end gap-3 mt-6 pt-2 border-t border-surface-100"
             >
@@ -848,46 +875,6 @@
                     onclick={handleEdit}
                 >
                     {submitting ? "Saving…" : "Save"}
-                </button>
-            </div>
-        </div>
-    {/if}
-</Modal>
-
-<Modal
-    open={showResetModal}
-    title={resetUser
-        ? `Reset password for ${resetUser.name}`
-        : "Reset password"}
-    onClose={closeModals}
->
-    {#if resetUser}
-        <div class="space-y-4">
-            <p class="text-sm text-surface-950/70">
-                Set a new password. The user will need to use this to log in.
-            </p>
-            <PasswordInput
-                bind:password={resetPassword}
-                bind:passwordConfirm={resetPasswordConfirm}
-                idPrefix="reset_pw"
-                disabled={submitting}
-                required={true}
-            />
-            <div
-                class="flex justify-end gap-3 mt-6 pt-2 border-t border-surface-100"
-            >
-                <button
-                    type="button"
-                    class="btn preset-tonal"
-                    onclick={closeModals}>Cancel</button
-                >
-                <button
-                    type="button"
-                    class="btn preset-filled-primary-500 shadow-sm"
-                    disabled={submitting || resetPassword.length < 8 || resetPassword !== resetPasswordConfirm}
-                    onclick={handleReset}
-                >
-                    {submitting ? "Resetting…" : "Reset"}
                 </button>
             </div>
         </div>

@@ -6,12 +6,14 @@
     import FlowDiagram from "../../../Components/FlowDiagram.svelte";
     import QrDisplay from "../../../Components/QrDisplay.svelte";
     import DiagramCanvas from "../../../Components/ProgramDiagram/DiagramCanvas.svelte";
+    import ScopedRbacTeamAccessPanel from "../../../Components/admin/ScopedRbacTeamAccessPanel.svelte";
     import { get } from "svelte/store";
     import { onMount } from "svelte";
     import { Link, router, usePage } from "@inertiajs/svelte";
     import { toaster } from "../../../lib/toaster.js";
     import { compressImage, HERO_BANNER_PRESET, getUploadHint } from "../../../lib/imageUtils.js";
     import { ensureVoicesLoaded, speakSample, speakSampleAsync } from "../../../lib/speechUtils.js";
+    import { playAdminFullAnnouncementPreview, playAdminTtsPreview, previewSegment2Text } from "../../../lib/ttsPreview.js";
 
     import {
         Plus,
@@ -73,16 +75,23 @@
             display_tts_repeat_count?: number;
             /** Delay between repeated announcements in ms (500–10000). Default 2000. */
             display_tts_repeat_delay_ms?: number;
-            /** Per plan: allow public self-serve triage at /public-triage. */
+            /** Legacy mirror of kiosk self-service; prefer kiosk_self_service_triage_enabled. */
             allow_public_triage?: boolean;
+            kiosk_self_service_triage_enabled?: boolean;
+            kiosk_status_checker_enabled?: boolean;
+            kiosk_enable_hid_barcode?: boolean;
+            kiosk_enable_camera_scanner?: boolean;
+            kiosk_modal_idle_seconds?: number;
             /** Per identity-registration plan: when true, public triage may create a session alongside an identity registration (unverified). Default false. */
             allow_unverified_entry?: boolean;
             /** Per flexiqueue-xm2o: per-program identity binding mode. */
             identity_binding_mode?: "disabled" | "required";
             /** Per barcode-hid: enable HID barcode on Display board. Default true. */
             enable_display_hid_barcode?: boolean;
-            /** Per barcode-hid: enable HID barcode on Public triage. Default true. */
+            /** Per barcode-hid: enable HID barcode on kiosk (legacy key). */
             enable_public_triage_hid_barcode?: boolean;
+            /** Camera on kiosk (legacy key). */
+            enable_public_triage_camera_scanner?: boolean;
             /** Per plan: enable camera/QR scanner on Display board. Default true. */
             enable_display_camera_scanner?: boolean;
             /** Per addition-to-public-site-plan: public page and program key. */
@@ -146,6 +155,10 @@
                     voice_id?: string;
                     rate?: number;
                     station_phrase?: string;
+                    status?: string;
+                    failure_reason?: string | null;
+                    audio_path?: string | null;
+                    updated_at?: string | null;
                 }
             >;
         };
@@ -179,6 +192,12 @@
         },
         site_slug = null,
         app_url = "",
+        rbac_team = null as {
+            id: number;
+            type: string;
+            site_id: number;
+            scope_label: string;
+        } | null,
     }: {
         program?: ProgramItem | null;
         tracks?: TrackItem[];
@@ -187,6 +206,12 @@
         stats?: ProgramStats;
         site_slug?: string | null;
         app_url?: string;
+        rbac_team?: {
+            id: number;
+            type: string;
+            site_id: number;
+            scope_label: string;
+        } | null;
     } = $props();
 
     const VALID_TABS = ["overview", "public-page", "processes", "stations", "staff", "tokens", "tracks", "diagram", "settings"] as const;
@@ -291,7 +316,10 @@
     let createStationCapacity = $state(1);
     let createStationClientCapacity = $state(1);
     let createStationProcessIds = $state<number[]>([]);
+    let createStationGenerateAudio = $state(true);
     type StationTtsLangKey = "en" | "fil" | "ilo";
+    type StationTtsUiStatus = "not_generated" | "generating" | "ready" | "failed";
+    const STATION_TTS_LANGS: StationTtsLangKey[] = ["en", "fil", "ilo"];
     interface StationTtsConfig {
         voice_id: string;
         rate: number;
@@ -371,12 +399,11 @@
     });
     /** Modal for editing program-wide connector TTS (shown from Stations tab or Settings shortcut). */
     let showProgramConnectorTtsModal = $state(false);
-    /** Modal for editing a single station's TTS (voice, rate, station phrase per language). */
-    let showStationTtsModal = $state(false);
-    /** Station whose TTS is being edited in the dedicated TTS modal (null when closed). */
-    let stationTtsModalStation = $state<StationItem | null>(null);
-    /** Which language is currently playing a TTS sample in the station TTS modal. */
-    let stationTtsSamplePlayingLang = $state<StationTtsLangKey | null>(null);
+    /** Station edit modal: segment-2-only vs full-call preview. */
+    let stationTtsAudioPlaying = $state<null | { mode: "sample" | "full"; lang: StationTtsLangKey }>(null);
+    /** Add-station modal: same preview pattern before save. */
+    let createStationTtsAudioPlaying = $state<null | { mode: "sample" | "full"; lang: StationTtsLangKey }>(null);
+    let connectorTtsAudioPlaying = $state<null | { mode: "sample" | "full"; lang: TtsLangKey }>(null);
     /** Show "regenerate station TTS" confirm after saving program connector TTS. */
     let showProgramTtsRegenerateConfirm = $state(false);
     /** Show "regenerate station TTS" confirm after saving a station's TTS. */
@@ -400,8 +427,10 @@
     let accessTokensList = $state<{ id: number; token_ref: string; issued_at: string; expires_at: string }[]>([]);
     /** Station ID currently triggering TTS regeneration (for button loading state). */
     let stationRegeneratingId = $state<number | null>(null);
-    /** Per plan: allow public self-serve triage at /public-triage. */
+    /** Kiosk: allow self-service triage (scan token, choose track, start visit). */
     let allowPublicTriage = $state(false);
+    /** Kiosk: allow scanning a token already in the queue to open queue status. */
+    let kioskStatusCheckerEnabled = $state(true);
     /**
      * Identity policy at triage. Per IDENTITY-BINDING-FINAL-IMPLEMENTATION-PLAN: only none | required; optional washed out.
      * When "required", allow_unverified_entry controls whether public triage can start a visit before staff verification.
@@ -413,8 +442,10 @@
     let identityBindingMode = $state<"disabled" | "required">("disabled");
     /** Per barcode-hid: enable HID barcode on Display board. Default true. */
     let enableDisplayHidBarcode = $state(true);
-    /** Per barcode-hid: enable HID barcode on Public triage. Default true. */
+    /** Per barcode-hid: enable HID barcode on kiosk. Default true. */
     let enablePublicTriageHidBarcode = $state(true);
+    /** Camera / QR on kiosk. */
+    let enablePublicTriageCameraScanner = $state(true);
     /** Per plan: enable camera/QR scanner on Display board. Default true. */
     let enableDisplayCameraScanner = $state(true);
     /** Per ISSUES-ELABORATION §15: expandable "More details" for station selection. */
@@ -458,7 +489,14 @@
                     (Number(s.display_tts_repeat_delay_ms ?? 2000) / 1000),
                 ),
             );
-            allowPublicTriage = s.allow_public_triage === true;
+            {
+                const kss = (s as { kiosk_self_service_triage_enabled?: boolean })
+                    .kiosk_self_service_triage_enabled;
+                allowPublicTriage =
+                    kss !== undefined ? kss === true : s.allow_public_triage === true;
+            }
+            kioskStatusCheckerEnabled =
+                (s as { kiosk_status_checker_enabled?: boolean }).kiosk_status_checker_enabled !== false;
             const rawMode = s.identity_binding_mode;
             const allowUnverified =
                 (s as { allow_unverified_entry?: boolean })
@@ -473,7 +511,15 @@
                 allowUnverifiedEntry = allowUnverified;
             }
             enableDisplayHidBarcode = (s.enable_display_hid_barcode ?? true) === true;
-            enablePublicTriageHidBarcode = (s.enable_public_triage_hid_barcode ?? true) === true;
+            enablePublicTriageHidBarcode =
+                (s as { kiosk_enable_hid_barcode?: boolean }).kiosk_enable_hid_barcode !== undefined
+                    ? (s as { kiosk_enable_hid_barcode?: boolean }).kiosk_enable_hid_barcode === true
+                    : (s.enable_public_triage_hid_barcode ?? true) === true;
+            enablePublicTriageCameraScanner =
+                (s as { kiosk_enable_camera_scanner?: boolean }).kiosk_enable_camera_scanner !== undefined
+                    ? (s as { kiosk_enable_camera_scanner?: boolean }).kiosk_enable_camera_scanner !== false
+                    : (s as { enable_public_triage_camera_scanner?: boolean })
+                          .enable_public_triage_camera_scanner !== false;
             enableDisplayCameraScanner = (s.enable_display_camera_scanner ?? true) === true;
             const tts = (s as { tts?: { active_language?: string; auto_generate_station_tts?: boolean; connector?: { languages?: Record<string, { voice_id?: string; rate?: number; connector_phrase?: string }> } } }).tts;
             if (tts) {
@@ -732,6 +778,12 @@
             .map((x) => x.user_id);
     }
     const page = usePage();
+    const allowCustomPronunciation = $derived(
+        (get(page)?.props as { tts_allow_custom_pronunciation?: boolean } | undefined)?.tts_allow_custom_pronunciation !== false,
+    );
+    const segment2Enabled = $derived(
+        (get(page)?.props as { tts_segment_2_enabled?: boolean } | undefined)?.tts_segment_2_enabled !== false,
+    );
     const serverTtsConfigured = $derived((get(page)?.props as { server_tts_configured?: boolean } | undefined)?.server_tts_configured ?? true);
     /** Per docs/final-edge-mode-rush-plann.md [DF-18]: edge mode from shared props for read-only UI and sync card. */
     const edgeMode = $derived(($page?.props as { edge_mode?: { is_edge?: boolean; admin_read_only?: boolean } } | undefined)?.edge_mode ?? null);
@@ -1032,6 +1084,8 @@
         showCreateStationModal = false;
         showCreateProcessModal = false;
         editStation = null;
+        stationTtsAudioPlaying = null;
+        createStationTtsAudioPlaying = null;
     }
 
     async function handleCreate() {
@@ -1116,6 +1170,7 @@
         createStationCapacity = 1;
         createStationClientCapacity = 1;
         createStationProcessIds = [];
+        createStationGenerateAudio = autoGenerateStationTts;
         createStationTts = {
             en: { voice_id: "", rate: 0.84, station_phrase: "" },
             fil: { voice_id: "", rate: 0.84, station_phrase: "" },
@@ -1155,60 +1210,55 @@
         };
     }
 
-    /** Open the dedicated Station TTS modal for a station; syncs edit form so Save can call handleUpdateStation. */
-    function openEditStationTtsModal(s: StationItem) {
-        editStation = s;
-        editStationName = s.name;
-        editStationCapacity = s.capacity;
-        editStationClientCapacity = s.client_capacity ?? 1;
-        editStationPriorityFirstOverride = s.priority_first_override ?? null;
-        editStationIsActive = s.is_active;
-        editStationProcessIds = [...(s.process_ids ?? [])];
-        const langs =
-            (s.tts?.languages as
-                | Record<string, { voice_id?: string; rate?: number; station_phrase?: string }>
-                | undefined) ?? {};
-        editStationTts = {
-            en: {
-                voice_id: (langs.en?.voice_id as string | undefined) ?? "",
-                rate: typeof langs.en?.rate === "number" ? (langs.en?.rate as number) : 0.84,
-                station_phrase: (langs.en?.station_phrase as string | undefined) ?? "",
-            },
-            fil: {
-                voice_id: (langs.fil?.voice_id as string | undefined) ?? "",
-                rate: typeof langs.fil?.rate === "number" ? (langs.fil?.rate as number) : 0.84,
-                station_phrase: (langs.fil?.station_phrase as string | undefined) ?? "",
-            },
-            ilo: {
-                voice_id: (langs.ilo?.voice_id as string | undefined) ?? "",
-                rate: typeof langs.ilo?.rate === "number" ? (langs.ilo?.rate as number) : 0.84,
-                station_phrase: (langs.ilo?.station_phrase as string | undefined) ?? "",
-            },
+    function closeProgramConnectorTtsModal() {
+        showProgramConnectorTtsModal = false;
+        connectorTtsAudioPlaying = null;
+    }
+
+    function normalizeStationTtsStatus(raw?: string | null): StationTtsUiStatus {
+        if (raw === "ready") return "ready";
+        if (raw === "failed") return "failed";
+        if (raw === "generating") return "generating";
+        return "not_generated";
+    }
+
+    function getStationLanguageTtsStatus(
+        station: StationItem,
+        lang: StationTtsLangKey,
+    ): StationTtsUiStatus {
+        const langs = station.tts?.languages as
+            | Record<string, { status?: string }>
+            | undefined;
+        return normalizeStationTtsStatus(langs?.[lang]?.status);
+    }
+
+    function getStationLanguageTtsStatuses(
+        station: StationItem,
+    ): Record<StationTtsLangKey, StationTtsUiStatus> {
+        return {
+            en: getStationLanguageTtsStatus(station, "en"),
+            fil: getStationLanguageTtsStatus(station, "fil"),
+            ilo: getStationLanguageTtsStatus(station, "ilo"),
         };
-        stationTtsModalStation = s;
-        showStationTtsModal = true;
     }
 
-    function closeStationTtsModal() {
-        showStationTtsModal = false;
-        stationTtsModalStation = null;
-        stationTtsSamplePlayingLang = null;
+    function getStationTtsButtonLabel(station: StationItem): string {
+        const statuses = Object.values(getStationLanguageTtsStatuses(station));
+        if (statuses.some((s) => s === "ready" || s === "failed")) return "Regenerate station TTS";
+        return "Generate station TTS";
     }
 
-    /** Aggregate TTS status from station.settings.tts.languages (ready, failed, or not generated). */
-    function getStationTtsStatus(station: StationItem): "ready" | "failed" | null {
-        const langs = station.tts?.languages as Record<string, { status?: string }> | undefined;
-        if (!langs || typeof langs !== "object") return null;
-        let hasReady = false;
-        let hasFailed = false;
-        for (const lang of Object.keys(langs)) {
-            const s = langs[lang]?.status;
-            if (s === "ready") hasReady = true;
-            if (s === "failed") hasFailed = true;
-        }
-        if (hasFailed) return "failed";
-        if (hasReady) return "ready";
-        return null;
+    function stationTtsStatusClass(status: StationTtsUiStatus): string {
+        if (status === "ready") return "bg-success-50 border-success-200 text-success-700";
+        if (status === "failed") return "bg-error-50 border-error-200 text-error-700";
+        if (status === "generating") return "bg-primary-50 border-primary-200 text-primary-700";
+        return "bg-surface-100 border-surface-200 text-surface-600";
+    }
+
+    function stationTtsStatusLabel(status: StationTtsUiStatus): string {
+        if (status === "ready") return "Generated";
+        if (status === "generating") return "Generating";
+        return "Not generated";
     }
 
     async function regenerateStationTts(station: StationItem) {
@@ -1234,75 +1284,265 @@
         }
     }
 
-    /** Play TTS sample for station phrase in the given language (connector + station name). */
-    async function playStationTtsSample(lang: StationTtsLangKey) {
-        if (stationTtsSamplePlayingLang || !stationTtsModalStation || !program) return;
-        stationTtsSamplePlayingLang = lang;
+    /** Station directions only (segment 2) for the station open in the edit modal. */
+    async function playStationDirectionsSample(lang: StationTtsLangKey) {
+        if (stationTtsAudioPlaying || !editStation || !program) return;
+        stationTtsAudioPlaying = { mode: "sample", lang };
         try {
-            const connectorPhrase =
+            const connectorRaw =
                 (lang === "en"
                     ? connectorTts.en.connector_phrase
                     : lang === "fil"
                       ? connectorTts.fil.connector_phrase
                       : connectorTts.ilo.connector_phrase) ?? "";
-            const phraseParams = new URLSearchParams({
-                lang,
-                pre_phrase: connectorPhrase.trim(),
-                alias: stationTtsModalStation.name || "Station",
-                pronounce_as: "word",
-            });
-            const phraseRes = await fetch(`/api/admin/tts/sample-phrase?${phraseParams.toString()}`, {
-                method: "GET",
-                headers: { Accept: "application/json", "X-CSRF-TOKEN": getCsrfToken(), "X-Requested-With": "XMLHttpRequest" },
-                credentials: "same-origin",
-            });
-            if (phraseRes.status === 419) {
-                toaster.error({ title: MSG_SESSION_EXPIRED });
-                return;
-            }
-            const phraseData = await phraseRes.json().catch(() => ({}));
-            if (!phraseRes.ok || typeof phraseData?.text !== "string") {
-                toaster.error({ title: "Could not get sample phrase." });
-                return;
-            }
+            const connectorPhrase = connectorRaw.trim();
             const config = lang === "en" ? editStationTts.en : lang === "fil" ? editStationTts.fil : editStationTts.ilo;
-            const voiceId = (config.voice_id && config.voice_id.trim()) || "";
-            const ttsParams = new URLSearchParams({ text: phraseData.text, rate: String(config.rate) });
-            if (voiceId) ttsParams.set("voice", voiceId);
-            const ttsRes = await fetch(`/api/public/tts?${ttsParams.toString()}`, {
-                method: "GET",
-                headers: { Accept: "audio/mpeg", "X-Requested-With": "XMLHttpRequest" },
-                credentials: "same-origin",
+            const stationPhrase = allowCustomPronunciation ? (config.station_phrase ?? "").trim() : "";
+            const pr = await previewSegment2Text({
+                lang,
+                connector_phrase: connectorPhrase,
+                station_name: (editStation.name || "Station").trim(),
+                station_phrase: stationPhrase || undefined,
+                getCsrfToken: () => getCsrfToken(),
             });
-            if (ttsRes.status === 419) {
+            if (pr.status === 419) {
                 toaster.error({ title: MSG_SESSION_EXPIRED });
                 return;
             }
-            if (!ttsRes.ok) {
-                ensureVoicesLoaded();
-                await speakSampleAsync(phraseData.text, null, 1, config.rate);
+            if (!pr.ok || !pr.text) {
+                toaster.error({ title: "Could not build preview phrase." });
                 return;
             }
-            const blob = await ttsRes.blob();
-            const objectUrl = URL.createObjectURL(blob);
-            await new Promise<void>((resolve, reject) => {
-                const audio = new Audio(objectUrl);
-                audio.onended = () => {
-                    URL.revokeObjectURL(objectUrl);
-                    resolve();
-                };
-                audio.onerror = () => {
-                    URL.revokeObjectURL(objectUrl);
-                    reject(new Error("Playback failed"));
-                };
-                audio.volume = 1;
-                audio.play().catch(reject);
-            });
+            const voiceId = (config.voice_id && config.voice_id.trim()) || "";
+            const preview = await playAdminTtsPreview({ text: pr.text, rate: config.rate, voiceId });
+            if (preview.code === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
+            if (!preview.ok) {
+                toaster.error({ title: "Failed to play TTS sample." });
+            }
         } catch (e) {
             const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
             toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to play TTS sample." });
         } finally {
-            stationTtsSamplePlayingLang = null;
+            stationTtsAudioPlaying = null;
+        }
+    }
+
+    /** Full call: sample token (A1, site defaults) + this station’s directions. */
+    async function playStationFullAnnouncementSample(lang: StationTtsLangKey) {
+        if (stationTtsAudioPlaying || !editStation || !program) return;
+        stationTtsAudioPlaying = { mode: "full", lang };
+        try {
+            const connectorRaw =
+                (lang === "en"
+                    ? connectorTts.en.connector_phrase
+                    : lang === "fil"
+                      ? connectorTts.fil.connector_phrase
+                      : connectorTts.ilo.connector_phrase) ?? "";
+            const connectorPhrase = connectorRaw.trim();
+            const config = lang === "en" ? editStationTts.en : lang === "fil" ? editStationTts.fil : editStationTts.ilo;
+            const stationPhrase = allowCustomPronunciation ? (config.station_phrase ?? "").trim() : "";
+            const voiceId = (config.voice_id && config.voice_id.trim()) || "";
+            const res = await playAdminFullAnnouncementPreview({
+                getCsrfToken: () => getCsrfToken(),
+                lang,
+                rate: config.rate,
+                voiceId,
+                segment2Enabled: true,
+                segment1: { alias: "A1", pronounce_as: "letters" },
+                connectorPhrase,
+                stationName: (editStation.name || "Station").trim(),
+                stationPhrase: stationPhrase || undefined,
+            });
+            if (res.code === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
+            if (!res.ok) {
+                const msg =
+                    res.step === "segment1"
+                        ? "Could not build token call."
+                        : res.step === "segment2"
+                          ? "Could not build station directions."
+                          : "Failed to play full preview.";
+                toaster.error({ title: msg });
+            }
+        } catch (e) {
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to play full preview." });
+        } finally {
+            stationTtsAudioPlaying = null;
+        }
+    }
+
+    async function playCreateStationDirectionsSample(lang: StationTtsLangKey) {
+        if (createStationTtsAudioPlaying || !program) return;
+        const nm = createStationName.trim();
+        if (!nm) {
+            toaster.error({ title: "Enter a station name first." });
+            return;
+        }
+        createStationTtsAudioPlaying = { mode: "sample", lang };
+        try {
+            const connectorRaw =
+                (lang === "en"
+                    ? connectorTts.en.connector_phrase
+                    : lang === "fil"
+                      ? connectorTts.fil.connector_phrase
+                      : connectorTts.ilo.connector_phrase) ?? "";
+            const connectorPhrase = connectorRaw.trim();
+            const config = lang === "en" ? createStationTts.en : lang === "fil" ? createStationTts.fil : createStationTts.ilo;
+            const stationPhrase = allowCustomPronunciation ? (config.station_phrase ?? "").trim() : "";
+            const pr = await previewSegment2Text({
+                lang,
+                connector_phrase: connectorPhrase,
+                station_name: nm,
+                station_phrase: stationPhrase || undefined,
+                getCsrfToken: () => getCsrfToken(),
+            });
+            if (pr.status === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
+            if (!pr.ok || !pr.text) {
+                toaster.error({ title: "Could not build preview phrase." });
+                return;
+            }
+            const voiceId = (config.voice_id && config.voice_id.trim()) || "";
+            const preview = await playAdminTtsPreview({ text: pr.text, rate: config.rate, voiceId });
+            if (preview.code === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
+            if (!preview.ok) {
+                toaster.error({ title: "Failed to play TTS sample." });
+            }
+        } catch (e) {
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to play TTS sample." });
+        } finally {
+            createStationTtsAudioPlaying = null;
+        }
+    }
+
+    async function playCreateStationFullSample(lang: StationTtsLangKey) {
+        if (createStationTtsAudioPlaying || !program) return;
+        const nm = createStationName.trim();
+        if (!nm) {
+            toaster.error({ title: "Enter a station name first." });
+            return;
+        }
+        createStationTtsAudioPlaying = { mode: "full", lang };
+        try {
+            const connectorRaw =
+                (lang === "en"
+                    ? connectorTts.en.connector_phrase
+                    : lang === "fil"
+                      ? connectorTts.fil.connector_phrase
+                      : connectorTts.ilo.connector_phrase) ?? "";
+            const connectorPhrase = connectorRaw.trim();
+            const config = lang === "en" ? createStationTts.en : lang === "fil" ? createStationTts.fil : createStationTts.ilo;
+            const stationPhrase = allowCustomPronunciation ? (config.station_phrase ?? "").trim() : "";
+            const voiceId = (config.voice_id && config.voice_id.trim()) || "";
+            const res = await playAdminFullAnnouncementPreview({
+                getCsrfToken: () => getCsrfToken(),
+                lang,
+                rate: config.rate,
+                voiceId,
+                segment2Enabled: true,
+                segment1: { alias: "A1", pronounce_as: "letters" },
+                connectorPhrase,
+                stationName: nm,
+                stationPhrase: stationPhrase || undefined,
+            });
+            if (res.code === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
+            if (!res.ok) {
+                toaster.error({
+                    title:
+                        res.step === "segment1"
+                            ? "Could not build token call."
+                            : res.step === "segment2"
+                              ? "Could not build station directions."
+                              : "Failed to play full preview.",
+                });
+            }
+        } catch (e) {
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to play full preview." });
+        } finally {
+            createStationTtsAudioPlaying = null;
+        }
+    }
+
+    /** Connector phrase only. */
+    async function playConnectorTtsSample(lang: TtsLangKey) {
+        if (connectorTtsAudioPlaying || submitting) return;
+        const config = lang === "en" ? connectorTts.en : lang === "fil" ? connectorTts.fil : connectorTts.ilo;
+        const sampleText = (config.connector_phrase ?? "").trim();
+        if (!sampleText) {
+            toaster.error({ title: "Enter a connector phrase to preview." });
+            return;
+        }
+        connectorTtsAudioPlaying = { mode: "sample", lang };
+        try {
+            const voiceId = (config.voice_id && config.voice_id.trim()) || "";
+            const preview = await playAdminTtsPreview({ text: sampleText, rate: config.rate, voiceId });
+            if (preview.code === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
+            if (!preview.ok) {
+                toaster.error({ title: "Failed to play TTS sample." });
+            }
+        } catch (e) {
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to play TTS sample." });
+        } finally {
+            connectorTtsAudioPlaying = null;
+        }
+    }
+
+    /** Full call using this connector + placeholder station (Window 1). */
+    async function playConnectorTtsFullSample(lang: TtsLangKey) {
+        if (connectorTtsAudioPlaying || submitting) return;
+        const config = lang === "en" ? connectorTts.en : lang === "fil" ? connectorTts.fil : connectorTts.ilo;
+        connectorTtsAudioPlaying = { mode: "full", lang };
+        try {
+            const voiceId = (config.voice_id && config.voice_id.trim()) || "";
+            const res = await playAdminFullAnnouncementPreview({
+                getCsrfToken: () => getCsrfToken(),
+                lang,
+                rate: config.rate,
+                voiceId,
+                segment2Enabled: true,
+                segment1: { alias: "A1", pronounce_as: "letters" },
+                connectorPhrase: (config.connector_phrase ?? "").trim(),
+                stationName: "Window 1",
+            });
+            if (res.code === 419) {
+                toaster.error({ title: MSG_SESSION_EXPIRED });
+                return;
+            }
+            if (!res.ok) {
+                toaster.error({
+                    title:
+                        res.step === "segment1"
+                            ? "Could not build token call."
+                            : res.step === "segment2"
+                              ? "Could not build directions."
+                              : "Failed to play full preview.",
+                });
+            }
+        } catch (e) {
+            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
+            toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to play full preview." });
+        } finally {
+            connectorTtsAudioPlaying = null;
         }
     }
 
@@ -1341,6 +1581,7 @@
                 capacity: createStationCapacity,
                 client_capacity: createStationClientCapacity,
                 process_ids: createStationProcessIds,
+                generate_tts: createStationGenerateAudio,
                 tts: {
                     languages: {
                         en: {
@@ -1514,7 +1755,6 @@
                 showStationTtsRegenerateConfirm = true;
             } else {
                 closeModals();
-                closeStationTtsModal();
                 router.reload();
             }
         } else {
@@ -1790,11 +2030,17 @@
                         settingsDisplayTtsRepeatDelaySec * 1000,
                     ),
                     allow_public_triage: allowPublicTriage,
+                    kiosk_self_service_triage_enabled: allowPublicTriage,
+                    kiosk_status_checker_enabled: kioskStatusCheckerEnabled,
+                    kiosk_enable_hid_barcode: enablePublicTriageHidBarcode,
+                    kiosk_enable_camera_scanner: enablePublicTriageCameraScanner,
+                    kiosk_modal_idle_seconds: displayScanTimeoutSeconds,
                     allow_unverified_entry: effectiveAllowUnverified,
                     identity_binding_mode: effectiveIdentityMode,
                     enable_display_hid_barcode: enableDisplayHidBarcode,
                     enable_public_triage_hid_barcode:
                         enablePublicTriageHidBarcode,
+                    enable_public_triage_camera_scanner: enablePublicTriageCameraScanner,
                     enable_display_camera_scanner: enableDisplayCameraScanner,
                     tts: {
                         active_language: ttsActiveLanguage,
@@ -1881,7 +2127,14 @@
                     1000),
             ),
         );
-        allowPublicTriage = (s as { allow_public_triage?: boolean }).allow_public_triage === true;
+        {
+            const kss = (s as { kiosk_self_service_triage_enabled?: boolean })
+                .kiosk_self_service_triage_enabled;
+            allowPublicTriage =
+                kss !== undefined ? kss === true : (s as { allow_public_triage?: boolean }).allow_public_triage === true;
+        }
+        kioskStatusCheckerEnabled =
+            (s as { kiosk_status_checker_enabled?: boolean }).kiosk_status_checker_enabled !== false;
         const rawMode = (s as { identity_binding_mode?: string }).identity_binding_mode;
         const allowUnverified =
             (s as { allow_unverified_entry?: boolean }).allow_unverified_entry === true;
@@ -1896,9 +2149,15 @@
         }
         enableDisplayHidBarcode = (s as { enable_display_hid_barcode?: boolean })
             .enable_display_hid_barcode !== false;
-        enablePublicTriageHidBarcode = (
-            s as { enable_public_triage_hid_barcode?: boolean }
-        ).enable_public_triage_hid_barcode !== false;
+        enablePublicTriageHidBarcode =
+            (s as { kiosk_enable_hid_barcode?: boolean }).kiosk_enable_hid_barcode !== undefined
+                ? (s as { kiosk_enable_hid_barcode?: boolean }).kiosk_enable_hid_barcode === true
+                : (s as { enable_public_triage_hid_barcode?: boolean }).enable_public_triage_hid_barcode !== false;
+        enablePublicTriageCameraScanner =
+            (s as { kiosk_enable_camera_scanner?: boolean }).kiosk_enable_camera_scanner !== undefined
+                ? (s as { kiosk_enable_camera_scanner?: boolean }).kiosk_enable_camera_scanner !== false
+                : (s as { enable_public_triage_camera_scanner?: boolean })
+                      .enable_public_triage_camera_scanner !== false;
         enableDisplayCameraScanner = (s as { enable_display_camera_scanner?: boolean })
             .enable_display_camera_scanner !== false;
         const tts = (s as { tts?: { active_language?: string } }).tts;
@@ -2383,6 +2642,9 @@
                         </button>
                     </div>
                 {/if}
+                {#if rbac_team}
+                    <ScopedRbacTeamAccessPanel rbacTeam={rbac_team} />
+                {/if}
                 <section>
                     <h2 class="text-lg font-semibold text-surface-950 mb-4">
                         Program stats
@@ -2689,22 +2951,26 @@
                     <h2 class="text-lg font-semibold text-surface-950">
                         Stations
                     </h2>
-                    <p class="text-sm text-surface-600 mt-0.5">
-                        Manage service points where clients receive attention.
-                    </p>
                 </div>
-                <div class="flex flex-wrap items-center gap-2">
+                <div class="flex w-full sm:w-auto flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 sm:ml-auto">
+                    {#if segment2Enabled}
+                        <button
+                            type="button"
+                            class="btn preset-tonal flex items-center gap-2 shadow-sm w-full sm:w-auto"
+                            onclick={() => (showProgramConnectorTtsModal = true)}
+                        >
+                            <Volume2 class="w-4 h-4" />
+                            Connecting phrase TTS
+                        </button>
+                    {:else}
+                        <p class="text-sm text-surface-600 max-w-lg">
+                            Station directions are off site-wide.
+                            <Link href="/admin/settings?tab=token-tts" class="font-semibold text-primary-600 hover:text-primary-700 underline">Configuration → Audio &amp; TTS</Link>
+                        </p>
+                    {/if}
                     <button
                         type="button"
-                        class="btn preset-tonal flex items-center gap-2 shadow-sm"
-                        onclick={() => (showProgramConnectorTtsModal = true)}
-                    >
-                        <Volume2 class="w-4 h-4" />
-                        Connecting phrase TTS
-                    </button>
-                    <button
-                        type="button"
-                        class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm"
+                        class="btn preset-filled-primary-500 flex items-center gap-2 shadow-sm sm:ml-auto shrink-0"
                         onclick={openCreateStation}
                         disabled={!!edgeMode?.admin_read_only}
                         title={edgeMode?.admin_read_only ? "Changes must be made on the central server and re-synced to this device." : undefined}
@@ -2827,7 +3093,7 @@
                             <div
                                 class="px-5 py-3 border-t border-surface-100 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-surface-50/50 rounded-b-container"
                             >
-                                <!-- Status + TTS actions: grid on mobile for predictable wrapping -->
+                                <!-- Status and non-TTS card actions -->
                                 <div class="w-full md:w-auto">
                                     <div class="grid grid-cols-2 gap-2 w-full">
                                         <button
@@ -2845,31 +3111,31 @@
                                                 <Power class="w-3.5 h-3.5" /> Activate
                                             {/if}
                                         </button>
-                                        <button
-                                            type="button"
-                                            class="btn btn-xs preset-tonal w-full justify-center md:w-auto"
-                                            onclick={() => regenerateStationTts(station)}
-                                            disabled={submitting || getStationTtsStatus(station) !== "failed" || stationRegeneratingId !== null}
-                                            title={getStationTtsStatus(station) === "failed" ? "Regenerate TTS" : "Only available when TTS has failed"}
-                                        >
-                                            {stationRegeneratingId === station.id ? "Starting…" : "Generate TTS"}
-                                        </button>
+                                        <div class="hidden md:block"></div>
                                     </div>
                                 </div>
-                                <!-- Per-station controls: Volume / Edit / Delete in grid on mobile -->
+                                <!-- Per-language TTS statuses + core actions -->
                                 <div class="w-full md:w-auto">
-                                    <div class="grid grid-cols-3 gap-2 w-full md:w-auto">
-                                        <button
-                                            type="button"
-                                            class="btn preset-tonal p-2 w-full justify-center"
-                                            onclick={() => openEditStationTtsModal(station)}
-                                            disabled={submitting}
-                                            title="Station TTS"
-                                        >
-                                            <Volume2
-                                                class="w-5 h-5 text-surface-600"
-                                            />
-                                        </button>
+                                    <div class="flex flex-col gap-2 w-full md:w-auto">
+                                        <div class="grid grid-cols-3 gap-1.5">
+                                            {#each STATION_TTS_LANGS as lang}
+                                                {@const langStatus = getStationLanguageTtsStatus(station, lang)}
+                                                <span
+                                                    class="inline-flex items-center justify-center gap-1 rounded-full border text-[10px] px-2 py-0.5 font-medium {stationTtsStatusClass(langStatus)}"
+                                                    title={`${lang.toUpperCase()}: ${stationTtsStatusLabel(langStatus)}`}
+                                                >
+                                                    <span class="uppercase">{lang}</span>
+                                                    {#if langStatus === "ready"}
+                                                        <CheckCircle class="w-3 h-3" />
+                                                    {:else if langStatus === "generating"}
+                                                        <span class="loading-spinner loading-2xs"></span>
+                                                    {:else}
+                                                        <XCircle class="w-3 h-3" />
+                                                    {/if}
+                                                </span>
+                                            {/each}
+                                        </div>
+                                        <div class="grid grid-cols-2 gap-2 w-full md:w-auto">
                                         <button
                                             type="button"
                                             class="btn preset-tonal p-2 w-full justify-center"
@@ -2893,6 +3159,7 @@
                                                 class="w-5 h-5 text-error-500"
                                             />
                                         </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -3535,7 +3802,7 @@
                                     <Volume2 class="w-4 h-4 text-surface-500" /> Display board audio
                                 </h3>
                                 <p class="text-xs text-surface-500 mt-1">
-                                    Mute and volume for the general display board TTS announcements (e.g. "Calling A3, please proceed to...").
+                                    Mute, volume, and repeat for this program’s display board only. Site-wide token voice and “station directions on/off” are under Configuration → Audio &amp; TTS.
                                 </p>
                             </div>
                             <div class="sm:w-2/3 form-control space-y-3">
@@ -3593,51 +3860,68 @@
                             </div>
                         </div>
 
-                        <!-- Program TTS connector phrases (configured via modal on Stations tab) -->
-                        <div
-                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
-                        >
-                            <div class="sm:w-1/3 shrink-0">
-                                <h3
-                                    class="font-medium text-surface-950 flex items-center gap-2"
-                                >
-                                    <Volume2 class="w-4 h-4 text-surface-500" /> TTS connector phrases
-                                </h3>
-                                <p class="text-xs text-surface-500 mt-1">
-                                    Phrases between token and station (e.g. "Please proceed to"). One set per language.
-                                </p>
+                        <!-- Program-wide connecting phrases (modal on Stations tab) -->
+                        {#if segment2Enabled}
+                            <div
+                                class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                            >
+                                <div class="sm:w-1/3 shrink-0">
+                                    <h3
+                                        class="font-medium text-surface-950 flex items-center gap-2"
+                                    >
+                                        <Volume2 class="w-4 h-4 text-surface-500" /> Connecting phrases (station directions)
+                                    </h3>
+                                    <p class="text-xs text-surface-500 mt-1">
+                                        Spoken between the token call and the window or station name (e.g. “please go to”). One set per language for this program.
+                                    </p>
+                                </div>
+                                <div class="sm:w-2/3 form-control space-y-3">
+                                    <p class="text-xs text-surface-600">
+                                        Open <strong>Connecting phrase TTS</strong> on the Stations tab. It applies to every station in this program.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        class="btn preset-tonal w-full sm:w-auto flex items-center gap-2"
+                                        onclick={() => {
+                                            activeTab = "stations";
+                                            showProgramConnectorTtsModal = true;
+                                        }}
+                                    >
+                                        <Volume2 class="w-4 h-4" />
+                                        Open connecting phrase TTS
+                                    </button>
+                                </div>
                             </div>
-                            <div class="sm:w-2/3 form-control space-y-3">
-                                <p class="text-xs text-surface-600">
-                                    Configure connector phrases and voices from the Stations tab. This applies to all stations in the program.
-                                </p>
-                                <button
-                                    type="button"
-                                    class="btn preset-tonal w-full sm:w-auto flex items-center gap-2"
-                                    onclick={() => {
-                                        activeTab = "stations";
-                                        showProgramConnectorTtsModal = true;
-                                    }}
-                                >
-                                    <Volume2 class="w-4 h-4" />
-                                    Open connector TTS settings
-                                </button>
+                        {:else}
+                            <div class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200">
+                                <div class="sm:w-1/3 shrink-0">
+                                    <h3 class="font-medium text-surface-950 flex items-center gap-2">
+                                        <Volume2 class="w-4 h-4 text-surface-500" /> Station directions
+                                    </h3>
+                                </div>
+                                <div class="sm:w-2/3">
+                                    <p class="text-sm text-surface-600">
+                                        Station directions after the token call are turned off site-wide. Enable them under
+                                        <Link href="/admin/settings?tab=token-tts" class="font-semibold text-primary-600 hover:text-primary-700 underline">Configuration → Audio &amp; TTS</Link>
+                                        to edit connecting phrases per program.
+                                    </p>
+                                </div>
                             </div>
-                        </div>
+                        {/if}
 
-                        <!-- Allow public self-serve triage (per plan) -->
+                        <!-- Kiosk device (self-service + status) -->
                         <div
                             class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
                         >
                             <div class="sm:w-1/3 shrink-0">
                                 <h3 class="font-medium text-surface-950 flex items-center gap-2">
-                                    Public self-serve triage
+                                    Kiosk device
                                 </h3>
                                 <p class="text-xs text-surface-500 mt-1">
-                                    When enabled, clients can open /public-triage (no login) to scan their token and choose a track to start their visit.
+                                    Controls the public self-service kiosk (site URL <code class="text-xs bg-surface-100 px-1 rounded">/site/…/kiosk/…</code>). Self-service starts a visit; status checker opens queue status when the token is already in the queue.
                                 </p>
                             </div>
-                            <div class="sm:w-2/3 form-control pt-1">
+                            <div class="sm:w-2/3 form-control pt-1 space-y-4">
                                 <label
                                     for="allow-public-triage-switch"
                                     class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors items-center"
@@ -3654,8 +3938,32 @@
                                             aria-hidden="true"
                                         ></span>
                                     </div>
-                                    <span class="label-text text-surface-950 font-medium">Allow public self-serve triage</span>
+                                    <span class="label-text text-surface-950 font-medium">Self-service triage</span>
                                 </label>
+                                <p class="text-xs text-surface-500 -mt-2 ml-14">
+                                    Scan token, choose a track, start a visit (when the device is unlocked for this program).
+                                </p>
+                                <label
+                                    for="kiosk-status-checker-switch"
+                                    class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors items-center"
+                                >
+                                    <div class="relative inline-block w-11 h-5">
+                                        <input
+                                            id="kiosk-status-checker-switch"
+                                            type="checkbox"
+                                            class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300"
+                                            bind:checked={kioskStatusCheckerEnabled}
+                                        />
+                                        <span
+                                            class="absolute top-0 left-0 w-5 h-5 bg-surface-950 rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none"
+                                            aria-hidden="true"
+                                        ></span>
+                                    </div>
+                                    <span class="label-text text-surface-950 font-medium">Queue status checker</span>
+                                </label>
+                                <p class="text-xs text-surface-500 -mt-2 ml-14">
+                                    When a scanned token is already in the queue, send the visitor to the public status screen.
+                                </p>
                             </div>
                         </div>
 
@@ -3777,22 +4085,42 @@
                             </div>
                         </div>
 
-                        <!-- HID barcode: Public triage -->
+                        <!-- HID barcode: Kiosk -->
                         <div
                             class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
                         >
                             <div class="sm:w-1/3 shrink-0">
                                 <h3 class="font-medium text-surface-950 flex items-center gap-2">
-                                    <Users class="w-4 h-4 text-surface-500" /> HID barcode (Public triage)
+                                    <Users class="w-4 h-4 text-surface-500" /> HID barcode (Kiosk)
                                 </h3>
                                 <p class="text-xs text-surface-500 mt-1">
-                                    When on, the public triage page (/public-triage) keeps focus on the hidden barcode input for hardware scanners.
+                                    When on, the kiosk page keeps focus on the hidden barcode input for hardware scanners.
                                 </p>
                             </div>
                             <div class="sm:w-2/3 form-control pt-1">
                                 <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
                                     <input type="checkbox" class="checkbox" bind:checked={enablePublicTriageHidBarcode} />
-                                    <span class="label-text text-surface-950 font-medium">Enable HID barcode on Public triage</span>
+                                    <span class="label-text text-surface-950 font-medium">Enable HID barcode on kiosk</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Camera: Kiosk -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
+                                    <Camera class="w-4 h-4 text-surface-500" /> Camera / QR (Kiosk)
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    When on, the kiosk shows the camera scan button to read token QR codes.
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control pt-1">
+                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
+                                    <input type="checkbox" class="checkbox" bind:checked={enablePublicTriageCameraScanner} />
+                                    <span class="label-text text-surface-950 font-medium">Enable camera / QR scanner on kiosk</span>
                                 </label>
                             </div>
                         </div>
@@ -4211,6 +4539,15 @@
                     <button
                         type="button"
                         class="btn preset-tonal"
+                        onclick={() => editStation && regenerateStationTts(editStation)}
+                        disabled={submitting || !segment2Enabled || !editStation || stationRegeneratingId !== null}
+                        title={segment2Enabled ? getStationTtsButtonLabel(editStation) : "Station directions are off site-wide"}
+                    >
+                        {stationRegeneratingId === editStation?.id ? "Starting…" : getStationTtsButtonLabel(editStation)}
+                    </button>
+                    <button
+                        type="button"
+                        class="btn preset-tonal"
                         onclick={closeModals}>Cancel</button
                     >
                     <button
@@ -4309,15 +4646,29 @@
                     </div>
                 {/if}
             </div>
+            {#if segment2Enabled}
+            <label class="label cursor-pointer justify-start gap-3 rounded-lg border border-surface-200 bg-surface-50 p-3">
+                <input
+                    type="checkbox"
+                    class="checkbox checkbox-sm"
+                    bind:checked={createStationGenerateAudio}
+                />
+                <span class="label-text">Generate audio on create</span>
+            </label>
             <div class="form-control w-full">
-                <span class="label-text font-medium mb-1 block">Station TTS (per language)</span>
-                <p class="text-sm text-surface-600 mb-2">
-                    Voice, speed, and pronunciation for this station in each language. Connector phrase is set via &quot;Connecting phrase TTS&quot; on the Stations tab.
-                </p>
+                <span class="label-text font-medium mb-1 block">Station directions audio (per language)</span>
                 <div class="space-y-3">
                     <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                        <div class="flex items-center justify-between gap-2 mb-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                             <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">English</span>
+                            <div class="flex flex-wrap gap-1">
+                                <button type="button" class="btn btn-xs preset-tonal" disabled={createStationTtsAudioPlaying !== null || submitting} onclick={() => playCreateStationDirectionsSample("en")}>
+                                    {createStationTtsAudioPlaying?.mode === "sample" && createStationTtsAudioPlaying.lang === "en" ? "Playing…" : "Play sample"}
+                                </button>
+                                <button type="button" class="btn btn-xs preset-filled-primary-500" disabled={createStationTtsAudioPlaying !== null || submitting} onclick={() => playCreateStationFullSample("en")}>
+                                    {createStationTtsAudioPlaying?.mode === "full" && createStationTtsAudioPlaying.lang === "en" ? "Playing…" : "Play full"}
+                                </button>
+                            </div>
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div class="form-control">
@@ -4338,13 +4689,21 @@
                             </div>
                         </div>
                         <div class="form-control mt-2">
-                            <label class="label" for="station-en-phrase"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
-                            <input id="station-en-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Window one"' bind:value={createStationTts.en.station_phrase} />
+                            <label class="label" for="station-en-phrase"><span class="label-text text-xs font-medium">Station wording (optional)</span></label>
+                            <input id="station-en-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={createStationTts.en.station_phrase} disabled={!allowCustomPronunciation} />
                         </div>
                     </div>
                     <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                        <div class="flex items-center justify-between gap-2 mb-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                             <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Filipino</span>
+                            <div class="flex flex-wrap gap-1">
+                                <button type="button" class="btn btn-xs preset-tonal" disabled={createStationTtsAudioPlaying !== null || submitting} onclick={() => playCreateStationDirectionsSample("fil")}>
+                                    {createStationTtsAudioPlaying?.mode === "sample" && createStationTtsAudioPlaying.lang === "fil" ? "Playing…" : "Play sample"}
+                                </button>
+                                <button type="button" class="btn btn-xs preset-filled-primary-500" disabled={createStationTtsAudioPlaying !== null || submitting} onclick={() => playCreateStationFullSample("fil")}>
+                                    {createStationTtsAudioPlaying?.mode === "full" && createStationTtsAudioPlaying.lang === "fil" ? "Playing…" : "Play full"}
+                                </button>
+                            </div>
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div class="form-control">
@@ -4365,13 +4724,21 @@
                             </div>
                         </div>
                         <div class="form-control mt-2">
-                            <label class="label" for="station-fil-phrase"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
-                            <input id="station-fil-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Estasyon ng window one"' bind:value={createStationTts.fil.station_phrase} />
+                            <label class="label" for="station-fil-phrase"><span class="label-text text-xs font-medium">Station wording (optional)</span></label>
+                            <input id="station-fil-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={createStationTts.fil.station_phrase} disabled={!allowCustomPronunciation} />
                         </div>
                     </div>
                     <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                        <div class="flex items-center justify-between gap-2 mb-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                             <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Ilocano</span>
+                            <div class="flex flex-wrap gap-1">
+                                <button type="button" class="btn btn-xs preset-tonal" disabled={createStationTtsAudioPlaying !== null || submitting} onclick={() => playCreateStationDirectionsSample("ilo")}>
+                                    {createStationTtsAudioPlaying?.mode === "sample" && createStationTtsAudioPlaying.lang === "ilo" ? "Playing…" : "Play sample"}
+                                </button>
+                                <button type="button" class="btn btn-xs preset-filled-primary-500" disabled={createStationTtsAudioPlaying !== null || submitting} onclick={() => playCreateStationFullSample("ilo")}>
+                                    {createStationTtsAudioPlaying?.mode === "full" && createStationTtsAudioPlaying.lang === "ilo" ? "Playing…" : "Play full"}
+                                </button>
+                            </div>
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div class="form-control">
@@ -4392,12 +4759,19 @@
                             </div>
                         </div>
                         <div class="form-control mt-2">
-                            <label class="label" for="station-ilo-phrase"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
-                            <input id="station-ilo-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Estasyon ti window one"' bind:value={createStationTts.ilo.station_phrase} />
+                            <label class="label" for="station-ilo-phrase"><span class="label-text text-xs font-medium">Station wording (optional)</span></label>
+                            <input id="station-ilo-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={createStationTts.ilo.station_phrase} disabled={!allowCustomPronunciation} />
                         </div>
                     </div>
                 </div>
             </div>
+            {:else}
+                <p class="text-sm text-surface-600">
+                    Station directions after the token call are off site-wide. Enable them under
+                    <Link href="/admin/settings?tab=token-tts" class="font-semibold text-primary-600 hover:text-primary-700 underline">Configuration → Audio &amp; TTS</Link>
+                    to configure connecting phrases and station direction audio.
+                </p>
+            {/if}
             <div class="flex justify-end gap-2">
                 <button
                     type="button"
@@ -4680,14 +5054,22 @@
                         <span class="label-text">Active</span>
                     </label>
                 </div>
+                {#if segment2Enabled}
                 <div class="form-control w-full">
-                    <span class="label-text font-medium mb-1 block">Station TTS (per language)</span>
-                    <p class="text-sm text-surface-600 mb-2">
-                        Voice, speed, and pronunciation. For full TTS editing use the <strong>Station TTS</strong> button on the station card.
-                    </p>
+                    <span class="label-text font-medium mb-1 block">Station directions audio (per language)</span>
                     <div class="space-y-3">
                         <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                            <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">English</span>
+                            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">English</span>
+                                <div class="flex flex-wrap gap-1">
+                                    <button type="button" class="btn btn-xs preset-tonal" disabled={stationTtsAudioPlaying !== null || submitting} onclick={() => playStationDirectionsSample("en")}>
+                                        {stationTtsAudioPlaying?.mode === "sample" && stationTtsAudioPlaying.lang === "en" ? "Playing…" : "Play sample"}
+                                    </button>
+                                    <button type="button" class="btn btn-xs preset-filled-primary-500" disabled={stationTtsAudioPlaying !== null || submitting} onclick={() => playStationFullAnnouncementSample("en")}>
+                                        {stationTtsAudioPlaying?.mode === "full" && stationTtsAudioPlaying.lang === "en" ? "Playing…" : "Play full"}
+                                    </button>
+                                </div>
+                            </div>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
                                 <div class="form-control">
                                     <label class="label py-0"><span class="label-text text-xs font-medium">Voice</span></label>
@@ -4707,12 +5089,22 @@
                                 </div>
                             </div>
                             <div class="form-control mt-2">
-                                <label class="label py-0" for="edit-station-en-phrase"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
-                                <input id="edit-station-en-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Window one"' bind:value={editStationTts.en.station_phrase} />
+                                <label class="label py-0" for="edit-station-en-phrase"><span class="label-text text-xs font-medium">Station wording (optional)</span></label>
+                                <input id="edit-station-en-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={editStationTts.en.station_phrase} disabled={!allowCustomPronunciation} />
                             </div>
                         </div>
                         <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                            <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Filipino</span>
+                            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Filipino</span>
+                                <div class="flex flex-wrap gap-1">
+                                    <button type="button" class="btn btn-xs preset-tonal" disabled={stationTtsAudioPlaying !== null || submitting} onclick={() => playStationDirectionsSample("fil")}>
+                                        {stationTtsAudioPlaying?.mode === "sample" && stationTtsAudioPlaying.lang === "fil" ? "Playing…" : "Play sample"}
+                                    </button>
+                                    <button type="button" class="btn btn-xs preset-filled-primary-500" disabled={stationTtsAudioPlaying !== null || submitting} onclick={() => playStationFullAnnouncementSample("fil")}>
+                                        {stationTtsAudioPlaying?.mode === "full" && stationTtsAudioPlaying.lang === "fil" ? "Playing…" : "Play full"}
+                                    </button>
+                                </div>
+                            </div>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
                                 <div class="form-control">
                                     <label class="label py-0"><span class="label-text text-xs font-medium">Voice</span></label>
@@ -4732,12 +5124,22 @@
                                 </div>
                             </div>
                             <div class="form-control mt-2">
-                                <label class="label py-0" for="edit-station-fil-phrase"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
-                                <input id="edit-station-fil-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Estasyon ng window one"' bind:value={editStationTts.fil.station_phrase} />
+                                <label class="label py-0" for="edit-station-fil-phrase"><span class="label-text text-xs font-medium">Station wording (optional)</span></label>
+                                <input id="edit-station-fil-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={editStationTts.fil.station_phrase} disabled={!allowCustomPronunciation} />
                             </div>
                         </div>
                         <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                            <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Ilocano</span>
+                            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Ilocano</span>
+                                <div class="flex flex-wrap gap-1">
+                                    <button type="button" class="btn btn-xs preset-tonal" disabled={stationTtsAudioPlaying !== null || submitting} onclick={() => playStationDirectionsSample("ilo")}>
+                                        {stationTtsAudioPlaying?.mode === "sample" && stationTtsAudioPlaying.lang === "ilo" ? "Playing…" : "Play sample"}
+                                    </button>
+                                    <button type="button" class="btn btn-xs preset-filled-primary-500" disabled={stationTtsAudioPlaying !== null || submitting} onclick={() => playStationFullAnnouncementSample("ilo")}>
+                                        {stationTtsAudioPlaying?.mode === "full" && stationTtsAudioPlaying.lang === "ilo" ? "Playing…" : "Play full"}
+                                    </button>
+                                </div>
+                            </div>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
                                 <div class="form-control">
                                     <label class="label py-0"><span class="label-text text-xs font-medium">Voice</span></label>
@@ -4757,13 +5159,28 @@
                                 </div>
                             </div>
                             <div class="form-control mt-2">
-                                <label class="label py-0" for="edit-station-ilo-phrase"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
-                                <input id="edit-station-ilo-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Estasyon ti window one"' bind:value={editStationTts.ilo.station_phrase} />
+                                <label class="label py-0" for="edit-station-ilo-phrase"><span class="label-text text-xs font-medium">Station wording (optional)</span></label>
+                                <input id="edit-station-ilo-phrase" type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={editStationTts.ilo.station_phrase} disabled={!allowCustomPronunciation} />
                             </div>
                         </div>
                     </div>
                 </div>
+                {:else}
+                <p class="text-sm text-surface-600">
+                    Station directions are off site-wide.
+                    <Link href="/admin/settings?tab=token-tts" class="font-semibold text-primary-600 hover:text-primary-700 underline">Configuration → Audio &amp; TTS</Link>
+                </p>
+                {/if}
                 <div class="flex justify-end gap-2">
+                    <button
+                        type="button"
+                        class="btn preset-tonal"
+                        onclick={() => editStation && regenerateStationTts(editStation)}
+                        disabled={submitting || !segment2Enabled || !editStation || stationRegeneratingId !== null}
+                        title={segment2Enabled ? getStationTtsButtonLabel(editStation) : "Station directions are off site-wide"}
+                    >
+                        {stationRegeneratingId === editStation?.id ? "Starting…" : getStationTtsButtonLabel(editStation).replace("station TTS", "audio")}
+                    </button>
                     <button
                         type="button"
                         class="btn preset-tonal"
@@ -4784,126 +5201,6 @@
         {/snippet}
     </Modal>
 {/if}
-
-<Modal
-    open={showStationTtsModal && !!stationTtsModalStation}
-    title={stationTtsModalStation ? `Station TTS – ${stationTtsModalStation.name}` : "Station TTS"}
-    onClose={closeStationTtsModal}
->
-    {#snippet children()}
-        <form
-            onsubmit={(e) => {
-                e.preventDefault();
-                if (editStation) handleUpdateStation();
-            }}
-            class="flex flex-col gap-4"
-        >
-            <p class="text-sm text-surface-600">
-                Configure how this station name is spoken in each language (voice, speed, and pronunciation). Used for the second part of the call announcement.
-            </p>
-            <div class="space-y-3 max-h-[24rem] overflow-y-auto pr-1">
-                <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                    <div class="flex items-center justify-between gap-2 mb-2">
-                        <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">English</span>
-                        <button type="button" class="btn btn-xs preset-tonal" disabled={!!stationTtsSamplePlayingLang || submitting} onclick={() => playStationTtsSample("en")}>
-                            {stationTtsSamplePlayingLang === "en" ? "Playing…" : "Sample"}
-                        </button>
-                    </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div class="form-control">
-                            <label class="label py-0"><span class="label-text text-xs font-medium">Voice</span></label>
-                            <select class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={editStationTts.en.voice_id}>
-                                <option value="">Use default</option>
-                                {#each serverTtsVoices as voice}
-                                    <option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
-                                {/each}
-                            </select>
-                        </div>
-                        <div class="form-control">
-                            <label class="label py-0"><span class="label-text text-xs font-medium">Speed</span></label>
-                            <div class="flex items-center gap-2">
-                                <input type="range" min="0.5" max="2" step="0.05" class="range range-xs flex-1" bind:value={editStationTts.en.rate} />
-                                <span class="text-xs text-surface-600 w-12">{Number(editStationTts.en.rate).toFixed(2)}x</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="form-control mt-2">
-                        <label class="label py-0"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
-                        <input type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Window one"' bind:value={editStationTts.en.station_phrase} />
-                    </div>
-                </div>
-                <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                    <div class="flex items-center justify-between gap-2 mb-2">
-                        <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Filipino</span>
-                        <button type="button" class="btn btn-xs preset-tonal" disabled={!!stationTtsSamplePlayingLang || submitting} onclick={() => playStationTtsSample("fil")}>
-                            {stationTtsSamplePlayingLang === "fil" ? "Playing…" : "Sample"}
-                        </button>
-                    </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div class="form-control">
-                            <label class="label py-0"><span class="label-text text-xs font-medium">Voice</span></label>
-                            <select class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={editStationTts.fil.voice_id}>
-                                <option value="">Use default</option>
-                                {#each serverTtsVoices as voice}
-                                    <option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
-                                {/each}
-                            </select>
-                        </div>
-                        <div class="form-control">
-                            <label class="label py-0"><span class="label-text text-xs font-medium">Speed</span></label>
-                            <div class="flex items-center gap-2">
-                                <input type="range" min="0.5" max="2" step="0.05" class="range range-xs flex-1" bind:value={editStationTts.fil.rate} />
-                                <span class="text-xs text-surface-600 w-12">{Number(editStationTts.fil.rate).toFixed(2)}x</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="form-control mt-2">
-                        <label class="label py-0"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
-                        <input type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Estasyon ng window one"' bind:value={editStationTts.fil.station_phrase} />
-                    </div>
-                </div>
-                <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                    <div class="flex items-center justify-between gap-2 mb-2">
-                        <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Ilocano</span>
-                        <button type="button" class="btn btn-xs preset-tonal" disabled={!!stationTtsSamplePlayingLang || submitting} onclick={() => playStationTtsSample("ilo")}>
-                            {stationTtsSamplePlayingLang === "ilo" ? "Playing…" : "Sample"}
-                        </button>
-                    </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div class="form-control">
-                            <label class="label py-0"><span class="label-text text-xs font-medium">Voice</span></label>
-                            <select class="select select-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" bind:value={editStationTts.ilo.voice_id}>
-                                <option value="">Use default</option>
-                                {#each serverTtsVoices as voice}
-                                    <option value={voice.id}>{voice.name}{voice.lang ? ` (${voice.lang})` : ""}</option>
-                                {/each}
-                            </select>
-                        </div>
-                        <div class="form-control">
-                            <label class="label py-0"><span class="label-text text-xs font-medium">Speed</span></label>
-                            <div class="flex items-center gap-2">
-                                <input type="range" min="0.5" max="2" step="0.05" class="range range-xs flex-1" bind:value={editStationTts.ilo.rate} />
-                                <span class="text-xs text-surface-600 w-12">{Number(editStationTts.ilo.rate).toFixed(2)}x</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="form-control mt-2">
-                        <label class="label py-0"><span class="label-text text-xs font-medium">Station phrase (optional)</span></label>
-                        <input type="text" class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm w-full" placeholder='e.g. "Estasyon ti window one"' bind:value={editStationTts.ilo.station_phrase} />
-                    </div>
-                </div>
-            </div>
-            <div class="flex justify-end gap-2 pt-2">
-                <button type="button" class="btn preset-tonal" onclick={closeStationTtsModal} disabled={submitting}>
-                    Cancel
-                </button>
-                <button type="submit" class="btn preset-filled-primary-500" disabled={submitting || !editStation}>
-                    {submitting ? "Saving…" : "Save"}
-                </button>
-            </div>
-        </form>
-    {/snippet}
-</Modal>
 
 <Modal
     open={showProgramTtsRegenerateConfirm}
@@ -4952,7 +5249,7 @@
 <Modal
     open={showStationTtsRegenerateConfirm}
     title="Regenerate station TTS"
-    onClose={() => { if (!stationTtsRegenerating) { showStationTtsRegenerateConfirm = false; closeModals(); closeStationTtsModal(); } }}
+    onClose={() => { if (!stationTtsRegenerating) { showStationTtsRegenerateConfirm = false; closeModals(); } }}
 >
     {#snippet children()}
         <div class="flex flex-col gap-4">
@@ -4960,7 +5257,7 @@
                 Station TTS was updated and this station had generated audio. Regenerate TTS for this station?
             </p>
             <div class="flex justify-end gap-3 pt-2 border-t border-surface-200">
-                <button type="button" class="btn preset-tonal" disabled={stationTtsRegenerating} onclick={() => { if (!stationTtsRegenerating) { showStationTtsRegenerateConfirm = false; closeModals(); closeStationTtsModal(); router.reload(); } }}>
+                <button type="button" class="btn preset-tonal" disabled={stationTtsRegenerating} onclick={() => { if (!stationTtsRegenerating) { showStationTtsRegenerateConfirm = false; closeModals(); router.reload(); } }}>
                     Cancel
                 </button>
                 <button
@@ -4977,7 +5274,7 @@
                                 return;
                             }
                             if (!res.ok) toaster.error({ title: "Failed to start regeneration." });
-                            else { showStationTtsRegenerateConfirm = false; closeModals(); closeStationTtsModal(); router.reload(); }
+                            else { showStationTtsRegenerateConfirm = false; closeModals(); router.reload(); }
                         } catch (e) {
                             const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
                             toaster.error({ title: isNetwork ? MSG_NETWORK_ERROR : "Failed to start regeneration." });
@@ -5237,22 +5534,18 @@
 
 <Modal
     open={showProgramConnectorTtsModal}
-    title="Program connecting-phrase TTS"
-    onClose={() => (showProgramConnectorTtsModal = false)}
+    title="Station directions — connecting phrase"
+    onClose={closeProgramConnectorTtsModal}
 >
     {#snippet children()}
         <form
             onsubmit={(e) => {
                 e.preventDefault();
                 handleSaveSettings();
-                showProgramConnectorTtsModal = false;
+                closeProgramConnectorTtsModal();
             }}
             class="flex flex-col gap-4"
         >
-            <p class="text-sm text-surface-600">
-                Configure how the connecting phrase between the token and station will sound for each language.
-                These settings apply to all stations in this program.
-            </p>
             <div class="form-control">
                 <label class="label" for="tts-active-language-modal">
                     <span class="label-text text-sm font-medium">Active language</span>
@@ -5281,8 +5574,26 @@
             </div>
             <div class="space-y-3 max-h-[26rem] overflow-y-auto pr-1">
                 <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                    <div class="flex items-center justify-between gap-2 mb-2">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                         <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">English</span>
+                        <div class="flex flex-wrap gap-1">
+                            <button
+                                type="button"
+                                class="btn btn-xs preset-tonal"
+                                disabled={connectorTtsAudioPlaying !== null || submitting}
+                                onclick={() => playConnectorTtsSample("en")}
+                            >
+                                {connectorTtsAudioPlaying?.mode === "sample" && connectorTtsAudioPlaying.lang === "en" ? "Playing…" : "Play sample"}
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-xs preset-filled-primary-500"
+                                disabled={connectorTtsAudioPlaying !== null || submitting}
+                                onclick={() => playConnectorTtsFullSample("en")}
+                            >
+                                {connectorTtsAudioPlaying?.mode === "full" && connectorTtsAudioPlaying.lang === "en" ? "Playing…" : "Play full"}
+                            </button>
+                        </div>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div class="form-control">
@@ -5330,14 +5641,32 @@
                             id="connector-en-phrase-modal"
                             type="text"
                             class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                            placeholder='e.g. "Please proceed to"'
                             bind:value={connectorTts.en.connector_phrase}
+                            disabled={!allowCustomPronunciation}
                         />
                     </div>
                 </div>
                 <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                    <div class="flex items-center justify-between gap-2 mb-2">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                         <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Filipino</span>
+                        <div class="flex flex-wrap gap-1">
+                            <button
+                                type="button"
+                                class="btn btn-xs preset-tonal"
+                                disabled={connectorTtsAudioPlaying !== null || submitting}
+                                onclick={() => playConnectorTtsSample("fil")}
+                            >
+                                {connectorTtsAudioPlaying?.mode === "sample" && connectorTtsAudioPlaying.lang === "fil" ? "Playing…" : "Play sample"}
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-xs preset-filled-primary-500"
+                                disabled={connectorTtsAudioPlaying !== null || submitting}
+                                onclick={() => playConnectorTtsFullSample("fil")}
+                            >
+                                {connectorTtsAudioPlaying?.mode === "full" && connectorTtsAudioPlaying.lang === "fil" ? "Playing…" : "Play full"}
+                            </button>
+                        </div>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div class="form-control">
@@ -5385,14 +5714,32 @@
                             id="connector-fil-phrase-modal"
                             type="text"
                             class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                            placeholder='e.g. "Pumunta sa"'
                             bind:value={connectorTts.fil.connector_phrase}
+                            disabled={!allowCustomPronunciation}
                         />
                     </div>
                 </div>
                 <div class="p-3 rounded-container border border-surface-200 bg-surface-50">
-                    <div class="flex items-center justify-between gap-2 mb-2">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                         <span class="text-xs font-semibold uppercase tracking-wide text-surface-500">Ilocano</span>
+                        <div class="flex flex-wrap gap-1">
+                            <button
+                                type="button"
+                                class="btn btn-xs preset-tonal"
+                                disabled={connectorTtsAudioPlaying !== null || submitting}
+                                onclick={() => playConnectorTtsSample("ilo")}
+                            >
+                                {connectorTtsAudioPlaying?.mode === "sample" && connectorTtsAudioPlaying.lang === "ilo" ? "Playing…" : "Play sample"}
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-xs preset-filled-primary-500"
+                                disabled={connectorTtsAudioPlaying !== null || submitting}
+                                onclick={() => playConnectorTtsFullSample("ilo")}
+                            >
+                                {connectorTtsAudioPlaying?.mode === "full" && connectorTtsAudioPlaying.lang === "ilo" ? "Playing…" : "Play full"}
+                            </button>
+                        </div>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div class="form-control">
@@ -5440,8 +5787,8 @@
                             id="connector-ilo-phrase-modal"
                             type="text"
                             class="input input-sm rounded-container border border-surface-200 bg-surface-50 shadow-sm"
-                            placeholder='e.g. "Mapanen ijay"'
                             bind:value={connectorTts.ilo.connector_phrase}
+                            disabled={!allowCustomPronunciation}
                         />
                     </div>
                 </div>
@@ -5450,7 +5797,7 @@
                 <button
                     type="button"
                     class="btn preset-tonal"
-                    onclick={() => (showProgramConnectorTtsModal = false)}
+                    onclick={closeProgramConnectorTtsModal}
                     disabled={submitting}
                 >
                     Cancel

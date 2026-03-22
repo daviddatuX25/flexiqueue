@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Client;
 use App\Models\DeviceAuthorization;
 use App\Models\IdentityRegistration;
 use App\Models\Process;
@@ -15,15 +14,20 @@ use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\TransactionLog;
 use App\Models\User;
+use App\Services\ClientService;
 use App\Services\DeviceAuthorizationService;
+use App\Services\MobileCryptoService;
 use App\Support\DeviceLock;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /**
- * Public self-serve triage: GET /public-triage, GET /api/public/token-lookup, POST /api/public/sessions/bind.
- * No auth. 403 when program allow_public_triage is false.
+ * Self-service kiosk: GET /site/{site}/kiosk/..., legacy /public-triage redirects; GET /api/public/token-lookup, POST /api/public/sessions/bind.
+ * No auth. 403 when kiosk surface is disabled (no self-service and no status checker).
  */
 class PublicTriageTest extends TestCase
 {
@@ -33,7 +37,7 @@ class PublicTriageTest extends TestCase
     {
         return Site::firstOrCreate(
             ['slug' => 'default'],
-            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
+            ['name' => 'Default', 'api_key_hash' => Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
         );
     }
 
@@ -57,7 +61,7 @@ class PublicTriageTest extends TestCase
             'is_active' => true,
         ]);
         $process = Process::create(['program_id' => $program->id, 'name' => 'P1', 'description' => null]);
-        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+        DB::table('station_process')->insert([
             'station_id' => $station->id,
             'process_id' => $process->id,
         ]);
@@ -85,34 +89,19 @@ class PublicTriageTest extends TestCase
         return $this->withUnencryptedCookie('known_sites', $value);
     }
 
-    /** Per plan: request per-site triage URL with device auth + device lock (triage) so we get 200 PublicStart. */
-    private function getTriageWithDeviceAuth(Site $site, Program $program): \Illuminate\Testing\TestResponse
+    /** Per plan: request canonical kiosk URL with device auth + device lock (kiosk) so we get 200 PublicStart. */
+    private function getTriageWithDeviceAuth(Site $site, Program $program): TestResponse
     {
         $service = app(DeviceAuthorizationService::class);
         $result = $service->authorize($program, 'test-device-'.$program->id, DeviceAuthorization::SCOPE_SESSION);
         $name = DeviceAuthorizationService::cookieNameForProgram($program);
-        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_TRIAGE, null);
+        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_KIOSK, null);
         $lockValue = $lockCookie->getValue();
 
         return $this->withKnownSiteCookie($site)
             ->withCookie($name, $result['cookie_value'])
             ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockValue)
-            ->get('/site/'.$site->slug.'/public-triage/'.$program->slug);
-    }
-
-    /** Per plan: request legacy /public/triage/{id} with device auth + device lock (triage) so we get 200 PublicStart. */
-    private function getPublicTriageWithDeviceAuth(Program $program): \Illuminate\Testing\TestResponse
-    {
-        $service = app(DeviceAuthorizationService::class);
-        $result = $service->authorize($program, 'test-device-'.$program->id, DeviceAuthorization::SCOPE_SESSION);
-        $name = DeviceAuthorizationService::cookieNameForProgram($program);
-        $site = $program->site;
-        $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_TRIAGE, null);
-        $lockValue = $lockCookie->getValue();
-
-        return $this->withCookie($name, $result['cookie_value'])
-            ->withUnencryptedCookie(DeviceLock::COOKIE_NAME, $lockValue)
-            ->get('/public/triage/'.$program->id);
+            ->get('/site/'.$site->slug.'/kiosk/'.$program->slug);
     }
 
     private function createToken(string $physicalId = 'A1', ?int $siteId = null): Token
@@ -137,7 +126,7 @@ class PublicTriageTest extends TestCase
 
         $response = $this->withKnownSiteCookie($site)->get('/site/'.$site->slug.'/public-triage');
 
-        $response->assertRedirect('/site/'.$site->slug.'/public-triage/'.$program->slug);
+        $response->assertRedirect('/site/'.$site->slug.'/kiosk');
         $response = $this->getTriageWithDeviceAuth($site, $program);
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -156,16 +145,16 @@ class PublicTriageTest extends TestCase
         $this->assertTrue($props['allow_unverified_entry']);
     }
 
-    /** Per plan: legacy /public-triage with no slug redirects to site triage; with no program allowing triage, shows allowed false. */
+    /** Per plan: legacy /public-triage with no slug redirects to site kiosk; with no program allowing kiosk, shows allowed false. */
     public function test_triage_start_returns_200_with_allowed_false_when_no_program(): void
     {
         $site = $this->defaultSite();
 
         $response = $this->get('/public-triage');
 
-        $response->assertRedirect('/site/'.$site->slug.'/public-triage');
+        $response->assertRedirect('/site/'.$site->slug.'/kiosk');
 
-        $response = $this->withKnownSiteCookie($site)->get('/site/'.$site->slug.'/public-triage');
+        $response = $this->withKnownSiteCookie($site)->get('/site/'.$site->slug.'/kiosk');
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -179,7 +168,7 @@ class PublicTriageTest extends TestCase
         $site = $this->defaultSite();
         $this->createProgramWithTracks(false);
 
-        $response = $this->withKnownSiteCookie($site)->get('/site/'.$site->slug.'/public-triage');
+        $response = $this->withKnownSiteCookie($site)->get('/site/'.$site->slug.'/kiosk');
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -209,7 +198,56 @@ class PublicTriageTest extends TestCase
         $response = $this->getJson('/api/public/token-lookup?qr_hash='.urlencode($token->qr_code_hash).'&program_id='.$program->id);
 
         $response->assertStatus(403);
-        $response->assertJsonPath('message', 'Public self-serve triage is not available.');
+        $response->assertJsonPath('message', 'Kiosk is not available for this program.');
+    }
+
+    public function test_public_token_lookup_returns_200_when_only_status_checker_enabled(): void
+    {
+        $site = $this->defaultSite();
+        $user = User::factory()->create();
+        $program = Program::create([
+            'site_id' => $site->id,
+            'name' => 'Status Only',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+            'settings' => [
+                'allow_public_triage' => false,
+                'kiosk_self_service_triage_enabled' => false,
+                'kiosk_status_checker_enabled' => true,
+                'enable_public_triage_hid_barcode' => true,
+                'enable_public_triage_camera_scanner' => true,
+            ],
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'First',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $process = Process::create(['program_id' => $program->id, 'name' => 'P1', 'description' => null]);
+        DB::table('station_process')->insert([
+            'station_id' => $station->id,
+            'process_id' => $process->id,
+        ]);
+        $track = ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'Default',
+            'is_default' => true,
+            'color_code' => null,
+        ]);
+        TrackStep::create([
+            'track_id' => $track->id,
+            'process_id' => $process->id,
+            'step_order' => 1,
+            'is_required' => true,
+        ]);
+        $token = $this->createToken('A1');
+
+        $response = $this->getJson('/api/public/token-lookup?qr_hash='.urlencode($token->qr_code_hash).'&program_id='.$program->id);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('physical_id', 'A1');
     }
 
     public function test_public_token_lookup_returns_404_when_token_not_found(): void
@@ -272,7 +310,7 @@ class PublicTriageTest extends TestCase
             'allow_unverified_entry' => true,
         ]);
         $token = $this->createToken('A1');
-        $session = \App\Models\Session::create([
+        $session = Session::create([
             'token_id' => $token->id,
             'program_id' => $program->id,
             'track_id' => $track->id,
@@ -437,7 +475,7 @@ class PublicTriageTest extends TestCase
 
         $response->assertStatus(200);
         $response->assertJsonPath('request_submitted', true);
-        $reg = \App\Models\IdentityRegistration::where('program_id', $program->id)
+        $reg = IdentityRegistration::where('program_id', $program->id)
             ->where('first_name', 'Jane')
             ->where('last_name', 'Doe')
             ->where('client_category', 'Regular')
@@ -492,8 +530,8 @@ class PublicTriageTest extends TestCase
         $token = $this->createToken('A1');
 
         $mobile = '09171234567';
-        $mobileHash = app(\App\Services\MobileCryptoService::class)->hash($mobile);
-        $mobileEncrypted = app(\App\Services\MobileCryptoService::class)->encrypt($mobile);
+        $mobileHash = app(MobileCryptoService::class)->hash($mobile);
+        $mobileEncrypted = app(MobileCryptoService::class)->encrypt($mobile);
 
         $existing = IdentityRegistration::create([
             'program_id' => $program->id,
@@ -536,14 +574,14 @@ class PublicTriageTest extends TestCase
 
     public function test_public_bind_when_mobile_matches_existing_client_creates_session_without_new_registration(): void
     {
-        $site = \App\Models\Site::firstOrCreate(
+        $site = Site::firstOrCreate(
             ['slug' => 'default'],
-            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make('key'), 'settings' => [], 'edge_settings' => []]
+            ['name' => 'Default', 'api_key_hash' => Hash::make('key'), 'settings' => [], 'edge_settings' => []]
         );
         ['track' => $track, 'program' => $program] = $this->createProgramWithTracks(true, ['allow_unverified_entry' => true]);
         $program->update(['site_id' => $site->id]);
 
-        $clientService = app(\App\Services\ClientService::class);
+        $clientService = app(ClientService::class);
         $mobile = '09181112222';
         $client = $clientService->createClient('Already', 'Registered', '1988-01-01', $site->id, $mobile);
 
@@ -583,10 +621,10 @@ class PublicTriageTest extends TestCase
             'allow_unverified_entry' => true,
         ]);
 
-        $clientService = app(\App\Services\ClientService::class);
-        $site = \App\Models\Site::firstOrCreate(
+        $clientService = app(ClientService::class);
+        $site = Site::firstOrCreate(
             ['slug' => 'default'],
-            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make('key'), 'settings' => [], 'edge_settings' => []]
+            ['name' => 'Default', 'api_key_hash' => Hash::make('key'), 'settings' => [], 'edge_settings' => []]
         );
         $client = $clientService->createClient('Juan', 'Cruz', '1985-01-01', $site->id, '09171234567');
 
@@ -667,8 +705,9 @@ class PublicTriageTest extends TestCase
     public function test_public_triage_page_returns_200_with_allowed_false_when_allow_public_triage_false(): void
     {
         ['program' => $program] = $this->createProgramWithTracks(false);
+        $site = $program->site;
 
-        $response = $this->get('/public/triage/'.$program->id);
+        $response = $this->withKnownSiteCookie($site)->get('/site/'.$site->slug.'/kiosk/'.$program->slug);
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page

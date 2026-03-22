@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Site;
+use App\Services\HomeStatsService;
+use App\Support\PermissionCatalog;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -13,6 +15,10 @@ use Inertia\Response;
  */
 class HomeController extends Controller
 {
+    public function __construct(
+        private HomeStatsService $homeStatsService
+    ) {}
+
     public function index(Request $request): Response
     {
         $user = $request->user();
@@ -22,10 +28,11 @@ class HomeController extends Controller
 
         if ($user) {
             $roleBadge = $user->role->value;
-            if ($user->isSuperAdmin()) {
+            if ($user->can(PermissionCatalog::PLATFORM_MANAGE)) {
                 $dashboardRoute = route('admin.dashboard');
                 $dashboardLabel = 'Go to admin console';
-            } elseif ($user->isAdmin() || $user->isSupervisorForAnyProgram()) {
+            } elseif ($user->can(PermissionCatalog::ADMIN_MANAGE)
+                || ($user->can(PermissionCatalog::PROGRAMS_SUPERVISE) && $user->isSupervisorForAnyProgram())) {
                 $dashboardRoute = route('admin.dashboard');
                 $dashboardLabel = 'Go to your dashboard';
             } else {
@@ -35,6 +42,13 @@ class HomeController extends Controller
         }
 
         $defaultSiteSlug = Site::query()->where('is_default', true)->value('slug');
+        $homeStats = ['served_count' => 0, 'session_hours' => 0.0];
+
+        try {
+            $homeStats = $this->homeStatsService->getGlobalStats();
+        } catch (\Throwable) {
+            // Keep homepage resilient even if stats query is temporarily unavailable.
+        }
 
         return Inertia::render('Home', [
             'dashboardRoute' => $dashboardRoute,
@@ -45,6 +59,7 @@ class HomeController extends Controller
             'appVersion' => config('app.version', '1.0.0-dev'),
             'default_site_slug' => $defaultSiteSlug,
             'heroImageUrl' => asset('images/mswdo_tagudin.jpg'),
+            'homeStats' => $homeStats,
         ]);
     }
 }

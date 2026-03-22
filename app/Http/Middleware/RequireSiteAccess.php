@@ -31,7 +31,7 @@ class RequireSiteAccess
         if ($user) {
             $isSameSite = $user->site_id === $site->id;
             $isAdminLike = method_exists($user, 'isAdmin') && $user->isAdmin();
-            $isSuperAdmin = property_exists($user, 'role') && $user->role === 'super_admin';
+            $isSuperAdmin = method_exists($user, 'isSuperAdmin') && $user->isSuperAdmin();
             if ($isSameSite || $isAdminLike || $isSuperAdmin) {
                 return $next($request);
             }
@@ -67,6 +67,7 @@ class RequireSiteAccess
                 ];
             }
         }
+
         return $out;
     }
 }

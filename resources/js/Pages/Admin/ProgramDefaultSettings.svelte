@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * Per ISSUES-ELABORATION §2: view/edit global default program settings.
-	 * Used when creating new programs or "Apply default settings" on Program Show.
+	 * New programs start with these defaults; "Apply default settings" on Program Show refreshes from here.
 	 */
 	import AdminLayout from "../../Layouts/AdminLayout.svelte";
 	import { Link } from "@inertiajs/svelte";
@@ -215,7 +215,7 @@
 			<h1 class="text-xl font-semibold text-surface-950">Default program settings</h1>
 		</div>
 		<p class="text-sm text-surface-600 mb-6">
-			These values are used when you click "Apply default settings" on a program's Settings tab. New programs do not auto-apply; use Apply default settings after creating one.
+			These values are applied automatically when a new program is created. Use &quot;Apply default settings&quot; on a program&apos;s Settings tab anytime to reset that program from here.
 		</p>
 
 		{#if loading}

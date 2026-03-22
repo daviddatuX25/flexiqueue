@@ -1,13 +1,23 @@
 <script lang="ts">
 	/**
 	 * Program default settings form — embedded in Configuration tab.
-	 * Migrated from ProgramDefaultSettings.svelte.
+	 * `platform`: super_admin template (copied to new sites). `site`: site admin (new programs in this site).
 	 */
 	import { get } from "svelte/store";
 	import { usePage } from "@inertiajs/svelte";
 	import { onMount } from "svelte";
 	import { toaster } from "../../../lib/toaster.js";
 	import { Clock, Users, GitMerge, AlertCircle } from "lucide-svelte";
+
+	interface Props {
+		variant?: "site" | "platform";
+	}
+	let { variant = "site" }: Props = $props();
+
+	const apiBase =
+		variant === "platform"
+			? "/api/admin/program-platform-default-settings"
+			: "/api/admin/program-default-settings";
 
 	const page = usePage();
 	function getCsrfToken(): string {
@@ -75,7 +85,7 @@
 	async function loadSettings() {
 		loading = true;
 		loadFailed = false;
-		const { ok, data, message } = await api("GET", "/api/admin/program-default-settings");
+		const { ok, data, message } = await api("GET", apiBase);
 		loading = false;
 		if (!ok || !data) {
 			loadFailed = true;
@@ -116,7 +126,7 @@
 
 	async function handleSave() {
 		submitting = true;
-		const { ok, message } = await api("PUT", "/api/admin/program-default-settings", {
+		const { ok, message } = await api("PUT", apiBase, {
 			settings: {
 				no_show_timer_seconds: noShowTimer,
 				max_no_show_attempts: maxNoShowAttempts,
@@ -148,7 +158,11 @@
 </script>
 
 <p class="text-sm text-surface-600 mb-4">
-	These values are used when you click &quot;Apply default settings&quot; on a program&apos;s Settings tab. New programs do not auto-apply.
+	{#if variant === "platform"}
+		Template copied into each <strong>new site&apos;s</strong> program defaults when the site is created. Existing sites keep their own copies until edited under that site.
+	{:else}
+		Applied when a <strong>new program</strong> is created in this site. Use &quot;Apply default settings&quot; on a program&apos;s Settings tab to refresh that program from here.
+	{/if}
 </p>
 
 {#if loading}

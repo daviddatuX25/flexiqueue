@@ -2,12 +2,15 @@
 
 namespace App\Http\Middleware;
 
-use App\Enums\UserRole;
 use App\Http\Controllers\StationPageController;
 use App\Models\Program;
 use App\Models\Station;
+use App\Models\TtsPlatformBudget;
+use App\Repositories\TokenTtsSettingRepository;
+use App\Services\EdgeModeService;
 use App\Services\TtsService;
 use App\Support\DeviceLock;
+use App\Support\PermissionCatalog;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -41,8 +44,15 @@ class HandleInertiaRequests extends Middleware
     {
         $user = $request->user();
 
+        $canApproveRequests = $user && (
+            $user->can(PermissionCatalog::ADMIN_MANAGE)
+            || $user->can(PermissionCatalog::ADMIN_SHARED)
+            || $user->can(PermissionCatalog::AUTH_SUPERVISOR_TOOLS)
+        );
+
         $base = [
             ...parent::share($request),
+            'staff_triage_page_enabled' => config('flexiqueue.staff_triage_page_enabled', true),
             'csrf_token' => csrf_token(),
             'flash' => [
                 'status' => $request->session()->get('status'),
@@ -51,21 +61,32 @@ class HandleInertiaRequests extends Middleware
             ],
             'auth' => [
                 'user' => $user,
-                'can_approve_requests' => $user && ($user->isAdmin() || $user->isSuperAdmin() || $user->isSupervisorForAnyProgram()),
+                /** Single source of truth for Configuration / super-admin UI (see super_admin_settings_nav plan). */
+                'is_super_admin' => $user?->isSuperAdmin() ?? false,
+                /** @deprecated Prefer auth.can.approve_requests (Phase 5 RBAC). */
+                'can_approve_requests' => $canApproveRequests,
+                /** Stable capability flags from $user->can(); see docs/architecture/PERMISSIONS-MATRIX.md Phase 5. */
+                'can' => [
+                    'public_device_authorize' => $user?->can(PermissionCatalog::PUBLIC_DEVICE_AUTHORIZE) ?? false,
+                    'public_display_settings_apply' => $user?->can(PermissionCatalog::PUBLIC_DISPLAY_SETTINGS_APPLY) ?? false,
+                    'approve_requests' => $canApproveRequests,
+                    'staff_operations' => $user?->can(PermissionCatalog::STAFF_OPERATIONS) ?? false,
+                    'admin_manage' => $user?->can(PermissionCatalog::ADMIN_MANAGE) ?? false,
+                ],
             ],
-            'server_tts_configured' => $user?->role === 'admin'
+            'server_tts_configured' => $user?->can(PermissionCatalog::ADMIN_MANAGE)
                 ? app(TtsService::class)->isEnabled()
                 : null,
             // Lockout applies only to non-staff/admin; staff/admin can exit without PIN/QR.
             'device_locked' => self::deviceLockedForRequest($request),
             'device_locked_redirect_url' => self::deviceLockedRedirectUrl($request),
             'edge_mode' => [
-                'is_edge' => app(\App\Services\EdgeModeService::class)->isEdge(),
-                'is_online' => app(\App\Services\EdgeModeService::class)->isOnline(),
-                'is_offline' => app(\App\Services\EdgeModeService::class)->isOffline(),
-                'admin_read_only' => app(\App\Services\EdgeModeService::class)->isAdminReadOnly(),
-                'sync_back' => app(\App\Services\EdgeModeService::class)->syncBack(),
-                'bridge_mode_enabled' => app(\App\Services\EdgeModeService::class)->bridgeModeEnabled(),
+                'is_edge' => app(EdgeModeService::class)->isEdge(),
+                'is_online' => app(EdgeModeService::class)->isOnline(),
+                'is_offline' => app(EdgeModeService::class)->isOffline(),
+                'admin_read_only' => app(EdgeModeService::class)->isAdminReadOnly(),
+                'sync_back' => app(EdgeModeService::class)->syncBack(),
+                'bridge_mode_enabled' => app(EdgeModeService::class)->bridgeModeEnabled(),
             ],
         ];
 
@@ -93,6 +114,21 @@ class HandleInertiaRequests extends Middleware
             } catch (\Throwable) {
                 $base['programs'] = [];
                 $base['currentProgram'] = null;
+            }
+
+            try {
+                $playback = app(TokenTtsSettingRepository::class)->getInstance()->getPlayback();
+                $base['tts_allow_custom_pronunciation'] = $playback['allow_custom_pronunciation'];
+                $base['tts_segment_2_enabled'] = $playback['segment_2_enabled'];
+            } catch (\Throwable) {
+                $base['tts_allow_custom_pronunciation'] = true;
+                $base['tts_segment_2_enabled'] = true;
+            }
+
+            try {
+                $base['tts_global_budget_enabled'] = (bool) TtsPlatformBudget::settings()->global_enabled;
+            } catch (\Throwable) {
+                $base['tts_global_budget_enabled'] = false;
             }
 
             return $base;
@@ -222,12 +258,12 @@ class HandleInertiaRequests extends Middleware
     }
 
     /**
-     * Device lockout applies only to non-staff/admin. Staff and admin can navigate away without PIN/QR.
+     * Device lockout for guests and users without public.device.authorize (Spatie).
      */
     private static function deviceLockedForRequest(Request $request): bool
     {
         $user = $request->user();
-        if ($user && in_array($user->role, [UserRole::Staff, UserRole::Admin, UserRole::SuperAdmin], true)) {
+        if ($user && $user->can(PermissionCatalog::PUBLIC_DEVICE_AUTHORIZE)) {
             return false;
         }
 

@@ -1,3 +1,9 @@
+import {
+	clearTriageDeviceLocalHidSettings,
+	getLocalAllowHidOnThisDevice,
+	hasLocalPersistentHidOverride,
+} from './displayHid.js';
+
 /**
  * Per plan: device-local camera/QR scanner settings for public display, public triage, and staff triage binder.
  * Not persisted to DB; localStorage per device.
@@ -41,13 +47,39 @@ export function setLocalAllowCameraOnThisDevice(context, value) {
 }
 
 /**
- * Default ON when not set.
+ * When local is unset, use programDefault (mirror program “apply to all” on this device).
  *
  * @param {'display' | 'triage' | 'staff_binder'} context
+ * @param {boolean} [programDefault=true] Program allows camera when local unset
  * @returns {boolean}
  */
-export function shouldAllowCameraScanner(context) {
+export function shouldAllowCameraScanner(context, programDefault = true) {
 	const local = getLocalAllowCameraOnThisDevice(context);
-	return local === null ? true : local === true;
+	if (local !== null) return local === true;
+	return programDefault === true;
+}
+
+/** Clear triage/kiosk device-local camera preference so program default applies again. */
+export function clearTriageDeviceLocalCameraSettings() {
+	if (typeof window === 'undefined' || !window.localStorage) return;
+	try {
+		window.localStorage.removeItem(STORAGE_KEYS.triage);
+	} catch {
+		// ignore
+	}
+}
+
+/** Clear all triage/kiosk “this device” overrides (HID + persistent HID + camera). */
+export function clearTriageDeviceLocalSettings() {
+	clearTriageDeviceLocalHidSettings();
+	clearTriageDeviceLocalCameraSettings();
+}
+
+/** True if any triage/kiosk per-device localStorage override is set (reset button only useful then). */
+export function hasTriageDeviceLocalOverrides() {
+	if (getLocalAllowHidOnThisDevice('triage') !== null) return true;
+	if (getLocalAllowCameraOnThisDevice('triage') !== null) return true;
+	if (hasLocalPersistentHidOverride('triage')) return true;
+	return false;
 }
 

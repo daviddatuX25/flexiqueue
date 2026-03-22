@@ -2,6 +2,7 @@
 	import { useForm } from '@inertiajs/svelte';
 	import AuthLayout from '../../Layouts/AuthLayout.svelte';
 	import AppBackground from '../../Components/AppBackground.svelte';
+	import Modal from '../../Components/Modal.svelte';
 
 	interface DemoAccount {
 		label: string;
@@ -22,6 +23,15 @@
 		email: '',
 		password: ''
 	});
+
+	let showDemoAccountsModal = $state(false);
+
+	function applyDemoAccount(account: DemoAccount) {
+		$form.email = account.email;
+		$form.password = 'password';
+		$form.errors = {};
+		showDemoAccountsModal = false;
+	}
 </script>
 
 <svelte:head>
@@ -45,7 +55,24 @@
 		</a>
 		<div class="card bg-surface-50 rounded-container shadow-xl max-w-md w-full p-6">
 			<h1 class="text-2xl font-bold text-primary-500 text-center">FlexiQueue</h1>
-			<p class="text-center text-surface-950/80 text-sm mt-1">Sign in with your email and password.</p>
+			<div class="mt-1 flex items-center justify-center gap-2">
+				<p class="text-center text-surface-950/80 text-sm">Sign in with your email and password.</p>
+				{#if demo && demoAccounts.length > 0}
+					<button
+						type="button"
+						class="inline-flex items-center justify-center h-7 w-7 rounded-full border border-surface-300 text-surface-600 hover:bg-surface-100 hover:text-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-500"
+						title="View demo accounts"
+						aria-label="View demo accounts"
+						onclick={() => {
+							showDemoAccountsModal = true;
+						}}
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+						</svg>
+					</button>
+				{/if}
+			</div>
 
 			<form
 				class="flex flex-col gap-4 mt-4"
@@ -101,36 +128,40 @@
 				</button>
 			</form>
 
-			{#if demo && demoAccounts.length > 0}
-				<section
-					class="mt-6 p-4 rounded-container border border-surface-200 bg-surface-100/80"
-					aria-labelledby="demo-accounts-heading"
-				>
-					<h2 id="demo-accounts-heading" class="text-sm font-semibold text-surface-700 mb-2">
-						Demo accounts
-					</h2>
-					<p class="text-xs text-surface-600 mb-3">
-						Password: <kbd class="px-1 rounded bg-surface-200 font-mono text-xs">password</kbd>
-						· Override PIN: <kbd class="px-1 rounded bg-surface-200 font-mono text-xs">123456</kbd>
-					</p>
-					<ul class="space-y-1.5 max-h-48 overflow-y-auto">
-						{#each demoAccounts as account (account.email)}
-							<li>
-								<button
-									type="button"
-									class="text-left w-full text-sm py-1.5 px-2 rounded hover:bg-primary-500/10 focus:bg-primary-500/10 focus:outline-none focus:ring-2 focus:ring-primary-500"
-									onclick={() => {
-										$form.setData({ email: account.email, password: 'password' });
-									}}
-								>
-									<span class="font-medium text-surface-800">{account.label}</span>
-									<span class="block text-xs text-surface-500 truncate" title={account.email}>{account.email}</span>
-								</button>
-							</li>
-						{/each}
-					</ul>
-				</section>
-			{/if}
 		</div>
 	</main>
+
+	{#if demo && demoAccounts.length > 0}
+		<Modal
+			open={showDemoAccountsModal}
+			title="Demo accounts"
+			onClose={() => {
+				showDemoAccountsModal = false;
+			}}
+		>
+			<div class="space-y-4">
+				<p class="text-sm text-surface-600">
+					Choose an account to auto-fill the login form.
+				</p>
+				<p class="text-xs text-surface-600">
+					Password: <kbd class="px-1 rounded bg-surface-200 font-mono text-xs">password</kbd>
+					· Override PIN: <kbd class="px-1 rounded bg-surface-200 font-mono text-xs">123456</kbd>
+				</p>
+				<ul class="space-y-2 max-h-72 overflow-y-auto">
+					{#each demoAccounts as account (account.email)}
+						<li>
+							<button
+								type="button"
+								class="text-left w-full text-sm py-2 px-3 rounded border border-surface-200 hover:bg-primary-500/10 focus:bg-primary-500/10 focus:outline-none focus:ring-2 focus:ring-primary-500"
+								onclick={() => applyDemoAccount(account)}
+							>
+								<span class="font-medium text-surface-800">{account.label}</span>
+								<span class="block text-xs text-surface-500 truncate" title={account.email}>{account.email}</span>
+							</button>
+						</li>
+					{/each}
+				</ul>
+			</div>
+		</Modal>
+	{/if}
 </AuthLayout>

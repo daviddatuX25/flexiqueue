@@ -10,6 +10,7 @@ use App\Jobs\GenerateStationTtsJob;
 use App\Models\Program;
 use App\Models\Station;
 use App\Models\TrackStep;
+use App\Services\Tts\TtsLanguageStatusPresenter;
 use App\Support\QueueWorkerIdleCheck;
 use Illuminate\Http\JsonResponse;
 
@@ -18,6 +19,10 @@ use Illuminate\Http\JsonResponse;
  */
 class StationController extends Controller
 {
+    public function __construct(
+        private TtsLanguageStatusPresenter $ttsLanguageStatusPresenter
+    ) {}
+
     /**
      * List stations for program.
      */
@@ -39,6 +44,8 @@ class StationController extends Controller
         $data = $request->validated();
         $processIds = $data['process_ids'] ?? [];
         unset($data['process_ids']);
+        $generateTtsOverride = array_key_exists('generate_tts', $data) ? (bool) $data['generate_tts'] : null;
+        unset($data['generate_tts']);
 
         $tts = $data['tts'] ?? null;
         unset($data['tts']);
@@ -64,7 +71,7 @@ class StationController extends Controller
 
         $station = $station->fresh();
         $program = $station->program;
-        $autoGenerateStationTts = $program->settings['tts']['auto_generate_station_tts'] ?? true;
+        $autoGenerateStationTts = $generateTtsOverride ?? ($program->settings['tts']['auto_generate_station_tts'] ?? true);
         if ($autoGenerateStationTts) {
             $workerIdle = QueueWorkerIdleCheck::appearsIdle();
             if ($workerIdle && config('tts.allow_sync_when_queue_unavailable', false)) {
@@ -227,6 +234,9 @@ class StationController extends Controller
     private function stationResource(Station $station): array
     {
         $station->loadMissing('processes');
+        $languages = $this->ttsLanguageStatusPresenter->present(
+            is_array($station->settings['tts']['languages'] ?? null) ? $station->settings['tts']['languages'] : []
+        );
 
         return [
             'id' => $station->id,
@@ -239,7 +249,7 @@ class StationController extends Controller
             'created_at' => $station->created_at?->toIso8601String(),
             'process_ids' => $station->processes->pluck('id')->values()->all(),
             'tts' => [
-                'languages' => ($station->settings['tts']['languages'] ?? []),
+                'languages' => $languages,
             ],
         ];
     }

@@ -139,5 +139,32 @@ class ProgramSettingsTest extends TestCase
         $this->assertTrue($required->allowsPublicBinding());
         $this->assertTrue($required->requiresPublicBinding());
     }
-}
 
+    public function test_kiosk_getters_fallback_to_legacy_keys(): void
+    {
+        $legacy = ProgramSettings::fromArray([
+            'allow_public_triage' => true,
+            'enable_public_triage_hid_barcode' => false,
+            'enable_public_triage_camera_scanner' => false,
+            'display_scan_timeout_seconds' => 45,
+        ]);
+        $this->assertTrue($legacy->getKioskSelfServiceTriageEnabled());
+        $this->assertTrue($legacy->getKioskStatusCheckerEnabled());
+        $this->assertFalse(
+            ProgramSettings::fromArray(['allow_public_triage' => false])->getKioskStatusCheckerEnabled()
+        );
+        $this->assertFalse($legacy->getKioskEnableHidBarcode());
+        $this->assertFalse($legacy->getKioskEnableCameraScanner());
+        $this->assertSame(45, $legacy->getKioskModalIdleSeconds());
+
+        $explicit = ProgramSettings::fromArray([
+            'allow_public_triage' => false,
+            'kiosk_self_service_triage_enabled' => true,
+            'kiosk_status_checker_enabled' => false,
+            'kiosk_modal_idle_seconds' => 0,
+        ]);
+        $this->assertTrue($explicit->getKioskSelfServiceTriageEnabled());
+        $this->assertFalse($explicit->getKioskStatusCheckerEnabled());
+        $this->assertSame(0, $explicit->getKioskModalIdleSeconds());
+    }
+}

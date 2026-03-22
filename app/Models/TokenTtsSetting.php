@@ -10,11 +10,13 @@ class TokenTtsSetting extends Model
         'voice_id',
         'rate',
         'default_languages',
+        'playback',
     ];
 
     protected $casts = [
         'rate' => 'float',
         'default_languages' => 'array',
+        'playback' => 'array',
     ];
 
     /**
@@ -61,5 +63,34 @@ class TokenTtsSetting extends Model
             'ilo' => $raw['ilo'] ?? [],
         ];
     }
-}
 
+    /**
+     * Product toggles for display/admin (DB source of truth; defaults match legacy behavior).
+     *
+     * @return array{prefer_generated_audio: bool, allow_custom_pronunciation: bool, segment_2_enabled: bool}
+     */
+    public function getPlayback(): array
+    {
+        $defaults = [
+            'prefer_generated_audio' => true,
+            'allow_custom_pronunciation' => true,
+            'segment_2_enabled' => true,
+        ];
+        $raw = $this->playback;
+        if (! is_array($raw)) {
+            return $defaults;
+        }
+
+        return [
+            'prefer_generated_audio' => isset($raw['prefer_generated_audio'])
+                ? (bool) $raw['prefer_generated_audio']
+                : $defaults['prefer_generated_audio'],
+            'allow_custom_pronunciation' => isset($raw['allow_custom_pronunciation'])
+                ? (bool) $raw['allow_custom_pronunciation']
+                : $defaults['allow_custom_pronunciation'],
+            'segment_2_enabled' => isset($raw['segment_2_enabled'])
+                ? (bool) $raw['segment_2_enabled']
+                : $defaults['segment_2_enabled'],
+        ];
+    }
+}
