@@ -28,7 +28,7 @@ class ProgramPlatformDefaultSettingsTest extends TestCase
             'settings' => [],
             'edge_settings' => [],
         ]);
-        $this->superAdmin = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+        $this->superAdmin = User::factory()->superAdmin()->create(['site_id' => null]);
     }
 
     public function test_super_admin_can_show_and_update_platform_program_defaults(): void

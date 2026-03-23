@@ -28,7 +28,7 @@ class StaffAssignmentServiceTest extends TestCase
 
     public function test_get_station_for_user_returns_station_from_program_station_assignment(): void
     {
-        $user = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        $user = User::factory()->create(['assigned_station_id' => null]);
         $program = Program::create([
             'name' => 'Program A',
             'description' => null,
@@ -55,7 +55,7 @@ class StaffAssignmentServiceTest extends TestCase
 
     public function test_get_station_for_user_psa_wins_over_assigned_station_id(): void
     {
-        $user = User::factory()->create(['role' => 'staff']);
+        $user = User::factory()->create();
         $program = Program::create([
             'name' => 'Program A',
             'description' => null,
@@ -89,7 +89,7 @@ class StaffAssignmentServiceTest extends TestCase
 
     public function test_get_station_for_user_returns_station_from_assigned_station_id_when_no_psa(): void
     {
-        $user = User::factory()->create(['role' => 'staff']);
+        $user = User::factory()->create();
         $program = Program::create([
             'name' => 'Program A',
             'description' => null,
@@ -112,7 +112,7 @@ class StaffAssignmentServiceTest extends TestCase
 
     public function test_get_station_for_user_returns_null_when_assigned_station_in_different_program(): void
     {
-        $user = User::factory()->create(['role' => 'staff']);
+        $user = User::factory()->create();
         $programA = Program::create([
             'name' => 'Program A',
             'description' => null,
@@ -140,7 +140,7 @@ class StaffAssignmentServiceTest extends TestCase
 
     public function test_get_station_for_user_returns_null_when_no_assignment(): void
     {
-        $user = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        $user = User::factory()->create(['assigned_station_id' => null]);
         $program = Program::create([
             'name' => 'Program A',
             'description' => null,

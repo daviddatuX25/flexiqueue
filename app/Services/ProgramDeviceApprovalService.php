@@ -30,11 +30,6 @@ class ProgramDeviceApprovalService
             }
         }
 
-        if ($this->rbacContextService->canInProgramTeamOnly($user, PermissionCatalog::PROGRAMS_SUPERVISE, $program)) {
-            return true;
-        }
-
-        return $user->can(PermissionCatalog::PROGRAMS_SUPERVISE)
-            && $user->isSupervisorForProgram($program->id);
+        return $user->isSupervisorForProgram($program->id);
     }
 }

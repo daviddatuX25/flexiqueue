@@ -61,9 +61,9 @@
         rbacTeam.type === "program" ? "Program" : "Site";
 
     const scopedDescription = $derived(
-        `Scoped direct permissions for team ${rbacTeam.id} (${rbacTeam.type}). ` +
-            `These apply in addition to the user’s global role and direct grants. ` +
-            `Effective access in this ${rbacTeam.type} is the union of global, site-team, and program-team checks (see hasPermissionInContext).`,
+        rbacTeam.type === "program"
+            ? `Extra access for this program only (“${rbacTeam.scope_label}”). Their normal role still applies everywhere else.`
+            : `Extra access for this site only (“${rbacTeam.scope_label}”). Their normal role still applies everywhere else.`,
     );
 
     const isDirty = $derived(
@@ -205,7 +205,7 @@
             );
             selectedPerms = next;
             initialScopedPerms = [...next];
-            toaster.success("Scoped permissions saved.");
+            toaster.success("Saved.");
         } catch {
             toaster.error("Network error saving permissions.");
         } finally {
@@ -226,10 +226,10 @@
         id="scoped-rbac-heading"
         class="text-base font-semibold text-surface-950 mb-1"
     >
-        Permissions — {rbacTeam.scope_label}
+        Extra access — {rbacTeam.scope_label}
     </h2>
     <p class="text-xs text-surface-500 mb-4">
-        {scopeTitle} scope ({rbacTeam.type} team). Title shows where these grants apply.
+        {scopeTitle}-only; choose a user, then tick the extras they need here.
     </p>
 
     {#if listLoading}
@@ -285,7 +285,7 @@
                         onclick={() => void save()}
                         disabled={saving || !isDirty}
                     >
-                        {saving ? "Saving…" : "Save scoped permissions"}
+                        {saving ? "Saving…" : "Save"}
                     </button>
                 </div>
             {/if}

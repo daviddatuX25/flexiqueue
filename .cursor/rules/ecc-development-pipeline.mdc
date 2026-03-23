@@ -1,0 +1,27 @@
+---
+description: "ECC development pipeline: plan, TDD, review, then git — aligned with beads"
+alwaysApply: true
+---
+
+# Development pipeline (ECC-inspired)
+
+This is the **feature path** before Git operations. It **extends** (does not replace) the bead + contract flow in **`agentic-workflow.mdc`**.
+
+## 1. Plan first
+
+- Confirm scope with the user when required by **`plan-first-and-bead-scope.mdc`**.
+- Identify dependencies, risks, and test scenarios **before** large edits.
+
+## 2. TDD when behavior changes
+
+- For **new or changed behavior**, prefer: failing automated test → minimal implementation → green → refactor.
+- Follow project PHPUnit guidance (targeted `php artisan test` paths while iterating; full suite per project cadence).
+
+## 3. Review after writing
+
+- After substantive code changes: self-review for edge cases, authz, and consistency with **`stack-conventions.mdc`**.
+- Treat **CRITICAL / HIGH** issues as blockers; fix **MEDIUM** when practical.
+
+## 4. Commit and PR
+
+- Follow **`ecc-git-workflow.mdc`** for commits and PR habits.

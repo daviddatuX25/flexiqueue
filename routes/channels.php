@@ -1,6 +1,6 @@
 <?php
 
-use App\Enums\UserRole;
+use App\Support\PermissionCatalog;
 use Illuminate\Support\Facades\Broadcast;
 
 Broadcast::channel('App.Models.User.{id}', function ($user, $id) {
@@ -8,9 +8,9 @@ Broadcast::channel('App.Models.User.{id}', function ($user, $id) {
 });
 
 Broadcast::channel('admin.token-tts', function ($user) {
-    return $user->role === UserRole::Admin;
+    return $user->can(PermissionCatalog::ADMIN_MANAGE) || $user->can(PermissionCatalog::PLATFORM_MANAGE);
 });
 
 Broadcast::channel('admin.station-tts', function ($user) {
-    return $user->role === UserRole::Admin;
+    return $user->can(PermissionCatalog::ADMIN_MANAGE) || $user->can(PermissionCatalog::PLATFORM_MANAGE);
 });

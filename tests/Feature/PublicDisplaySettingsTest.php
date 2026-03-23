@@ -65,7 +65,7 @@ class PublicDisplaySettingsTest extends TestCase
             ],
         ]);
         $supervisor = User::factory()->supervisor()->withOverridePin('123456')->create();
-        $program->supervisedBy()->attach($supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $program);
 
         $response = $this->postJson('/api/public/display-settings', [
             'program_id' => $program->id,
@@ -75,11 +75,12 @@ class PublicDisplaySettingsTest extends TestCase
 
         $response->assertStatus(200);
         $response->assertJsonPath('enable_display_hid_barcode', false);
+        $response->assertJsonPath('kiosk_enable_hid_barcode', true);
         $response->assertJsonPath('enable_public_triage_hid_barcode', true);
 
         $program->refresh();
-        $this->assertFalse($program->getEnableDisplayHidBarcode());
-        $this->assertTrue($program->getEnablePublicTriageHidBarcode());
+        $this->assertFalse($program->settings()->getEnableDisplayHidBarcode());
+        $this->assertTrue($program->settings()->getKioskEnableHidBarcode());
     }
 
     public function test_valid_admin_pin_updates_settings_returns_200(): void
@@ -141,7 +142,7 @@ class PublicDisplaySettingsTest extends TestCase
             'edge_settings' => [],
         ]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['site_id' => $site->id, 'role' => 'staff']);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'Test',
@@ -182,7 +183,7 @@ class PublicDisplaySettingsTest extends TestCase
             'edge_settings' => [],
         ]);
         $admin = User::factory()->admin()->withOverridePin('123456')->create(['site_id' => $siteA->id]);
-        $staffB = User::factory()->create(['site_id' => $siteB->id, 'role' => 'staff']);
+        $staffB = User::factory()->create(['site_id' => $siteB->id]);
         $program = Program::create([
             'site_id' => $siteA->id,
             'name' => 'Test',
@@ -245,9 +246,10 @@ class PublicDisplaySettingsTest extends TestCase
         ]);
 
         $response->assertStatus(200);
+        $response->assertJsonPath('kiosk_enable_camera_scanner', false);
         $response->assertJsonPath('enable_public_triage_camera_scanner', false);
 
         $program->refresh();
-        $this->assertFalse($program->settings()->getEnablePublicTriageCameraScanner());
+        $this->assertFalse($program->settings()->getKioskEnableCameraScanner());
     }
 }

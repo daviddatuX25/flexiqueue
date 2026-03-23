@@ -23,8 +23,7 @@ class TtsControllerTest extends TestCase
 {
     private function createAdminForSite(Site $site): User
     {
-        return User::factory()->create([
-            'role' => 'admin',
+        return User::factory()->admin()->create([
             'site_id' => $site->id,
         ]);
     }
@@ -166,7 +165,7 @@ class TtsControllerTest extends TestCase
 
     public function test_tts_requires_admin_or_super_admin_role(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->get('/api/public/tts?text=Calling+A+3');
 

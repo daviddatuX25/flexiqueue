@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Program;
 use App\Models\Site;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -33,12 +32,10 @@ class SuperAdminVsAdminAccessTest extends TestCase
             'settings' => [],
             'edge_settings' => [],
         ]);
-        $this->admin = User::factory()->create([
-            'role' => 'admin',
+        $this->admin = User::factory()->admin()->create([
             'site_id' => $this->site->id,
         ]);
-        $this->superAdmin = User::factory()->create([
-            'role' => 'super_admin',
+        $this->superAdmin = User::factory()->superAdmin()->create([
             'site_id' => null,
         ]);
     }
@@ -103,7 +100,9 @@ class SuperAdminVsAdminAccessTest extends TestCase
     {
         $response = $this->actingAs($this->admin)->postJson('/api/admin/users', [
             'name' => 'Fellow Admin',
+            'username' => 'fellow.admin',
             'email' => 'fellow@example.com',
+            'recovery_gmail' => 'fellow.recovery@gmail.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
             'role' => 'admin',
@@ -112,14 +111,13 @@ class SuperAdminVsAdminAccessTest extends TestCase
         $response->assertStatus(201);
         $user = User::where('email', 'fellow@example.com')->first();
         $this->assertNotNull($user);
-        $this->assertSame('admin', $user->role->value);
+        $this->assertSame('admin', $user->primaryGlobalRoleName());
         $this->assertSame($this->site->id, $user->site_id);
     }
 
     public function test_super_admin_user_index_returns_only_admins(): void
     {
         $staff = User::factory()->create([
-            'role' => 'staff',
             'site_id' => $this->site->id,
             'name' => 'Staff User',
         ]);

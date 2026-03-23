@@ -28,6 +28,7 @@ services:
         depends_on:
             - mysql
             - redis
+            - mailpit
     mysql:
         image: 'mysql:8.0'
         ports:
@@ -51,6 +52,13 @@ services:
                 - localhost
             retries: 3
             timeout: 5s
+    mailpit:
+        image: 'axllent/mailpit:latest'
+        ports:
+            - '${FORWARD_MAILPIT_DASHBOARD_PORT:-8025}:8025'
+            - '${FORWARD_MAILPIT_SMTP_PORT:-1025}:1025'
+        networks:
+            - sail
     redis:
         image: 'redis:alpine'
         ports:

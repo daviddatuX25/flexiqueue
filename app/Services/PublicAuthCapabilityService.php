@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Enums\UserRole;
 use App\Models\Program;
 use App\Models\User;
 use App\Support\PermissionCatalog;
@@ -34,14 +33,10 @@ class PublicAuthCapabilityService
      */
     public function userMayAuthorizeDeviceForProgram(User $user, Program $program): bool
     {
-        if ($user->role === UserRole::SuperAdmin) {
+        if ($user->can(PermissionCatalog::PLATFORM_MANAGE)) {
             return true;
         }
 
-        if (in_array($user->role, [UserRole::Admin, UserRole::Staff], true)) {
-            return $user->site_id !== null && (int) $user->site_id === (int) $program->site_id;
-        }
-
-        return false;
+        return $user->site_id !== null && (int) $user->site_id === (int) $program->site_id;
     }
 }

@@ -2,7 +2,6 @@
 
 namespace Tests\Feature\Api\Admin;
 
-use App\Enums\UserRole;
 use App\Models\Site;
 use App\Models\TtsPlatformBudget;
 use App\Models\User;
@@ -25,7 +24,7 @@ class TtsPlatformBudgetControllerTest extends TestCase
             'is_default' => true,
         ]);
 
-        $super = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $super = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $response = $this->actingAs($super)->getJson('/api/admin/tts/platform-budget');
 
@@ -50,7 +49,7 @@ class TtsPlatformBudgetControllerTest extends TestCase
             'edge_settings' => [],
             'is_default' => true,
         ]);
-        $admin = User::factory()->create(['role' => UserRole::Admin, 'site_id' => $site->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
 
         $response = $this->actingAs($admin)->getJson('/api/admin/tts/platform-budget');
 
@@ -68,7 +67,7 @@ class TtsPlatformBudgetControllerTest extends TestCase
             'is_default' => true,
         ]);
 
-        $super = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $super = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $response = $this->actingAs($super)->putJson('/api/admin/tts/platform-budget', [
             'global_enabled' => true,
@@ -89,7 +88,7 @@ class TtsPlatformBudgetControllerTest extends TestCase
 
     public function test_superadmin_cannot_set_platform_budget_mode_to_minutes(): void
     {
-        $super = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $super = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $response = $this->actingAs($super)->putJson('/api/admin/tts/platform-budget', [
             'mode' => 'minutes',
@@ -105,7 +104,7 @@ class TtsPlatformBudgetControllerTest extends TestCase
         $budget->mode = 'minutes';
         $budget->save();
 
-        $super = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $super = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $response = $this->actingAs($super)->getJson('/api/admin/tts/platform-budget');
 

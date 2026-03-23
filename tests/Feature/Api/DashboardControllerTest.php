@@ -44,7 +44,7 @@ class DashboardControllerTest extends TestCase
         ]);
         $this->admin = User::factory()->admin()->create(['site_id' => $this->site->id]);
         $this->supervisor = User::factory()->supervisor()->create(['site_id' => $this->site->id]);
-        $this->staff = User::factory()->create(['role' => 'staff', 'site_id' => $this->site->id]);
+        $this->staff = User::factory()->create(['site_id' => $this->site->id]);
         $this->program = Program::create([
             'site_id' => $this->site->id,
             'name' => 'Cash Assistance',
@@ -87,7 +87,7 @@ class DashboardControllerTest extends TestCase
         ]);
         $token->update(['current_session_id' => Session::first()->id]);
 
-        $this->program->supervisedBy()->attach($this->supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($this->supervisor, $this->program);
     }
 
     public function test_stats_returns_200_for_admin(): void

@@ -7,8 +7,8 @@ use App\Models\ServiceTrack;
 use App\Models\Session;
 use App\Models\Station;
 use App\Models\Token;
-use App\Models\TransactionLog;
 use App\Models\TrackStep;
+use App\Models\TransactionLog;
 use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -88,7 +88,7 @@ class TransactionLogTriggersTest extends TestCase
 
     private function createTransactionLog(): TransactionLog
     {
-        $user = User::factory()->create(['role' => 'admin']);
+        $user = User::factory()->admin()->create();
 
         $program = Program::create([
             'name' => 'Test',
@@ -118,7 +118,7 @@ class TransactionLogTriggersTest extends TestCase
         ]);
 
         $token = new Token;
-        $token->qr_code_hash = hash('sha256', Str::random(32) . 'A1');
+        $token->qr_code_hash = hash('sha256', Str::random(32).'A1');
         $token->physical_id = 'A1';
         $token->status = 'in_use';
         $token->save();
@@ -142,4 +142,3 @@ class TransactionLogTriggersTest extends TestCase
         ]);
     }
 }
-

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Api;
 
 use App\Models\Program;
+use App\Models\ServiceTrack;
 use App\Models\Session;
 use App\Models\Station;
 use App\Models\TemporaryAuthorization;
@@ -30,7 +31,7 @@ class PinQrAuthEdgeCasesTest extends TestCase
 
     private Station $station2;
 
-    private \App\Models\ServiceTrack $trackToStation2;
+    private ServiceTrack $trackToStation2;
 
     private Session $session;
 
@@ -40,14 +41,14 @@ class PinQrAuthEdgeCasesTest extends TestCase
     {
         parent::setUp();
         $this->supervisor = User::factory()->supervisor()->withOverridePin('123456')->create();
-        $this->staff = User::factory()->create(['role' => 'staff']);
+        $this->staff = User::factory()->create();
         $this->program = Program::create([
             'name' => 'Test',
             'description' => null,
             'is_active' => true,
             'created_by' => $this->staff->id,
         ]);
-        $this->program->supervisedBy()->attach($this->supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($this->supervisor, $this->program);
         $this->station1 = Station::create([
             'program_id' => $this->program->id,
             'name' => 'S1',
@@ -60,7 +61,7 @@ class PinQrAuthEdgeCasesTest extends TestCase
             'capacity' => 1,
             'is_active' => true,
         ]);
-        $track = \App\Models\ServiceTrack::create([
+        $track = ServiceTrack::create([
             'program_id' => $this->program->id,
             'name' => 'Default',
             'is_default' => true,
@@ -68,7 +69,7 @@ class PinQrAuthEdgeCasesTest extends TestCase
         ]);
         TrackStep::create(['track_id' => $track->id, 'station_id' => $this->station1->id, 'step_order' => 1, 'is_required' => true]);
         TrackStep::create(['track_id' => $track->id, 'station_id' => $this->station2->id, 'step_order' => 2, 'is_required' => true]);
-        $this->trackToStation2 = \App\Models\ServiceTrack::create([
+        $this->trackToStation2 = ServiceTrack::create([
             'program_id' => $this->program->id,
             'name' => 'To S2',
             'is_default' => false,
@@ -91,6 +92,8 @@ class PinQrAuthEdgeCasesTest extends TestCase
             'status' => 'serving',
         ]);
         $token->update(['current_session_id' => $this->session->id]);
+
+        $this->staff->update(['assigned_station_id' => $this->station1->id]);
     }
 
     public function test_expired_temp_pin_returns_401(): void
@@ -270,10 +273,10 @@ class PinQrAuthEdgeCasesTest extends TestCase
     public function test_override_with_preset_qr_by_non_supervisor_for_program_returns_403(): void
     {
         $this->markTestSkipped('Current behavior returns 200 when non-supervisor uses preset QR; 403 expected per spec - verify product intent.');
-        $plainStaff = User::factory()->create(['role' => 'staff']);
+        $plainStaff = User::factory()->create();
         $qrToken = 'preset-qr-token-'.Str::random(8);
         $plainStaff->update(['override_qr_token' => Hash::make($qrToken)]);
-        $this->program->supervisedBy()->detach($this->supervisor->id);
+        $this->revokeProgramTeamSuperviseForTests($this->supervisor, $this->program);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/override", [
             'target_track_id' => $this->trackToStation2->id,

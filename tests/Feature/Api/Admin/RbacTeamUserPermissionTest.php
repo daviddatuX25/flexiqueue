@@ -26,7 +26,7 @@ class RbacTeamUserPermissionTest extends TestCase
         ]);
         $team = RbacTeam::forSite($site);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $target = User::factory()->create(['site_id' => $site->id, 'role' => 'staff']);
+        $target = User::factory()->create(['site_id' => $site->id]);
 
         $response = $this->actingAs($admin)->putJson(
             "/api/admin/rbac-teams/{$team->id}/users/{$target->id}",
@@ -59,7 +59,7 @@ class RbacTeamUserPermissionTest extends TestCase
             'is_default' => false,
         ]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $target = User::factory()->create(['site_id' => $site->id, 'role' => 'staff']);
+        $target = User::factory()->create(['site_id' => $site->id]);
 
         $response = $this->actingAs($admin)->putJson(
             '/api/admin/rbac-teams/'.RbacTeam::GLOBAL_TEAM_ID.'/users/'.$target->id,
@@ -89,7 +89,7 @@ class RbacTeamUserPermissionTest extends TestCase
         ]);
         $teamB = RbacTeam::forSite($siteB);
         $admin = User::factory()->admin()->create(['site_id' => $siteA->id]);
-        $target = User::factory()->create(['site_id' => $siteB->id, 'role' => 'staff']);
+        $target = User::factory()->create(['site_id' => $siteB->id]);
 
         $response = $this->actingAs($admin)->putJson(
             "/api/admin/rbac-teams/{$teamB->id}/users/{$target->id}",
@@ -111,7 +111,7 @@ class RbacTeamUserPermissionTest extends TestCase
         ]);
         $team = RbacTeam::forSite($site);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $target = User::factory()->create(['site_id' => $site->id, 'role' => 'staff']);
+        $target = User::factory()->create(['site_id' => $site->id]);
 
         $previous = getPermissionsTeamId();
         setPermissionsTeamId($team->id);

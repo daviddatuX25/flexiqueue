@@ -95,7 +95,7 @@ class ProgramServiceTest extends TestCase
     {
         Auth::login($this->admin);
 
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        $staff = User::factory()->create(['assigned_station_id' => null]);
         $program = Program::create([
             'name' => 'P',
             'description' => null,
@@ -141,7 +141,6 @@ class ProgramServiceTest extends TestCase
         Auth::login($this->admin);
 
         $staff = User::factory()->create([
-            'role' => 'staff',
             'assigned_station_id' => null,
             'availability_status' => User::AVAILABILITY_AVAILABLE,
         ]);
@@ -190,7 +189,6 @@ class ProgramServiceTest extends TestCase
         Auth::login($this->admin);
 
         $staff = User::factory()->create([
-            'role' => 'staff',
             'availability_status' => User::AVAILABILITY_AVAILABLE,
         ]);
         $program = Program::create([

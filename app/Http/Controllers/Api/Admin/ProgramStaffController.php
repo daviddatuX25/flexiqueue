@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers\Api\Admin;
 
+use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\Program;
 use App\Models\ProgramStationAssignment;
 use App\Models\Station;
 use App\Models\User;
+use App\Services\ProgramSupervisorGrantService;
 use App\Services\SpatieRbacSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -27,17 +29,17 @@ class ProgramStaffController extends Controller
         $siteId = $request->user()->site_id;
         $assignments = ProgramStationAssignment::query()
             ->where('program_id', $program->id)
-            ->with(['user:id,name,email,role,is_active,site_id', 'station:id,name'])
+            ->with(['user:id,name,email,is_active,site_id', 'station:id,name'])
             ->get();
 
         $staffIds = $assignments->pluck('user_id')->unique()->all();
-        $staffWithoutAssignment = User::query()
+        $staffWithoutAssignment = User::withGlobalPermissionsTeam(fn () => User::query()
             ->forSite($siteId)
-            ->where('role', 'staff')
+            ->role(UserRole::Staff->value)
             ->where('is_active', true)
             ->whereNotIn('id', $staffIds)
             ->orderBy('name')
-            ->get(['id', 'name', 'email', 'role', 'is_active']);
+            ->get(['id', 'name', 'email', 'is_active']));
 
         $items = $assignments->map(fn ($a) => [
             'user_id' => $a->user_id,
@@ -45,7 +47,7 @@ class ProgramStaffController extends Controller
                 'id' => $a->user->id,
                 'name' => $a->user->name,
                 'email' => $a->user->email,
-                'role' => $a->user->role->value,
+                'role' => $a->user->primaryGlobalRoleName() ?? 'staff',
                 'is_active' => $a->user->is_active,
             ],
             'station_id' => $a->station_id,
@@ -58,7 +60,7 @@ class ProgramStaffController extends Controller
                 'id' => $u->id,
                 'name' => $u->name,
                 'email' => $u->email,
-                'role' => $u->role->value,
+                'role' => $u->primaryGlobalRoleName() ?? 'staff',
                 'is_active' => $u->is_active,
             ],
             'station_id' => null,
@@ -89,7 +91,7 @@ class ProgramStaffController extends Controller
         }
 
         $user = User::forSite($request->user()->site_id)->findOrFail($valid['user_id']);
-        if ($user->role->value !== 'staff') {
+        if (! $user->isStaff()) {
             return response()->json(['message' => 'Only staff can be assigned to stations.'], 422);
         }
 
@@ -147,18 +149,21 @@ class ProgramStaffController extends Controller
         $this->ensureProgramInSite($request, $program);
 
         $siteId = $request->user()->site_id;
-        $supervisors = $program->supervisedBy()
-            ->where('users.role', 'staff')
-            ->orderBy('users.name')
-            ->get(['users.id', 'users.name', 'users.email']);
+        $allSupervisorIds = $program->allSupervisorUserIds();
 
-        $staffWithPin = User::query()
+        $supervisors = User::withGlobalPermissionsTeam(fn () => User::query()
+            ->whereIn('id', $allSupervisorIds)
+            ->role(UserRole::Staff->value)
+            ->orderBy('name')
+            ->get(['id', 'name', 'email']));
+
+        $staffWithPin = User::withGlobalPermissionsTeam(fn () => User::query()
             ->forSite($siteId)
-            ->where('role', 'staff')
+            ->role(UserRole::Staff->value)
             ->where('is_active', true)
             ->whereNotNull('override_pin')
             ->orderBy('name')
-            ->get(['id', 'name', 'email']);
+            ->get(['id', 'name', 'email']));
 
         $supervisorIds = $supervisors->pluck('id')->all();
 
@@ -187,14 +192,14 @@ class ProgramStaffController extends Controller
         $valid = $request->validate(['user_id' => ['required', 'integer', 'exists:users,id']]);
 
         $user = User::forSite($request->user()->site_id)->findOrFail($valid['user_id']);
-        if ($user->role->value !== 'staff') {
+        if (! $user->isStaff()) {
             return response()->json(['message' => 'Only staff can be program supervisors.'], 422);
         }
         if (! $user->override_pin) {
             return response()->json(['message' => 'User must have override PIN set to be a supervisor.'], 422);
         }
 
-        $program->supervisedBy()->syncWithoutDetaching([$user->id]);
+        app(ProgramSupervisorGrantService::class)->grantProgramTeamSupervise($user, $program);
 
         app(SpatieRbacSyncService::class)->syncSupervisorDirectPermissions($user->fresh());
 
@@ -212,7 +217,7 @@ class ProgramStaffController extends Controller
         $this->ensureProgramInSite($request, $program);
         $this->ensureUserInSite($request, $user);
 
-        $program->supervisedBy()->detach($user->id);
+        app(ProgramSupervisorGrantService::class)->revokeProgramTeamSupervise($user, $program);
 
         app(SpatieRbacSyncService::class)->syncSupervisorDirectPermissions($user->fresh());
 

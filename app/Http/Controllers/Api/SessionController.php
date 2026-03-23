@@ -201,9 +201,12 @@ class SessionController extends Controller
     public function call(CallSessionRequest $request, Session $session): JsonResponse
     {
         $user = $request->user();
+        Gate::authorize('update', $session);
+
+        $session->loadMissing('program');
 
         // Per docs/REFACTORING-ISSUE-LIST.md Issue 1: supervisor auth via SupervisorAuthService::verifyForAction.
-        if ($this->sessionService->callRequiresOverrideAuth($session) && ! $this->staffProgramAccessService->mayBypassSupervisorInteractiveAuth($user)) {
+        if ($this->sessionService->callRequiresOverrideAuth($session) && ! $this->staffProgramAccessService->mayBypassSupervisorInteractiveAuth($user, $session->program)) {
             $result = $this->supervisorAuthService->verifyForAction(
                 $request->validated(),
                 $user,
@@ -282,6 +285,8 @@ class SessionController extends Controller
      */
     public function transfer(TransferSessionRequest $request, Session $session): JsonResponse
     {
+        Gate::authorize('update', $session);
+
         try {
             $result = $this->sessionService->transfer(
                 $session,
@@ -314,6 +319,8 @@ class SessionController extends Controller
      */
     public function complete(Session $session): JsonResponse
     {
+        Gate::authorize('update', $session);
+
         try {
             $result = $this->sessionService->complete($session, $this->user()->id);
         } catch (\InvalidArgumentException $e) {
@@ -336,6 +343,8 @@ class SessionController extends Controller
      */
     public function cancel(CancelSessionRequest $request, Session $session): JsonResponse
     {
+        Gate::authorize('update', $session);
+
         try {
             $result = $this->sessionService->cancel($session, $this->user()->id, $request->validated('remarks'));
         } catch (\InvalidArgumentException $e) {
@@ -501,7 +510,11 @@ class SessionController extends Controller
         $user = $request->user();
         $staffUserId = $user->id;
 
-        if ($this->staffProgramAccessService->mayForceCompleteOrOverrideWithoutSupervisorProof($user)) {
+        Gate::authorize('update', $session);
+
+        $session->loadMissing('program');
+
+        if ($this->staffProgramAccessService->mayForceCompleteOrOverrideWithoutSupervisorProof($user, $session->program)) {
             try {
                 $result = $this->sessionService->forceComplete(
                     $session,
@@ -522,7 +535,6 @@ class SessionController extends Controller
         }
 
         // Per flexiqueue-i87: When program has require_permission_before_override OFF, accept reason only (no PIN/QR).
-        $session->loadMissing('program');
         $program = $session->program;
         if ($program && ! $program->settings()->getRequirePermissionBeforeOverride()) {
             try {
@@ -584,7 +596,11 @@ class SessionController extends Controller
         $user = $request->user();
         $staffUserId = $user->id;
 
-        if ($this->staffProgramAccessService->mayForceCompleteOrOverrideWithoutSupervisorProof($user)) {
+        Gate::authorize('update', $session);
+
+        $session->loadMissing('program');
+
+        if ($this->staffProgramAccessService->mayForceCompleteOrOverrideWithoutSupervisorProof($user, $session->program)) {
             try {
                 $result = $this->sessionService->overrideByTrack(
                     $session,
@@ -607,7 +623,6 @@ class SessionController extends Controller
         }
 
         // Per flexiqueue-i87: When program has require_permission_before_override OFF, accept reason only (no PIN/QR).
-        $session->loadMissing('program');
         $program = $session->program;
         $customSteps = $this->sanitizeCustomSteps($request->validated('custom_steps'));
         if ($program && ! $program->settings()->getRequirePermissionBeforeOverride()) {

@@ -22,6 +22,20 @@ class TriagePageControllerTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_legacy_triage_path_redirects_to_client_registration_preserving_query(): void
+    {
+        $site = $this->defaultSite();
+        $user = User::factory()->create(['site_id' => $site->id]);
+
+        $this->actingAs($user)->get('/triage?program=12')->assertRedirect('/client-registration?program=12');
+    }
+
+    /** Staff client-registration URL is auth-gated; guests must not reach the redirect closure. */
+    public function test_legacy_triage_path_redirects_guest_to_login(): void
+    {
+        $this->get('/triage?program=12')->assertRedirect(route('login'));
+    }
+
     private function defaultSite(): Site
     {
         return Site::firstOrCreate(
@@ -40,7 +54,7 @@ class TriagePageControllerTest extends TestCase
         config(['flexiqueue.staff_triage_page_enabled' => false]);
 
         $site = $this->defaultSite();
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'P',
@@ -69,7 +83,7 @@ class TriagePageControllerTest extends TestCase
             'is_required' => true,
         ]);
 
-        $response = $this->actingAs($staff)->get(route('triage'));
+        $response = $this->actingAs($staff)->get(route('client-registration'));
 
         $response->assertRedirect('/station');
     }
@@ -98,7 +112,7 @@ class TriagePageControllerTest extends TestCase
         ]);
         ServiceTrack::create(['program_id' => $programA->id, 'name' => 'Default', 'is_default' => true, 'color_code' => '#333']);
 
-        $response = $this->actingAs($admin)->get('/triage?program='.$programA->id);
+        $response = $this->actingAs($admin)->get('/client-registration?program='.$programA->id);
 
         $response->assertRedirect('/station?program='.$programA->id);
     }
@@ -106,7 +120,7 @@ class TriagePageControllerTest extends TestCase
     public function test_staff_with_assigned_station_can_load_triage_and_gets_active_program(): void
     {
         $site = $this->defaultSite();
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'Triage Program',
@@ -135,7 +149,7 @@ class TriagePageControllerTest extends TestCase
             'is_required' => true,
         ]);
 
-        $response = $this->actingAs($staff)->get(route('triage'));
+        $response = $this->actingAs($staff)->get(route('client-registration'));
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -150,10 +164,10 @@ class TriagePageControllerTest extends TestCase
     public function test_staff_without_assigned_station_gets_422_when_visiting_triage(): void
     {
         $site = $this->defaultSite();
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $staff->update(['assigned_station_id' => null]);
 
-        $response = $this->actingAs($staff)->get(route('triage'));
+        $response = $this->actingAs($staff)->get(route('client-registration'));
 
         $response->assertStatus(422);
         $response->assertSessionHasErrors('station');
@@ -184,11 +198,11 @@ class TriagePageControllerTest extends TestCase
         ServiceTrack::create(['program_id' => $programA->id, 'name' => 'Default', 'is_default' => true, 'color_code' => '#333']);
         ServiceTrack::create(['program_id' => $programB->id, 'name' => 'Default', 'is_default' => true, 'color_code' => '#333']);
 
-        $response = $this->actingAs($admin)->get('/triage?program='.$programB->id);
-        $response->assertRedirect('/triage');
+        $response = $this->actingAs($admin)->get('/client-registration?program='.$programB->id);
+        $response->assertRedirect(route('client-registration'));
         $this->assertEquals($programB->id, $response->getSession()->get('staff_selected_program_id'));
 
-        $response2 = $this->actingAs($admin)->get(route('triage'));
+        $response2 = $this->actingAs($admin)->get(route('client-registration'));
         $response2->assertStatus(200);
         $response2->assertInertia(fn ($page) => $page
             ->component('Triage/Index')

@@ -41,7 +41,7 @@ class SessionBindTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->staff = User::factory()->create(['role' => 'staff']);
+        $this->staff = User::factory()->create();
         $this->program = Program::create([
             'name' => 'Test Program',
             'description' => null,
@@ -352,7 +352,7 @@ class SessionBindTest extends TestCase
 
     public function test_bind_admin_without_assigned_station_can_bind_with_program_id_in_body(): void
     {
-        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+        $admin = User::factory()->admin()->create(['assigned_station_id' => null]);
 
         $response = $this->actingAs($admin)->postJson('/api/sessions/bind', [
             'program_id' => $this->program->id,
@@ -367,7 +367,7 @@ class SessionBindTest extends TestCase
 
     public function test_bind_admin_without_assigned_station_can_bind_with_session_selected_program(): void
     {
-        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+        $admin = User::factory()->admin()->create(['assigned_station_id' => null]);
 
         $this->withSession([StationPageController::SESSION_KEY_PROGRAM_ID => $this->program->id]);
 
@@ -383,7 +383,7 @@ class SessionBindTest extends TestCase
 
     public function test_bind_admin_without_assigned_station_returns_422_when_no_program_context(): void
     {
-        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+        $admin = User::factory()->admin()->create(['assigned_station_id' => null]);
 
         $response = $this->actingAs($admin)->postJson('/api/sessions/bind', [
             'qr_hash' => $this->token->qr_code_hash,

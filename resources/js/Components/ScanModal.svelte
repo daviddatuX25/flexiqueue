@@ -2,7 +2,7 @@
     /**
      * Reusable scan modal: HID barcode input + camera QR scanner, same layout everywhere.
      * When modal opens and HID is enabled, the HID input is focused first so hardware scanners work immediately.
-     * Use in: mobile footer (approve QR), staff triage, public triage, display board.
+     * Use in: mobile footer (approve QR), client registration, kiosk, display board.
      */
     import { tick } from "svelte";
     import Modal from "./Modal.svelte";

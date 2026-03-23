@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Enums\UserRole;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
@@ -25,15 +26,17 @@ class SuperAdminSeeder extends Seeder
         $email = env('SUPER_ADMIN_EMAIL', 'superadmin@flexiqueue.local');
         $password = env('SUPER_ADMIN_PASSWORD', 'password');
 
-        User::updateOrCreate(
+        $user = User::updateOrCreate(
             ['email' => $email],
             [
                 'name' => 'Super Admin',
+                'username' => env('SUPER_ADMIN_USERNAME', 'superadmin'),
+                'recovery_gmail' => $email,
                 'password' => Hash::make($password),
-                'role' => 'super_admin',
                 'site_id' => null,
                 'is_active' => true,
             ]
         );
+        User::assignGlobalRoleAndSyncProvisioning($user, UserRole::SuperAdmin->value);
     }
 }

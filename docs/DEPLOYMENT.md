@@ -32,6 +32,30 @@ Global HTTP requests use team id `1` via middleware (`SetGlobalPermissionsTeam`)
 
 ## Part 1 — Deploying Central (Hestia)
 
+### Transactional mail and DNS (password resets)
+
+Password resets and other transactional notifications use Laravel’s mailer. Per [`docs/plans/HYBRID_AUTH_ADMIN_FIRST_PRD.md`](plans/HYBRID_AUTH_ADMIN_FIRST_PRD.md) **§0.2** and **§3.3 (PWD-2, PWD-6)**:
+
+| Rule | Detail |
+|------|--------|
+| **SMTP on your domain** | Configure **`MAIL_MAILER=smtp`** against the **Agila / HestiaCP** mail server for the site’s domain (host, port **465** with SSL or **587** with STARTTLS/TLS — match the panel and provider docs). |
+| **From address** | Set **`MAIL_FROM_ADDRESS`** and **`MAIL_FROM_NAME`** to a mailbox/domain you control and that passes SPF/DKIM. |
+| **No third-party transactional APIs** | Do **not** use SendGrid, Mailgun, or the **Gmail API** for application password-reset or notification mail in production — align with the hybrid auth PRD. |
+
+**DNS (deliverability):** For the **sending domain**, configure at least:
+
+- **SPF** — authorize Hestia’s outbound mail hosts.
+- **DKIM** — sign messages (Hestia usually provides the key/selector to publish).
+- **DMARC** — start with `p=none` or `quarantine` while monitoring, then tighten as appropriate.
+
+This reduces spam-folder placement when users receive resets at **Gmail** (recovery address on file).
+
+**Google Sign-In (OAuth):** After code deploy, create an OAuth **Web client** in Google Cloud Console and set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (and ensure `APP_URL` matches the live HTTPS URL). Step-by-step checklist: [`docs/GOOGLE_OAUTH_AND_AGILA_HOSTING.md`](GOOGLE_OAUTH_AND_AGILA_HOSTING.md).
+
+### Authentication posture (no public registration)
+
+Per the same PRD: there is **no public self-registration**. Accounts are **admin-provisioned**; do not add open `/register` routes in deployments or forks without an explicit product decision.
+
 ### First deploy ever (one time only)
 1. Make sure .env on the Hestia server has these set:
    SUPER_ADMIN_EMAIL=your@email.com

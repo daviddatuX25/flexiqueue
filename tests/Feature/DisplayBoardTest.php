@@ -291,7 +291,6 @@ class DisplayBoardTest extends TestCase
         ]);
         $program->refresh();
         $staff = User::factory()->create([
-            'role' => 'staff',
             'site_id' => $site->id,
         ]);
         $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_DISPLAY, null);
@@ -323,9 +322,7 @@ class DisplayBoardTest extends TestCase
             'created_by' => $owner->id,
         ]);
         $program->refresh();
-        $admin = User::factory()->create([
-            'role' => 'admin',
-        ]);
+        $admin = User::factory()->admin()->create();
         $lockCookie = DeviceLock::encode($site->slug, $program->slug, DeviceLock::TYPE_DISPLAY, null);
         $lockValue = $lockCookie->getValue();
 
@@ -757,7 +754,7 @@ class DisplayBoardTest extends TestCase
         $token->save();
 
         $site = $this->defaultSite();
-        $returnTo = '/site/'.$site->slug.'/public-triage/my-program';
+        $returnTo = '/site/'.$site->slug.'/kiosk/my-program';
         $response = $this->withKnownSiteCookie($site)->get(
             $this->displayBase($site).'/status/'.$hash.'?return_to='.rawurlencode($returnTo)
         );

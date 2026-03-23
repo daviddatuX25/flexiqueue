@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api;
 
+use App\Http\Controllers\StationPageController;
 use App\Models\Client;
 use App\Models\IdentityRegistration;
 use App\Models\Process;
@@ -13,6 +14,7 @@ use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -37,7 +39,7 @@ class IdentityRegistrationApiTest extends TestCase
             'is_active' => true,
         ]);
         $process = Process::create(['program_id' => $program->id, 'name' => 'P1', 'description' => null]);
-        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+        DB::table('station_process')->insert([
             'station_id' => $station->id,
             'process_id' => $process->id,
         ]);
@@ -60,7 +62,7 @@ class IdentityRegistrationApiTest extends TestCase
     public function test_direct_creates_accepted_registration_and_client(): void
     {
         ['program' => $program, 'station' => $station] = $this->createProgramWithTrack();
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
+        $staff = User::factory()->create(['assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson('/api/identity-registrations/direct', [
             'first_name' => 'Direct',
@@ -85,7 +87,7 @@ class IdentityRegistrationApiTest extends TestCase
     public function test_direct_with_mobile_creates_client_with_mobile(): void
     {
         ['program' => $program, 'station' => $station] = $this->createProgramWithTrack();
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
+        $staff = User::factory()->create(['assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson('/api/identity-registrations/direct', [
             'first_name' => 'With',
@@ -108,7 +110,7 @@ class IdentityRegistrationApiTest extends TestCase
     public function test_direct_returns_422_when_name_or_birth_year_missing(): void
     {
         ['program' => $program, 'station' => $station] = $this->createProgramWithTrack();
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
+        $staff = User::factory()->create(['assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson('/api/identity-registrations/direct', [
             'first_name' => '',
@@ -131,7 +133,7 @@ class IdentityRegistrationApiTest extends TestCase
             'status' => 'pending',
             'requested_at' => now(),
         ]);
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
+        $staff = User::factory()->create(['assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->getJson('/api/identity-registrations');
 
@@ -179,7 +181,7 @@ class IdentityRegistrationApiTest extends TestCase
         ]);
         $session->update(['identity_registration_id' => $reg->id]);
         $client = Client::factory()->create(['first_name' => 'Jane', 'last_name' => 'Doe', 'birth_date' => '1990-01-01']);
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
+        $staff = User::factory()->create(['assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson("/api/identity-registrations/{$reg->id}/accept", [
             'first_name' => 'Jane',
@@ -230,7 +232,7 @@ class IdentityRegistrationApiTest extends TestCase
             'requested_at' => now(),
         ]);
         $session->update(['identity_registration_id' => $reg->id]);
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
+        $staff = User::factory()->create(['assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson("/api/identity-registrations/{$reg->id}/accept", [
             'first_name' => 'New',
@@ -263,7 +265,7 @@ class IdentityRegistrationApiTest extends TestCase
             'status' => 'pending',
             'requested_at' => now(),
         ]);
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
+        $staff = User::factory()->create(['assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->postJson("/api/identity-registrations/{$reg->id}/reject", []);
 
@@ -278,7 +280,7 @@ class IdentityRegistrationApiTest extends TestCase
     public function test_index_returns_422_when_staff_has_no_assigned_station(): void
     {
         $this->createProgramWithTrack();
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        $staff = User::factory()->create(['assigned_station_id' => null]);
 
         $response = $this->actingAs($staff)->getJson('/api/identity-registrations');
 
@@ -289,7 +291,7 @@ class IdentityRegistrationApiTest extends TestCase
     public function test_direct_returns_422_when_staff_has_no_assigned_station(): void
     {
         $this->createProgramWithTrack();
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        $staff = User::factory()->create(['assigned_station_id' => null]);
 
         $response = $this->actingAs($staff)->postJson('/api/identity-registrations/direct', [
             'first_name' => 'Direct',
@@ -315,7 +317,7 @@ class IdentityRegistrationApiTest extends TestCase
             'status' => 'pending',
             'requested_at' => now(),
         ]);
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        $staff = User::factory()->create(['assigned_station_id' => null]);
 
         $response = $this->actingAs($staff)->getJson("/api/identity-registrations/{$reg->id}/possible-matches");
 
@@ -336,7 +338,7 @@ class IdentityRegistrationApiTest extends TestCase
             'status' => 'pending',
             'requested_at' => now(),
         ]);
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => $station->id]);
+        $staff = User::factory()->create(['assigned_station_id' => $station->id]);
 
         $response = $this->actingAs($staff)->getJson("/api/identity-registrations/{$reg->id}/possible-matches");
 
@@ -358,7 +360,7 @@ class IdentityRegistrationApiTest extends TestCase
             'requested_at' => now(),
         ]);
         $client = Client::factory()->create(['first_name' => 'Jane', 'last_name' => 'Doe', 'birth_date' => '1990-01-01']);
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        $staff = User::factory()->create(['assigned_station_id' => null]);
 
         $response = $this->actingAs($staff)->postJson("/api/identity-registrations/{$reg->id}/accept", [
             'first_name' => 'Jane',
@@ -385,7 +387,7 @@ class IdentityRegistrationApiTest extends TestCase
             'status' => 'pending',
             'requested_at' => now(),
         ]);
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        $staff = User::factory()->create(['assigned_station_id' => null]);
 
         $response = $this->actingAs($staff)->postJson("/api/identity-registrations/{$reg->id}/reject", []);
 
@@ -408,10 +410,10 @@ class IdentityRegistrationApiTest extends TestCase
             'status' => 'pending',
             'requested_at' => now(),
         ]);
-        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+        $admin = User::factory()->admin()->create(['assigned_station_id' => null]);
 
         $response = $this
-            ->withSession([\App\Http\Controllers\StationPageController::SESSION_KEY_PROGRAM_ID => $program->id])
+            ->withSession([StationPageController::SESSION_KEY_PROGRAM_ID => $program->id])
             ->actingAs($admin)
             ->getJson('/api/identity-registrations');
 
@@ -422,7 +424,7 @@ class IdentityRegistrationApiTest extends TestCase
     public function test_direct_returns_200_for_admin_without_station_when_program_id_in_body(): void
     {
         ['program' => $program] = $this->createProgramWithTrack();
-        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+        $admin = User::factory()->admin()->create(['assigned_station_id' => null]);
 
         $response = $this->actingAs($admin)->postJson('/api/identity-registrations/direct', [
             'program_id' => $program->id,
@@ -454,7 +456,7 @@ class IdentityRegistrationApiTest extends TestCase
             'status' => 'pending',
             'requested_at' => now(),
         ]);
-        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+        $admin = User::factory()->admin()->create(['assigned_station_id' => null]);
 
         $response = $this->actingAs($admin)->getJson("/api/identity-registrations/{$reg->id}/possible-matches");
 
@@ -476,7 +478,7 @@ class IdentityRegistrationApiTest extends TestCase
             'requested_at' => now(),
         ]);
         $client = Client::factory()->create(['first_name' => 'Jane', 'last_name' => 'Doe', 'birth_date' => '1990-01-01']);
-        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+        $admin = User::factory()->admin()->create(['assigned_station_id' => null]);
 
         $response = $this->actingAs($admin)->postJson("/api/identity-registrations/{$reg->id}/accept", [
             'first_name' => 'Jane',
@@ -503,7 +505,7 @@ class IdentityRegistrationApiTest extends TestCase
             'status' => 'pending',
             'requested_at' => now(),
         ]);
-        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+        $admin = User::factory()->admin()->create(['assigned_station_id' => null]);
 
         $response = $this->actingAs($admin)->postJson("/api/identity-registrations/{$reg->id}/reject", []);
 

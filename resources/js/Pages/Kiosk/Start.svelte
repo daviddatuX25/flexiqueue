@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
-	 * Public self-serve triage: scan token, choose track, bind. No auth.
-	 * Per plan: GET /public-triage; when program allow_public_triage is true, clients can start a visit.
+	 * Public self-serve kiosk: scan token, choose track, bind. No auth.
+	 * Canonical URL: /site/{slug}/kiosk/{program}; program settings use kiosk_* keys.
 	 */
 	import { get } from 'svelte/store';
 	import { usePage } from '@inertiajs/svelte';
@@ -28,7 +28,7 @@ import { onMount, onDestroy } from 'svelte';
 	import {
 		shouldAllowCameraScanner,
 		setLocalAllowCameraOnThisDevice,
-		clearTriageDeviceLocalSettings,
+		clearKioskDeviceLocalSettings,
 	} from '../../lib/displayCamera.js';
 
 /** Per IDENTITY-BINDING-FINAL-IMPLEMENTATION-PLAN: optional washed out; only disabled | required. */
@@ -50,9 +50,8 @@ let {
 		tracks = [],
 		date = '',
 		display_scan_timeout_seconds = 20,
-		enable_public_triage_hid_barcode = true,
-		enable_public_triage_camera_scanner = true,
-		/** Kiosk feature flags (canonical; default true when omitted for older responses). */
+		kiosk_enable_hid_barcode = true,
+		kiosk_enable_camera_scanner = true,
 		kiosk_self_service_triage_enabled = true,
 		kiosk_status_checker_enabled = true,
 		kiosk_hid_persistent_when_scan_modal_closed = false,
@@ -71,8 +70,8 @@ let {
 		tracks: Track[];
 		date: string;
 		display_scan_timeout_seconds?: number;
-		enable_public_triage_hid_barcode?: boolean;
-		enable_public_triage_camera_scanner?: boolean;
+		kiosk_enable_hid_barcode?: boolean;
+		kiosk_enable_camera_scanner?: boolean;
 		kiosk_self_service_triage_enabled?: boolean;
 		kiosk_status_checker_enabled?: boolean;
 		kiosk_hid_persistent_when_scan_modal_closed?: boolean;
@@ -148,7 +147,7 @@ function bumpDevicePrefsEpoch() {
 	const effectiveLocalPersistentHid = $derived.by(() => {
 		devicePrefsEpoch;
 		kioskHidPersistentProgram;
-		return getEffectivePersistentHid('triage', kioskHidPersistentProgram);
+		return getEffectivePersistentHid('kiosk', kioskHidPersistentProgram);
 	});
 /** Modal HID loses focus → show "click me to allow scans". */
 let barcodeValue = $state('');
@@ -182,7 +181,7 @@ const checkMyStatusHref = $derived.by(() => {
 	const base =
 		site_id != null ? `/display/status/${site_id}/${hash}` : `/display/status/${hash}`;
 	const ret =
-		site_slug && program_slug ? `/site/${site_slug}/public-triage/${program_slug}` : null;
+		site_slug && program_slug ? `/site/${site_slug}/kiosk/${program_slug}` : null;
 	return ret ? `${base}?return_to=${encodeURIComponent(ret)}` : base;
 });
 let selectedTrackId = $state<number | null>(null);
@@ -196,13 +195,13 @@ let selectedTrackId = $state<number | null>(null);
 	let pendingRegistrationSuccess = $state(false);
 	let scannerCountdownRef = $state<{ extend: (seconds: number) => void } | null>(null);
 	/** Program HID setting — from props and .display_settings broadcast. */
-	let enablePublicTriageHidBarcode = $state(true);
+	let kioskProgramHidEnabled = $state(true);
 	/** Program camera/QR scanner setting — from props and .display_settings broadcast. */
-	let enablePublicTriageCameraScanner = $state(true);
+	let kioskProgramCameraEnabled = $state(true);
 	/** Effective: program default when local unset; device override when set (see displayCamera). */
 	const effectiveAllowCameraScanner = $derived.by(() => {
 		devicePrefsEpoch;
-		return shouldAllowCameraScanner('triage', enablePublicTriageCameraScanner);
+		return shouldAllowCameraScanner('kiosk', kioskProgramCameraEnabled);
 	});
 	/** Settings modal (shown after successful PIN/QR auth). */
 	let showTriageSettingsModal = $state(false);
@@ -443,7 +442,7 @@ let selectedTrackId = $state<number | null>(null);
 		window.addEventListener('beforeunload', beforeUnloadHandler);
 	});
 
-// Identity binding mode for public triage (per ProgramSettings). Invalid/optional treated as disabled.
+// Identity binding mode for kiosk (per ProgramSettings). Invalid/optional treated as disabled.
 	const identityBindingMode = $derived(
 		((identity_binding_mode === 'required' ? 'required' : 'disabled') ?? 'disabled') as IdentityBindingMode
 	);
@@ -461,8 +460,8 @@ type HidMode = 'token' | 'off';
 let hidMode = $state<HidMode>('token');
 
 	$effect(() => {
-		enablePublicTriageHidBarcode = enable_public_triage_hid_barcode !== false;
-		enablePublicTriageCameraScanner = enable_public_triage_camera_scanner !== false;
+		kioskProgramHidEnabled = kiosk_enable_hid_barcode !== false;
+		kioskProgramCameraEnabled = kiosk_enable_camera_scanner !== false;
 	});
 
 	$effect(() => {
@@ -471,9 +470,9 @@ let hidMode = $state<HidMode>('token');
 
 	/** When persistent HID is on, refocus global HID every 2s when scan modal is closed. */
 	$effect(() => {
-		if (showScanner || !effectiveLocalPersistentHid || !shouldFocusHidInput(enablePublicTriageHidBarcode, 'triage')) return;
+		if (showScanner || !effectiveLocalPersistentHid || !shouldFocusHidInput(kioskProgramHidEnabled, 'kiosk')) return;
 		const id = setInterval(() => {
-			if (!showScanner && effectiveLocalPersistentHid && shouldFocusHidInput(enablePublicTriageHidBarcode, 'triage')) barcodeInputEl?.focus();
+			if (!showScanner && effectiveLocalPersistentHid && shouldFocusHidInput(kioskProgramHidEnabled, 'kiosk')) barcodeInputEl?.focus();
 		}, 2000);
 		return () => clearInterval(id);
 	});
@@ -494,7 +493,7 @@ let hidMode = $state<HidMode>('token');
 
 	function closeScanner() {
 		showScanner = false;
-		if (effectiveLocalPersistentHid && shouldFocusHidInput(enablePublicTriageHidBarcode, 'triage')) barcodeInputEl?.focus();
+		if (effectiveLocalPersistentHid && shouldFocusHidInput(kioskProgramHidEnabled, 'kiosk')) barcodeInputEl?.focus();
 	}
 
 	function queueResetTriageDeviceToProgramDefaults() {
@@ -513,12 +512,12 @@ let hidMode = $state<HidMode>('token');
 			kioskThemeBaselineAtModalOpen = domMode;
 			kioskSettingsThemeMode = domMode;
 		}
-		triageSettingsProgramHid = enablePublicTriageHidBarcode;
-		triageSettingsProgramCamera = enablePublicTriageCameraScanner;
+		triageSettingsProgramHid = kioskProgramHidEnabled;
+		triageSettingsProgramCamera = kioskProgramCameraEnabled;
 		triageSettingsProgramPersistentHid = kioskHidPersistentProgram;
-		triageSettingsLocalAllowHid = getEffectiveLocalAllowHid('triage', enablePublicTriageHidBarcode);
-		triageSettingsLocalPersistentHid = getEffectivePersistentHid('triage', kioskHidPersistentProgram);
-		triageSettingsLocalAllowCamera = shouldAllowCameraScanner('triage', enablePublicTriageCameraScanner);
+		triageSettingsLocalAllowHid = getEffectiveLocalAllowHid('kiosk', kioskProgramHidEnabled);
+		triageSettingsLocalPersistentHid = getEffectivePersistentHid('kiosk', kioskHidPersistentProgram);
+		triageSettingsLocalAllowCamera = shouldAllowCameraScanner('kiosk', kioskProgramCameraEnabled);
 		triageSettingsAuthMode = 'pin';
 		triageSettingsError = '';
 		triageSettingsAuthSession += 1;
@@ -527,12 +526,12 @@ let hidMode = $state<HidMode>('token');
 
 	async function handleTriageSettingsQrApproved() {
 		if (pendingResetDeviceToDefaults) {
-			clearTriageDeviceLocalSettings();
+			clearKioskDeviceLocalSettings();
 			pendingResetDeviceToDefaults = false;
 		} else {
-			setLocalAllowHidOnThisDevice('triage', triageSettingsLocalAllowHid);
-			setLocalPersistentHidOnThisDevice('triage', triageSettingsLocalPersistentHid);
-			setLocalAllowCameraOnThisDevice('triage', triageSettingsLocalAllowCamera);
+			setLocalAllowHidOnThisDevice('kiosk', triageSettingsLocalAllowHid);
+			setLocalPersistentHidOnThisDevice('kiosk', triageSettingsLocalPersistentHid);
+			setLocalAllowCameraOnThisDevice('kiosk', triageSettingsLocalAllowCamera);
 		}
 		applyKioskThemeToDocument(kioskSettingsThemeMode);
 		bumpDevicePrefsEpoch();
@@ -540,8 +539,8 @@ let hidMode = $state<HidMode>('token');
 		showTriageSettingsModal = false;
 		router.reload({
 			only: [
-				'enable_public_triage_hid_barcode',
-				'enable_public_triage_camera_scanner',
+				'kiosk_enable_hid_barcode',
+				'kiosk_enable_camera_scanner',
 				'kiosk_hid_persistent_when_scan_modal_closed',
 			],
 		});
@@ -571,8 +570,8 @@ let hidMode = $state<HidMode>('token');
 			const body = {
 				program_id,
 				...authBody, // { pin } or { qr_scan_token }
-				enable_public_triage_hid_barcode: triageSettingsProgramHid,
-				enable_public_triage_camera_scanner: triageSettingsProgramCamera,
+				kiosk_enable_hid_barcode: triageSettingsProgramHid,
+				kiosk_enable_camera_scanner: triageSettingsProgramCamera,
 				kiosk_hid_persistent_when_scan_modal_closed: triageSettingsProgramPersistentHid,
 			};
 			const res = await fetch('/api/public/display-settings', {
@@ -609,25 +608,35 @@ let hidMode = $state<HidMode>('token');
 				return;
 			}
 			const d = data as {
+				kiosk_enable_hid_barcode?: boolean;
+				kiosk_enable_camera_scanner?: boolean;
 				enable_public_triage_hid_barcode?: boolean;
 				enable_public_triage_camera_scanner?: boolean;
 				kiosk_hid_persistent_when_scan_modal_closed?: boolean;
 			};
-			enablePublicTriageHidBarcode = !!d.enable_public_triage_hid_barcode;
-			enablePublicTriageCameraScanner = d.enable_public_triage_camera_scanner !== false;
+			const hid =
+				typeof d.kiosk_enable_hid_barcode === 'boolean'
+					? d.kiosk_enable_hid_barcode
+					: !!d.enable_public_triage_hid_barcode;
+			const cam =
+				typeof d.kiosk_enable_camera_scanner === 'boolean'
+					? d.kiosk_enable_camera_scanner
+					: d.enable_public_triage_camera_scanner !== false;
+			kioskProgramHidEnabled = hid;
+			kioskProgramCameraEnabled = cam;
 			if (typeof d.kiosk_hid_persistent_when_scan_modal_closed === 'boolean') {
 				kioskHidPersistentProgram = d.kiosk_hid_persistent_when_scan_modal_closed;
 			}
 			if (pendingResetDeviceToDefaults) {
-				clearTriageDeviceLocalSettings();
-				triageSettingsLocalAllowHid = getEffectiveLocalAllowHid('triage', enablePublicTriageHidBarcode);
-				triageSettingsLocalPersistentHid = getEffectivePersistentHid('triage', kioskHidPersistentProgram);
-				triageSettingsLocalAllowCamera = shouldAllowCameraScanner('triage', enablePublicTriageCameraScanner);
+				clearKioskDeviceLocalSettings();
+				triageSettingsLocalAllowHid = getEffectiveLocalAllowHid('kiosk', kioskProgramHidEnabled);
+				triageSettingsLocalPersistentHid = getEffectivePersistentHid('kiosk', kioskHidPersistentProgram);
+				triageSettingsLocalAllowCamera = shouldAllowCameraScanner('kiosk', kioskProgramCameraEnabled);
 				pendingResetDeviceToDefaults = false;
 			} else {
-				setLocalAllowHidOnThisDevice('triage', triageSettingsLocalAllowHid);
-				setLocalPersistentHidOnThisDevice('triage', triageSettingsLocalPersistentHid);
-				setLocalAllowCameraOnThisDevice('triage', triageSettingsLocalAllowCamera);
+				setLocalAllowHidOnThisDevice('kiosk', triageSettingsLocalAllowHid);
+				setLocalPersistentHidOnThisDevice('kiosk', triageSettingsLocalPersistentHid);
+				setLocalAllowCameraOnThisDevice('kiosk', triageSettingsLocalAllowCamera);
 			}
 			applyKioskThemeToDocument(kioskSettingsThemeMode);
 			bumpDevicePrefsEpoch();
@@ -650,15 +659,21 @@ let hidMode = $state<HidMode>('token');
 		ch.listen(
 			'.display_settings',
 			(e: {
+				kiosk_enable_hid_barcode?: boolean;
+				kiosk_enable_camera_scanner?: boolean;
 				enable_public_triage_hid_barcode?: boolean;
 				enable_public_triage_camera_scanner?: boolean;
 				kiosk_hid_persistent_when_scan_modal_closed?: boolean;
 			}) => {
-				if (typeof e.enable_public_triage_hid_barcode === 'boolean') {
-					enablePublicTriageHidBarcode = e.enable_public_triage_hid_barcode;
+				if (typeof e.kiosk_enable_hid_barcode === 'boolean') {
+					kioskProgramHidEnabled = e.kiosk_enable_hid_barcode;
+				} else if (typeof e.enable_public_triage_hid_barcode === 'boolean') {
+					kioskProgramHidEnabled = e.enable_public_triage_hid_barcode;
 				}
-				if (typeof e.enable_public_triage_camera_scanner === 'boolean') {
-					enablePublicTriageCameraScanner = e.enable_public_triage_camera_scanner;
+				if (typeof e.kiosk_enable_camera_scanner === 'boolean') {
+					kioskProgramCameraEnabled = e.kiosk_enable_camera_scanner;
+				} else if (typeof e.enable_public_triage_camera_scanner === 'boolean') {
+					kioskProgramCameraEnabled = e.enable_public_triage_camera_scanner;
 				}
 				if (typeof e.kiosk_hid_persistent_when_scan_modal_closed === 'boolean') {
 					kioskHidPersistentProgram = e.kiosk_hid_persistent_when_scan_modal_closed;
@@ -705,7 +720,7 @@ let hidMode = $state<HidMode>('token');
 
 	async function doTokenLookup(qrHash: string, physicalId: string): Promise<boolean> {
 		if (program_id == null) {
-			toaster.error({ title: 'Program not set. Please use the triage link for your program.' });
+			toaster.error({ title: 'Program not set. Please use this site’s kiosk link for your program.' });
 			return false;
 		}
 		const programParam = `program_id=${encodeURIComponent(program_id)}`;
@@ -781,7 +796,7 @@ let hidMode = $state<HidMode>('token');
 		if (!kioskSelfServiceTriageEnabled) return;
 		if (!scannedToken || selectedTrackId == null) return;
 		if (program_id == null) {
-			toaster.error({ title: 'Program not set. Please use the triage link for your program.' });
+			toaster.error({ title: 'Program not set. Please use this site’s kiosk link for your program.' });
 			return;
 		}
 		isSubmitting = true;
@@ -849,7 +864,7 @@ let hidMode = $state<HidMode>('token');
 		if (!kioskSelfServiceTriageEnabled) return;
 		if (!scannedToken || selectedTrackId == null) return;
 		if (program_id == null) {
-			toaster.error({ title: 'Program not set. Please use the triage link for your program.' });
+			toaster.error({ title: 'Program not set. Please use this site’s kiosk link for your program.' });
 			return;
 		}
 		isSubmitting = true;
@@ -906,7 +921,7 @@ let hidMode = $state<HidMode>('token');
 	async function submitGuestIdentificationRegistration() {
 		if (!kioskSelfServiceTriageEnabled) return;
 		if (program_id == null) {
-			toaster.error({ title: 'Program not set. Please use the triage link for your program.' });
+			toaster.error({ title: 'Program not set. Please use this site’s kiosk link for your program.' });
 			return;
 		}
 		isSubmitting = true;
@@ -1003,7 +1018,7 @@ let hidMode = $state<HidMode>('token');
 			<div class="rounded-container bg-surface-50 border border-surface-200 p-6 md:p-8 text-center">
 				<h2 class="text-xl font-bold text-surface-950 mb-2">Kiosk is not available</h2>
 				<p class="text-surface-600 mb-4">
-					Self-service triage and queue status check are both turned off for this program (or no program is configured for this device).
+					Self-service visit start and queue status check are both turned off for this program (or no program is configured for this kiosk).
 				</p>
 				<a href="/display" class="btn preset-filled-primary-500">View display board</a>
 			</div>
@@ -1047,7 +1062,7 @@ let hidMode = $state<HidMode>('token');
 			<input
 				type="text"
 				autocomplete="off"
-				inputmode={shouldUseInputModeNone(enablePublicTriageHidBarcode, 'triage') ? 'none' : 'text'}
+				inputmode={shouldUseInputModeNone(kioskProgramHidEnabled, 'kiosk') ? 'none' : 'text'}
 				aria-label="Barcode scanner input"
 				class="sr-only"
 				bind:value={barcodeValue}
@@ -1059,11 +1074,11 @@ let hidMode = $state<HidMode>('token');
 				open={showScanner}
 				title="Scan QR via Camera"
 				onClose={closeScanner}
-				allowHid={shouldFocusHidInput(enablePublicTriageHidBarcode, 'triage')}
+				allowHid={shouldFocusHidInput(kioskProgramHidEnabled, 'kiosk')}
 				allowCamera={effectiveAllowCameraScanner}
 				onScan={handleQrScan}
 				wide={true}
-				inputModeNone={shouldUseInputModeNone(enablePublicTriageHidBarcode, 'triage')}
+				inputModeNone={shouldUseInputModeNone(kioskProgramHidEnabled, 'kiosk')}
 			>
 				{#snippet extra()}
 					<CountdownTimer
@@ -1273,8 +1288,8 @@ let hidMode = $state<HidMode>('token');
 								canBypassAuth={canBypassDeviceLock}
 								getCsrfToken={getCsrfToken}
 								getRequestBody={() => ({
-									enable_public_triage_hid_barcode: triageSettingsProgramHid,
-									enable_public_triage_camera_scanner: triageSettingsProgramCamera,
+									kiosk_enable_hid_barcode: triageSettingsProgramHid,
+									kiosk_enable_camera_scanner: triageSettingsProgramCamera,
 									kiosk_hid_persistent_when_scan_modal_closed: triageSettingsProgramPersistentHid,
 								})}
 								disabled={triageSettingsSaving}
@@ -1371,7 +1386,7 @@ let hidMode = $state<HidMode>('token');
 								<Camera class="w-6 h-6" />
 							</button>
 						{/if}
-						{#if shouldFocusHidInput(enablePublicTriageHidBarcode, 'triage')}
+						{#if shouldFocusHidInput(kioskProgramHidEnabled, 'kiosk')}
 							<button
 								type="button"
 								class="btn btn-sm preset-tonal shrink-0 touch-target-h"
@@ -1391,12 +1406,12 @@ let hidMode = $state<HidMode>('token');
 					<section class="rounded-container border border-surface-200 bg-surface-50 p-4 md:p-6 space-y-3">
 						<div class="space-y-1">
 							<p class="text-sm font-semibold text-surface-950">
-								{showHoldingAreaFlows ? 'Submit registration for staff' : 'Need help linking your ID?'}
+								{showHoldingAreaFlows ? 'Client registration (holding area)' : 'Need help linking your ID?'}
 							</p>
 							<p class="text-xs text-surface-700">
 								{showHoldingAreaFlows
-									? 'Submit your details so staff can process your request. No token needed.'
-									: 'Request registration so staff can verify your identity and link your ID to your record (new client or existing).'}
+									? 'Your program requires staff verification before joining the queue. Submit your details—no token needed—or see staff at Client registration.'
+									: 'Request registration so staff can verify your identity and link your ID to your record (new or existing client).'}
 							</p>
 						</div>
 						<button

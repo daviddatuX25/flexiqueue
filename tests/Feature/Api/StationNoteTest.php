@@ -35,7 +35,6 @@ class StationNoteTest extends TestCase
             'is_active' => true,
         ]);
         $this->staff = User::factory()->create([
-            'role' => 'staff',
             'assigned_station_id' => $this->station->id,
         ]);
     }
@@ -88,7 +87,7 @@ class StationNoteTest extends TestCase
 
     public function test_notes_require_station_access(): void
     {
-        $otherStaff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        $otherStaff = User::factory()->create(['assigned_station_id' => null]);
 
         $response = $this->actingAs($otherStaff)->getJson("/api/stations/{$this->station->id}/notes");
 

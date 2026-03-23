@@ -2,7 +2,6 @@
 
 namespace Tests\Feature\Api\Admin;
 
-use App\Enums\UserRole;
 use App\Models\Site;
 use App\Models\SiteTtsUsageRollup;
 use App\Models\TtsPlatformBudget;
@@ -42,7 +41,7 @@ class TtsBudgetControllerTest extends TestCase
             'generation_count' => 50,
         ]);
 
-        $admin = User::factory()->create(['role' => UserRole::Admin, 'site_id' => $site->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
 
         $response = $this->actingAs($admin)->getJson('/api/admin/tts/budget');
 
@@ -82,7 +81,7 @@ class TtsBudgetControllerTest extends TestCase
             'is_default' => false,
         ]);
 
-        $admin = User::factory()->create(['role' => UserRole::Admin, 'site_id' => $siteA->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $siteA->id]);
 
         $response = $this->actingAs($admin)->getJson("/api/admin/sites/{$siteB->id}/tts-budget");
 
@@ -105,7 +104,7 @@ class TtsBudgetControllerTest extends TestCase
             'is_default' => true,
         ]);
 
-        $superadmin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $superadmin = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $response = $this->actingAs($superadmin)->getJson("/api/admin/sites/{$site->id}/tts-budget");
 
@@ -137,7 +136,7 @@ class TtsBudgetControllerTest extends TestCase
             'generation_count' => 20,
         ]);
 
-        $superadmin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $superadmin = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $response = $this->actingAs($superadmin)->getJson('/api/admin/tts/budgets');
 
@@ -159,7 +158,7 @@ class TtsBudgetControllerTest extends TestCase
             'edge_settings' => [],
             'is_default' => true,
         ]);
-        $admin = User::factory()->create(['role' => UserRole::Admin, 'site_id' => $site->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
 
         $response = $this->actingAs($admin)->getJson('/api/admin/tts/budgets');
 
@@ -177,7 +176,7 @@ class TtsBudgetControllerTest extends TestCase
             'is_default' => true,
         ]);
 
-        $admin = User::factory()->create(['role' => UserRole::Admin, 'site_id' => $site->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
 
         $response = $this->actingAs($admin)->getJson('/api/admin/tts/budget');
 
@@ -232,7 +231,7 @@ class TtsBudgetControllerTest extends TestCase
             'generation_count' => 10,
         ]);
 
-        $admin = User::factory()->create(['role' => UserRole::Admin, 'site_id' => $site->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
 
         $response = $this->actingAs($admin)->getJson('/api/admin/tts/budget');
 
@@ -264,7 +263,7 @@ class TtsBudgetControllerTest extends TestCase
             'is_default' => true,
         ]);
 
-        $admin = User::factory()->create(['role' => UserRole::Admin, 'site_id' => $site->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
 
         $response = $this->actingAs($admin)->getJson('/api/admin/tts/budget');
 

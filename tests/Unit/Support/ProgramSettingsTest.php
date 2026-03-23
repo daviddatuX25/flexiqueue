@@ -167,4 +167,16 @@ class ProgramSettingsTest extends TestCase
         $this->assertFalse($explicit->getKioskStatusCheckerEnabled());
         $this->assertSame(0, $explicit->getKioskModalIdleSeconds());
     }
+
+    public function test_normalize_stored_program_settings_kiosk_keys_fills_from_legacy(): void
+    {
+        $normalized = ProgramSettings::normalizeStoredProgramSettingsKioskKeys([
+            'enable_public_triage_hid_barcode' => false,
+            'enable_public_triage_camera_scanner' => true,
+        ]);
+        $this->assertArrayHasKey('kiosk_enable_hid_barcode', $normalized);
+        $this->assertFalse($normalized['kiosk_enable_hid_barcode']);
+        $this->assertTrue($normalized['kiosk_enable_camera_scanner']);
+        $this->assertFalse($normalized['enable_public_triage_hid_barcode']);
+    }
 }

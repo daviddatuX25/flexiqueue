@@ -190,7 +190,7 @@ class TrackControllerTest extends TestCase
 
     public function test_staff_cannot_access_tracks_api_returns_403(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->getJson("/api/admin/programs/{$this->program->id}/tracks");
 

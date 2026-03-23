@@ -2,6 +2,7 @@
 
 namespace Database\Seeders\Edge;
 
+use App\Enums\UserRole;
 use App\Models\Process;
 use App\Models\Program;
 use App\Models\ProgramStationAssignment;
@@ -10,6 +11,8 @@ use App\Models\Site;
 use App\Models\Station;
 use App\Models\TrackStep;
 use App\Models\User;
+use App\Services\ProgramSupervisorGrantService;
+use App\Services\SpatieRbacSyncService;
 use Illuminate\Database\Seeder;
 
 /**
@@ -20,8 +23,15 @@ class EdgeProgramSeeder extends Seeder
     public function run(): void
     {
         $site = Site::where('slug', 'tagudin-mswdo-field')->firstOrFail();
-        $admin = User::where('site_id', $site->id)->where('role', 'admin')->firstOrFail();
-        $staff = User::where('site_id', $site->id)->where('role', 'staff')->orderBy('id')->get();
+        $admin = User::withGlobalPermissionsTeam(fn () => User::query()
+            ->where('site_id', $site->id)
+            ->role(UserRole::Admin->value)
+            ->firstOrFail());
+        $staff = User::withGlobalPermissionsTeam(fn () => User::query()
+            ->where('site_id', $site->id)
+            ->role(UserRole::Staff->value)
+            ->orderBy('id')
+            ->get());
 
         $aics = Program::updateOrCreate(
             ['site_id' => $site->id, 'name' => 'Assistance to Individuals in Crisis Situation (AICS)'],
@@ -98,6 +108,7 @@ class EdgeProgramSeeder extends Seeder
             );
             $staff[$i]->update(['assigned_station_id' => $aicsStations[$i]->id]);
         }
-        $aics->supervisedBy()->syncWithoutDetaching([$staff[3]->id]);
+        app(ProgramSupervisorGrantService::class)->grantProgramTeamSupervise($staff[3], $aics);
+        app(SpatieRbacSyncService::class)->syncSupervisorDirectPermissions($staff[3]->fresh());
     }
 }

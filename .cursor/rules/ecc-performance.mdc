@@ -1,0 +1,24 @@
+---
+description: "ECC performance: model choice, context budget, failing builds"
+alwaysApply: true
+---
+
+# Performance & context (ECC-inspired, Cursor)
+
+## Model choice (flexible)
+
+- Use a **faster / cheaper** model for straightforward, narrow tasks when your Cursor plan allows it.
+- Use a **more capable** model for architecture, subtle bugs, security-sensitive review, and large refactors.
+
+## Context window
+
+- As context fills, **re-read only what you need**; avoid pasting huge files repeatedly.
+- Prefer **targeted** tests and searches over loading entire trees when possible.
+
+## When the build or tests fail
+
+1. Read the **first failing error** carefully.
+2. Fix **incrementally**; re-run the **narrowest** command that reproduces (e.g. single test file).
+3. Avoid large speculative changes without a red/green signal.
+
+There is no Cursor equivalent of Claude Code’s `~/.claude/settings.json` hook runner—rely on **discipline + CI + local scripts**.

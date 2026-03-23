@@ -27,12 +27,12 @@ class HomeController extends Controller
         $roleBadge = null;
 
         if ($user) {
-            $roleBadge = $user->role->value;
+            $roleBadge = $user->primaryGlobalRoleName() ?? 'staff';
             if ($user->can(PermissionCatalog::PLATFORM_MANAGE)) {
                 $dashboardRoute = route('admin.dashboard');
                 $dashboardLabel = 'Go to admin console';
             } elseif ($user->can(PermissionCatalog::ADMIN_MANAGE)
-                || ($user->can(PermissionCatalog::PROGRAMS_SUPERVISE) && $user->isSupervisorForAnyProgram())) {
+                || $user->isSupervisorForAnyProgram()) {
                 $dashboardRoute = route('admin.dashboard');
                 $dashboardLabel = 'Go to your dashboard';
             } else {

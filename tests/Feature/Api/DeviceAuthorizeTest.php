@@ -49,11 +49,10 @@ class DeviceAuthorizeTest extends TestCase
             'created_by' => $user->id,
         ]);
         $supervisor = User::factory()->create([
-            'role' => 'staff',
             'site_id' => $site->id,
             'override_pin' => Hash::make('123456'),
         ]);
-        $program->supervisedBy()->attach($supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $program);
 
         $response = $this->postJson('/api/public/device-authorize', [
             'program_id' => $program->id,
@@ -76,11 +75,10 @@ class DeviceAuthorizeTest extends TestCase
             'created_by' => $user->id,
         ]);
         $supervisor = User::factory()->create([
-            'role' => 'staff',
             'site_id' => $site->id,
             'override_pin' => Hash::make('123456'),
         ]);
-        $program->supervisedBy()->attach($supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $program);
 
         $response = $this->postJson('/api/public/device-authorize', [
             'program_id' => $program->id,
@@ -111,11 +109,10 @@ class DeviceAuthorizeTest extends TestCase
             'created_by' => $user->id,
         ]);
         $supervisor = User::factory()->create([
-            'role' => 'staff',
             'site_id' => $site->id,
             'override_pin' => Hash::make('123456'),
         ]);
-        $program->supervisedBy()->attach($supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $program);
 
         $response = $this->postJson('/api/public/device-authorize', [
             'program_id' => $program->id,
@@ -145,11 +142,10 @@ class DeviceAuthorizeTest extends TestCase
             'created_by' => $user->id,
         ]);
         $supervisor = User::factory()->create([
-            'role' => 'staff',
             'site_id' => $site->id,
             'override_pin' => Hash::make('987654'),
         ]);
-        $program->supervisedBy()->attach($supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $program);
 
         $response = $this->postJson('/api/public/device-authorize', [
             'program_id' => $program->id,
@@ -179,11 +175,10 @@ class DeviceAuthorizeTest extends TestCase
             'created_by' => $user->id,
         ]);
         $supervisor = User::factory()->create([
-            'role' => 'staff',
             'site_id' => $site->id,
             'override_pin' => Hash::make('987654'),
         ]);
-        $program->supervisedBy()->attach($supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $program);
 
         $response = $this->withSession([
             DeviceLock::SESSION_KEY => [

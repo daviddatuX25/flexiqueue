@@ -49,8 +49,10 @@ class UpdatePublicDisplaySettingsRequest extends FormRequest
             'display_audio_volume' => ['sometimes', 'numeric', 'min:0', 'max:1'],
             'enable_display_hid_barcode' => ['sometimes', 'boolean'],
             'enable_public_triage_hid_barcode' => ['sometimes', 'boolean'],
+            'kiosk_enable_hid_barcode' => ['sometimes', 'boolean'],
             'enable_display_camera_scanner' => ['sometimes', 'boolean'],
             'enable_public_triage_camera_scanner' => ['sometimes', 'boolean'],
+            'kiosk_enable_camera_scanner' => ['sometimes', 'boolean'],
             'kiosk_hid_persistent_when_scan_modal_closed' => ['sometimes', 'boolean'],
         ];
     }

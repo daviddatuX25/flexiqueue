@@ -1,0 +1,57 @@
+---
+description: "ECC PHP rules: PSR-12, strict types, services, security, PHPUnit — Laravel"
+globs:
+  - "**/*.php"
+  - "**/composer.json"
+  - "**/phpunit.xml"
+  - "**/phpunit.xml.dist"
+alwaysApply: false
+---
+
+# PHP / Laravel (ECC-inspired)
+
+> Extends **`ecc-coding-style.mdc`**, **`ecc-patterns.mdc`**, **`ecc-security.mdc`**, **`ecc-testing.mdc`** for PHP files.
+
+## Style and static analysis
+
+- **PSR-12**; use **Laravel Pint** when the project uses it.
+- Prefer `declare(strict_types=1);` in **new** application PHP where it fits the codebase.
+- Scalar **type hints**, **return types**, and **typed properties** for new code.
+- Run **PHPStan** / **Psalm** if the repo is configured (CI/local).
+
+## Immutability
+
+- Prefer **`readonly`** properties and small **DTOs** at service boundaries.
+- Simple maps may stay as arrays; promote to classes when shape errors cost time.
+
+## Architecture
+
+- **Thin controllers**; **Form Requests** for validation; **Services** for rules (see **`stack-conventions.mdc`**).
+- **DI** via constructors; depend on abstractions when testing demands it.
+
+## Manual “hook” checks after editing PHP
+
+There is no Claude **PostToolUse** hook in Cursor—do these mentally or via CI:
+
+- Remove **`var_dump`**, **`dd`**, **`dump`**, stray **`die()`**.
+- Avoid new **raw SQL** concatenation; use **bindings**.
+- Do not disable **CSRF** / session protections without an explicit, reviewed reason.
+
+## Security
+
+- **Eloquent**: careful **`$fillable` / `$guarded`** and mass assignment.
+- **Passwords**: framework hashing (`Hash::make` / bcrypt), not custom crypto.
+- **Session**: regenerate session id on **login / privilege change** when applicable.
+- **composer audit** in CI when available; review new dependencies.
+
+## Tests
+
+- **PHPUnit** default; **Pest** only if the project already standardizes on it.
+- Separate **fast** tests from **DB-heavy** feature tests when it helps iteration.
+- Use **factories** for fixtures; keep controller tests about **HTTP + validation**; deep rules in **service tests**.
+
+```bash
+php artisan test path/to/Test.php
+# Coverage when needed:
+php artisan test --coverage-text
+```

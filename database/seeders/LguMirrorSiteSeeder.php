@@ -67,14 +67,16 @@ class LguMirrorSiteSeeder extends Seeder
             ['email' => env('LGU_ADMIN_EMAIL', 'admin@tagudinlgu.gov.ph')],
             [
                 'name' => 'LGU Admin',
+                'username' => env('LGU_ADMIN_USERNAME', 'admin.lgu'),
+                'recovery_gmail' => env('LGU_ADMIN_EMAIL', 'admin@tagudinlgu.gov.ph'),
                 'password' => $password,
-                'role' => UserRole::Admin,
                 'is_active' => true,
                 'override_pin' => $defaultPin,
                 'override_qr_token' => Hash::make(Str::random(64)),
                 'site_id' => $site->id,
             ]
         );
+        User::assignGlobalRoleAndSyncProvisioning($admin, UserRole::Admin->value);
 
         // 6 LGU staff
         $staffNames = [
@@ -88,18 +90,21 @@ class LguMirrorSiteSeeder extends Seeder
 
         $staff = [];
         foreach ($staffNames as $i => $name) {
-            $staff[] = User::updateOrCreate(
+            $row = User::updateOrCreate(
                 ['email' => 'staff'.($i + 1).'@tagudinlgu.gov.ph'],
                 [
                     'name' => $name,
+                    'username' => 'staff'.($i + 1).'.lgu',
+                    'recovery_gmail' => 'staff'.($i + 1).'@tagudinlgu.gov.ph',
                     'password' => $password,
-                    'role' => UserRole::Staff,
                     'is_active' => true,
                     'override_pin' => $defaultPin,
                     'override_qr_token' => Hash::make(Str::random(64)),
                     'site_id' => $site->id,
                 ]
             );
+            User::assignGlobalRoleAndSyncProvisioning($row, UserRole::Staff->value);
+            $staff[] = $row;
         }
 
         // --- AICS (Assistance to Individuals in Crisis Situation) ---

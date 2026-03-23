@@ -1,7 +1,7 @@
 <script lang="ts">
     /**
-     * Direct Spatie permissions multi-select for admin user edit (RBAC Phase 4).
-     * Long list: search filters; grouped by first segment (platform, admin, …).
+     * Extra permission checkboxes for admin user edit (staff-facing copy; internal names unchanged).
+     * Search + grouped by area.
      */
     let {
         assignablePermissions = [],
@@ -11,7 +11,7 @@
         canAssignPlatformManage = false,
         disabled = false,
         errors = {} as Record<string, string[] | string | undefined>,
-        /** When set, replaces the default “Direct permissions” intro (e.g. site/program Spatie team scope). */
+        /** When set, replaces the default one-line intro (e.g. site/program scoped panel). */
         description = null as string | null,
         showEffectiveReadout = true,
     }: {
@@ -45,9 +45,20 @@
         return i === -1 ? "other" : p.slice(0, i);
     }
 
+    /** Short labels for staff-facing UI (permission names stay technical). */
     function groupTitle(seg: string): string {
-        if (seg === "other") return "Other";
-        return seg.charAt(0).toUpperCase() + seg.slice(1);
+        const labels: Record<string, string> = {
+            platform: "Platform (super admin)",
+            admin: "Administration",
+            auth: "Supervisor & authorization",
+            staff: "Staff & queue",
+            profile: "Profile & account",
+            public: "Public screens & devices",
+            programs: "Programs",
+            kiosk: "Kiosk",
+            other: "Other",
+        };
+        return labels[seg] ?? seg.charAt(0).toUpperCase() + seg.slice(1);
     }
 
     let filtered = $derived(
@@ -116,10 +127,9 @@
     {#if description}
         <p class="text-sm text-surface-600 leading-relaxed">{description}</p>
     {:else}
-        <p class="text-sm text-surface-600 leading-relaxed">
-            <strong class="text-surface-800">Direct permissions</strong> are extra
-            grants on top of the user’s <strong>role</strong>. Effective access is
-            the union of role permissions and direct grants.
+        <p class="text-sm text-surface-600 leading-snug">
+            Optional <strong class="text-surface-800">extra access</strong> on top of
+            their <strong>role</strong>. Only tick what this person needs.
         </p>
     {/if}
     {#if supervisorProgramCount > 0}
@@ -127,12 +137,9 @@
             class="text-sm rounded-container border border-primary-200 bg-primary-50/80 text-surface-800 px-3 py-2"
             role="status"
         >
-            This user is a <strong>program supervisor</strong> on
-            {supervisorProgramCount}
-            {supervisorProgramCount === 1 ? "program" : "programs"}. They also
-            receive supervisor-related permissions from that assignment (e.g.
-            dashboard and authorization tools), in addition to what you set
-            here.
+            This person supervises <strong>{supervisorProgramCount}</strong>
+            {supervisorProgramCount === 1 ? "program" : "programs"} — they already get
+            supervisor access there in addition to the options below.
         </p>
     {/if}
 
@@ -146,7 +153,7 @@
             </p>
             <ul
                 class="mt-1 max-h-32 overflow-y-auto rounded-container border border-surface-200 bg-surface-50/80 px-3 py-2 text-sm font-mono text-surface-800"
-                aria-label="Effective permission names"
+                aria-label="Current access list"
             >
                 {#if effectivePermissions.length === 0}
                     <li class="text-surface-500">—</li>
@@ -155,13 +162,9 @@
                         <li class="leading-relaxed">
                             {name}
                             {#if selected.includes(name)}
-                                <span class="text-surface-500 text-xs ml-1"
-                                    >(direct grant)</span
-                                >
+                                <span class="text-surface-500 text-xs ml-1">· extra</span>
                             {:else if effectiveFromRole(name)}
-                                <span class="text-surface-500 text-xs ml-1"
-                                    >(from role)</span
-                                >
+                                <span class="text-surface-500 text-xs ml-1">· role</span>
                             {/if}
                         </li>
                     {/each}
@@ -172,22 +175,17 @@
 
     <div class="form-control">
         <label class="label" for="perm-search"
-            ><span class="label-text font-medium"
-                >Search assignable permissions</span
-            ></label
+            ><span class="label-text font-medium">Find a permission</span></label
         >
         <input
             id="perm-search"
             type="search"
             class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-            placeholder="Filter by name (e.g. dashboard, platform)…"
+            placeholder="Search by name…"
             bind:value={search}
             autocomplete="off"
             {disabled}
         />
-        <span class="label-text-alt mt-1"
-            >Permissions are grouped by prefix. Use search when the list grows.</span
-        >
     </div>
 
     {#if errDirect.length > 0}

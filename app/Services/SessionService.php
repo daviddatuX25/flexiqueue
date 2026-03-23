@@ -875,7 +875,7 @@ class SessionService
             return [
                 'session' => $session,
                 'override' => [
-                    'authorized_by' => $supervisor ? $supervisor->name.' ('.ucfirst($supervisor->role->value).')' : 'Unknown',
+                    'authorized_by' => $supervisor ? $supervisor->name.' ('.ucfirst($supervisor->primaryGlobalRoleName() ?? 'staff').')' : 'Unknown',
                     'reason' => $reason,
                 ],
             ];
@@ -1026,7 +1026,7 @@ class SessionService
             return [
                 'session' => $session,
                 'override' => [
-                    'authorized_by' => $supervisor ? $supervisor->name.' ('.ucfirst($supervisor->role->value).')' : 'Unknown',
+                    'authorized_by' => $supervisor ? $supervisor->name.' ('.ucfirst($supervisor->primaryGlobalRoleName() ?? 'staff').')' : 'Unknown',
                     'reason' => $reason,
                 ],
             ];
@@ -1137,7 +1137,7 @@ class SessionService
             return [
                 'session' => $session,
                 'override' => $reason ? [
-                    'authorized_by' => $supervisor ? $supervisor->name.' ('.ucfirst($supervisor->role->value).')' : 'Unknown',
+                    'authorized_by' => $supervisor ? $supervisor->name.' ('.ucfirst($supervisor->primaryGlobalRoleName() ?? 'staff').')' : 'Unknown',
                     'reason' => $reason,
                 ] : null,
             ];

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Program;
 use App\Models\Site;
 use App\Models\User;
+use App\Services\ProgramSupervisorGrantService;
 use App\Services\SpatieRbacSyncService;
 use App\Support\PermissionCatalog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -17,7 +18,7 @@ class SpatieRbacSyncTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_user_observer_syncs_spatie_role_from_enum(): void
+    public function test_user_provisioning_syncs_spatie_role_from_enum(): void
     {
         $site = Site::create([
             'name' => 'S',
@@ -42,7 +43,7 @@ class SpatieRbacSyncTest extends TestCase
             'edge_settings' => [],
         ]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['site_id' => $site->id, 'role' => 'staff']);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'P',
@@ -50,13 +51,18 @@ class SpatieRbacSyncTest extends TestCase
             'is_active' => true,
             'created_by' => $admin->id,
         ]);
-        $program->supervisedBy()->attach($staff->id);
+        app(ProgramSupervisorGrantService::class)->grantProgramTeamSupervise($staff, $program);
 
         app(SpatieRbacSyncService::class)->syncSupervisorDirectPermissions($staff->fresh());
 
+        $staff->refresh();
         $this->assertTrue($staff->can(PermissionCatalog::DASHBOARD_VIEW));
         $this->assertTrue($staff->can(PermissionCatalog::AUTH_SUPERVISOR_TOOLS));
-        $this->assertTrue($staff->can(PermissionCatalog::PROGRAMS_SUPERVISE));
+        $this->assertFalse(
+            $staff->can(PermissionCatalog::PROGRAMS_SUPERVISE),
+            'R4: programs.supervise is not granted globally; use program team checks',
+        );
+        $this->assertTrue($staff->isSupervisorForProgram($program->id));
     }
 
     public function test_super_admin_role_has_platform_and_shared_not_admin_manage(): void

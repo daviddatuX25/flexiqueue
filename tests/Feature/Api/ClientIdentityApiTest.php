@@ -6,7 +6,6 @@ use App\Models\Client;
 use App\Models\Process;
 use App\Models\Program;
 use App\Models\ServiceTrack;
-use App\Models\Session;
 use App\Models\Site;
 use App\Models\Station;
 use App\Models\Token;
@@ -16,6 +15,8 @@ use App\Models\User;
 use App\Services\ClientService;
 use App\Services\MobileCryptoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -36,11 +37,11 @@ class ClientIdentityApiTest extends TestCase
         $this->site = Site::create([
             'name' => 'Default',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make('key'),
+            'api_key_hash' => Hash::make('key'),
             'settings' => [],
             'edge_settings' => [],
         ]);
-        $this->staff = User::factory()->create(['role' => 'staff', 'site_id' => $this->site->id]);
+        $this->staff = User::factory()->create(['site_id' => $this->site->id]);
     }
 
     public function test_search_by_phone_existing_returns_client_and_masked(): void
@@ -122,7 +123,7 @@ class ClientIdentityApiTest extends TestCase
         ]);
         $staff->update(['assigned_station_id' => $station->id]);
         $process = Process::create(['program_id' => $program->id, 'name' => 'P1', 'description' => null]);
-        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+        DB::table('station_process')->insert([
             'station_id' => $station->id,
             'process_id' => $process->id,
         ]);
@@ -175,7 +176,7 @@ class ClientIdentityApiTest extends TestCase
         ]);
         $staff->update(['assigned_station_id' => $station->id]);
         $process = Process::create(['program_id' => $program->id, 'name' => 'P1', 'description' => null]);
-        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+        DB::table('station_process')->insert([
             'station_id' => $station->id,
             'process_id' => $process->id,
         ]);
@@ -249,7 +250,7 @@ class ClientIdentityApiTest extends TestCase
         ]);
         $staff->update(['assigned_station_id' => $station->id]);
         $process = Process::create(['program_id' => $program->id, 'name' => 'P1', 'description' => null]);
-        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+        DB::table('station_process')->insert([
             'station_id' => $station->id,
             'process_id' => $process->id,
         ]);
@@ -299,7 +300,7 @@ class ClientIdentityApiTest extends TestCase
 
     public function test_admin_reveal_phone_returns_raw_and_writes_audit_log(): void
     {
-        $admin = User::factory()->create(['role' => 'admin', 'site_id' => $this->site->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $this->site->id]);
         $clientService = app(ClientService::class);
         $client = $clientService->createClient('Juan', 'Cruz', '1985-01-01', $this->site->id, '09171234567');
 
@@ -321,7 +322,7 @@ class ClientIdentityApiTest extends TestCase
 
     public function test_admin_reveal_phone_missing_confirm_returns_422(): void
     {
-        $admin = User::factory()->create(['role' => 'admin', 'site_id' => $this->site->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $this->site->id]);
         $clientService = app(ClientService::class);
         $client = $clientService->createClient('Juan', 'Cruz', '1985-01-01', $this->site->id, '09171234567');
 

@@ -17,7 +17,7 @@
     import { handleQrApproveScan } from "../lib/qrApproveHandler.js";
     import { getLocalAllowHidOnThisDevice, isMobileTouch } from "../lib/displayHid.js";
     import { shouldAllowCameraScanner } from "../lib/displayCamera.js";
-    import { Monitor, Route } from "lucide-svelte";
+    import { Monitor, UserPlus } from "lucide-svelte";
 
     let { children, programName = null, date = "", queueCount = 0, processedToday = 0 } = $props();
     let time = $state("");
@@ -29,7 +29,12 @@
     const showStaffFooter = $derived(auth?.can?.public_device_authorize === true);
     const currentPath = $derived((get(page)?.url ?? "").split("?")[0]);
     const isStation = $derived(currentPath === "/station" || currentPath.startsWith("/station/"));
-    const isTriage = $derived(currentPath === "/triage");
+    const isTriage = $derived(
+        currentPath === "/client-registration" ||
+            currentPath === "/triage" ||
+            currentPath.startsWith("/client-registration?") ||
+            currentPath.startsWith("/triage?"),
+    );
     const isTrackOverrides = $derived(currentPath === "/track-overrides");
     const isDevices = $derived(
         currentPath === "/devices" ||
@@ -254,13 +259,13 @@
                         <span class="text-[0.55rem] md:text-[0.65rem]">Station</span>
                     </Link>
                     <Link
-                        href="/triage"
+                        href="/client-registration"
                         class="flex flex-col items-center gap-0.5 touch-target justify-center min-w-0 flex-1 py-1 text-surface-800 dark:text-slate-200 {isTriage
                             ? 'text-primary-600 dark:text-primary-400 font-semibold'
                             : ''}"
                     >
-                        <Route class="h-4 w-4 md:h-5 md:w-5 shrink-0" />
-                        <span class="text-[0.55rem] md:text-[0.65rem]">Triage</span>
+                        <UserPlus class="h-4 w-4 md:h-5 md:w-5 shrink-0" aria-hidden="true" />
+                        <span class="text-[0.55rem] md:text-[0.65rem] text-center leading-tight">Client<br />registration</span>
                     </Link>
                     <Link
                         href="/track-overrides"

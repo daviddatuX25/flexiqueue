@@ -2,8 +2,6 @@
 
 namespace Tests\Feature\Api\Admin;
 
-use App\Enums\UserRole;
-use App\Models\Program;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
@@ -15,8 +13,7 @@ class AnalyticsTest extends TestCase
 
     private function createAdmin(): User
     {
-        return User::factory()->create([
-            'role' => UserRole::Admin,
+        return User::factory()->admin()->create([
             'password' => Hash::make('secret'),
         ]);
     }
@@ -61,7 +58,7 @@ class AnalyticsTest extends TestCase
 
     public function test_non_admin_cannot_access_analytics(): void
     {
-        $user = User::factory()->create(['role' => UserRole::Staff]);
+        $user = User::factory()->create();
         $this->actingAs($user)
             ->getJson('/api/admin/analytics/summary?from=2025-01-01&to=2025-01-31')
             ->assertForbidden();

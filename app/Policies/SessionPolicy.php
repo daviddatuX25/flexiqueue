@@ -34,11 +34,7 @@ class SessionPolicy
             return true;
         }
 
-        if ($program && $this->rbacContextService->canInProgramTeamOnly($user, PermissionCatalog::PROGRAMS_SUPERVISE, $program)) {
-            return true;
-        }
-
-        if ($user->can(PermissionCatalog::PROGRAMS_SUPERVISE) && $user->isSupervisorForProgram($session->program_id)) {
+        if ($program && $user->isSupervisorForProgram($session->program_id)) {
             return true;
         }
 
@@ -64,11 +60,7 @@ class SessionPolicy
             return true;
         }
 
-        if ($program && $this->rbacContextService->canInProgramTeamOnly($user, PermissionCatalog::PROGRAMS_SUPERVISE, $program)) {
-            return true;
-        }
-
-        if ($user->can(PermissionCatalog::PROGRAMS_SUPERVISE) && $user->isSupervisorForProgram($session->program_id)) {
+        if ($program && $user->isSupervisorForProgram($session->program_id)) {
             return true;
         }
 

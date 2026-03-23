@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\UserRole;
 use App\Events\ProgramStatusChanged;
 use App\Events\StaffAvailabilityUpdated;
 use App\Models\Program;
@@ -128,7 +129,9 @@ class ProgramService
 
         return (int) ProgramStationAssignment::query()
             ->whereIn('program_id', $activeProgramIds)
-            ->whereHas('user', fn ($q) => $q->where('role', 'staff'))
+            ->whereHas('user', function ($q): void {
+                User::withGlobalPermissionsTeam(fn () => $q->role(UserRole::Staff->value));
+            })
             ->select('user_id')
             ->groupBy('user_id')
             ->havingRaw('COUNT(DISTINCT program_id) > 1')
@@ -149,10 +152,11 @@ class ProgramService
         $stationIds = $program->stations()->pluck('id')->all();
         $assignedUserIds = ProgramStationAssignment::where('program_id', $program->id)->pluck('user_id')->all();
 
-        User::where('role', 'staff')
+        User::withGlobalPermissionsTeam(fn () => User::query()
+            ->role(UserRole::Staff->value)
             ->whereIn('assigned_station_id', $stationIds)
             ->whereNotIn('id', $assignedUserIds)
-            ->update(['assigned_station_id' => null]);
+            ->update(['assigned_station_id' => null]));
     }
 
     /**
@@ -163,15 +167,15 @@ class ProgramService
      */
     private function setAssignedStaffAvailability(Program $program, string $toStatus, ?array $fromStatuses = null): void
     {
-        $staff = User::query()
-            ->where('role', 'staff')
+        $staff = User::withGlobalPermissionsTeam(fn () => User::query()
+            ->role(UserRole::Staff->value)
             ->whereIn('id', function ($q) use ($program) {
                 $q->select('user_id')
                     ->from('program_station_assignments')
                     ->where('program_id', $program->id);
             })
             ->when($fromStatuses !== null, fn ($q) => $q->whereIn('availability_status', $fromStatuses))
-            ->get(['id', 'name', 'availability_status']);
+            ->get(['id', 'name', 'availability_status']));
 
         foreach ($staff as $user) {
             if (($user->availability_status ?? User::AVAILABILITY_OFFLINE) === $toStatus) {

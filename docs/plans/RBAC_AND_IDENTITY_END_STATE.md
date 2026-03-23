@@ -12,8 +12,8 @@
 
 Today’s FlexiQueue authorization stack is **correct for a phased migration** but carries **ongoing complexity**:
 
-- **`users.role` enum** and Spatie **roles** are kept aligned via **sync** (`SpatieRbacSyncService`, `UserObserver`).
-- **Supervisors** are represented on **`program_supervisors`** and mirrored into **global** Spatie direct grants for a handful of permissions.
+- **`users.role` enum** (admin API / forms) and Spatie **global-team roles** stay aligned via **`SpatieRbacSyncService`** when **`UserProvisioningService`** runs (after create, or when `role` / `username` / `password` change).
+- **Supervisors** are **`programs.supervise` on each program’s `RbacTeam`**; staff supervisors may still get **global** direct `dashboard.view` / `auth.supervisor_tools` from **`syncSupervisorDirectPermissions`** until that is narrowed to program-context-only checks.
 - **Spatie teams** + **`RbacTeam`** exist for **site/program** dynamics, parallel to the legacy supervisor path.
 
 That is **maintainable** but **not** the long-term “standard” shape: two sources of truth for identity/authorization create **drift risk**, extra code paths, and harder reasoning for new features.
@@ -88,7 +88,7 @@ flowchart TB
 
 | Phase | Name | Outcome |
 |-------|------|----------------|
-| **R1** | **Freeze the bridge** | No new features may add `users.role` or `program_supervisors` as authorization paths; new code uses `can()` + teams + policies. Document in PR checklist. |
+| **R1** | **Freeze the bridge** | No new features may add `users.role` or `program_supervisors` as authorization paths; new code uses `can()` + teams + policies. **PR checklist:** [`PR-CHECKLIST-RBAC-R1.md`](PR-CHECKLIST-RBAC-R1.md) (+ [`.github/pull_request_template.md`](../../.github/pull_request_template.md) gate). |
 | **R2** | **Supervisor parity on program teams** | For every behavior today that depends on pivot + global `programs.supervise`, prove equivalent behavior with **program `RbacTeam`** assignments + `hasPermissionInContext`. PHPUnit coverage. |
 | **R3** | **Data migration** | Script or admin tool: pivot rows → program-team role/permission assignments; dry-run on staging. |
 | **R4** | **Cutover** | Remove `syncSupervisorDirectPermissions` from runtime path; stop writing global supervisor direct grants; **remove** `program_supervisors` usage from UI/API; migration to drop pivot table when safe. |
@@ -145,3 +145,8 @@ is **[`HYBRID_AUTH_ADMIN_FIRST_PRD.md`](HYBRID_AUTH_ADMIN_FIRST_PRD.md)**. Imple
 | **2026-03-22** | §5 + principle 5 + identity diagram: **username** login, **Gmail** recovery — aligned with hybrid PRD revision. |
 | **2026-03-22** | §5 + principle 5: **Agila/Hestia SMTP** + **credentials** table per hybrid PRD **Developer brief** (§0). |
 | **2026-03-22** | **§1.1** — pre-production **aggressive cleanup** allowed (schema, dual-write, risk trade-off) for scalable end state while still in dev. |
+| **2026-03-22** | **R1** — PR checklist published: [`PR-CHECKLIST-RBAC-R1.md`](PR-CHECKLIST-RBAC-R1.md); GitHub PR template includes R1 gate. |
+| **2026-03-22** | **R2** — PHPUnit parity expanded in [`tests/Feature/Api/SupervisorProgramTeamParityApiTest.php`](../../tests/Feature/Api/SupervisorProgramTeamParityApiTest.php): program-team `programs.supervise` **without** `program_supervisors` pivot or assigned station (`POST …/sessions/{id}/call`); **403** on another program’s station queue vs **200** on matching program. |
+| **2026-03-22** | **R3** — Idempotent sync: `php artisan rbac:sync-supervisor-pivot-to-program-teams` (`--dry-run` supported). Implementation: [`ProgramSupervisorPivotToProgramTeamSyncService`](../../app/Services/ProgramSupervisorPivotToProgramTeamSyncService.php); tests: [`tests/Feature/Console/SyncProgramSupervisorsToProgramTeamsCommandTest.php`](../../tests/Feature/Console/SyncProgramSupervisorsToProgramTeamsCommandTest.php). Run after `rbac:sync-teams`; then `permission:cache-reset` if grants were written. Pivot table unchanged until R4 cutover. |
+| **2026-03-22** | **R4** — Dropped **`program_supervisors`** (migration `2026_03_22_180000_drop_program_supervisors_table`). Admin APIs use [`ProgramSupervisorGrantService`](../../app/Services/ProgramSupervisorGrantService.php) only. Removed pivot relations; [`Program::allSupervisorUserIds()`](../../app/Models/Program.php) = program-team IDs; [`User::scopeWithSupervisorProgramCount`](../../app/Models/User.php) for admin user list. `rbac:sync-supervisor-pivot-to-program-teams` no-ops when the table is absent. **Follow-up:** narrow or remove `syncSupervisorDirectPermissions` once all supervisor UX uses program-team context only. |
+| **2026-03-22** | **R5 / R6 (implemented)** — No `UserObserver`; [`UserProvisioningService`](../../app/Services/UserProvisioningService.php) runs from [`User::booted()`](../../app/Models/User.php) only on create or when `role`, `username`, or `password` changes (not on every save). Middleware, redirects, broadcasts, and public auth helpers use [`PermissionCatalog`](../../app/Support/PermissionCatalog.php) via `$user->can()` where applicable; admin/staff listing queries use Spatie’s `role()` scope inside [`User::withGlobalPermissionsTeam()`](../../app/Models/User.php). `users.role` remains the admin-API / form field; [`SpatieRbacSyncService`](../../app/Services/SpatieRbacSyncService.php) keeps global-team Spatie roles aligned on those saves. Further north-star work: drop `users.role` column after a single-writer migration; move supervisor direct grants fully onto program teams only (narrow `syncSupervisorDirectPermissions`). |

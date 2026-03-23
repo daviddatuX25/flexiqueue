@@ -21,7 +21,7 @@ class LoginTest extends TestCase
         $user = User::factory()->admin()->create();
 
         $response = $this->post('/login', [
-            'email' => $user->email,
+            'username' => $user->username,
             'password' => 'password',
         ]);
 
@@ -31,10 +31,10 @@ class LoginTest extends TestCase
 
     public function test_login_with_valid_credentials_redirects_staff_to_station(): void
     {
-        $user = User::factory()->create(['role' => 'staff']);
+        $user = User::factory()->create();
 
         $response = $this->post('/login', [
-            'email' => $user->email,
+            'username' => $user->username,
             'password' => 'password',
         ]);
 
@@ -47,7 +47,7 @@ class LoginTest extends TestCase
         $user = User::factory()->supervisor()->create();
 
         $response = $this->post('/login', [
-            'email' => $user->email,
+            'username' => $user->username,
             'password' => 'password',
         ]);
 
@@ -60,12 +60,12 @@ class LoginTest extends TestCase
         $user = User::factory()->create();
 
         $response = $this->post('/login', [
-            'email' => $user->email,
+            'username' => $user->username,
             'password' => 'wrong-password',
         ]);
 
         $response->assertRedirect();
-        $response->assertSessionHasErrors('email');
+        $response->assertSessionHasErrors('username');
         $this->assertGuest();
     }
 
@@ -74,12 +74,12 @@ class LoginTest extends TestCase
         $user = User::factory()->inactive()->create();
 
         $response = $this->post('/login', [
-            'email' => $user->email,
+            'username' => $user->username,
             'password' => 'password',
         ]);
 
         $response->assertRedirect();
-        $response->assertSessionHasErrors('email');
+        $response->assertSessionHasErrors('username');
         $this->assertGuest();
     }
 
@@ -90,13 +90,13 @@ class LoginTest extends TestCase
 
         for ($i = 0; $i < 5; $i++) {
             $this->post('/login', [
-                'email' => 'someone@example.com',
+                'username' => 'nonexistent-user-xyz',
                 'password' => 'wrong',
             ]);
         }
 
         $response = $this->post('/login', [
-            'email' => 'someone@example.com',
+            'username' => 'nonexistent-user-xyz',
             'password' => 'wrong',
         ]);
 
@@ -137,17 +137,17 @@ class LoginTest extends TestCase
     public function test_authenticated_user_visiting_login_redirects_by_role(): void
     {
         $admin = User::factory()->admin()->create();
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $this->actingAs($admin)->get(route('login'))->assertRedirect(route('admin.dashboard'));
         $this->actingAs($staff)->get(route('login'))->assertRedirect(route('station'));
     }
 
-    public function test_login_requires_email_and_password(): void
+    public function test_login_requires_username_and_password(): void
     {
         $response = $this->post('/login', []);
 
         $response->assertRedirect();
-        $response->assertSessionHasErrors(['email', 'password']);
+        $response->assertSessionHasErrors(['username', 'password']);
     }
 }

@@ -9,7 +9,7 @@ enum UserRole: string
     case SuperAdmin = 'super_admin';
 
     /**
-     * Supervisor is no longer a role; it is a program-specific permission (program_supervisors table).
-     * Use User::isSupervisorForProgram($programId) or User::isSupervisorForAnyProgram() instead.
+     * Supervisor is not a role; use User::isSupervisorForProgram / isSupervisorForAnyProgram
+     * (Spatie `programs.supervise` on the program RbacTeam.)
      */
 }

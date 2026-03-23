@@ -3,6 +3,7 @@
 namespace Tests\Feature\Api;
 
 use App\Models\Program;
+use App\Models\ServiceTrack;
 use App\Models\Session;
 use App\Models\Station;
 use App\Models\Token;
@@ -27,9 +28,9 @@ class TemporaryPinTest extends TestCase
 
     private Station $station2;
 
-    private \App\Models\ServiceTrack $track;
+    private ServiceTrack $track;
 
-    private \App\Models\ServiceTrack $trackToStation2;
+    private ServiceTrack $trackToStation2;
 
     private Session $session;
 
@@ -37,14 +38,14 @@ class TemporaryPinTest extends TestCase
     {
         parent::setUp();
         $this->supervisor = User::factory()->supervisor()->withOverridePin('123456')->create();
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $this->program = Program::create([
             'name' => 'Test',
             'description' => null,
             'is_active' => true,
             'created_by' => $staff->id,
         ]);
-        $this->program->supervisedBy()->attach($this->supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($this->supervisor, $this->program);
         $this->station1 = Station::create([
             'program_id' => $this->program->id,
             'name' => 'S1',
@@ -57,7 +58,7 @@ class TemporaryPinTest extends TestCase
             'capacity' => 1,
             'is_active' => true,
         ]);
-        $this->track = \App\Models\ServiceTrack::create([
+        $this->track = ServiceTrack::create([
             'program_id' => $this->program->id,
             'name' => 'Default',
             'is_default' => true,
@@ -65,7 +66,7 @@ class TemporaryPinTest extends TestCase
         ]);
         TrackStep::create(['track_id' => $this->track->id, 'station_id' => $this->station1->id, 'step_order' => 1, 'is_required' => true]);
         TrackStep::create(['track_id' => $this->track->id, 'station_id' => $this->station2->id, 'step_order' => 2, 'is_required' => true]);
-        $this->trackToStation2 = \App\Models\ServiceTrack::create([
+        $this->trackToStation2 = ServiceTrack::create([
             'program_id' => $this->program->id,
             'name' => 'To S2',
             'is_default' => false,
@@ -119,7 +120,7 @@ class TemporaryPinTest extends TestCase
         $genResponse->assertStatus(201);
         $code = $genResponse->json('code');
 
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $response = $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
             'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Skip step',
@@ -140,7 +141,7 @@ class TemporaryPinTest extends TestCase
         ]);
         $code = $genResponse->json('code');
 
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
             'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Use 1',
@@ -168,7 +169,7 @@ class TemporaryPinTest extends TestCase
         $genResponse->assertStatus(201);
         $code = $genResponse->json('code');
 
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $response = $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/force-complete", [
             'reason' => 'Client left',
             'auth_type' => 'temp_pin',
@@ -190,7 +191,7 @@ class TemporaryPinTest extends TestCase
         $genResponse->assertStatus(201);
         $code = $genResponse->json('code');
 
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
             'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Use 1',
@@ -226,7 +227,7 @@ class TemporaryPinTest extends TestCase
         $genResponse->assertStatus(201);
         $code = $genResponse->json('code');
 
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
             'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Use 1',
@@ -246,7 +247,7 @@ class TemporaryPinTest extends TestCase
 
     public function test_temporary_pin_staff_cannot_generate(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->postJson('/api/auth/temporary-pin');
 

@@ -86,7 +86,6 @@ class EdgeBindingModeTest extends TestCase
             'is_required' => true,
         ]);
         $this->staff = User::factory()->create([
-            'role' => 'staff',
             'site_id' => $this->site->id,
             'assigned_station_id' => $this->station->id,
         ]);
@@ -100,7 +99,7 @@ class EdgeBindingModeTest extends TestCase
         ]);
         config(['app.mode' => 'edge']);
 
-        $response = $this->actingAs($this->staff)->get(route('triage'));
+        $response = $this->actingAs($this->staff)->get(route('client-registration'));
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -113,7 +112,7 @@ class EdgeBindingModeTest extends TestCase
     {
         config(['app.mode' => 'central']);
 
-        $response = $this->actingAs($this->staff)->get(route('triage'));
+        $response = $this->actingAs($this->staff)->get(route('client-registration'));
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -156,12 +155,12 @@ class EdgeBindingModeTest extends TestCase
             'active_program_id' => $this->programDisabled->id,
         ]);
         config(['app.mode' => 'edge']);
-        $responseEdge = $this->actingAs($this->staff)->get(route('triage'));
+        $responseEdge = $this->actingAs($this->staff)->get(route('client-registration'));
         $responseEdge->assertStatus(200);
         $responseEdge->assertInertia(fn ($page) => $page->where('activeProgram.identity_binding_mode', 'disabled'));
 
         config(['app.mode' => 'central']);
-        $responseCentral = $this->actingAs($this->staff)->get(route('triage'));
+        $responseCentral = $this->actingAs($this->staff)->get(route('client-registration'));
         $responseCentral->assertStatus(200);
         $responseCentral->assertInertia(fn ($page) => $page->where('activeProgram.identity_binding_mode', 'disabled'));
     }

@@ -29,7 +29,7 @@ use Tests\TestCase;
  * Self-service kiosk: GET /site/{site}/kiosk/..., legacy /public-triage redirects; GET /api/public/token-lookup, POST /api/public/sessions/bind.
  * No auth. 403 when kiosk surface is disabled (no self-service and no status checker).
  */
-class PublicTriageTest extends TestCase
+class KioskSurfaceTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -89,7 +89,7 @@ class PublicTriageTest extends TestCase
         return $this->withUnencryptedCookie('known_sites', $value);
     }
 
-    /** Per plan: request canonical kiosk URL with device auth + device lock (kiosk) so we get 200 PublicStart. */
+    /** Per plan: request canonical kiosk URL with device auth + device lock (kiosk) so we get 200 Kiosk/Start. */
     private function getTriageWithDeviceAuth(Site $site, Program $program): TestResponse
     {
         $service = app(DeviceAuthorizationService::class);
@@ -130,7 +130,7 @@ class PublicTriageTest extends TestCase
         $response = $this->getTriageWithDeviceAuth($site, $program);
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
-            ->component('Triage/PublicStart')
+            ->component('Kiosk/Start')
             ->where('allowed', true)
             ->where('program_id', $program->id)
             ->has('program_name')
@@ -158,7 +158,7 @@ class PublicTriageTest extends TestCase
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
-            ->component('Triage/PublicStart')
+            ->component('Kiosk/Start')
             ->where('allowed', false)
         );
     }
@@ -172,7 +172,7 @@ class PublicTriageTest extends TestCase
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
-            ->component('Triage/PublicStart')
+            ->component('Kiosk/Start')
             ->where('allowed', false)
         );
     }
@@ -677,7 +677,7 @@ class PublicTriageTest extends TestCase
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
-            ->component('Triage/PublicStart')
+            ->component('Kiosk/Start')
             ->where('allowed', true)
             ->where('program_id', $program->id)
             ->has('program_name')
@@ -711,7 +711,7 @@ class PublicTriageTest extends TestCase
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
-            ->component('Triage/PublicStart')
+            ->component('Kiosk/Start')
             ->where('allowed', false)
             ->where('program_id', $program->id)
         );

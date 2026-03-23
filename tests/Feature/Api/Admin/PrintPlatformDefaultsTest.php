@@ -19,7 +19,7 @@ class PrintPlatformDefaultsTest extends TestCase
 
     public function test_super_admin_can_show_platform_print_defaults(): void
     {
-        $super = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+        $super = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $response = $this->actingAs($super)->getJson('/api/admin/print-platform-default-settings');
 
@@ -30,7 +30,7 @@ class PrintPlatformDefaultsTest extends TestCase
 
     public function test_super_admin_can_update_platform_print_defaults(): void
     {
-        $super = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+        $super = User::factory()->superAdmin()->create(['site_id' => null]);
         $this->app->make(PrintSettingRepository::class)->getPlatformTemplate();
 
         $this->actingAs($super);
@@ -87,7 +87,7 @@ class PrintPlatformDefaultsTest extends TestCase
     public function test_super_admin_can_upload_platform_print_image(): void
     {
         Storage::fake('public');
-        $super = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+        $super = User::factory()->superAdmin()->create(['site_id' => null]);
         $this->app->make(PrintSettingRepository::class)->getPlatformTemplate();
 
         $this->actingAs($super);

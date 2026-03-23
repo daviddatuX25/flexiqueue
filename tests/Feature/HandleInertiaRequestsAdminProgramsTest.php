@@ -74,7 +74,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
             'edge_settings' => [],
         ]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'Station Program',
@@ -200,7 +200,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
             'edge_settings' => [],
         ]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'Station Program',
@@ -237,7 +237,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
             'edge_settings' => [],
         ]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'Triage Program',
@@ -253,7 +253,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         ]);
         $staff->update(['assigned_station_id' => $station->id]);
 
-        $response = $this->actingAs($staff)->get(route('triage'));
+        $response = $this->actingAs($staff)->get(route('client-registration'));
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -334,7 +334,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
             'edge_settings' => [],
         ]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'Station Program',
@@ -377,7 +377,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
             'edge_settings' => [],
         ]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'Display Program',

@@ -25,14 +25,14 @@ class UserPageController extends Controller
 
         $query = User::query()
             ->with(['assignedStation', 'site', 'roles', 'permissions'])
-            ->withCount('supervisedPrograms')
+            ->withSupervisorProgramCount()
             ->orderBy('name');
         if ($authUser->can(PermissionCatalog::PLATFORM_MANAGE)) {
             $filterSiteId = $request->query('site_id');
             if (is_numeric($filterSiteId)) {
                 $query->forSite((int) $filterSiteId);
             } else {
-                $query->where('role', UserRole::Admin->value);
+                User::withGlobalPermissionsTeam(fn () => $query->role(UserRole::Admin->value));
             }
         } else {
             $query->forSite($siteId);
@@ -41,9 +41,11 @@ class UserPageController extends Controller
         $users = $query->get()->map(fn (User $u) => [
             'id' => $u->id,
             'name' => $u->name,
+            'username' => $u->username,
             'email' => $u->email,
+            'recovery_gmail' => $u->recovery_gmail,
             'avatar_url' => $u->avatar_url,
-            'role' => $u->role->value,
+            'role' => $u->primaryGlobalRoleName() ?? 'staff',
             'is_active' => $u->is_active,
             'availability_status' => $u->availability_status ?? 'offline',
             'assigned_station_id' => $u->assigned_station_id,
@@ -55,7 +57,7 @@ class UserPageController extends Controller
             'spatie_roles' => $u->roles->pluck('name')->values()->all(),
             'direct_permissions' => $u->getDirectPermissions()->pluck('name')->values()->all(),
             'effective_permissions' => $u->getAllPermissions()->pluck('name')->values()->all(),
-            'supervisor_program_count' => (int) ($u->supervised_programs_count ?? 0),
+            'supervisor_program_count' => (int) ($u->supervised_program_count ?? 0),
         ]);
 
         // Per central-edge Phase A: program from query. B.4: site admin only sees programs in their site; super_admin may pick any.

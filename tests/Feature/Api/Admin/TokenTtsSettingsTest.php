@@ -344,14 +344,14 @@ class TokenTtsSettingsTest extends TestCase
 
     public function test_super_admin_cannot_access_token_tts_settings(): void
     {
-        $super = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+        $super = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $this->actingAs($super)->getJson('/api/admin/token-tts-settings')->assertStatus(403);
     }
 
     public function test_non_admin_cannot_access(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $this->actingAs($staff)->getJson('/api/admin/token-tts-settings')->assertStatus(403);
         $this->actingAs($staff)->getJson('/api/admin/tts/sample-phrase?lang=en')->assertStatus(403);

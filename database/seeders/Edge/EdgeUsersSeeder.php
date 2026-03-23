@@ -21,20 +21,21 @@ class EdgeUsersSeeder extends Seeder
         $overridePin = Hash::make('123456');
 
         $users = [
-            ['role' => UserRole::Admin, 'name' => 'Lourdes Valdez', 'email' => 'admin@tagudinfield.gov.ph'],
-            ['role' => UserRole::Staff, 'name' => 'Maria Santos', 'email' => 'staff1@tagudinfield.gov.ph'],
-            ['role' => UserRole::Staff, 'name' => 'Juan Dela Cruz', 'email' => 'staff2@tagudinfield.gov.ph'],
-            ['role' => UserRole::Staff, 'name' => 'Rosa Reyes', 'email' => 'staff3@tagudinfield.gov.ph'],
-            ['role' => UserRole::Staff, 'name' => 'Jose Garcia', 'email' => 'staff4@tagudinfield.gov.ph'],
+            ['role' => UserRole::Admin, 'name' => 'Lourdes Valdez', 'email' => 'admin@tagudinfield.gov.ph', 'username' => 'admin.field'],
+            ['role' => UserRole::Staff, 'name' => 'Maria Santos', 'email' => 'staff1@tagudinfield.gov.ph', 'username' => 'staff1.field'],
+            ['role' => UserRole::Staff, 'name' => 'Juan Dela Cruz', 'email' => 'staff2@tagudinfield.gov.ph', 'username' => 'staff2.field'],
+            ['role' => UserRole::Staff, 'name' => 'Rosa Reyes', 'email' => 'staff3@tagudinfield.gov.ph', 'username' => 'staff3.field'],
+            ['role' => UserRole::Staff, 'name' => 'Jose Garcia', 'email' => 'staff4@tagudinfield.gov.ph', 'username' => 'staff4.field'],
         ];
 
         foreach ($users as $u) {
-            User::updateOrCreate(
+            $row = User::updateOrCreate(
                 ['email' => $u['email']],
                 [
                     'name' => $u['name'],
+                    'username' => $u['username'],
+                    'recovery_gmail' => $u['email'],
                     'password' => $password,
-                    'role' => $u['role'],
                     'site_id' => $site->id,
                     'is_active' => true,
                     'availability_status' => 'available',
@@ -42,6 +43,7 @@ class EdgeUsersSeeder extends Seeder
                     'override_qr_token' => Hash::make(Str::random(64)),
                 ]
             );
+            User::assignGlobalRoleAndSyncProvisioning($row, $u['role']->value);
         }
     }
 }

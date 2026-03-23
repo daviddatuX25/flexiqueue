@@ -44,7 +44,7 @@ class StationController extends Controller
      */
     public function setPriorityFirst(SetStationPriorityFirstRequest $request, Station $station): JsonResponse
     {
-        Gate::authorize('view', $station);
+        Gate::authorize('managePriority', $station);
         $station->update(['priority_first_override' => $request->validated('priority_first')]);
 
         return response()->json([

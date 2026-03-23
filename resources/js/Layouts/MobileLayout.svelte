@@ -7,7 +7,7 @@
     import { Link } from "@inertiajs/svelte";
     import { usePage } from "@inertiajs/svelte";
     import { router } from "@inertiajs/svelte";
-    import { Monitor, Route } from "lucide-svelte";
+    import { Monitor, UserPlus } from "lucide-svelte";
     import StatusFooter from "./StatusFooter.svelte";
     import FlexiQueueToaster from "../Components/FlexiQueueToaster.svelte";
     import FlashToToast from "../Components/FlashToToast.svelte";
@@ -39,7 +39,12 @@
     const isStation = $derived(
         currentPath === "/station" || currentPath.startsWith("/station/"),
     );
-    const isTriage = $derived(currentPath === "/triage");
+    const isTriage = $derived(
+        currentPath === "/client-registration" ||
+            currentPath.startsWith("/client-registration?") ||
+            currentPath === "/triage" ||
+            currentPath.startsWith("/triage?"),
+    );
     const isTrackOverrides = $derived(currentPath === "/track-overrides");
     const isDevices = $derived(currentPath === "/devices" || currentPath.startsWith("/devices/"));
     const isSuperAdmin = $derived(user?.role === "super_admin");
@@ -51,7 +56,7 @@
     /** Approve flows + staff token scan (status / triage); staff.operations covers staff QR. */
     const showFooterQrButton = $derived(!!canApproveRequests || auth?.can?.staff_operations === true);
     const staffTriagePageEnabled = $derived($pageStore.props?.staff_triage_page_enabled !== false);
-    const triageNavHref = $derived(staffTriagePageEnabled ? "/triage" : "/station");
+    const triageNavHref = $derived(staffTriagePageEnabled ? "/client-registration" : "/station");
     /** Account-level scan preferences (same as Triage); auth.user has staff_triage_allow_* when serialized. */
     const accountAllowHid = $derived(user?.staff_triage_allow_hid_barcode !== false);
     const accountAllowCamera = $derived(user?.staff_triage_allow_camera_scanner !== false);
@@ -242,7 +247,7 @@
 
     <!-- Footer: one strip with matching background; nav bar + status footer (program | QR | availability). -->
     <footer class="shrink-0 min-h-0 z-10 flex flex-col ">
-        <!-- Nav bar: Station | Triage | Track overrides; same theme as status bar below -->
+        <!-- Nav bar: Station | Client registration | Track overrides; same theme as status bar below -->
         <div class="px-3 sm:px-4 pt-3 pb-2">
             <div
                 class="fq-nav-bar relative rounded-3xl border bg-surface-50 dark:bg-slate-900 border-t border-surface-200 dark:border-slate-700 shadow-md overflow-visible h-14 md:h-16 flex items-center justify-between px-4 sm:px-6 md:px-8"
@@ -271,15 +276,15 @@
                     <span class="text-[0.55rem] md:text-[0.65rem]">Station</span>
                 </Link>
 
-                <!-- Center: Triage (or Station when full-page triage is off) -->
+                <!-- Center: Client registration (or Station when staff page is off) -->
                 <Link
                     href={triageNavHref}
                     class="flex flex-col items-center gap-0.5 touch-target justify-center min-w-0 flex-1 py-1 text-surface-800 dark:text-slate-200 {isTriage
                         ? 'text-primary-600 dark:text-primary-400 font-semibold'
                         : ''}"
                 >
-                    <Route class="h-4 w-4 md:h-5 md:w-5 shrink-0" />
-                    <span class="text-[0.55rem] md:text-[0.65rem]">Triage</span>
+                    <UserPlus class="h-4 w-4 md:h-5 md:w-5 shrink-0" aria-hidden="true" />
+                    <span class="text-[0.55rem] md:text-[0.65rem] text-center leading-tight">Client<br />registration</span>
                 </Link>
 
                     <!-- Right: Track overrides -->

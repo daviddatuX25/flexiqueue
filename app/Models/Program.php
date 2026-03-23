@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\PermissionCatalog;
 use App\Support\ProgramSettings;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -9,7 +10,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Spatie\Permission\Models\Permission;
 
 class Program extends Model
 {
@@ -191,11 +194,36 @@ class Program extends Model
         return $this->hasMany(Session::class, 'program_id');
     }
 
-    public function supervisedBy(): BelongsToMany
+    /**
+     * User IDs with `programs.supervise` on this program's {@see RbacTeam}.
+     *
+     * @return list<int>
+     */
+    public function programTeamSupervisorUserIds(): array
     {
-        return $this->belongsToMany(User::class, 'program_supervisors')
-            ->using(ProgramSupervisor::class)
-            ->withTimestamps();
+        $team = RbacTeam::forProgram($this);
+        $permission = Permission::findByName(PermissionCatalog::PROGRAMS_SUPERVISE, PermissionCatalog::guardName());
+        if ($permission === null) {
+            return [];
+        }
+
+        return DB::table('model_has_permissions')
+            ->where('team_id', $team->id)
+            ->where('permission_id', $permission->id)
+            ->where('model_type', (new User)->getMorphClass())
+            ->pluck('model_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+    }
+
+    /**
+     * All user IDs who supervise this program via program-team `programs.supervise`.
+     *
+     * @return list<int>
+     */
+    public function allSupervisorUserIds(): array
+    {
+        return $this->programTeamSupervisorUserIds();
     }
 
     public function stationAssignments(): HasMany

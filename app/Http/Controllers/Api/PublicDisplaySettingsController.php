@@ -53,13 +53,19 @@ class PublicDisplaySettingsController extends Controller
             $payload['temp_code']
         );
 
-        foreach (['display_audio_muted', 'display_audio_volume', 'enable_display_hid_barcode', 'enable_public_triage_hid_barcode', 'enable_display_camera_scanner', 'enable_public_triage_camera_scanner', 'kiosk_hid_persistent_when_scan_modal_closed'] as $key) {
+        foreach ([
+            'display_audio_muted', 'display_audio_volume',
+            'enable_display_hid_barcode', 'enable_public_triage_hid_barcode',
+            'enable_display_camera_scanner', 'enable_public_triage_camera_scanner',
+            'kiosk_enable_hid_barcode', 'kiosk_enable_camera_scanner',
+            'kiosk_hid_persistent_when_scan_modal_closed',
+        ] as $key) {
             if (array_key_exists($key, $payload)) {
                 $settings[$key] = $payload[$key];
             }
         }
 
-        $settings = ProgramSettings::syncKioskKeysToLegacyAliases($settings);
+        $settings = ProgramSettings::normalizeStoredProgramSettingsKioskKeys($settings);
 
         $program->update(['settings' => $settings]);
         $program = $program->fresh();
@@ -77,14 +83,18 @@ class PublicDisplaySettingsController extends Controller
             $program->settings()->getKioskHidPersistentWhenScanModalClosed(),
         ));
 
+        $ps = $program->settings();
+
         return response()->json([
-            'display_audio_muted' => $program->settings()->getDisplayAudioMuted(),
-            'display_audio_volume' => $program->settings()->getDisplayAudioVolume(),
-            'enable_display_hid_barcode' => $program->settings()->getEnableDisplayHidBarcode(),
-            'enable_public_triage_hid_barcode' => $program->settings()->getEnablePublicTriageHidBarcode(),
-            'enable_display_camera_scanner' => $program->settings()->getEnableDisplayCameraScanner(),
-            'enable_public_triage_camera_scanner' => $program->settings()->getEnablePublicTriageCameraScanner(),
-            'kiosk_hid_persistent_when_scan_modal_closed' => $program->settings()->getKioskHidPersistentWhenScanModalClosed(),
+            'display_audio_muted' => $ps->getDisplayAudioMuted(),
+            'display_audio_volume' => $ps->getDisplayAudioVolume(),
+            'enable_display_hid_barcode' => $ps->getEnableDisplayHidBarcode(),
+            'kiosk_enable_hid_barcode' => $ps->getKioskEnableHidBarcode(),
+            'kiosk_enable_camera_scanner' => $ps->getKioskEnableCameraScanner(),
+            'enable_public_triage_hid_barcode' => $ps->getEnablePublicTriageHidBarcode(),
+            'enable_display_camera_scanner' => $ps->getEnableDisplayCameraScanner(),
+            'enable_public_triage_camera_scanner' => $ps->getEnablePublicTriageCameraScanner(),
+            'kiosk_hid_persistent_when_scan_modal_closed' => $ps->getKioskHidPersistentWhenScanModalClosed(),
         ]);
     }
 }

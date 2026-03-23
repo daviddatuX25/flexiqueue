@@ -27,6 +27,7 @@ flexiqueue-deploy.tar.gz
 flexiqueue-hosting.tar.gz
 flexiqueue-*.tar.gz
 /releases
+/.build
 *.img
 *.img.gz
 /bootstrap/cache/*.php
@@ -56,6 +57,9 @@ last23*.jsonl
 nul
 root@*
 *.docx
+
+# Local clone of affaan-m/everything-claude-code (optional reference; not part of the app)
+.ecc-temp-everything-claude-code/
 
 # Code Mapper (github.com/daviddatuX25/codemapper): clone + generated TTS maps
 .tmp-codemapper/

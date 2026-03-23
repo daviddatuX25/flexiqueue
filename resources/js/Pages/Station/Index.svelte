@@ -759,7 +759,7 @@
 						description: 'Send the client to triage to register and get in the queue.',
 						action: {
 							label: 'Go to triage',
-							onClick: () => router.visit('/triage')
+							onClick: () => router.visit('/client-registration')
 						},
 						duration: 10000
 					});
@@ -1501,7 +1501,7 @@
 												Unverified
 											</span>
 											<a
-												href="/triage?highlight_session_id={scannedSession.session_id}"
+												href="/client-registration?highlight_session_id={scannedSession.session_id}"
 												class="text-[11px] px-2 py-0.5 rounded preset-tonal text-surface-900 hover:underline touch-target-h"
 												title="Open triage and highlight this client"
 											>
@@ -1550,7 +1550,7 @@
 								<CategoryBadge category={s.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(s.client_category)} />
 								{#if s.unverified}
 									<a
-										href="/triage?highlight_session_id={s.session_id}"
+										href="/client-registration?highlight_session_id={s.session_id}"
 										class="text-xs px-2 py-0.5 rounded preset-filled-warning-500/30 text-warning-800 hover:preset-filled-warning-500/50 touch-target-h inline-block"
 										title="Identity not yet verified — go to triage"
 									>
@@ -1849,7 +1849,7 @@
 													<CategoryBadge category={w.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(w.client_category)} size="sm" />
 													{#if w.unverified}
 														<a
-															href="/triage?highlight_session_id={w.session_id}"
+															href="/client-registration?highlight_session_id={w.session_id}"
 															class="text-xs px-2 py-0.5 rounded preset-filled-warning-500/30 text-warning-800 hover:preset-filled-warning-500/50 touch-target-h"
 															title="Identity not yet verified — go to triage"
 														>

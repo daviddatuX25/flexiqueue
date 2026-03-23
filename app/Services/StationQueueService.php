@@ -124,12 +124,12 @@ class StationQueueService
 
         $authorizers = [];
         if ($program) {
-            $supervisorIds = $program->supervisedBy()->pluck('users.id')->all();
-            $adminIds = User::query()
+            $supervisorIds = $program->allSupervisorUserIds();
+            $adminIds = User::withGlobalPermissionsTeam(fn () => User::query()
                 ->where('site_id', $program->site_id)
-                ->where('role', UserRole::Admin)
+                ->role(UserRole::Admin->value)
                 ->pluck('id')
-                ->all();
+                ->all());
             $authorizerIds = array_unique(array_merge($supervisorIds, $adminIds));
             $authorizers = User::query()
                 ->whereIn('id', $authorizerIds)

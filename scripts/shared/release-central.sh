@@ -15,6 +15,7 @@ PUSHER_APP_CLUSTER=""
 BUILD_MODE="docker"
 KEEP_WORKTREE="0"
 DO_FTP="1"
+SYNC_VENDOR_FLAG=""
 WORKTREE_DIR=""
 STAGE_DIR=""
 BUILD_ROOT=""
@@ -34,6 +35,10 @@ usage() {
     echo "       $0 --keep-worktree [--local] [version]"
     echo "       $0 --no-ftp [--local] [version]"
     echo "       $0 --build-only [--local] [version]"
+    echo "       $0 [--sync-vendor|--no-vendor-sync] ...  (FTP: upload vendor/ or skip; env: RELEASE_SYNC_VENDOR=1|0)"
+    echo ""
+    echo "Build output: .build/stage/release-central-<version>-<timestamp>/ (FTP-ready copy)."
+    echo "Pointer file: .build/stage/LATEST.txt"
     exit 0
 }
 
@@ -47,6 +52,10 @@ for arg in "$@"; do
         KEEP_WORKTREE="1"
     elif [ "$arg" = "--no-ftp" ] || [ "$arg" = "--build-only" ]; then
         DO_FTP="0"
+    elif [ "$arg" = "--sync-vendor" ]; then
+        SYNC_VENDOR_FLAG="1"
+    elif [ "$arg" = "--no-vendor-sync" ]; then
+        SYNC_VENDOR_FLAG="0"
     else
         ARGS+=("$arg")
     fi
@@ -144,12 +153,45 @@ cp "$BUILD_ROOT/composer.lock" "$STAGE_DIR/composer.lock"
 cp "$BUILD_ROOT/storage/app/version.txt" "$STAGE_DIR/storage/app/version.txt"
 cp "$BUILD_ROOT/bootstrap/cache/deploy_pending" "$STAGE_DIR/bootstrap/cache/deploy_pending"
 
+mkdir -p "$REPO_ROOT/.build/stage"
+printf '%s\n' "$STAGE_DIR" > "$REPO_ROOT/.build/stage/LATEST.txt"
+echo "[release-central] Deployment directory (FTP-ready): $STAGE_DIR"
+echo "[release-central] Path recorded in: $REPO_ROOT/.build/stage/LATEST.txt"
+
 if [ "$DO_FTP" != "1" ]; then
-  echo "[release-central] Build complete (no FTP upload). Staged at: $STAGE_DIR"
+  echo "[release-central] Build complete (no FTP upload). Upload the directory above with lftp or any FTP client."
   exit 0
 fi
 
-lftp -c "
+SYNC_VENDOR=""
+if [ "$SYNC_VENDOR_FLAG" = "1" ] || [ "$SYNC_VENDOR_FLAG" = "0" ]; then
+  SYNC_VENDOR="$SYNC_VENDOR_FLAG"
+elif [ -n "${RELEASE_SYNC_VENDOR:-}" ]; then
+  case "$RELEASE_SYNC_VENDOR" in
+    1|yes|true|Y|y) SYNC_VENDOR=1 ;;
+    0|no|false|N|n) SYNC_VENDOR=0 ;;
+    *) echo "[release-central] Error: RELEASE_SYNC_VENDOR must be 1/yes or 0/no." >&2; exit 1 ;;
+  esac
+elif [ -t 0 ] && [ -t 1 ]; then
+  echo "[release-central] Staging already includes a full vendor/ tree for this release."
+  read -r -p "Upload or replace vendor/ on hosting via FTP (lftp)? [Y/n] " _ans
+  case "${_ans:-y}" in
+    n|N|no|NO) SYNC_VENDOR=0 ;;
+    *) SYNC_VENDOR=1 ;;
+  esac
+else
+  SYNC_VENDOR=1
+fi
+
+if [ "$SYNC_VENDOR" = "1" ]; then
+  echo "[release-central] FTP (lftp): mirroring vendor/ to hosting."
+else
+  echo "[release-central] FTP (lftp): skipping vendor/ — hosting keeps existing vendor; only use skip if deps unchanged."
+fi
+
+LFTP_BATCH=$(mktemp)
+{
+  cat <<PART1
 set ssl:verify-certificate no
 set ftp:ssl-allow no
 set cache:enable yes
@@ -170,13 +212,20 @@ put public/build/manifest.json -o public/build/manifest.json
 mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time resources/ resources/
 mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time routes/ routes/
 mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time php-run-scripts/ php-run-scripts/
-mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time vendor/ vendor/
+PART1
+  if [ "$SYNC_VENDOR" = "1" ]; then
+    echo 'mirror --reverse --delete --verbose --no-perms --no-umask --no-symlinks --ignore-time vendor/ vendor/'
+  fi
+  cat <<'PART2'
 put artisan
 put composer.json
 put composer.lock
 put storage/app/version.txt -o storage/app/version.txt
 put bootstrap/cache/deploy_pending -o bootstrap/cache/deploy_pending
 bye
-"
+PART2
+} > "$LFTP_BATCH"
+lftp -f "$LFTP_BATCH"
+rm -f "$LFTP_BATCH"
 
 echo "[release-central] Deploy complete: $VERSION"

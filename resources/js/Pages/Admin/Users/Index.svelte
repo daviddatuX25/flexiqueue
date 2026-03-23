@@ -29,7 +29,9 @@
     interface UserItem {
         id: number;
         name: string;
+        username: string;
         email: string;
+        recovery_gmail?: string | null;
         avatar_url?: string | null;
         role: string;
         is_active: boolean;
@@ -37,6 +39,7 @@
         assigned_station_id: number | null;
         assigned_station: { id: number; name: string } | null;
         site?: SiteOption | null;
+        pending_assignment?: boolean;
     }
 
     let {
@@ -64,18 +67,26 @@
     let deactivateConfirmUser = $state<UserItem | null>(null);
     let editUser = $state<UserItem | null>(null);
     let createName = $state("");
+    let createUsername = $state("");
     let createEmail = $state("");
+    let createRecoveryGmail = $state("");
     let createPassword = $state("");
     let createPasswordConfirm = $state("");
     let createRole = $state<"admin" | "staff">("staff");
+    let createPendingAssignment = $state(false);
     let createOverridePin = $state("");
     let createSiteId = $state<string | number>("");
     let editName = $state("");
+    let editUsername = $state("");
     let editEmail = $state("");
+    let editRecoveryGmail = $state("");
     let editRole = $state<"admin" | "staff">("staff");
     let editIsActive = $state(true);
     let editPassword = $state("");
+    let editTempPassword = $state("");
+    let editTempPasswordConfirm = $state("");
     let editOverridePin = $state("");
+    let editPendingAssignment = $state(false);
     let editSiteId = $state<string | number>("");
     let editDirectPermissions = $state<string[]>([]);
     let editInitialDirectPermissions = $state<string[]>([]);
@@ -156,10 +167,13 @@
 
     function openCreate() {
         createName = "";
+        createUsername = "";
         createEmail = "";
+        createRecoveryGmail = "";
         createPassword = "";
         createPasswordConfirm = "";
         createRole = (allowed_roles_for_create?.[0] ?? "staff") as "admin" | "staff";
+        createPendingAssignment = false;
         createOverridePin = "";
         createSiteId = sites?.length ? sites[0].id : "";
         showCreateModal = true;
@@ -168,11 +182,15 @@
     async function handleCreate() {
         if (
             !createName.trim() ||
+            !createUsername.trim() ||
             !createEmail.trim() ||
+            !createRecoveryGmail.trim() ||
             !createPassword.trim() ||
             !createPasswordConfirm.trim()
         ) {
-            toaster.error({ title: "Name, email, password, and confirm password are required." });
+            toaster.error({
+                title: "Name, username, email, recovery Gmail, password, and confirm password are required.",
+            });
             return;
         }
         if (createPassword !== createPasswordConfirm) {
@@ -186,15 +204,20 @@
         submitting = true;
         const body: {
             name: string;
+            username: string;
             email: string;
+            recovery_gmail: string;
             password: string;
             password_confirmation: string;
             role: string;
             override_pin?: string;
             site_id?: number | null;
+            pending_assignment?: boolean;
         } = {
             name: createName.trim(),
+            username: createUsername.trim(),
             email: createEmail.trim(),
+            recovery_gmail: createRecoveryGmail.trim(),
             password: createPassword,
             password_confirmation: createPasswordConfirm,
             role: createRole,
@@ -203,6 +226,9 @@
             body.override_pin = createOverridePin.trim();
         if (auth_is_super_admin && sites?.length)
             body.site_id = (createSiteId === "" || createSiteId == null) ? null : Number(createSiteId);
+        if (createRole === "staff" && createPendingAssignment) {
+            body.pending_assignment = true;
+        }
         const { ok, message: msg } = await api(
             "POST",
             "/api/admin/users",
@@ -219,43 +245,56 @@
     function openEdit(u: UserItem) {
         editUser = u;
         editName = u.name;
+        editUsername = u.username ?? "";
+        editEmail = u.email;
+        editRecoveryGmail = u.recovery_gmail ?? "";
         const allowed = allowed_roles_for_edit ?? ["staff"];
         editRole = (allowed.includes(u.role as "admin" | "staff") ? u.role : allowed[0]) as "admin" | "staff";
         editIsActive = u.is_active;
         editPassword = "";
+        editTempPassword = "";
+        editTempPasswordConfirm = "";
         editOverridePin = "";
         editSiteId = u.site?.id ?? "";
         editDirectPermissions = [...(u.direct_permissions ?? [])];
         editInitialDirectPermissions = [...(u.direct_permissions ?? [])];
         editEffectivePermissions = [...(u.effective_permissions ?? [])];
         editSupervisorProgramCount = u.supervisor_program_count ?? 0;
+        editPendingAssignment = u.pending_assignment ?? false;
         editValidationErrors = {};
         showEditModal = true;
     }
 
     async function handleEdit() {
-        if (!editUser || !editName.trim() || !editEmail.trim()) return;
+        if (!editUser || !editName.trim() || !editUsername.trim() || !editEmail.trim()) return;
         submitting = true;
         editValidationErrors = {};
         const body: {
             name: string;
+            username: string;
             email: string;
+            recovery_gmail?: string | null;
             role?: string;
             is_active?: boolean;
             password?: string;
             override_pin?: string | null;
             site_id?: number | null;
             direct_permissions?: string[];
+            pending_assignment?: boolean;
         } = {
             name: editName.trim(),
+            username: editUsername.trim(),
             email: editEmail.trim(),
+            recovery_gmail: editRecoveryGmail.trim() || null,
         };
         // API rejects role / is_active on self-update — omit so profile save works.
         if (editUser.id !== auth_user_id) {
             body.role = editRole;
             body.is_active = editIsActive;
         }
-        if (editPassword.trim()) body.password = editPassword.trim();
+        if (editUser.id === auth_user_id && editPassword.trim()) {
+            body.password = editPassword.trim();
+        }
         if (editOverridePin.trim()) body.override_pin = editOverridePin.trim();
         else body.override_pin = null;
         if (auth_is_super_admin)
@@ -263,6 +302,9 @@
         body.direct_permissions = [...editDirectPermissions].sort((a, b) =>
             a.localeCompare(b),
         );
+        if (editUser.id !== auth_user_id && editRole === "staff") {
+            body.pending_assignment = editPendingAssignment;
+        }
         const {
             ok,
             data,
@@ -284,6 +326,48 @@
             if (first) toaster.error({ title: String(first) });
         } else {
             toaster.error({ title: msg ?? "Failed to update user." });
+        }
+    }
+
+    /** PWD-5: fail-safe temporary password for another user (POST reset-password), not self. */
+    async function handleSetTemporaryPassword() {
+        if (!editUser || editUser.id === auth_user_id) return;
+        if (!editTempPassword.trim() || !editTempPasswordConfirm.trim()) {
+            toaster.error({
+                title: "Enter and confirm the temporary password.",
+            });
+            return;
+        }
+        if (editTempPassword !== editTempPasswordConfirm) {
+            toaster.error({ title: "Password and confirm password must match." });
+            return;
+        }
+        if (editTempPassword.length < 8) {
+            toaster.error({ title: "Password must be at least 8 characters." });
+            return;
+        }
+        submitting = true;
+        const { ok, message: msg, errors } = await api(
+            "POST",
+            `/api/admin/users/${editUser.id}/reset-password`,
+            {
+                password: editTempPassword.trim(),
+                password_confirmation: editTempPasswordConfirm.trim(),
+            },
+        );
+        submitting = false;
+        if (ok) {
+            toaster.success({ title: "Temporary password set." });
+            editTempPassword = "";
+            editTempPasswordConfirm = "";
+            return;
+        }
+        if (errors) {
+            const flat = Object.values(errors).flat();
+            const first = flat[0];
+            if (first) toaster.error({ title: String(first) });
+        } else {
+            toaster.error({ title: msg ?? "Failed to set temporary password." });
         }
     }
 
@@ -394,6 +478,7 @@
         {#snippet head()}
             <tr>
                 <th>Name</th>
+                <th>Username</th>
                 <th>Email</th>
                 <th>Role</th>
                 <th>Status</th>
@@ -413,14 +498,24 @@
                             >
                         </div>
                     </td>
+                    <td class="text-surface-700 font-mono text-sm">{user.username}</td>
                     <td class="text-surface-700">{user.email}</td>
                     <td>
-                        <span
-                            class="badge {user.role === 'admin'
-                                ? 'preset-filled-primary-500'
-                                : 'preset-tonal'} shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
-                            >{user.role}</span
-                        >
+                        <div class="flex flex-wrap items-center gap-1">
+                            <span
+                                class="badge {user.role === 'admin'
+                                    ? 'preset-filled-primary-500'
+                                    : 'preset-tonal'} shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
+                                >{user.role}</span
+                            >
+                            {#if user.role === "staff" && user.pending_assignment}
+                                <span
+                                    class="badge preset-filled-warning-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
+                                    title="Pending assignment / onboarding hold"
+                                    >Pending</span
+                                >
+                            {/if}
+                        </div>
                     </td>
                     <td>
                         {#if user.is_active}
@@ -519,7 +614,10 @@
                             <span class="font-semibold text-surface-950 block"
                                 >{user.name}</span
                             >
-                            <span class="text-sm text-surface-950/70 block"
+                            <span class="text-sm text-surface-950/70 font-mono block"
+                                >{user.username}</span
+                            >
+                            <span class="text-xs text-surface-500 block truncate"
                                 >{user.email}</span
                             >
                         </div>
@@ -539,6 +637,12 @@
                             >
                                 Staff
                             </span>
+                        {/if}
+                        {#if user.role === "staff" && user.pending_assignment}
+                            <span
+                                class="badge preset-filled-warning-500 shadow-sm font-semibold uppercase tracking-wide text-[11px] px-2.5 py-1 rounded-full"
+                                >Pending</span
+                            >
                         {/if}
                         {#if user.is_active}
                             <span
@@ -656,6 +760,19 @@
         </div>
         <div class="form-control">
             <label class="label"
+                ><span class="label-text font-medium">Username</span></label
+            >
+            <input
+                type="text"
+                class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm font-mono"
+                bind:value={createUsername}
+                placeholder="juan.cruz"
+                autocomplete="off"
+            />
+            <span class="label-text-alt mt-1">Letters, numbers, dots, underscores, hyphens only. Used to sign in.</span>
+        </div>
+        <div class="form-control">
+            <label class="label"
                 ><span class="label-text font-medium">Email</span></label
             >
             <input
@@ -664,6 +781,18 @@
                 bind:value={createEmail}
                 placeholder="juan@example.com"
             />
+        </div>
+        <div class="form-control">
+            <label class="label"
+                ><span class="label-text font-medium">Recovery Gmail</span></label
+            >
+            <input
+                type="email"
+                class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
+                bind:value={createRecoveryGmail}
+                placeholder="user@gmail.com"
+            />
+            <span class="label-text-alt mt-1">Forgot-password link is sent here (Hestia SMTP). Required for self-service reset.</span>
         </div>
         <div class="form-control">
             <PasswordInput
@@ -687,6 +816,31 @@
                 {/each}
             </select>
         </div>
+        {#if createRole === "staff"}
+            <div
+                class="form-control rounded-container border border-surface-200 bg-surface-50/80 p-3"
+            >
+                <label
+                    for="create-pending-assignment"
+                    class="label cursor-pointer justify-between gap-3 w-full items-start"
+                >
+                    <span class="label-text font-medium text-sm"
+                        >Hold at onboarding (pending assignment)</span
+                    >
+                    <input
+                        id="create-pending-assignment"
+                        type="checkbox"
+                        class="checkbox"
+                        bind:checked={createPendingAssignment}
+                        disabled={submitting}
+                    />
+                </label>
+                <span class="label-text-alt mt-1 block"
+                    >User can sign in but cannot use station or triage until you
+                    assign a station or turn this off.</span
+                >
+            </div>
+        {/if}
         <div class="form-control">
             <label class="label"
                 ><span class="label-text font-medium"
@@ -745,12 +899,34 @@
             </div>
             <div class="form-control">
                 <label class="label"
+                    ><span class="label-text font-medium">Username</span></label
+                >
+                <input
+                    type="text"
+                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm font-mono"
+                    bind:value={editUsername}
+                    autocomplete="off"
+                />
+            </div>
+            <div class="form-control">
+                <label class="label"
                     ><span class="label-text font-medium">Email</span></label
                 >
                 <input
                     type="email"
                     class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
                     bind:value={editEmail}
+                />
+            </div>
+            <div class="form-control">
+                <label class="label"
+                    ><span class="label-text font-medium">Recovery Gmail</span></label
+                >
+                <input
+                    type="email"
+                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
+                    bind:value={editRecoveryGmail}
+                    placeholder="user@gmail.com"
                 />
             </div>
             {#if editUser.id !== auth_user_id}
@@ -767,6 +943,31 @@
                         {/each}
                     </select>
                 </div>
+                {#if editRole === "staff"}
+                    <div
+                        class="form-control rounded-container border border-surface-200 bg-surface-50/80 p-3"
+                    >
+                        <label
+                            for="edit-pending-assignment"
+                            class="label cursor-pointer justify-between gap-3 w-full items-start"
+                        >
+                            <span class="label-text font-medium text-sm"
+                                >Hold at onboarding (pending assignment)</span
+                            >
+                            <input
+                                id="edit-pending-assignment"
+                                type="checkbox"
+                                class="checkbox"
+                                bind:checked={editPendingAssignment}
+                                disabled={submitting}
+                            />
+                        </label>
+                        <span class="label-text-alt mt-1 block"
+                            >Blocks station and triage until cleared or a station
+                            is assigned.</span
+                        >
+                    </div>
+                {/if}
                 <div
                     class="form-control mt-2 mb-2 p-3 border border-surface-100 rounded-container bg-surface-50/50"
                 >
@@ -793,19 +994,74 @@
                     </label>
                 </div>
             {/if}
-            <div class="form-control">
-                <label class="label"
-                    ><span class="label-text font-medium"
-                        >New password (optional)</span
-                    ></label
+            {#if editUser.id === auth_user_id}
+                <div class="form-control">
+                    <label class="label"
+                        ><span class="label-text font-medium"
+                            >New password (optional)</span
+                        ></label
+                    >
+                    <input
+                        type="password"
+                        class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
+                        bind:value={editPassword}
+                        placeholder="Leave blank to keep current"
+                        autocomplete="new-password"
+                    />
+                    <span class="label-text-alt mt-1"
+                        >For your own account, use this field or your profile
+                        page. The admin reset flow below is for other users
+                        only.</span
+                    >
+                </div>
+            {:else}
+                <div
+                    class="form-control rounded-container border border-surface-200 bg-surface-50/80 p-4 space-y-3"
                 >
-                <input
-                    type="password"
-                    class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                    bind:value={editPassword}
-                    placeholder="Leave blank to keep current"
-                />
-            </div>
+                    <p class="text-sm font-medium text-surface-900">
+                        Temporary password (fail-safe)
+                    </p>
+                    <p class="text-xs text-surface-600 leading-relaxed">
+                        Set a new password for this user when they are locked
+                        out or email is unavailable. This is logged for audit.
+                        You cannot use this on your own account.
+                    </p>
+                    <div>
+                        <label class="label"
+                            ><span class="label-text font-medium text-sm"
+                                >New password</span
+                            ></label
+                        >
+                        <input
+                            type="password"
+                            class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
+                            bind:value={editTempPassword}
+                            autocomplete="new-password"
+                        />
+                    </div>
+                    <div>
+                        <label class="label"
+                            ><span class="label-text font-medium text-sm"
+                                >Confirm password</span
+                            ></label
+                        >
+                        <input
+                            type="password"
+                            class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
+                            bind:value={editTempPasswordConfirm}
+                            autocomplete="new-password"
+                        />
+                    </div>
+                    <button
+                        type="button"
+                        class="btn preset-filled-primary-500 shadow-sm w-full sm:w-auto"
+                        disabled={submitting}
+                        onclick={handleSetTemporaryPassword}
+                    >
+                        {submitting ? "Setting…" : "Set temporary password"}
+                    </button>
+                </div>
+            {/if}
             <div class="form-control">
                 <label class="label"
                     ><span class="label-text font-medium"
@@ -829,6 +1085,7 @@
             </div>
             {#if (assignable_permissions?.length ?? 0) > 0}
                 <div class="border-t border-surface-200 pt-4 mt-4">
+                    <h3 class="text-sm font-semibold text-surface-950 mb-3">Extra access</h3>
                     <UserDirectPermissionsEditor
                         bind:selected={editDirectPermissions}
                         assignablePermissions={assignable_permissions ?? []}
@@ -837,6 +1094,7 @@
                         canAssignPlatformManage={auth_is_super_admin}
                         disabled={submitting}
                         errors={editValidationErrors}
+                        description="Optional — only if they need more than their role usually allows."
                     />
                 </div>
             {/if}

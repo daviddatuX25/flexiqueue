@@ -181,7 +181,7 @@ Enumerate:
 
 ### Phase 2 — Seed roles and permissions (parity mapping) ✅ (done)
 
-**Implemented:** `App\Support\PermissionCatalog`, `database/seeders/PermissionCatalogSeeder.php`, `App\Services\SpatieRbacSyncService`, `App\Observers\UserObserver`, supervisor sync from `ProgramStaffController`; `GET /api/admin/permissions`; `PUT` user `direct_permissions`; seed order in `DatabaseSeeder` + edge/central/lgu/superadmin seeders.
+**Implemented:** `App\Support\PermissionCatalog`, `database/seeders/PermissionCatalogSeeder.php`, `App\Services\SpatieRbacSyncService`, `App\Services\UserProvisioningService` (via `User::booted()` on relevant saves; replaces the former `UserObserver`), supervisor sync from `ProgramStaffController`; `GET /api/admin/permissions`; `PUT` user `direct_permissions`; seed order in `DatabaseSeeder` + edge/central/lgu/superadmin seeders.
 
 **Spatie roles (mirror enum, do not invent new ones in v1):**
 

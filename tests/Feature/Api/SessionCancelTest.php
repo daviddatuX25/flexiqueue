@@ -36,7 +36,7 @@ class SessionCancelTest extends TestCase
     {
         parent::setUp();
 
-        $this->staff = User::factory()->create(['role' => 'staff']);
+        $this->staff = User::factory()->create();
         $this->program = Program::create([
             'name' => 'Test Program',
             'description' => null,
@@ -79,6 +79,8 @@ class SessionCancelTest extends TestCase
             'status' => 'waiting',
         ]);
         $this->token->update(['current_session_id' => $this->session->id]);
+
+        $this->staff->update(['assigned_station_id' => $this->station->id]);
     }
 
     public function test_cancel_waiting_session_returns_200_and_sets_cancelled(): void
@@ -127,4 +129,3 @@ class SessionCancelTest extends TestCase
         $response->assertJsonPath('message', 'Session is already completed.');
     }
 }
-

@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Enums\UserRole;
 use App\Models\Site;
 use App\Models\SiteTtsUsageEvent;
 use App\Models\Token;
@@ -37,7 +36,7 @@ class TtsGenerationMeteringTest extends TestCase
             'is_default' => true,
         ]);
 
-        $admin = User::factory()->create(['role' => UserRole::Admin, 'site_id' => $site->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
 
         TtsAccount::create([
             'label' => 'Test',
@@ -85,7 +84,7 @@ class TtsGenerationMeteringTest extends TestCase
             'is_default' => false,
         ]);
 
-        $admin = User::factory()->create(['role' => UserRole::Admin, 'site_id' => $site->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
 
         TtsAccount::create([
             'label' => 'Test',

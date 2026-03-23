@@ -659,7 +659,7 @@
             <div class="divider my-1"></div>
             <fieldset class="space-y-3">
                 <legend class="text-sm font-semibold text-surface-900">
-                    Public triage
+                    Kiosk (self-service)
                 </legend>
                 <label class="flex items-start gap-3 cursor-pointer">
                     <input
@@ -668,10 +668,11 @@
                         bind:checked={editAllowPublicTriage}
                     />
                     <span class="text-sm">
-                        <span class="font-medium">Allow public triage</span>
+                        <span class="font-medium">Allow kiosk self-service</span>
                         <span class="block text-surface-500 text-xs">
-                            When enabled, clients can start at the public triage
-                            entry page for this program.
+                            When enabled, visitors can use this program’s kiosk
+                            (site URL) to start a visit or check queue status,
+                            per program kiosk settings.
                         </span>
                     </span>
                 </label>
@@ -684,18 +685,15 @@
                     />
                     <span class="text-sm">
                         <span class="font-medium"
-                            >Allow visits to start with unverified ID (public triage)</span
+                            >Allow visits to start with unverified ID (kiosk)</span
                         >
                         <span class="block text-surface-500 text-xs">
-                            When enabled, public triage can create a
+                            When identity is required, if enabled the kiosk can create a
                             <span class="font-semibold">queue session</span>
-                            together with an identity registration, even if the
-                            identification is not yet verified; the session is
-                            marked unverified until staff accept it. When
-                            disabled, public triage only records an identity
-                            registration and does
-                            <span class="font-semibold">not</span> start a
-                            session.
+                            together with an identity registration before staff verify; the session stays
+                            marked unverified until staff accept. If disabled, the kiosk only submits a
+                            registration for <span class="font-semibold">client registration</span> (staff)
+                            and does <span class="font-semibold">not</span> start a session.
                         </span>
                     </span>
                 </label>

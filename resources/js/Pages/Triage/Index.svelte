@@ -1,20 +1,12 @@
 <script lang="ts">
 	import MobileLayout from '../../Layouts/MobileLayout.svelte';
 	import Modal from '../../Components/Modal.svelte';
-	import ScanModal from '../../Components/ScanModal.svelte';
 	import CreateRegistrationModal from '../../Components/CreateRegistrationModal.svelte';
-	import StaffTriageBindPanel from '../../Components/StaffTriageBindPanel.svelte';
-	import IdNumberInput from '../../Components/IdNumberInput.svelte';
-	import AuthChoiceButtons from '../../Components/AuthChoiceButtons.svelte';
-	import PinOrQrInput from '../../Components/PinOrQrInput.svelte';
-	import { Camera, Plus, Search, Settings } from 'lucide-svelte';
+	import { Plus, Search } from 'lucide-svelte';
 	import { get } from 'svelte/store';
-	import { onMount } from 'svelte';
 	import { usePage, router } from '@inertiajs/svelte';
 	import { toaster } from '../../lib/toaster.js';
 	import { clientDisplayName } from '../../lib/clientDisplayName.js';
-	import { getLocalAllowHidOnThisDevice, setLocalAllowHidOnThisDevice, getLocalPersistentHidOnThisDevice, setLocalPersistentHidOnThisDevice, isMobileTouch } from '../../lib/displayHid.js';
-	import { shouldAllowCameraScanner, setLocalAllowCameraOnThisDevice } from '../../lib/displayCamera.js';
 
 	interface Track {
 		id: number;
@@ -42,13 +34,9 @@
 		programs = [],
 		queueCount = 0,
 		processedToday = 0,
-		display_scan_timeout_seconds = 20,
-		staff_triage_allow_hid_barcode = true,
-		staff_triage_allow_camera_scanner = true,
 		pending_identity_registrations = [],
 		site_slug = null,
 		program_slug = null,
-		allow_public_triage = false,
 	}: {
 		currentProgram?: ActiveProgram | null;
 		program?: ActiveProgram | null;
@@ -57,70 +45,12 @@
 		programs?: { id: number; name: string }[];
 		queueCount?: number;
 		processedToday?: number;
-		display_scan_timeout_seconds?: number;
-		staff_triage_allow_hid_barcode?: boolean;
-		staff_triage_allow_camera_scanner?: boolean;
 		pending_identity_registrations?: { id: number; request_type?: string; first_name: string | null; middle_name: string | null; last_name: string | null; birth_date: string | null; client_category: string | null; mobile_masked: string | null; id_verified: boolean; id_verified_at: string | null; id_verified_by_user_id: number | null; id_verified_by: string | null; requested_at: string; session_id: number | null; session_alias: string | null; token_physical_id?: string; track_name?: string; client_name?: string | null }[];
 		site_slug?: string | null;
 		program_slug?: string | null;
-		allow_public_triage?: boolean;
 	} = $props();
 
 	const effectiveProgram = $derived(currentProgram ?? program ?? activeProgram);
-
-	const CATEGORIES = [
-		{ label: 'Regular', value: 'Regular' },
-		{ label: 'PWD / Senior / Pregnant', value: 'PWD / Senior / Pregnant' },
-		{ label: 'Incomplete Documents', value: 'Incomplete Documents' },
-	] as const;
-
-	let showScanner = $state(false);
-	/** When 'verify_id', scan verifies stored ID; when 'capture_id_accept', scan fills optional ID in Accept modal; when 'capture_id_new_reg', scan fills ID in New registration modal; else token lookup. */
-	/** Token scan only; no ID/phone scan until printable ID and scan feature exist. */
-	let scannerMode = $state<'token'>('token');
-	let scannedToken = $state<{ physical_id: string; qr_hash: string; status: string } | null>(null);
-	/** Latch: ignore repeated onScan callbacks after first successful scan (stops flicker). */
-	let scanHandled = $state(false);
-	let manualPhysicalId = $state('');
-	let barcodeValue = $state('');
-	let barcodeInputEl = $state<HTMLInputElement | null>(null);
-	/** Per plan: category hidden in staff triage normal bind; default to Regular. */
-	let selectedCategory = $state<string>('Regular');
-	let selectedTrackId = $state<number | null>(null);
-	let scanCountdown = $state(0);
-	let scanCountdownIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
-	/** Account-level preferences (from props, updated after PUT). */
-	let accountAllowHid = $state(true);
-	let accountAllowCamera = $state(true);
-	/** Device-level (localStorage staff_binder); in sync with modal device toggles. */
-	let localAllowHid = $state(true);
-	let localAllowCamera = $state(true);
-	/** When true, HID refocused every 2s when scan modal is closed. */
-	let localPersistentHid = $state(false);
-	const effectiveHid = $derived(accountAllowHid && localAllowHid);
-	const effectiveCamera = $derived(accountAllowCamera && localAllowCamera);
-	/** When true, user is in the "manual token input" focus window; pause HID refocus for 10s then return focus to hidden input. */
-	let manualFocusActive = $state(false);
-	let manualFocusTimeoutId = $state<ReturnType<typeof setTimeout> | null>(null);
-
-	/** Staff triage settings modal: view/edit anytime; apply only on Save with PIN/QR. */
-	let showTriageSettingsModal = $state(false);
-	let triageSettingsAuthMode = $state<'pin' | 'qr' | 'request'>('pin');
-	let triageSettingsPin = $state('');
-	let triageSettingsQrScanToken = $state('');
-	let triagePinOrQrRef = $state<{ buildPinOrQrPayload?: () => { pin: string } | { qr_scan_token: string } | null } | null>(null);
-	let triageSettingsError = $state('');
-	let triageSettingsSaving = $state(false);
-	let triageSettingsAccountHid = $state(true);
-	let triageSettingsAccountCamera = $state(true);
-	let triageSettingsLocalHid = $state(true);
-	let triageSettingsLocalPersistentHid = $state(false);
-	let triageSettingsLocalCamera = $state(true);
-	/** QR flow: show QR for admin to scan to unlock settings (reuses display-settings-requests). */
-	let triageSettingsRequestId = $state<number | null>(null);
-	let triageSettingsRequestToken = $state<string | null>(null);
-	let triageSettingsRequestState = $state<'idle' | 'waiting' | 'approved' | 'rejected'>('idle');
-	let triageSettingsPollIntervalId = $state<ReturnType<typeof setInterval> | null>(null);
 
 	/** Identity registration accept modal */
 	let acceptRegModalReg = $state<typeof pending_identity_registrations[0] | null>(null);
@@ -148,21 +78,6 @@
 
 	/** Staff direct registration request (no token) */
 	let showNewRegModal = $state(false);
-	/** When true, show manual ID entry in New reg modal optional ID block (same format as public triage start). */
-
-	/** When true, show manual ID entry in Accept modal optional ID block (same format as public triage start). */
-
-	const MANUAL_FOCUS_SECONDS = 10;
-
-	function startManualFocusWindow() {
-		if (manualFocusTimeoutId != null) clearTimeout(manualFocusTimeoutId);
-		manualFocusActive = true;
-		manualFocusTimeoutId = setTimeout(() => {
-			manualFocusTimeoutId = null;
-			manualFocusActive = false;
-			if (effectiveHid) barcodeInputEl?.focus();
-		}, MANUAL_FOCUS_SECONDS * 1000);
-	}
 
 	const page = usePage();
 	function getCsrfToken(): string {
@@ -205,323 +120,6 @@
 		const { ok, data, message } = await api('POST', '/api/identity-registrations/direct', payload);
 		const msg = (data as { message?: string })?.message ?? (message as string);
 		return { ok, message: msg };
-	}
-
-	$effect(() => {
-		accountAllowHid = staff_triage_allow_hid_barcode !== false;
-		accountAllowCamera = staff_triage_allow_camera_scanner !== false;
-	});
-
-	onMount(() => {
-		const hidLocal = getLocalAllowHidOnThisDevice('staff_binder');
-		localAllowHid = hidLocal !== null ? hidLocal : !isMobileTouch();
-		localPersistentHid = getLocalPersistentHidOnThisDevice('staff_binder');
-		localAllowCamera = shouldAllowCameraScanner('staff_binder', staff_triage_allow_camera_scanner !== false);
-	});
-
-	/** When persistent HID is on, refocus global HID every 2s when scan modal is closed. */
-	$effect(() => {
-		if (showScanner || !localPersistentHid || !effectiveHid) return;
-		const id = setInterval(() => {
-			if (!showScanner && localPersistentHid && effectiveHid) barcodeInputEl?.focus();
-		}, 2000);
-		return () => clearInterval(id);
-	});
-
-	/** Optional countdown when scanner modal is open. */
-	$effect(() => {
-		if (!showScanner) {
-			if (scanCountdownIntervalId != null) {
-				clearInterval(scanCountdownIntervalId);
-				scanCountdownIntervalId = null;
-			}
-			scanCountdown = 0;
-			return;
-		}
-		const timeout = Math.max(0, Number(display_scan_timeout_seconds) ?? 20);
-		if (timeout === 0) return;
-		scanCountdown = timeout;
-		const id = setInterval(() => {
-			scanCountdown = scanCountdown - 1;
-			if (scanCountdown <= 0) {
-				clearInterval(id);
-				scanCountdownIntervalId = null;
-				queueMicrotask(() => { showScanner = false; });
-			}
-		}, 1000);
-		scanCountdownIntervalId = id;
-		return () => {
-			if (scanCountdownIntervalId != null) clearInterval(scanCountdownIntervalId);
-			scanCountdownIntervalId = null;
-		};
-	});
-
-	function closeScanner() {
-		showScanner = false;
-		scannerMode = 'token';
-		if (localPersistentHid && effectiveHid) barcodeInputEl?.focus();
-	}
-
-	function extendScannerCountdown() {
-		scanCountdown += Math.max(0, Number(display_scan_timeout_seconds) || 20);
-	}
-
-	function onBarcodeKeydown(e: KeyboardEvent) {
-		if (e.key !== 'Enter') return;
-		const raw = barcodeValue.trim();
-		if (!raw) return;
-		e.preventDefault();
-		scanHandled = true;
-
-		const branchA = raw.length <= 10 && /^[A-Za-z0-9]+$/.test(raw);
-		const branchB = raw.length === 64 && /^[a-f0-9]+$/.test(raw);
-		const lastSegment = raw.includes('/') ? (raw.split('/').pop() ?? '').split('?')[0].trim() : '';
-		const branchUrl = lastSegment.length === 64 && /^[a-f0-9]+$/.test(lastSegment);
-		if (branchA) {
-			manualPhysicalId = raw;
-			handleLookup();
-		} else if (branchB || branchUrl) {
-			const hashToUse = branchUrl ? lastSegment : raw;
-			api('GET', `/api/sessions/token-lookup?qr_hash=${encodeURIComponent(hashToUse)}`).then(({ ok, data }) => {
-				const t = data as { physical_id?: string; qr_hash?: string; status?: string } | undefined;
-				if (ok && t?.physical_id && t?.qr_hash && t?.status === 'available') {
-					scannedToken = { physical_id: t.physical_id, qr_hash: t.qr_hash, status: 'available' };
-					showScanner = false;
-				} else if (t?.status === 'in_use') {
-					toaster.error({ title: 'Token is already in use.' });
-				} else if (t?.status === 'deactivated') {
-					toaster.error({ title: 'Token deactivated.' });
-				} else {
-					toaster.error({ title: 'Token not found.' });
-				}
-				scanHandled = false;
-			});
-		} else {
-			manualPhysicalId = raw.slice(0, 10);
-			handleLookup();
-		}
-		barcodeValue = '';
-	}
-
-	async function handleLookup() {
-		const id = manualPhysicalId.trim();
-		if (!id) return;
-		scannedToken = null;
-		const { ok, data, message } = await api('GET', `/api/sessions/token-lookup?physical_id=${encodeURIComponent(id)}`);
-		if (!ok) {
-			toaster.error({ title: message ?? 'Token not found.' });
-			scanHandled = false;
-			return;
-		}
-		const t = data as { physical_id: string; qr_hash: string; status: string };
-		if (t.status !== 'available') {
-			toaster.error({ title: t.status === 'in_use' ? 'Token is already in use.' : `Token is marked as ${t.status}.` });
-			// Consume the scan so QR scanner doesn't keep firing and re-clearing/setting error (flashing)
-			scanHandled = true;
-			return;
-		}
-		scannedToken = t;
-	}
-
-	async function handleQrScan(decodedText: string) {
-		if (scanHandled) return;
-		scanHandled = true;
-		const trimmed = decodedText.trim();
-		const branchA = trimmed.length <= 10 && /^[A-Za-z0-9]+$/.test(trimmed);
-		const branchB = trimmed.length === 64 && /^[a-f0-9]+$/.test(trimmed);
-		// If URL (e.g. .../display/status/HASH), extract last path segment as qr_hash (strip query string)
-		const lastSegment = trimmed.includes('/') ? (trimmed.split('/').pop() ?? '').split('?')[0].trim() : '';
-		const branchUrl = lastSegment.length === 64 && /^[a-f0-9]+$/.test(lastSegment);
-
-		if (branchA) {
-			manualPhysicalId = trimmed;
-			handleLookup();
-			return;
-		}
-		if (branchB || branchUrl) {
-			const hashToUse = branchUrl ? lastSegment : trimmed;
-			const { ok, data } = await api('GET', `/api/sessions/token-lookup?qr_hash=${encodeURIComponent(hashToUse)}`);
-			const t = data as { physical_id?: string; qr_hash?: string; status?: string } | undefined;
-			if (ok && t?.physical_id && t?.qr_hash && t?.status === 'available') {
-				scannedToken = { physical_id: t.physical_id, qr_hash: t.qr_hash, status: 'available' };
-				showScanner = false;
-			} else if (t?.status === 'in_use') {
-				toaster.error({ title: 'Token is already in use.' });
-			} else if (t?.status === 'deactivated') {
-				toaster.error({ title: 'Token deactivated.' });
-			} else {
-				toaster.error({ title: 'Token not found.' });
-			}
-			return;
-		}
-		manualPhysicalId = trimmed.slice(0, 10);
-		handleLookup();
-	}
-
-	function resetScan() {
-		scannedToken = null;
-		scanHandled = true;
-		manualPhysicalId = '';
-		showScanner = false;
-		scannerMode = 'token';
-	}
-
-	const STAFF_TRIAGE_SETTINGS_REQUEST_QR_PREFIX = 'flexiqueue:display_settings_request:';
-
-	function openTriageSettingsModal() {
-		triageSettingsAccountHid = accountAllowHid;
-		triageSettingsAccountCamera = accountAllowCamera;
-		triageSettingsLocalHid = localAllowHid;
-		triageSettingsLocalPersistentHid = localPersistentHid;
-		triageSettingsLocalCamera = localAllowCamera;
-		triageSettingsAuthMode = 'pin';
-		triageSettingsPin = '';
-		triageSettingsQrScanToken = '';
-		triageSettingsError = '';
-		triageSettingsRequestId = null;
-		triageSettingsRequestToken = null;
-		triageSettingsRequestState = 'idle';
-		if (triageSettingsPollIntervalId) {
-			clearInterval(triageSettingsPollIntervalId);
-			triageSettingsPollIntervalId = null;
-		}
-		showTriageSettingsModal = true;
-	}
-
-	function cancelTriageSettingsRequest() {
-		triageSettingsRequestState = 'idle';
-		triageSettingsRequestId = null;
-		triageSettingsRequestToken = null;
-		if (triageSettingsPollIntervalId) {
-			clearInterval(triageSettingsPollIntervalId);
-			triageSettingsPollIntervalId = null;
-		}
-	}
-
-	async function createStaffTriageSettingsRequest() {
-		const programId = effectiveProgram?.id;
-		if (programId == null || triageSettingsSaving) return;
-		triageSettingsSaving = true;
-		triageSettingsError = '';
-		try {
-			const body = {
-				program_id: programId,
-				enable_public_triage_hid_barcode: triageSettingsAccountHid,
-				enable_public_triage_camera_scanner: triageSettingsAccountCamera,
-			};
-			const res = await fetch('/api/public/display-settings-requests', {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					Accept: 'application/json',
-					'X-CSRF-TOKEN': getCsrfToken(),
-					'X-Requested-With': 'XMLHttpRequest',
-				},
-				credentials: 'same-origin',
-				body: JSON.stringify(body),
-			});
-			const data = await res.json().catch(() => ({}));
-			if (!res.ok) {
-				triageSettingsError = (data as { message?: string }).message || 'Failed to create request.';
-				toaster.error({ title: triageSettingsError });
-				return;
-			}
-			const d = data as { id: number; request_token: string };
-			triageSettingsRequestId = d.id;
-			triageSettingsRequestToken = d.request_token;
-			triageSettingsRequestState = 'waiting';
-			const id = d.id;
-			const token = d.request_token;
-			triageSettingsPollIntervalId = setInterval(async () => {
-				try {
-					const r = await fetch(
-						`/api/public/display-settings-requests/${id}?token=${encodeURIComponent(token)}`,
-						{ credentials: 'same-origin' }
-					);
-					const pollData = await r.json().catch(() => ({}));
-					const status = (pollData as { status?: string }).status;
-					if (status === 'approved') {
-						if (triageSettingsPollIntervalId) clearInterval(triageSettingsPollIntervalId);
-						triageSettingsPollIntervalId = null;
-						triageSettingsRequestId = null;
-						triageSettingsRequestToken = null;
-						triageSettingsRequestState = 'idle';
-						setLocalAllowHidOnThisDevice('staff_binder', triageSettingsLocalHid);
-						localAllowHid = triageSettingsLocalHid;
-						setLocalPersistentHidOnThisDevice('staff_binder', triageSettingsLocalPersistentHid);
-						localPersistentHid = triageSettingsLocalPersistentHid;
-						setLocalAllowCameraOnThisDevice('staff_binder', triageSettingsLocalCamera);
-						localAllowCamera = triageSettingsLocalCamera;
-						toaster.success({ title: 'Settings applied.' });
-						showTriageSettingsModal = false;
-					} else if (status === 'rejected' || status === 'cancelled') {
-						if (triageSettingsPollIntervalId) clearInterval(triageSettingsPollIntervalId);
-						triageSettingsPollIntervalId = null;
-						triageSettingsRequestState = 'idle';
-						triageSettingsRequestId = null;
-						triageSettingsRequestToken = null;
-						toaster.warning({ title: status === 'rejected' ? 'Request was rejected.' : 'Request was cancelled.' });
-					}
-				} catch {
-					// ignore
-				}
-			}, 2000);
-		} finally {
-			triageSettingsSaving = false;
-		}
-	}
-
-	async function saveTriageSettings() {
-		triageSettingsError = '';
-		// Logged-in staff can save without PIN/QR; PIN and QR remain optional for extra verification if desired.
-		const authBody = triageSettingsAuthMode === 'pin' ? (triagePinOrQrRef?.buildPinOrQrPayload?.() ?? null) : null;
-		if (triageSettingsAuthMode === 'request' && !authBody) {
-			triageSettingsError = 'Use "Show QR for supervisor to scan" to apply changes.';
-			return;
-		}
-		triageSettingsSaving = true;
-		try {
-			const res = await fetch('/api/profile/triage-settings', {
-				method: 'PUT',
-				headers: {
-					'Content-Type': 'application/json',
-					Accept: 'application/json',
-					'X-CSRF-TOKEN': getCsrfToken(),
-					'X-Requested-With': 'XMLHttpRequest',
-				},
-				credentials: 'same-origin',
-				body: JSON.stringify({
-					allow_hid_barcode: triageSettingsAccountHid,
-					allow_camera_scanner: triageSettingsAccountCamera,
-				}),
-			});
-			const data = await res.json().catch(() => ({}));
-			if (res.ok) {
-				const d = data as { allow_hid_barcode?: boolean; allow_camera_scanner?: boolean };
-				accountAllowHid = d.allow_hid_barcode !== false;
-				accountAllowCamera = d.allow_camera_scanner !== false;
-				setLocalAllowHidOnThisDevice('staff_binder', triageSettingsLocalHid);
-				localAllowHid = triageSettingsLocalHid;
-				setLocalPersistentHidOnThisDevice('staff_binder', triageSettingsLocalPersistentHid);
-				localPersistentHid = triageSettingsLocalPersistentHid;
-				setLocalAllowCameraOnThisDevice('staff_binder', triageSettingsLocalCamera);
-				localAllowCamera = triageSettingsLocalCamera;
-				showTriageSettingsModal = false;
-			} else {
-				triageSettingsError = (data as { message?: string }).message ?? 'Failed to save.';
-				toaster.error({ title: triageSettingsError });
-			}
-		} catch (e) {
-			toaster.error({ title: MSG_NETWORK_ERROR });
-			triageSettingsError = MSG_NETWORK_ERROR;
-		} finally {
-			triageSettingsSaving = false;
-		}
-	}
-
-	/** Per ISSUES-ELABORATION §12: clear error and allow scan/lookup again without refresh (e.g. after token freed elsewhere). */
-	function tryAgain() {
-		scanHandled = false;
 	}
 
 	// Identity registration accept/reject
@@ -737,10 +335,10 @@
 </script>
 
 <svelte:head>
-	<title>Triage — FlexiQueue</title>
+	<title>Client registration — FlexiQueue</title>
 </svelte:head>
 
-<MobileLayout headerTitle="Triage" {queueCount} {processedToday}>
+<MobileLayout headerTitle="Client registration" {queueCount} {processedToday}>
 	<div class="flex flex-col gap-4 md:gap-6 text-surface-950 w-full max-w-2xl mx-auto px-4 md:px-6 py-4 md:py-6">
 		{#if !effectiveProgram}
 			<div class="rounded-container bg-surface-50 border border-surface-200 elevation-card p-6 md:p-8 text-center text-surface-950/80">
@@ -748,19 +346,11 @@
 				<p class="mt-2 text-sm">Activate a program from Admin → Programs.</p>
 			</div>
 		{:else}
-			<div class="flex items-center justify-between gap-2">
-				<h1 class="text-xl md:text-2xl font-semibold text-surface-950">Triage</h1>
-				<div class="flex items-center gap-2">
-					<button
-						type="button"
-						class="btn btn-icon preset-tonal touch-target"
-						aria-label="Triage settings (HID and scanner)"
-						title="Settings"
-						onclick={openTriageSettingsModal}
-					>
-						<Settings class="w-5 h-5" />
-					</button>
-				</div>
+			<div>
+				<h1 class="text-xl md:text-2xl font-semibold text-surface-950">Client registration</h1>
+				<p class="mt-1 text-sm text-surface-600">
+					Verify or create registrations here. Guests scan tokens and start visits on the kiosk.
+				</p>
 			</div>
 
 			{#if pending_identity_registrations?.length > 0}
@@ -771,7 +361,7 @@
 							type="button"
 							class="btn preset-tonal text-sm touch-target-h flex items-center gap-2"
 							onclick={() => (showNewRegModal = true)}
-							data-testid="triage-new-registration-button"
+							data-testid="client-registration-new-button"
 						>
 							<Plus class="w-4 h-4" />
 							New client registration
@@ -780,7 +370,7 @@
 					<ul class="space-y-2">
 						{#each pending_identity_registrations as reg (reg.id)}
 							<li
-								class="flex flex-wrap items-center justify-between gap-2 py-2 border-b border-surface-200 last:border-b-0 {highlightSessionId === reg.session_id ? 'triage-row-highlight' : ''}"
+								class="flex flex-wrap items-center justify-between gap-2 py-2 border-b border-surface-200 last:border-b-0 {highlightSessionId === reg.session_id ? 'client-registration-row-highlight' : ''}"
 								data-testid="identity-registration-row-{reg.id}"
 							>
 								<div class="min-w-0">
@@ -851,7 +441,7 @@
 							type="button"
 							class="btn preset-tonal text-sm touch-target-h flex items-center gap-2"
 							onclick={() => (showNewRegModal = true)}
-							data-testid="triage-new-registration-button"
+							data-testid="client-registration-new-button"
 						>
 							<Plus class="w-4 h-4" />
 							New registration
@@ -860,197 +450,16 @@
 				</section>
 			{/if}
 
-			{#if effectiveHid}
-				<!-- Global HID barcode input (sr-only). Per plan: only focused when scanner modal is open. -->
-				<input
-					type="text"
-					autocomplete="off"
-					inputmode="none"
-					aria-label="Barcode scanner input; scan with hardware scanner or type and press Enter"
-					class="sr-only"
-					bind:value={barcodeValue}
-					bind:this={barcodeInputEl}
-					onkeydown={onBarcodeKeydown}
-				/>
-			{/if}
-
-			<ScanModal
-				open={showScanner}
-				onClose={closeScanner}
-				title="Scan QR via Camera"
-				allowHid={effectiveHid}
-				allowCamera={effectiveCamera}
-				onScan={handleQrScan}
-				wide={true}
-			>
-				{#snippet extra()}
-					{#if scanCountdown > 0}
-						<div class="flex flex-wrap items-center justify-center gap-2">
-							<p class="text-sm text-surface-600" aria-live="polite">Closing in {scanCountdown}s</p>
-							<button type="button" class="btn preset-tonal text-sm py-1.5 px-3" onclick={extendScannerCountdown}>
-								Extend (+{Math.max(0, Number(display_scan_timeout_seconds) || 20)}s)
-							</button>
-						</div>
-					{/if}
-				{/snippet}
-			</ScanModal>
-
-			{#if !scannedToken}
-				<!-- Get token: pulsing CTA with camera icon opens modal (same pattern as display). -->
-				<div
-					class="rounded-container border border-surface-200 bg-surface-50 elevation-card p-4 md:p-6 flex flex-col gap-4"
-					data-testid="triage-token-card"
-				>
-					<div
-						class="flex items-center gap-3 rounded-container border-2 border-primary-500/30 bg-primary-500/5 p-4 animate-pulse"
-						role="region"
-						aria-label="Scan or enter token ID"
-					>
-						<p class="flex-1 text-base font-medium text-surface-950">Scan or enter token ID</p>
-						{#if effectiveCamera}
-							<button
-								type="button"
-								class="btn btn-icon preset-filled-primary-500 shrink-0 touch-target"
-								aria-label="Open camera to scan QR"
-								title="Tap to scan with device camera"
-								onclick={() => {
-									showScanner = true;
-									scanHandled = false;
-								}}
-							>
-								<Camera class="w-6 h-6" />
-							</button>
-						{/if}
-						{#if effectiveHid}
-							<button
-								type="button"
-								class="btn btn-sm preset-tonal shrink-0 touch-target-h"
-								aria-label="Open scan modal for barcode"
-								onclick={() => {
-									showScanner = true;
-									scanHandled = false;
-								}}
-							>
-								Scan with barcode
-							</button>
-						{/if}
-					</div>
-					<div class="flex items-center gap-2">
-						<span class="text-xs text-surface-950/60 shrink-0">or enter token ID</span>
-						<div class="flex-1 border-t border-surface-200"></div>
-					</div>
-					<div class="flex gap-2">
-						<input
-							type="text"
-							class="input flex-1 rounded-container border border-surface-200 px-3 touch-target-h"
-							placeholder="e.g. A1"
-							data-testid="triage-token-input"
-							bind:value={manualPhysicalId}
-							onfocus={startManualFocusWindow}
-							onkeydown={(e) => e.key === 'Enter' && handleLookup()}
-						/>
-						<button
-							type="button"
-							class="btn preset-filled-primary-500 touch-target px-4"
-							data-testid="triage-token-lookup-button"
-							onclick={handleLookup}
-						>
-							Look up
-						</button>
-					</div>
-				</div>
-
-				<Modal open={showTriageSettingsModal} title="Triage settings" onClose={() => { cancelTriageSettingsRequest(); showTriageSettingsModal = false; }}>
-					{#snippet children()}
-						<div class="flex flex-col gap-6">
-							<p class="text-sm text-surface-950/70">You can view and change settings below. Changes are applied only when you save; saving requires PIN or QR (admin scan).</p>
-							<div class="flex flex-col gap-4">
-								<h3 class="text-sm font-semibold text-surface-950">On this account</h3>
-								<p class="text-xs text-surface-950/60">Saved to your account; applies on any device when you are logged in.</p>
-								<label class="flex items-center gap-2 cursor-pointer">
-									<input type="checkbox" class="checkbox" bind:checked={triageSettingsAccountHid} disabled={triageSettingsSaving} />
-									<span class="text-sm text-surface-950">Allow HID barcode scanner</span>
-								</label>
-								<label class="flex items-center gap-2 cursor-pointer">
-									<input type="checkbox" class="checkbox" bind:checked={triageSettingsAccountCamera} disabled={triageSettingsSaving} />
-									<span class="text-sm text-surface-950">Allow camera/QR scanner</span>
-								</label>
-							</div>
-							<div class="border-t border-surface-200 pt-4 flex flex-col gap-2">
-								<h3 class="text-sm font-semibold text-surface-950">On this device</h3>
-								<p class="text-xs text-surface-950/60">Stored on this device only — not saved to server.</p>
-								<label class="flex items-center gap-2 cursor-pointer">
-									<input type="checkbox" class="checkbox" bind:checked={triageSettingsLocalHid} />
-									<span class="text-sm text-surface-950">Allow HID scanner on this device</span>
-								</label>
-								{#if triageSettingsLocalHid}
-									<label class="flex items-center gap-2 cursor-pointer pl-6">
-										<input type="checkbox" class="checkbox" bind:checked={triageSettingsLocalPersistentHid} />
-										<span class="text-sm text-surface-950">Keep HID ready when scan modal is closed</span>
-									</label>
-								{/if}
-								<label class="flex items-center gap-2 cursor-pointer">
-									<input type="checkbox" class="checkbox" bind:checked={triageSettingsLocalCamera} />
-									<span class="text-sm text-surface-950">Allow camera/QR scanner on this device</span>
-								</label>
-							</div>
-							<div class="border-t border-surface-200 pt-4 flex flex-col gap-2">
-								<h3 class="text-sm font-semibold text-surface-950">Apply changes</h3>
-								<p class="text-xs text-surface-950/60">Authorize with PIN or show QR for supervisor to scan. Settings above are applied only when you save.</p>
-								<AuthChoiceButtons includeRequest={true} disabled={triageSettingsSaving || triageSettingsRequestState === 'waiting'} bind:mode={triageSettingsAuthMode} />
-								{#if triageSettingsRequestState === 'waiting' && triageSettingsRequestId != null && triageSettingsRequestToken != null}
-									<div class="flex flex-col items-center gap-3 py-4">
-										<p class="text-sm font-medium text-surface-950">Waiting for approval…</p>
-										<p class="text-xs text-surface-950/60 text-center">Ask the program supervisor or admin to scan this QR on the Track overrides page.</p>
-										<img class="rounded-container border border-surface-200 bg-white p-2" alt="QR for supervisor to scan" width="200" height="200" src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(STAFF_TRIAGE_SETTINGS_REQUEST_QR_PREFIX + triageSettingsRequestId + ':' + triageSettingsRequestToken)}`} />
-										<button type="button" class="btn preset-tonal btn-sm touch-target-h" onclick={cancelTriageSettingsRequest}>Cancel request</button>
-									</div>
-								{:else if triageSettingsAuthMode === 'request'}
-									<button type="button" class="btn preset-filled-primary-500" onclick={createStaffTriageSettingsRequest} disabled={triageSettingsSaving || effectiveProgram?.id == null}>
-										{triageSettingsSaving ? 'Creating…' : 'Show QR for supervisor to scan'}
-									</button>
-								{:else}
-									<PinOrQrInput bind:this={triagePinOrQrRef} disabled={triageSettingsSaving} mode={triageSettingsAuthMode} bind:pin={triageSettingsPin} bind:qrScanToken={triageSettingsQrScanToken} />
-								{/if}
-								{#if triageSettingsError}
-									<p class="text-sm text-error-600">{triageSettingsError}</p>
-								{/if}
-							</div>
-							<div class="flex flex-wrap gap-2 justify-end pt-2">
-								<button type="button" class="btn preset-tonal" onclick={() => { cancelTriageSettingsRequest(); showTriageSettingsModal = false; }} disabled={triageSettingsSaving}>Cancel</button>
-								{#if triageSettingsAuthMode !== 'request'}
-									<button type="button" class="btn preset-filled-primary-500" onclick={saveTriageSettings} disabled={triageSettingsSaving}>{triageSettingsSaving ? 'Saving…' : 'Save'}</button>
-								{/if}
-							</div>
-						</div>
-					{/snippet}
-				</Modal>
-
-				<CreateRegistrationModal
-					open={showNewRegModal}
-					onClose={() => (showNewRegModal = false)}
-					onSubmitSuccess={() => {
-						toaster.success({ title: 'Registration created.' });
-						router.reload();
-					}}
-					programId={effectiveProgram?.id ?? null}
-					submitRequest={submitNewRegistrationRequest}
-				/>
-			{:else}
-				<StaffTriageBindPanel
-					program={effectiveProgram}
-					token={scannedToken}
-					effectiveHid={effectiveHid}
-					effectiveCamera={effectiveCamera}
-					getCsrfToken={getCsrfToken}
-					onCancel={resetScan}
-					onBound={() => {
-						resetScan();
-						toaster.success({ title: 'Visit started.' });
-						router.reload();
-					}}
-				/>
-			{/if}
+			<CreateRegistrationModal
+				open={showNewRegModal}
+				onClose={() => (showNewRegModal = false)}
+				onSubmitSuccess={() => {
+					toaster.success({ title: 'Registration created.' });
+					router.reload();
+				}}
+				programId={effectiveProgram?.id ?? null}
+				submitRequest={submitNewRegistrationRequest}
+			/>
 		{/if}
 
 		<Modal

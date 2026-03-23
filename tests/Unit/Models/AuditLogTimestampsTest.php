@@ -8,10 +8,11 @@ use App\Models\ServiceTrack;
 use App\Models\Session;
 use App\Models\Station;
 use App\Models\Token;
-use App\Models\TransactionLog;
 use App\Models\TrackStep;
+use App\Models\TransactionLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -27,7 +28,7 @@ class AuditLogTimestampsTest extends TestCase
     {
         $this->createMinimalSession();
         $session = Session::first();
-        $user = User::factory()->create(['role' => 'staff']);
+        $user = User::factory()->create();
 
         $log = TransactionLog::create([
             'session_id' => $session->id,
@@ -37,12 +38,12 @@ class AuditLogTimestampsTest extends TestCase
         ]);
 
         $this->assertNotNull($log->created_at, 'TransactionLog created_at must be set by creating hook');
-        $this->assertInstanceOf(\Illuminate\Support\Carbon::class, $log->created_at);
+        $this->assertInstanceOf(Carbon::class, $log->created_at);
     }
 
     public function test_program_audit_log_has_created_at_set_when_not_passed(): void
     {
-        $user = User::factory()->create(['role' => 'admin']);
+        $user = User::factory()->admin()->create();
         $program = Program::create([
             'name' => 'Test',
             'is_active' => false,
@@ -56,12 +57,12 @@ class AuditLogTimestampsTest extends TestCase
         ]);
 
         $this->assertNotNull($log->created_at, 'ProgramAuditLog created_at must be set by creating hook');
-        $this->assertInstanceOf(\Illuminate\Support\Carbon::class, $log->created_at);
+        $this->assertInstanceOf(Carbon::class, $log->created_at);
     }
 
     private function createMinimalSession(): void
     {
-        $user = User::factory()->create(['role' => 'admin']);
+        $user = User::factory()->admin()->create();
         $program = Program::create([
             'name' => 'Test',
             'is_active' => true,

@@ -193,6 +193,28 @@ final class ProgramSettings
         return $settings;
     }
 
+    /**
+     * After merging request/display payload into stored settings: ensure canonical `kiosk_*` exist
+     * when only legacy triage keys were sent, then mirror kiosk → legacy.
+     *
+     * @param  array<string, mixed>  $settings
+     * @return array<string, mixed>
+     */
+    public static function normalizeStoredProgramSettingsKioskKeys(array $settings): array
+    {
+        if (! array_key_exists('kiosk_enable_hid_barcode', $settings) && array_key_exists('enable_public_triage_hid_barcode', $settings)) {
+            $settings['kiosk_enable_hid_barcode'] = (bool) $settings['enable_public_triage_hid_barcode'];
+        }
+        if (! array_key_exists('kiosk_enable_camera_scanner', $settings) && array_key_exists('enable_public_triage_camera_scanner', $settings)) {
+            $settings['kiosk_enable_camera_scanner'] = (bool) $settings['enable_public_triage_camera_scanner'];
+        }
+        if (! array_key_exists('kiosk_hid_persistent_when_scan_modal_closed', $settings) && array_key_exists('enable_public_triage_hid_persistent_when_scan_modal_closed', $settings)) {
+            $settings['kiosk_hid_persistent_when_scan_modal_closed'] = (bool) $settings['enable_public_triage_hid_persistent_when_scan_modal_closed'];
+        }
+
+        return self::syncKioskKeysToLegacyAliases($settings);
+    }
+
     public function getKioskEnableHidBarcode(): bool
     {
         if (array_key_exists('kiosk_enable_hid_barcode', $this->settings)) {

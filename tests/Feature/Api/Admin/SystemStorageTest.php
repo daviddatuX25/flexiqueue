@@ -2,7 +2,6 @@
 
 namespace Tests\Feature\Api\Admin;
 
-use App\Enums\UserRole;
 use App\Models\Program;
 use App\Models\Station;
 use App\Models\Token;
@@ -18,8 +17,7 @@ class SystemStorageTest extends TestCase
 
     private function createAdmin(): User
     {
-        return User::factory()->create([
-            'role' => UserRole::Admin,
+        return User::factory()->admin()->create([
             'password' => Hash::make('secret'),
         ]);
     }
@@ -88,9 +86,7 @@ class SystemStorageTest extends TestCase
 
     public function test_non_admin_cannot_access_system_storage(): void
     {
-        $user = User::factory()->create([
-            'role' => UserRole::Staff,
-        ]);
+        $user = User::factory()->create();
 
         $this->actingAs($user)
             ->getJson('/api/admin/system/storage')
@@ -147,7 +143,7 @@ class SystemStorageTest extends TestCase
 
     public function test_non_admin_cannot_clear_storage(): void
     {
-        $user = User::factory()->create(['role' => UserRole::Staff]);
+        $user = User::factory()->create();
 
         $this->actingAs($user)->get('/admin/settings');
         $csrf = $this->app['session']->token();
@@ -309,7 +305,7 @@ class SystemStorageTest extends TestCase
 
     public function test_non_admin_cannot_clear_orphaned_tts(): void
     {
-        $user = User::factory()->create(['role' => UserRole::Staff]);
+        $user = User::factory()->create();
 
         $this->actingAs($user)->get('/admin/settings');
         $csrf = $this->app['session']->token();
@@ -319,4 +315,3 @@ class SystemStorageTest extends TestCase
             ->assertForbidden();
     }
 }
-

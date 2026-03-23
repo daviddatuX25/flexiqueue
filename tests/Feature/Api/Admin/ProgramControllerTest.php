@@ -652,7 +652,7 @@ class ProgramControllerTest extends TestCase
 
     public function test_activate_syncs_assigned_station_id_from_program_station_assignments(): void
     {
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        $staff = User::factory()->create(['assigned_station_id' => null]);
         $program = Program::create([
             'site_id' => $this->siteId(),
             'name' => 'To Activate',
@@ -697,7 +697,6 @@ class ProgramControllerTest extends TestCase
     public function test_activate_sets_assigned_staff_availability_to_away(): void
     {
         $staff = User::factory()->create([
-            'role' => 'staff',
             'assigned_station_id' => null,
             'availability_status' => User::AVAILABILITY_AVAILABLE,
         ]);
@@ -916,7 +915,6 @@ class ProgramControllerTest extends TestCase
     public function test_pause_sets_available_assigned_staff_to_on_break(): void
     {
         $staff = User::factory()->create([
-            'role' => 'staff',
             'availability_status' => User::AVAILABILITY_AVAILABLE,
         ]);
         $program = Program::create([
@@ -965,7 +963,7 @@ class ProgramControllerTest extends TestCase
 
     public function test_staff_cannot_access_programs_api_returns_403(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->getJson('/api/admin/programs');
 
@@ -975,7 +973,7 @@ class ProgramControllerTest extends TestCase
     /** Per central-edge follow-up: activate returns warning when staff are in multiple active programs. */
     public function test_activate_returns_warning_when_staff_assigned_to_multiple_active_programs(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $programA = Program::create([
             'site_id' => $this->siteId(),

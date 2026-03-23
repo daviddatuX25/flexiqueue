@@ -70,7 +70,10 @@ use App\Http\Controllers\Api\TemporaryQrController;
 use App\Http\Controllers\Api\TtsController;
 use App\Http\Controllers\Api\UserAvailabilityController;
 use App\Http\Controllers\Api\VerifyPinController;
+use App\Http\Controllers\Auth\ForgotPasswordController;
+use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\Auth\LoginController;
+use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\DisplayController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\ProgramOverridesPageController;
@@ -78,6 +81,8 @@ use App\Http\Controllers\ShortLinkResolverController;
 use App\Http\Controllers\StaffDashboardController;
 use App\Http\Controllers\StationPageController;
 use App\Http\Controllers\TriagePageController;
+use App\Models\UserCredential;
+use App\Support\GoogleOAuthConfig;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -243,6 +248,7 @@ Route::middleware(['auth', 'permission:profile.self'])->prefix('api/profile')->g
     Route::post('/avatar', [ProfileController::class, 'updateAvatar'])->name('api.profile.avatar');
     Route::get('/triage-settings', [ProfileController::class, 'triageSettings'])->name('api.profile.triage-settings');
     Route::put('/triage-settings', [ProfileController::class, 'updateTriageSettings'])->name('api.profile.triage-settings.update');
+    Route::delete('/google', [ProfileController::class, 'unlinkGoogle'])->name('api.profile.google.unlink');
 });
 
 // Per PIN-QR-AUTHORIZATION-SYSTEM AUTH-3, AUTH-4: Temporary PIN/QR generation (supervisor/admin only)
@@ -320,7 +326,23 @@ Route::get('/edge/waiting', function () {
 // Per 05-SECURITY-CONTROLS §2.4: public routes (no auth)
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login')->middleware('guest');
 Route::post('/login', [LoginController::class, 'login'])->middleware('guest');
+Route::get('/forgot-password', [ForgotPasswordController::class, 'create'])->middleware(['guest', 'throttle:20,1'])->name('password.request');
+Route::post('/forgot-password', [ForgotPasswordController::class, 'store'])->middleware(['guest', 'throttle:5,15'])->name('password.email');
+Route::get('/reset-password/{token}', [NewPasswordController::class, 'create'])->middleware(['guest', 'throttle:30,1'])->name('password.reset');
+Route::post('/reset-password', [NewPasswordController::class, 'store'])->middleware(['guest', 'throttle:10,15'])->name('password.store');
+Route::get('/auth/google', [GoogleAuthController::class, 'redirectToGoogle'])
+    ->name('auth.google.redirect')
+    ->middleware(['guest', 'throttle:20,1']);
+Route::get('/auth/google/link', [GoogleAuthController::class, 'redirectToLinkGoogle'])
+    ->name('auth.google.link')
+    ->middleware(['auth', 'permission:profile.self', 'throttle:10,1']);
+Route::get('/auth/google/callback', [GoogleAuthController::class, 'handleGoogleCallback'])
+    ->name('auth.google.callback')
+    ->middleware(['throttle:30,1']);
 Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->middleware('auth');
+
+// Per HYBRID_AUTH_ADMIN_FIRST_PRD.md ONB-5 / H5: holding page until admin assigns station or clears pending_assignment.
+Route::middleware(['auth', 'permission:profile.self'])->get('/pending-assignment', fn () => Inertia::render('PendingAssignment/Index'))->name('pending-assignment');
 
 // Per central-edge B.2: sync/bridge auth stub (site API key only; no session)
 Route::post('/api/sync/test-site-auth', function (Request $request) {
@@ -451,11 +473,16 @@ Route::middleware(['auth', 'permission:admin.manage|staff.operations'])->prefix(
     Route::get('/clients/{client}', [ClientPageController::class, 'show'])->name('clients.show');
 });
 
-// All staff (admin, supervisor, staff): station, triage, track-overrides, profile, dashboard
+// All staff (admin, supervisor, staff): station, client registration (staff), track-overrides, profile, dashboard
 Route::middleware(['auth', 'permission:staff.operations'])->group(function (): void {
     Route::get('/dashboard', StaffDashboardController::class)->name('dashboard');
     Route::get('/station/{station?}', StationPageController::class)->name('station');
-    Route::get('/triage', TriagePageController::class)->name('triage');
+    Route::get('/client-registration', TriagePageController::class)->name('client-registration');
+    Route::get('/triage', function (Request $request) {
+        $qs = $request->getQueryString();
+
+        return redirect('/client-registration'.($qs !== '' && $qs !== null ? '?'.$qs : ''), 302);
+    })->name('triage');
     Route::get('/devices', [DisplayController::class, 'devicesForStaff'])->name('devices');
     Route::redirect('/authorize', '/track-overrides', 302)->name('authorize');
 
@@ -464,7 +491,18 @@ Route::middleware(['auth', 'permission:staff.operations'])->group(function (): v
 
     // Backwards compatibility: old URL redirects to canonical
     Route::redirect('/program-overrides', '/track-overrides', 302);
-    Route::get('/profile', fn () => Inertia::render('Profile/Index'))->name('profile');
+    Route::get('/profile', function (Request $request) {
+        $user = $request->user();
+        if ($user === null) {
+            abort(403);
+        }
+
+        return Inertia::render('Profile/Index', [
+            'googleOAuthEnabled' => GoogleOAuthConfig::isConfigured(),
+            'googleLinked' => $user->credentials()->where('provider', UserCredential::PROVIDER_GOOGLE)->exists(),
+            'recoveryGmail' => $user->recovery_gmail,
+        ]);
+    })->name('profile');
 });
 
 // All other web routes require authentication

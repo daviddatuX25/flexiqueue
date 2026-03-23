@@ -151,7 +151,7 @@ class ProgramDefaultSettingsTest extends TestCase
 
     public function test_staff_cannot_access_returns_403(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $this->actingAs($staff)->getJson('/api/admin/program-default-settings')->assertStatus(403);
         $this->actingAs($staff)->putJson('/api/admin/program-default-settings', [
             'settings' => ['no_show_timer_seconds' => 15],
@@ -160,7 +160,7 @@ class ProgramDefaultSettingsTest extends TestCase
 
     public function test_super_admin_without_site_cannot_use_site_scoped_program_defaults(): void
     {
-        $super = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+        $super = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $this->actingAs($super)->getJson('/api/admin/program-default-settings')->assertStatus(403);
         $this->actingAs($super)->putJson('/api/admin/program-default-settings', [

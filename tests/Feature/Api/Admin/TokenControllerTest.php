@@ -650,14 +650,14 @@ class TokenControllerTest extends TestCase
 
     public function test_non_admin_cannot_access_index(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $response = $this->actingAs($staff)->getJson('/api/admin/tokens');
         $response->assertStatus(403);
     }
 
     public function test_non_admin_cannot_batch_create(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $response = $this->actingAs($staff)->postJson('/api/admin/tokens/batch', [
             'prefix' => 'A',
             'count' => 5,
@@ -669,7 +669,7 @@ class TokenControllerTest extends TestCase
     public function test_non_admin_cannot_update_token(): void
     {
         $token = $this->createToken('A1', 'available');
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $response = $this->actingAs($staff)->putJson("/api/admin/tokens/{$token->id}", ['status' => 'available']);
         $response->assertStatus(403);
     }

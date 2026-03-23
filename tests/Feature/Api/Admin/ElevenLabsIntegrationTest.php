@@ -2,7 +2,6 @@
 
 namespace Tests\Feature\Api\Admin;
 
-use App\Enums\UserRole;
 use App\Models\TtsAccount;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -20,7 +19,7 @@ class ElevenLabsIntegrationTest extends TestCase
 
     public function test_admin_can_view_elevenlabs_integration_status(): void
     {
-        $admin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $admin = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $response = $this->actingAs($admin)
             ->getJson('/api/admin/integrations/elevenlabs');
@@ -46,7 +45,7 @@ class ElevenLabsIntegrationTest extends TestCase
 
     public function test_staff_cannot_view_elevenlabs_integration_status(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)
             ->getJson('/api/admin/integrations/elevenlabs');
@@ -60,7 +59,7 @@ class ElevenLabsIntegrationTest extends TestCase
             'api.elevenlabs.io/v1/user' => Http::response(['subscription' => []], 200),
         ]);
 
-        $admin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $admin = User::factory()->superAdmin()->create(['site_id' => null]);
         $this->actingAs($admin);
         Session::start();
 
@@ -78,7 +77,7 @@ class ElevenLabsIntegrationTest extends TestCase
 
     public function test_admin_can_activate_elevenlabs_account(): void
     {
-        $admin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $admin = User::factory()->superAdmin()->create(['site_id' => null]);
         $account = TtsAccount::create([
             'label' => 'Inactive',
             'api_key' => Crypt::encryptString('sk_test'),
@@ -98,7 +97,7 @@ class ElevenLabsIntegrationTest extends TestCase
 
     public function test_admin_can_delete_elevenlabs_account(): void
     {
-        $admin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $admin = User::factory()->superAdmin()->create(['site_id' => null]);
         $account = TtsAccount::create([
             'label' => 'To delete',
             'api_key' => Crypt::encryptString('sk_test'),
@@ -128,7 +127,7 @@ class ElevenLabsIntegrationTest extends TestCase
             ], 200),
         ]);
 
-        $admin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $admin = User::factory()->superAdmin()->create(['site_id' => null]);
         TtsAccount::create([
             'label' => 'Active',
             'api_key' => Crypt::encryptString('sk_test_key'),
@@ -149,7 +148,7 @@ class ElevenLabsIntegrationTest extends TestCase
 
     public function test_staff_cannot_create_elevenlabs_account(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $this->actingAs($staff);
         Session::start();
 
@@ -165,7 +164,7 @@ class ElevenLabsIntegrationTest extends TestCase
 
     public function test_staff_cannot_fetch_voices(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)
             ->getJson('/api/admin/integrations/elevenlabs/voices');
@@ -190,7 +189,7 @@ class ElevenLabsIntegrationTest extends TestCase
             ], 200),
         ]);
 
-        $admin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $admin = User::factory()->superAdmin()->create(['site_id' => null]);
         TtsAccount::create([
             'label' => 'Active',
             'api_key' => Crypt::encryptString('sk_test_key'),
@@ -211,7 +210,7 @@ class ElevenLabsIntegrationTest extends TestCase
 
     public function test_admin_usage_returns_null_subscription_when_no_active_account(): void
     {
-        $admin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $admin = User::factory()->superAdmin()->create(['site_id' => null]);
         // No TtsAccount and no .env key: getResolvedApiKey() returns ''
         config(['tts.elevenlabs.api_key' => '']);
 
@@ -225,7 +224,7 @@ class ElevenLabsIntegrationTest extends TestCase
 
     public function test_staff_cannot_fetch_usage(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)
             ->getJson('/api/admin/integrations/elevenlabs/usage');

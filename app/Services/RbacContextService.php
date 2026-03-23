@@ -6,6 +6,7 @@ use App\Models\Program;
 use App\Models\RbacTeam;
 use App\Models\Site;
 use App\Models\User;
+use App\Support\PermissionCatalog;
 
 /**
  * Effective permission = global team ∪ site team ∪ program team (OR).
@@ -63,5 +64,27 @@ class RbacContextService
             setPermissionsTeamId($previous);
             $user->unsetRelation('roles')->unsetRelation('permissions');
         }
+    }
+
+    /**
+     * True if the user has {@see PermissionCatalog::PROGRAMS_SUPERVISE} on any active program
+     * {@see RbacTeam} in their site scope (pivot-independent).
+     */
+    public function hasProgramTeamSuperviseOnAnyActiveProgramInUserScope(User $user): bool
+    {
+        $query = Program::query()->where('is_active', true);
+        if ($user->site_id !== null) {
+            $query->where('site_id', $user->site_id);
+        } else {
+            $query->whereNull('site_id');
+        }
+
+        foreach ($query->cursor() as $program) {
+            if ($this->canInProgramTeamOnly($user, PermissionCatalog::PROGRAMS_SUPERVISE, $program)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

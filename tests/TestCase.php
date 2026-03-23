@@ -2,7 +2,11 @@
 
 namespace Tests;
 
+use App\Models\Program;
 use App\Models\RbacTeam;
+use App\Models\User;
+use App\Services\ProgramSupervisorGrantService;
+use App\Services\SpatieRbacSyncService;
 use Database\Seeders\PermissionCatalogSeeder;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
@@ -45,5 +49,18 @@ abstract class TestCase extends BaseTestCase
             $_ENV[$key] = $value;
             $_SERVER[$key] = $value;
         }
+    }
+
+    /** Grant `programs.supervise` on the program RbacTeam and sync dashboard/supervisor-tool direct perms (replaces pivot + observer). */
+    protected function grantProgramTeamSuperviseForTests(User $user, Program $program): void
+    {
+        app(ProgramSupervisorGrantService::class)->grantProgramTeamSupervise($user, $program);
+        app(SpatieRbacSyncService::class)->syncSupervisorDirectPermissions($user->fresh());
+    }
+
+    protected function revokeProgramTeamSuperviseForTests(User $user, Program $program): void
+    {
+        app(ProgramSupervisorGrantService::class)->revokeProgramTeamSupervise($user, $program);
+        app(SpatieRbacSyncService::class)->syncSupervisorDirectPermissions($user->fresh());
     }
 }

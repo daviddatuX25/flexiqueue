@@ -3669,8 +3669,7 @@
                             Program Settings
                         </h2>
                         <p class="text-sm text-surface-600 mt-0.5">
-                            Configure operational rules and routing behavior for
-                            this program.
+                            Queue and service rules, display board options, and kiosk / public triage—grouped below so each surface is easier to find.
                         </p>
                     </div>
                     {#if !edgeMode?.admin_read_only}
@@ -3688,7 +3687,12 @@
                 <div
                     class="rounded-container bg-surface-50 border border-surface-200 shadow-sm flex flex-col overflow-hidden"
                 >
-                    <div class="p-5 sm:p-6 space-y-6">
+                    <div class="p-5 sm:p-6 flex flex-col gap-10">
+                        <section class="space-y-6" aria-labelledby="program-settings-queue">
+                        <div class="rounded-lg bg-surface-100/70 border border-surface-200 px-4 py-3">
+                            <h2 id="program-settings-queue" class="text-sm font-semibold text-surface-950">Queue & service rules</h2>
+                            <p class="text-xs text-surface-600 mt-1">No-shows, priority and balancing, station selection, and supervisor PIN overrides.</p>
+                        </div>
                         <!-- Setting 1 -->
                         <div
                             class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
@@ -3759,369 +3763,6 @@
                                     max="10"
                                     bind:value={maxNoShowAttempts}
                                 />
-                            </div>
-                        </div>
-
-                        <!-- Display scan timeout: scanner modal auto-close and status page auto-dismiss (flexiqueue-87p) -->
-                        <div
-                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
-                        >
-                            <div class="sm:w-1/3 shrink-0">
-                                <h3
-                                    class="font-medium text-surface-950 flex items-center gap-2"
-                                >
-                                    <Monitor class="w-4 h-4 text-surface-500" /> Display scan timeout
-                                </h3>
-                                <p class="text-xs text-surface-500 mt-1">
-                                    Seconds before the camera scanner modal and status page auto-close. 0 = no auto-close.
-                                </p>
-                            </div>
-                            <div class="sm:w-2/3 form-control">
-                                <label class="flex items-center gap-2 flex-wrap">
-                                    <input
-                                        id="informant-desk-activity-buffer"
-                                        type="number"
-                                        class="input rounded-container border border-surface-200 px-3 py-2 w-20 text-surface-950 bg-surface-50 shadow-sm text-center"
-                                        min="0"
-                                        max="300"
-                                        bind:value={displayScanTimeoutSeconds}
-                                    />
-                                    <span class="text-sm text-surface-600">seconds (0–300, 0 = no auto-close)</span>
-                                </label>
-                            </div>
-                        </div>
-
-                        <!-- Display board audio: TTS mute and volume (per plan) -->
-                        <div
-                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
-                        >
-                            <div class="sm:w-1/3 shrink-0">
-                                <h3
-                                    class="font-medium text-surface-950 flex items-center gap-2"
-                                >
-                                    <Volume2 class="w-4 h-4 text-surface-500" /> Display board audio
-                                </h3>
-                                <p class="text-xs text-surface-500 mt-1">
-                                    Mute, volume, and repeat for this program’s display board only. Site-wide token voice and “station directions on/off” are under Configuration → Audio &amp; TTS.
-                                </p>
-                            </div>
-                            <div class="sm:w-2/3 form-control space-y-3">
-                                <label
-                                    class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors"
-                                >
-                                    <input
-                                        type="checkbox"
-                                        class="checkbox"
-                                        bind:checked={displayAudioMuted}
-                                    />
-                                    <span class="label-text text-surface-950 font-medium">Mute display board TTS</span>
-                                </label>
-                                <label class="flex flex-col gap-1">
-                                    <span class="text-sm text-surface-600">Volume (0–100%)</span>
-                                    <input
-                                        type="range"
-                                        min="0"
-                                        max="1"
-                                        step="0.1"
-                                        class="range range-sm w-48 max-w-full"
-                                        bind:value={displayAudioVolume}
-                                        disabled={displayAudioMuted}
-                                        aria-label="Display board TTS volume"
-                                    />
-                                    <span class="text-xs text-surface-500">{Math.round(displayAudioVolume * 100)}%</span>
-                                </label>
-                                <div class="flex flex-col gap-1">
-                                    <label for="display-tts-repeat" class="text-sm text-surface-600">TTS announcement repeat</label>
-                                    <select
-                                        id="display-tts-repeat"
-                                        class="select select-bordered w-fit"
-                                        bind:value={settingsDisplayTtsRepeatCount}
-                                        aria-label="How many times to repeat each call announcement"
-                                    >
-                                        <option value={1}>Once</option>
-                                        <option value={2}>Twice</option>
-                                        <option value={3}>Three times</option>
-                                    </select>
-                                </div>
-                                <div class="flex flex-col gap-1">
-                                    <label for="display-tts-repeat-delay" class="text-sm text-surface-600">Delay between repeats (seconds)</label>
-                                    <input
-                                        id="display-tts-repeat-delay"
-                                        type="number"
-                                        min="0.5"
-                                        max="10"
-                                        step="0.5"
-                                        class="input input-bordered w-24"
-                                        bind:value={settingsDisplayTtsRepeatDelaySec}
-                                        aria-label="Delay between repeated announcements in seconds"
-                                    />
-                                </div>
-                                <!-- TTS source/voice are now global; program controls only mute/volume/repeat. -->
-                            </div>
-                        </div>
-
-                        <!-- Program-wide connecting phrases (modal on Stations tab) -->
-                        {#if segment2Enabled}
-                            <div
-                                class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
-                            >
-                                <div class="sm:w-1/3 shrink-0">
-                                    <h3
-                                        class="font-medium text-surface-950 flex items-center gap-2"
-                                    >
-                                        <Volume2 class="w-4 h-4 text-surface-500" /> Connecting phrases (station directions)
-                                    </h3>
-                                    <p class="text-xs text-surface-500 mt-1">
-                                        Spoken between the token call and the window or station name (e.g. “please go to”). One set per language for this program.
-                                    </p>
-                                </div>
-                                <div class="sm:w-2/3 form-control space-y-3">
-                                    <p class="text-xs text-surface-600">
-                                        Open <strong>Connecting phrase TTS</strong> on the Stations tab. It applies to every station in this program.
-                                    </p>
-                                    <button
-                                        type="button"
-                                        class="btn preset-tonal w-full sm:w-auto flex items-center gap-2"
-                                        onclick={() => {
-                                            activeTab = "stations";
-                                            showProgramConnectorTtsModal = true;
-                                        }}
-                                    >
-                                        <Volume2 class="w-4 h-4" />
-                                        Open connecting phrase TTS
-                                    </button>
-                                </div>
-                            </div>
-                        {:else}
-                            <div class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200">
-                                <div class="sm:w-1/3 shrink-0">
-                                    <h3 class="font-medium text-surface-950 flex items-center gap-2">
-                                        <Volume2 class="w-4 h-4 text-surface-500" /> Station directions
-                                    </h3>
-                                </div>
-                                <div class="sm:w-2/3">
-                                    <p class="text-sm text-surface-600">
-                                        Station directions after the token call are turned off site-wide. Enable them under
-                                        <Link href="/admin/settings?tab=token-tts" class="font-semibold text-primary-600 hover:text-primary-700 underline">Configuration → Audio &amp; TTS</Link>
-                                        to edit connecting phrases per program.
-                                    </p>
-                                </div>
-                            </div>
-                        {/if}
-
-                        <!-- Kiosk device (self-service + status) -->
-                        <div
-                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
-                        >
-                            <div class="sm:w-1/3 shrink-0">
-                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
-                                    Kiosk device
-                                </h3>
-                                <p class="text-xs text-surface-500 mt-1">
-                                    Controls the public self-service kiosk (site URL <code class="text-xs bg-surface-100 px-1 rounded">/site/…/kiosk/…</code>). Self-service starts a visit; status checker opens queue status when the token is already in the queue.
-                                </p>
-                            </div>
-                            <div class="sm:w-2/3 form-control pt-1 space-y-4">
-                                <label
-                                    for="allow-public-triage-switch"
-                                    class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors items-center"
-                                >
-                                    <div class="relative inline-block w-11 h-5">
-                                        <input
-                                            id="allow-public-triage-switch"
-                                            type="checkbox"
-                                            class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300"
-                                            bind:checked={allowPublicTriage}
-                                        />
-                                        <span
-                                            class="absolute top-0 left-0 w-5 h-5 bg-surface-950 rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none"
-                                            aria-hidden="true"
-                                        ></span>
-                                    </div>
-                                    <span class="label-text text-surface-950 font-medium">Self-service triage</span>
-                                </label>
-                                <p class="text-xs text-surface-500 -mt-2 ml-14">
-                                    Scan token, choose a track, start a visit (when the device is unlocked for this program).
-                                </p>
-                                <label
-                                    for="kiosk-status-checker-switch"
-                                    class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors items-center"
-                                >
-                                    <div class="relative inline-block w-11 h-5">
-                                        <input
-                                            id="kiosk-status-checker-switch"
-                                            type="checkbox"
-                                            class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300"
-                                            bind:checked={kioskStatusCheckerEnabled}
-                                        />
-                                        <span
-                                            class="absolute top-0 left-0 w-5 h-5 bg-surface-950 rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none"
-                                            aria-hidden="true"
-                                        ></span>
-                                    </div>
-                                    <span class="label-text text-surface-950 font-medium">Queue status checker</span>
-                                </label>
-                                <p class="text-xs text-surface-500 -mt-2 ml-14">
-                                    When a scanned token is already in the queue, send the visitor to the public status screen.
-                                </p>
-                            </div>
-                        </div>
-
-                        <!-- Publish to display and public triage (site-level visibility) -->
-                        <!-- Allow in-triage verification/registration (mother) + sub-switches -->
-                        <div
-                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
-                        >
-                            <div class="sm:w-1/3 shrink-0">
-                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
-                                    In-triage verification / registration
-                                </h3>
-                                <p class="text-xs text-surface-500 mt-1 space-y-1">
-                                    <span class="block">
-                                        Turn this on to show verification and registration tools on staff and public triage (phone-based identity).
-                                    </span>
-                                    <span class="block">
-                                        Then choose: <strong>allow unverified to proceed to queue</strong>, or <strong>require verification to proceed</strong>.
-                                    </span>
-                                </p>
-                                {#if !allowPublicTriage}
-                                    <p class="text-[11px] text-surface-500 mt-2">
-                                        Public triage is currently disabled; these settings apply to staff triage until public triage is enabled.
-                                    </p>
-                                {:else}
-                                    <p class="text-[11px] text-surface-500 mt-2">
-                                        When public triage is enabled, these settings also apply to the public triage page.
-                                    </p>
-                                {/if}
-                            </div>
-                            <div class="sm:w-2/3 form-control pt-1 space-y-2">
-                                <label
-                                    class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors items-center"
-                                >
-                                    <div class="relative inline-block w-11 h-5">
-                                        <input
-                                            type="checkbox"
-                                            class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300"
-                                            checked={identityPolicy !== "none"}
-                                            onchange={() => {
-                                                if (identityPolicy === "none") {
-                                                    identityPolicy = "required";
-                                                } else {
-                                                    identityPolicy = "none";
-                                                }
-                                            }}
-                                        />
-                                        <span
-                                            class="absolute top-0 left-0 w-5 h-5 bg-surface-950 rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none"
-                                            aria-hidden="true"
-                                        ></span>
-                                    </div>
-                                    <span class="label-text text-surface-950 font-medium">
-                                        Allow in-triage verification / registration
-                                    </span>
-                                </label>
-                                {#if identityPolicy !== "none"}
-                                    <div class="ml-7">
-                                        <label
-                                            class="flex items-start gap-3 cursor-pointer hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors"
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                class="checkbox checkbox-sm mt-0.5"
-                                                bind:checked={allowUnverifiedEntry}
-                                                disabled={!allowPublicTriage}
-                                            />
-                                            <span class="text-sm text-surface-950">
-                                                <span class="font-medium text-surface-950"
-                                                    >Allow unverified to proceed to queue</span
-                                                >
-                                                <span class="block text-surface-500 text-xs">
-                                                    Public triage can create a queue session from a registration that is not yet verified; session is marked unverified until staff accept. When unchecked, visitors must verify identity or submit a registration for staff to process first.
-                                                </span>
-                                            </span>
-                                        </label>
-                                    </div>
-                                {/if}
-                            </div>
-                        </div>
-
-                        <!-- HID barcode: Display board -->
-                        <div
-                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
-                        >
-                            <div class="sm:w-1/3 shrink-0">
-                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
-                                    <Monitor class="w-4 h-4 text-surface-500" /> HID barcode (Display)
-                                </h3>
-                                <p class="text-xs text-surface-500 mt-1">
-                                    When on, the Display board keeps focus on the hidden barcode input for hardware scanners.
-                                </p>
-                            </div>
-                            <div class="sm:w-2/3 form-control pt-1">
-                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
-                                    <input type="checkbox" class="checkbox" bind:checked={enableDisplayHidBarcode} />
-                                    <span class="label-text text-surface-950 font-medium">Enable HID barcode on Display board</span>
-                                </label>
-                            </div>
-                        </div>
-
-                        <!-- Camera/QR scanner: Display board -->
-                        <div
-                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
-                        >
-                            <div class="sm:w-1/3 shrink-0">
-                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
-                                    <Camera class="w-4 h-4 text-surface-500" /> Camera/QR scanner (Display)
-                                </h3>
-                                <p class="text-xs text-surface-500 mt-1">
-                                    When on, the Display board shows the button to open the camera and scan a QR code.
-                                </p>
-                            </div>
-                            <div class="sm:w-2/3 form-control pt-1">
-                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
-                                    <input type="checkbox" class="checkbox" bind:checked={enableDisplayCameraScanner} />
-                                    <span class="label-text text-surface-950 font-medium">Enable camera/QR scanner on Display board</span>
-                                </label>
-                            </div>
-                        </div>
-
-                        <!-- HID barcode: Kiosk -->
-                        <div
-                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
-                        >
-                            <div class="sm:w-1/3 shrink-0">
-                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
-                                    <Users class="w-4 h-4 text-surface-500" /> HID barcode (Kiosk)
-                                </h3>
-                                <p class="text-xs text-surface-500 mt-1">
-                                    When on, the kiosk page keeps focus on the hidden barcode input for hardware scanners.
-                                </p>
-                            </div>
-                            <div class="sm:w-2/3 form-control pt-1">
-                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
-                                    <input type="checkbox" class="checkbox" bind:checked={enablePublicTriageHidBarcode} />
-                                    <span class="label-text text-surface-950 font-medium">Enable HID barcode on kiosk</span>
-                                </label>
-                            </div>
-                        </div>
-
-                        <!-- Camera: Kiosk -->
-                        <div
-                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
-                        >
-                            <div class="sm:w-1/3 shrink-0">
-                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
-                                    <Camera class="w-4 h-4 text-surface-500" /> Camera / QR (Kiosk)
-                                </h3>
-                                <p class="text-xs text-surface-500 mt-1">
-                                    When on, the kiosk shows the camera scan button to read token QR codes.
-                                </p>
-                            </div>
-                            <div class="sm:w-2/3 form-control pt-1">
-                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
-                                    <input type="checkbox" class="checkbox" bind:checked={enablePublicTriageCameraScanner} />
-                                    <span class="label-text text-surface-950 font-medium">Enable camera / QR scanner on kiosk</span>
-                                </label>
                             </div>
                         </div>
 
@@ -4328,7 +3969,7 @@
                         </div>
 
                         <!-- Setting 5 -->
-                        <div class="flex flex-col sm:flex-row gap-4">
+                        <div class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200">
                             <div class="sm:w-1/3 shrink-0">
                                 <h3
                                     class="font-medium text-surface-950 flex items-center gap-2"
@@ -4360,12 +4001,341 @@
                         </div>
 
                         <!-- Per ISSUES-ELABORATION §5: info on multiple processes per station -->
-                        <div class="rounded-container bg-surface-100/80 border border-surface-200 p-4 mt-4">
+                        <div class="rounded-container bg-surface-100/80 border border-surface-200 p-4">
                             <p class="text-sm font-medium text-surface-800">Multiple processes per station</p>
                             <p class="text-xs text-surface-600 mt-1">
                                 You can assign several processes to the same physical station: add the same station to multiple track steps (each step can use a different process), and in Stations ensure that station has multiple processes selected. Station selection mode above then applies when choosing which station serves each process.
                             </p>
                         </div>
+                        </section>
+
+                        <section class="space-y-6" aria-labelledby="program-settings-display">
+                        <div class="rounded-lg bg-surface-100/70 border border-surface-200 px-4 py-3">
+                            <h2 id="program-settings-display" class="text-sm font-semibold text-surface-950">Display board</h2>
+                            <p class="text-xs text-surface-600 mt-1">Public display: scan timeout, spoken announcements, and barcode or camera on the board.</p>
+                        </div>
+
+                        <!-- Display scan timeout: scanner modal auto-close and status page auto-dismiss (flexiqueue-87p) -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3
+                                    class="font-medium text-surface-950 flex items-center gap-2"
+                                >
+                                    <Monitor class="w-4 h-4 text-surface-500" /> Display scan timeout
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    Seconds before the camera scanner modal and status page auto-close. 0 = no auto-close.
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control">
+                                <label class="flex items-center gap-2 flex-wrap">
+                                    <input
+                                        id="informant-desk-activity-buffer"
+                                        type="number"
+                                        class="input rounded-container border border-surface-200 px-3 py-2 w-20 text-surface-950 bg-surface-50 shadow-sm text-center"
+                                        min="0"
+                                        max="300"
+                                        bind:value={displayScanTimeoutSeconds}
+                                    />
+                                    <span class="text-sm text-surface-600">seconds (0–300, 0 = no auto-close)</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Display board audio: TTS mute and volume (per plan) -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3
+                                    class="font-medium text-surface-950 flex items-center gap-2"
+                                >
+                                    <Volume2 class="w-4 h-4 text-surface-500" /> Display board audio
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    Mute, volume, and repeat for this program’s display board only. Site-wide token voice and “station directions on/off” are under Configuration → Audio &amp; TTS.
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control space-y-3">
+                                <label
+                                    class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        class="checkbox"
+                                        bind:checked={displayAudioMuted}
+                                    />
+                                    <span class="label-text text-surface-950 font-medium">Mute display board TTS</span>
+                                </label>
+                                <label class="flex flex-col gap-1">
+                                    <span class="text-sm text-surface-600">Volume (0–100%)</span>
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="1"
+                                        step="0.1"
+                                        class="range range-sm w-48 max-w-full"
+                                        bind:value={displayAudioVolume}
+                                        disabled={displayAudioMuted}
+                                        aria-label="Display board TTS volume"
+                                    />
+                                    <span class="text-xs text-surface-500">{Math.round(displayAudioVolume * 100)}%</span>
+                                </label>
+                                <div class="flex flex-col gap-1">
+                                    <label for="display-tts-repeat" class="text-sm text-surface-600">TTS announcement repeat</label>
+                                    <select
+                                        id="display-tts-repeat"
+                                        class="select select-bordered w-fit"
+                                        bind:value={settingsDisplayTtsRepeatCount}
+                                        aria-label="How many times to repeat each call announcement"
+                                    >
+                                        <option value={1}>Once</option>
+                                        <option value={2}>Twice</option>
+                                        <option value={3}>Three times</option>
+                                    </select>
+                                </div>
+                                <div class="flex flex-col gap-1">
+                                    <label for="display-tts-repeat-delay" class="text-sm text-surface-600">Delay between repeats (seconds)</label>
+                                    <input
+                                        id="display-tts-repeat-delay"
+                                        type="number"
+                                        min="0.5"
+                                        max="10"
+                                        step="0.5"
+                                        class="input input-bordered w-24"
+                                        bind:value={settingsDisplayTtsRepeatDelaySec}
+                                        aria-label="Delay between repeated announcements in seconds"
+                                    />
+                                </div>
+                                <!-- TTS source/voice are now global; program controls only mute/volume/repeat. -->
+                            </div>
+                        </div>
+
+                        <!-- HID barcode: Display board -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
+                                    <Monitor class="w-4 h-4 text-surface-500" /> HID barcode (Display)
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    When on, the Display board keeps focus on the hidden barcode input for hardware scanners.
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control pt-1">
+                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
+                                    <input type="checkbox" class="checkbox" bind:checked={enableDisplayHidBarcode} />
+                                    <span class="label-text text-surface-950 font-medium">Enable HID barcode on Display board</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Camera/QR scanner: Display board -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
+                                    <Camera class="w-4 h-4 text-surface-500" /> Camera/QR scanner (Display)
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    When on, the Display board shows the button to open the camera and scan a QR code.
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control pt-1">
+                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
+                                    <input type="checkbox" class="checkbox" bind:checked={enableDisplayCameraScanner} />
+                                    <span class="label-text text-surface-950 font-medium">Enable camera/QR scanner on Display board</span>
+                                </label>
+                            </div>
+                        </div>
+                        </section>
+
+                        <section class="space-y-6" aria-labelledby="program-settings-kiosk">
+                        <div class="rounded-lg bg-surface-100/70 border border-surface-200 px-4 py-3">
+                            <h2 id="program-settings-kiosk" class="text-sm font-semibold text-surface-950">Kiosk & client registration</h2>
+                            <p class="text-xs text-surface-600 mt-1">Self-service kiosk, identity and registration on kiosk plus staff client registration, and scanner options for the kiosk.</p>
+                        </div>
+
+                        <!-- Kiosk device (self-service + status) -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
+                                    Kiosk device
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    Controls the public self-service kiosk (site URL <code class="text-xs bg-surface-100 px-1 rounded">/site/…/kiosk/…</code>). Self-service starts a visit; status checker opens queue status when the token is already in the queue.
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control pt-1 space-y-4">
+                                <label
+                                    for="allow-public-triage-switch"
+                                    class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors items-center"
+                                >
+                                    <div class="relative inline-block w-11 h-5">
+                                        <input
+                                            id="allow-public-triage-switch"
+                                            type="checkbox"
+                                            class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300"
+                                            bind:checked={allowPublicTriage}
+                                        />
+                                        <span
+                                            class="absolute top-0 left-0 w-5 h-5 bg-surface-950 rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none"
+                                            aria-hidden="true"
+                                        ></span>
+                                    </div>
+                                    <span class="label-text text-surface-950 font-medium">Self-service triage</span>
+                                </label>
+                                <p class="text-xs text-surface-500 -mt-2 ml-14">
+                                    Scan token, choose a track, start a visit (when the device is unlocked for this program).
+                                </p>
+                                <label
+                                    for="kiosk-status-checker-switch"
+                                    class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors items-center"
+                                >
+                                    <div class="relative inline-block w-11 h-5">
+                                        <input
+                                            id="kiosk-status-checker-switch"
+                                            type="checkbox"
+                                            class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300"
+                                            bind:checked={kioskStatusCheckerEnabled}
+                                        />
+                                        <span
+                                            class="absolute top-0 left-0 w-5 h-5 bg-surface-950 rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none"
+                                            aria-hidden="true"
+                                        ></span>
+                                    </div>
+                                    <span class="label-text text-surface-950 font-medium">Queue status checker</span>
+                                </label>
+                                <p class="text-xs text-surface-500 -mt-2 ml-14">
+                                    When a scanned token is already in the queue, send the visitor to the public status screen.
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Identity: kiosk self-service + staff client registration -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
+                                    Kiosk & staff: verification / registration
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1 space-y-1">
+                                    <span class="block">
+                                        When on, visitors and staff see phone-based identity verification and client registration flows (kiosk and <strong>Client registration</strong> page).
+                                    </span>
+                                    <span class="block">
+                                        Then choose: <strong>allow unverified to proceed to queue</strong>, or <strong>hold for staff</strong> (registration only until verified).
+                                    </span>
+                                </p>
+                                {#if !allowPublicTriage}
+                                    <p class="text-[11px] text-surface-500 mt-2">
+                                        Kiosk self-service is off; these identity rules still apply to <strong>Client registration</strong> (staff). Turn on self-service above to use the same rules on the kiosk.
+                                    </p>
+                                {:else}
+                                    <p class="text-[11px] text-surface-500 mt-2">
+                                        With kiosk self-service on, these settings apply to both the kiosk and staff <strong>Client registration</strong>.
+                                    </p>
+                                {/if}
+                            </div>
+                            <div class="sm:w-2/3 form-control pt-1 space-y-2">
+                                <label
+                                    class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors items-center"
+                                >
+                                    <div class="relative inline-block w-11 h-5">
+                                        <input
+                                            type="checkbox"
+                                            class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300"
+                                            checked={identityPolicy !== "none"}
+                                            onchange={() => {
+                                                if (identityPolicy === "none") {
+                                                    identityPolicy = "required";
+                                                } else {
+                                                    identityPolicy = "none";
+                                                }
+                                            }}
+                                        />
+                                        <span
+                                            class="absolute top-0 left-0 w-5 h-5 bg-surface-950 rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none"
+                                            aria-hidden="true"
+                                        ></span>
+                                    </div>
+                                    <span class="label-text text-surface-950 font-medium">
+                                        Require identity / registration (kiosk + staff)
+                                    </span>
+                                </label>
+                                {#if identityPolicy !== "none"}
+                                    <div class="ml-7">
+                                        <label
+                                            class="flex items-start gap-3 cursor-pointer hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                class="checkbox checkbox-sm mt-0.5"
+                                                bind:checked={allowUnverifiedEntry}
+                                                disabled={!allowPublicTriage}
+                                            />
+                                            <span class="text-sm text-surface-950">
+                                                <span class="font-medium text-surface-950"
+                                                    >Allow unverified to proceed to queue</span
+                                                >
+                                                <span class="block text-surface-500 text-xs">
+                                                    When checked, the kiosk may create a queue session from a registration that is not yet verified; the session stays marked unverified until staff accept. When unchecked, visitors submit registration for staff (<strong>Client registration</strong>) and do not enter the queue until processed.
+                                                </span>
+                                            </span>
+                                        </label>
+                                    </div>
+                                {/if}
+                            </div>
+                        </div>
+
+                        <!-- HID barcode: Kiosk -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
+                                    <Users class="w-4 h-4 text-surface-500" /> HID barcode (Kiosk)
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    When on, the kiosk page keeps focus on the hidden barcode input for hardware scanners.
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control pt-1">
+                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
+                                    <input type="checkbox" class="checkbox" bind:checked={enablePublicTriageHidBarcode} />
+                                    <span class="label-text text-surface-950 font-medium">Enable HID barcode on kiosk</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Camera: Kiosk -->
+                        <div
+                            class="flex flex-col sm:flex-row gap-4 pb-6 border-b border-surface-200"
+                        >
+                            <div class="sm:w-1/3 shrink-0">
+                                <h3 class="font-medium text-surface-950 flex items-center gap-2">
+                                    <Camera class="w-4 h-4 text-surface-500" /> Camera / QR (Kiosk)
+                                </h3>
+                                <p class="text-xs text-surface-500 mt-1">
+                                    When on, the kiosk shows the camera scan button to read token QR codes.
+                                </p>
+                            </div>
+                            <div class="sm:w-2/3 form-control pt-1">
+                                <label class="label cursor-pointer justify-start gap-3 w-fit hover:bg-surface-100 p-2 -ml-2 rounded-lg transition-colors">
+                                    <input type="checkbox" class="checkbox" bind:checked={enablePublicTriageCameraScanner} />
+                                    <span class="label-text text-surface-950 font-medium">Enable camera / QR scanner on kiosk</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        </section>
                     </div>
 
                     <div

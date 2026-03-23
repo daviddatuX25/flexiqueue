@@ -9,7 +9,6 @@ use App\Models\Session;
 use App\Models\Station;
 use App\Models\Token;
 use App\Models\TrackStep;
-use App\Models\TransactionLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -42,8 +41,8 @@ class SessionHoldingTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->staff = User::factory()->create(['role' => 'staff']);
-        $this->otherStaff = User::factory()->create(['role' => 'staff']);
+        $this->staff = User::factory()->create();
+        $this->otherStaff = User::factory()->create();
         $this->program = Program::create([
             'name' => 'Test Program',
             'description' => null,

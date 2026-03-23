@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -80,11 +81,27 @@ class EdgePackageImportService
                 );
             }
 
+            $userRowsForDb = array_map(static function (array $row): array {
+                unset($row['role']);
+
+                return $row;
+            }, $package['users']);
             DB::table('users')->upsert(
-                $package['users'],
+                $userRowsForDb,
                 ['id'],
-                ['site_id', 'name', 'email', 'password', 'role', 'override_pin', 'override_qr_token', 'assigned_station_id', 'is_active', 'availability_status', 'staff_triage_allow_hid_barcode', 'staff_triage_allow_camera_scanner', 'updated_at']
+                ['site_id', 'name', 'email', 'password', 'override_pin', 'override_qr_token', 'assigned_station_id', 'is_active', 'availability_status', 'staff_triage_allow_hid_barcode', 'staff_triage_allow_camera_scanner', 'updated_at']
             );
+            foreach ($package['users'] as $row) {
+                $id = $row['id'] ?? null;
+                $role = $row['role'] ?? null;
+                if (! is_numeric($id) || ! is_string($role) || $role === '') {
+                    continue;
+                }
+                $u = User::query()->find((int) $id);
+                if ($u) {
+                    User::assignGlobalRoleAndSyncProvisioning($u, $role);
+                }
+            }
 
             $programRow = self::encodeJsonColumns($package['program'], ['settings']);
             DB::table('programs')->upsert(

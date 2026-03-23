@@ -14,6 +14,13 @@
 
     const page = usePage();
     const user = $derived($page.props?.auth?.user ?? null);
+    const googleOAuthEnabled = $derived(Boolean($page.props?.googleOAuthEnabled));
+    const googleLinked = $derived(Boolean($page.props?.googleLinked));
+    const recoveryGmail = $derived(
+        (($page.props as { recoveryGmail?: string | null }).recoveryGmail as string | null | undefined) ?? null
+    );
+
+    let googleUnlinking = $state(false);
 
     // Password form
     let passwordCurrent = $state("");
@@ -265,6 +272,31 @@
         }
     }
 
+    async function unlinkGoogle() {
+        googleUnlinking = true;
+        try {
+            const r = await fetch("/api/profile/google", {
+                method: "DELETE",
+                headers: {
+                    Accept: "application/json",
+                    "X-XSRF-TOKEN": getCsrfToken(),
+                },
+                credentials: "include",
+            });
+            const data = await r.json().catch(() => ({}));
+            if (r.ok) {
+                toaster.success({ title: data.message ?? "Google unlinked." });
+                router.reload();
+            } else {
+                toaster.error({ title: data.message ?? "Could not unlink Google." });
+            }
+        } catch {
+            toaster.error({ title: "Network error. Please try again." });
+        } finally {
+            googleUnlinking = false;
+        }
+    }
+
     function getCsrfToken(): string {
         const match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
         return match ? decodeURIComponent(match[1]) : "";
@@ -328,12 +360,63 @@
 {#snippet profileContent()}
     <div class="profile-page-content p-4 max-w-lg mx-auto">
         <h1 class="text-xl font-semibold mb-4">Profile</h1>
+        {#if ($page.props?.flash as { success?: string; error?: string } | undefined)?.success}
+            <div
+                class="mb-4 p-3 rounded-container bg-success-500/15 border border-success-500/30 text-sm text-surface-950"
+                role="status"
+            >
+                {(($page.props?.flash as { success?: string }).success)}
+            </div>
+        {/if}
+        {#if ($page.props?.flash as { error?: string } | undefined)?.error}
+            <div
+                class="mb-4 p-3 rounded-container bg-error-500/15 border border-error-500/30 text-sm text-surface-950"
+                role="alert"
+            >
+                {(($page.props?.flash as { error?: string }).error)}
+            </div>
+        {/if}
         {#if user}
             <span class="text-sm text-surface-950/70">{user.name}</span>
             <span
                 class="text-xs px-2 py-0.5 rounded preset-filled-primary-500 badge-sm ml-2"
                 >{user.role}</span
             >
+        {/if}
+
+        {#if googleOAuthEnabled}
+            <section class="card bg-surface-50 shadow-sm mt-4 mb-6">
+                <div class="card-body">
+                    <h2 class="card-title text-base">Google sign-in</h2>
+                    <p class="text-sm text-surface-950/70 mb-2">
+                        Password reset emails go to your <strong>recovery Gmail</strong> on file. To link Google,
+                        that Gmail must match the Google account you choose — same as signing in with Google from the
+                        login page.
+                    </p>
+                    <p class="text-sm mb-3">
+                        <span class="text-surface-950/70">Recovery Gmail:</span>
+                        <strong class="ml-1">{recoveryGmail ?? "—"}</strong>
+                    </p>
+                    {#if googleLinked}
+                        <p class="text-sm text-success-700 mb-3">Google is linked. You can use Sign in with Google.</p>
+                        <button
+                            type="button"
+                            class="btn preset-tonal-surface border border-surface-200 btn-sm touch-target-h"
+                            onclick={unlinkGoogle}
+                            disabled={googleUnlinking}
+                        >
+                            {googleUnlinking ? "Unlinking…" : "Unlink Google"}
+                        </button>
+                    {:else}
+                        <a
+                            href="/auth/google/link"
+                            class="btn preset-filled-primary-500 btn-sm touch-target-h inline-flex"
+                        >
+                            Link Google account
+                        </a>
+                    {/if}
+                </div>
+            </section>
         {/if}
 
         <!-- Password -->

@@ -27,14 +27,14 @@ class RbacPermissionRouteMiddlewareTest extends TestCase
             'settings' => [],
             'edge_settings' => [],
         ]);
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
 
         $this->actingAs($staff)->getJson('/api/admin/programs')->assertStatus(403);
     }
 
     public function test_super_admin_receives_403_on_admin_manage_api_group(): void
     {
-        $superAdmin = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+        $superAdmin = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $this->actingAs($superAdmin)->getJson('/api/admin/programs')->assertStatus(403);
     }
@@ -55,7 +55,7 @@ class RbacPermissionRouteMiddlewareTest extends TestCase
 
     public function test_super_admin_receives_200_on_platform_manage_api_group(): void
     {
-        $superAdmin = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+        $superAdmin = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $this->actingAs($superAdmin)->getJson('/api/admin/integrations/elevenlabs')->assertOk();
     }
@@ -98,7 +98,6 @@ class RbacPermissionRouteMiddlewareTest extends TestCase
             'is_active' => true,
         ]);
         $staff = User::factory()->create([
-            'role' => 'staff',
             'site_id' => $site->id,
             'assigned_station_id' => $station->id,
         ]);

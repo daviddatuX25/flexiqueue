@@ -2,7 +2,6 @@
 
 namespace Tests\Feature\Api\Admin;
 
-use App\Enums\UserRole;
 use App\Models\Program;
 use App\Models\Site;
 use App\Models\Token;
@@ -50,7 +49,7 @@ class TokenSiteIsolationTest extends TestCase
         ]);
         $this->adminA = User::factory()->admin()->create(['site_id' => $this->siteA->id]);
         $this->adminB = User::factory()->admin()->create(['site_id' => $this->siteB->id]);
-        $this->superAdmin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $this->superAdmin = User::factory()->superAdmin()->create(['site_id' => null]);
     }
 
     private function createTokenForSite(string $physicalId, int $siteId, string $status = 'available'): Token

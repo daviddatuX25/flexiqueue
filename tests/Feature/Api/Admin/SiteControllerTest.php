@@ -34,7 +34,7 @@ class SiteControllerTest extends TestCase
             'edge_settings' => [],
         ]);
         $this->admin = User::factory()->admin()->create(['site_id' => $this->site->id]);
-        $this->superAdmin = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+        $this->superAdmin = User::factory()->superAdmin()->create(['site_id' => null]);
     }
 
     public function test_super_admin_store_creates_site_and_returns_raw_api_key_once(): void
@@ -179,7 +179,7 @@ class SiteControllerTest extends TestCase
 
     public function test_staff_cannot_access_sites_api_returns_403(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->postJson('/api/admin/sites', [
             'name' => 'Any',

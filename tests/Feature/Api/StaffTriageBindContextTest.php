@@ -34,7 +34,7 @@ class StaffTriageBindContextTest extends TestCase
     public function test_staff_gets_triage_bind_context_json(): void
     {
         $site = $this->defaultSite();
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'Ctx Program',
@@ -76,7 +76,7 @@ class StaffTriageBindContextTest extends TestCase
     public function test_triage_bind_context_hides_staff_client_category_when_identity_binding_required(): void
     {
         $site = $this->defaultSite();
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'Required Bind Program',

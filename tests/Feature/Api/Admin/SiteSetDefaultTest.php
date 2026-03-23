@@ -2,11 +2,11 @@
 
 namespace Tests\Feature\Api\Admin;
 
-use App\Enums\UserRole;
 use App\Models\Site;
 use App\Models\User;
 use App\Support\SiteResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -22,7 +22,7 @@ class SiteSetDefaultTest extends TestCase
         $siteA = Site::create([
             'name' => 'Site A',
             'slug' => 'site-a',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
             'is_default' => true,
@@ -30,12 +30,12 @@ class SiteSetDefaultTest extends TestCase
         $siteB = Site::create([
             'name' => 'Site B',
             'slug' => 'site-b',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
             'is_default' => false,
         ]);
-        $superAdmin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $superAdmin = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $response = $this->actingAs($superAdmin)->patchJson("/api/admin/sites/{$siteB->id}/default");
 
@@ -58,7 +58,7 @@ class SiteSetDefaultTest extends TestCase
         $site = Site::create([
             'name' => 'Site A',
             'slug' => 'site-a',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);

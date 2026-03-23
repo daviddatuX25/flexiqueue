@@ -31,10 +31,11 @@
     );
     const canSwitchProgram = $derived(!!$page.props?.canSwitchProgram);
     const programs = $derived($page.props?.programs ?? []);
-    /** Routes where staff run live sessions (station/triage/overrides/display). Used for program context + dropdown visibility. */
+    /** Routes where staff run live sessions (station / client registration / overrides / display). Used for program context + dropdown visibility. */
     const isLiveSessionRoute = $derived(
         pathOnly === "/station" ||
             pathOnly.startsWith("/station/") ||
+            pathOnly === "/client-registration" ||
             pathOnly === "/triage" ||
             pathOnly === "/track-overrides",
     );
@@ -305,7 +306,7 @@
         const path = typeof currentPath === "string" ? currentPath : "";
         const pathname = path.split("?")[0] || "/";
         if (pathname.startsWith("/station")) return "/station";
-        if (pathname === "/triage") return "/triage";
+        if (pathname === "/client-registration" || pathname === "/triage") return "/client-registration";
         if (pathname === "/track-overrides") return "/track-overrides";
         return "/station";
     }

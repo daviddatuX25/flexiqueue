@@ -42,7 +42,7 @@ class DeviceUnlockWithAuthTest extends TestCase
             'created_by' => $user->id,
         ]);
         $program->refresh();
-        $program->supervisedBy()->attach($user->id);
+        $this->grantProgramTeamSuperviseForTests($user, $program);
 
         $lock = [
             'site_slug' => $site->slug,

@@ -6,11 +6,11 @@ use App\Enums\UserRole;
 use App\Models\RbacTeam;
 use App\Models\User;
 use App\Support\PermissionCatalog;
-use Spatie\Permission\Models\Role;
 
 /**
- * Keeps Spatie roles/permissions aligned with User.role enum and program_supervisors (supervisor UX).
- * Routes use Spatie `permission:` middleware; supervisor direct grants stay in sync here.
+ * Supervisor UX: global direct grants for staff who supervise programs (dashboard + auth tools).
+ * Primary roles are assigned via Spatie only ({@see User::assignGlobalRoleAndSyncProvisioning}).
+ * R4: `programs.supervise` is only on program {@see RbacTeam}s — not granted globally here.
  */
 class SpatieRbacSyncService
 {
@@ -20,23 +20,11 @@ class SpatieRbacSyncService
         setPermissionsTeamId(RbacTeam::GLOBAL_TEAM_ID);
         try {
             $user->unsetRelation('roles')->unsetRelation('permissions');
-            $this->syncRoleFromEnum($user);
             $this->syncSupervisorDirectPermissions($user);
         } finally {
             setPermissionsTeamId($previous);
             $user->unsetRelation('roles')->unsetRelation('permissions');
         }
-    }
-
-    /**
-     * One Spatie role per user, mirroring users.role.
-     */
-    public function syncRoleFromEnum(User $user): void
-    {
-        $name = $user->role instanceof UserRole ? $user->role->value : (string) $user->role;
-        $guard = PermissionCatalog::guardName();
-        Role::findOrCreate($name, $guard);
-        $user->syncRoles([$name]);
     }
 
     /**
@@ -48,7 +36,6 @@ class SpatieRbacSyncService
         $perms = [
             PermissionCatalog::DASHBOARD_VIEW,
             PermissionCatalog::AUTH_SUPERVISOR_TOOLS,
-            PermissionCatalog::PROGRAMS_SUPERVISE,
         ];
 
         $previous = getPermissionsTeamId();
@@ -56,13 +43,13 @@ class SpatieRbacSyncService
         try {
             $user->unsetRelation('roles')->unsetRelation('permissions');
 
-            if ($user->role === UserRole::Admin || $user->role === UserRole::SuperAdmin) {
+            if ($user->hasRole([UserRole::Admin->value, UserRole::SuperAdmin->value])) {
                 $user->revokePermissionTo($perms);
 
                 return;
             }
 
-            if ($user->role !== UserRole::Staff) {
+            if (! $user->hasRole(UserRole::Staff->value)) {
                 return;
             }
 

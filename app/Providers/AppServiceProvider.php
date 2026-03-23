@@ -10,10 +10,8 @@ use App\Models\Program;
 use App\Models\Session;
 use App\Models\Site;
 use App\Models\Station;
-use App\Models\User;
 use App\Observers\ProgramObserver;
 use App\Observers\SiteObserver;
-use App\Observers\UserObserver;
 use App\Policies\SessionPolicy;
 use App\Policies\StationPolicy;
 use App\Repositories\PrintSettingRepository;
@@ -23,6 +21,7 @@ use App\Services\Tts\Contracts\TtsEngine;
 use App\Services\Tts\Engines\ElevenLabsEngine;
 use App\Services\Tts\Engines\NullTtsEngine;
 use App\Services\TtsService;
+use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
@@ -58,11 +57,18 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Station::class, StationPolicy::class);
         Gate::policy(Session::class, SessionPolicy::class);
 
-        User::observe(UserObserver::class);
         Site::observe(SiteObserver::class);
         Program::observe(ProgramObserver::class);
 
         Event::listen(StationDeleted::class, CleanupStationTtsFiles::class);
         Event::listen(TokenDeleted::class, CleanupTokenTtsFiles::class);
+
+        // Per HYBRID_AUTH_ADMIN_FIRST_PRD.md: reset link identifies account by username (not users.email).
+        ResetPassword::createUrlUsing(function ($user, string $token): string {
+            return url(route('password.reset', [
+                'token' => $token,
+                'username' => $user->username,
+            ], false));
+        });
     }
 }

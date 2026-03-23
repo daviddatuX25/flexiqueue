@@ -100,7 +100,7 @@ return [
     | Demo mode (show seeded accounts on login page)
     |--------------------------------------------------------------------------
     | When DEMO=true, the login page shows a section with seeded demo accounts
-    | (email + password hint) so staff can quickly sign in during demos.
+    | (username + password hint) so staff can quickly sign in during demos.
     | When DEMO is false or unset, that section is hidden.
     |
     */
@@ -108,25 +108,25 @@ return [
     'demo' => (bool) env('DEMO', false),
 
     'demo_accounts' => [
-        ['label' => 'Admin (Tagudin)', 'email' => 'admin@tagudinmswdo.gov.ph'],
-        ['label' => 'Staff 1 (Tagudin)', 'email' => 'staff1@tagudinmswdo.gov.ph'],
-        ['label' => 'Staff 2 (Tagudin)', 'email' => 'staff2@tagudinmswdo.gov.ph'],
-        ['label' => 'Staff 3 (Tagudin)', 'email' => 'staff3@tagudinmswdo.gov.ph'],
-        ['label' => 'Staff 4 (Tagudin)', 'email' => 'staff4@tagudinmswdo.gov.ph'],
-        ['label' => 'Staff 5 (Tagudin)', 'email' => 'staff5@tagudinmswdo.gov.ph'],
-        ['label' => 'Staff 6 (Tagudin)', 'email' => 'staff6@tagudinmswdo.gov.ph'],
-        ['label' => 'Admin (Candon)', 'email' => 'admin@candonmswdo.gov.ph'],
-        ['label' => 'Staff 1 (Candon)', 'email' => 'staff1@candonmswdo.gov.ph'],
-        ['label' => 'Staff 2 (Candon)', 'email' => 'staff2@candonmswdo.gov.ph'],
-        ['label' => 'Staff 3 (Candon)', 'email' => 'staff3@candonmswdo.gov.ph'],
-        ['label' => 'Staff 4 (Candon)', 'email' => 'staff4@candonmswdo.gov.ph'],
-        ['label' => 'Staff 5 (Candon)', 'email' => 'staff5@candonmswdo.gov.ph'],
-        ['label' => 'Staff 6 (Candon)', 'email' => 'staff6@candonmswdo.gov.ph'],
-        ['label' => 'Admin (Edge)', 'email' => 'admin@tagudinfield.gov.ph'],
-        ['label' => 'Staff 1 (Edge)', 'email' => 'staff1@tagudinfield.gov.ph'],
-        ['label' => 'Staff 2 (Edge)', 'email' => 'staff2@tagudinfield.gov.ph'],
-        ['label' => 'Staff 3 (Edge)', 'email' => 'staff3@tagudinfield.gov.ph'],
-        ['label' => 'Staff 4 (Edge)', 'email' => 'staff4@tagudinfield.gov.ph'],
+        ['label' => 'Admin (Tagudin)', 'username' => 'admin.tagudin', 'email' => 'admin@tagudinmswdo.gov.ph'],
+        ['label' => 'Staff 1 (Tagudin)', 'username' => 'staff1.tagudin', 'email' => 'staff1@tagudinmswdo.gov.ph'],
+        ['label' => 'Staff 2 (Tagudin)', 'username' => 'staff2.tagudin', 'email' => 'staff2@tagudinmswdo.gov.ph'],
+        ['label' => 'Staff 3 (Tagudin)', 'username' => 'staff3.tagudin', 'email' => 'staff3@tagudinmswdo.gov.ph'],
+        ['label' => 'Staff 4 (Tagudin)', 'username' => 'staff4.tagudin', 'email' => 'staff4@tagudinmswdo.gov.ph'],
+        ['label' => 'Staff 5 (Tagudin)', 'username' => 'staff5.tagudin', 'email' => 'staff5@tagudinmswdo.gov.ph'],
+        ['label' => 'Staff 6 (Tagudin)', 'username' => 'staff6.tagudin', 'email' => 'staff6@tagudinmswdo.gov.ph'],
+        ['label' => 'Admin (Candon)', 'username' => 'admin.candon', 'email' => 'admin@candonmswdo.gov.ph'],
+        ['label' => 'Staff 1 (Candon)', 'username' => 'staff1.candon', 'email' => 'staff1@candonmswdo.gov.ph'],
+        ['label' => 'Staff 2 (Candon)', 'username' => 'staff2.candon', 'email' => 'staff2@candonmswdo.gov.ph'],
+        ['label' => 'Staff 3 (Candon)', 'username' => 'staff3.candon', 'email' => 'staff3@candonmswdo.gov.ph'],
+        ['label' => 'Staff 4 (Candon)', 'username' => 'staff4.candon', 'email' => 'staff4@candonmswdo.gov.ph'],
+        ['label' => 'Staff 5 (Candon)', 'username' => 'staff5.candon', 'email' => 'staff5@candonmswdo.gov.ph'],
+        ['label' => 'Staff 6 (Candon)', 'username' => 'staff6.candon', 'email' => 'staff6@candonmswdo.gov.ph'],
+        ['label' => 'Admin (Edge)', 'username' => 'admin.field', 'email' => 'admin@tagudinfield.gov.ph'],
+        ['label' => 'Staff 1 (Edge)', 'username' => 'staff1.field', 'email' => 'staff1@tagudinfield.gov.ph'],
+        ['label' => 'Staff 2 (Edge)', 'username' => 'staff2.field', 'email' => 'staff2@tagudinfield.gov.ph'],
+        ['label' => 'Staff 3 (Edge)', 'username' => 'staff3.field', 'email' => 'staff3@tagudinfield.gov.ph'],
+        ['label' => 'Staff 4 (Edge)', 'username' => 'staff4.field', 'email' => 'staff4@tagudinfield.gov.ph'],
     ],
 
     /*

@@ -4,13 +4,13 @@ namespace Tests\Feature\Api\Admin;
 
 use App\Models\Program;
 use App\Models\ProgramAuditLog;
-use App\Models\Site;
 use App\Models\ServiceTrack;
 use App\Models\Session;
+use App\Models\Site;
 use App\Models\Station;
 use App\Models\Token;
-use App\Models\TransactionLog;
 use App\Models\TrackStep;
+use App\Models\TransactionLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -48,7 +48,7 @@ class ReportControllerTest extends TestCase
             'edge_settings' => [],
         ]);
         $this->admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $this->staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $this->staff = User::factory()->create(['site_id' => $site->id]);
         $this->program = Program::create([
             'site_id' => $site->id,
             'name' => 'Test Program',
@@ -142,7 +142,7 @@ class ReportControllerTest extends TestCase
 
     public function test_audit_filters_by_staff_user_id(): void
     {
-        $otherStaff = User::factory()->create(['role' => 'staff']);
+        $otherStaff = User::factory()->create();
         TransactionLog::create([
             'session_id' => $this->session->id,
             'station_id' => $this->station->id,

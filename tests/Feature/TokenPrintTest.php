@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\TokenPrintService;
 use Database\Seeders\TokenPrintTestSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Mockery;
 use Tests\TestCase;
@@ -28,7 +29,7 @@ class TokenPrintTest extends TestCase
             $this->site = Site::create([
                 'name' => 'Default Site',
                 'slug' => 'default',
-                'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+                'api_key_hash' => Hash::make(Str::random(40)),
                 'settings' => [],
                 'edge_settings' => [],
             ]);
@@ -87,7 +88,7 @@ class TokenPrintTest extends TestCase
     public function test_print_preview_excludes_token_with_empty_qr_code_hash(): void
     {
         $this->mockQrGeneration();
-        $admin = \App\Models\User::factory()->admin()->create(['site_id' => $this->site()->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $this->site()->id]);
         $t1 = $this->createToken('A1', null, false);
         $t2 = new Token;
         $t2->qr_code_hash = '';
@@ -123,7 +124,7 @@ class TokenPrintTest extends TestCase
 
     public function test_print_preview_shows_empty_state_when_no_tokens(): void
     {
-        $admin = \App\Models\User::factory()->admin()->create(['site_id' => $this->site()->id]);
+        $admin = User::factory()->admin()->create(['site_id' => $this->site()->id]);
 
         $response = $this->actingAs($admin)->get(route('admin.tokens.print'));
 
@@ -138,7 +139,7 @@ class TokenPrintTest extends TestCase
 
     public function test_non_admin_cannot_access_print_preview(): void
     {
-        $staff = \App\Models\User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create([]);
 
         $response = $this->actingAs($staff)->get(route('admin.tokens.print'));
 

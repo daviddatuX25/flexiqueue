@@ -38,7 +38,7 @@ class UserController extends Controller
             if (is_numeric($filterSiteId)) {
                 $query->forSite((int) $filterSiteId);
             } else {
-                $query->where('role', UserRole::Admin->value);
+                User::withGlobalPermissionsTeam(fn () => $query->role(UserRole::Admin->value));
             }
         } else {
             $siteId = $authUser->site_id;
@@ -51,8 +51,10 @@ class UserController extends Controller
         $users = $query->get()->map(fn (User $u) => [
             'id' => $u->id,
             'name' => $u->name,
+            'username' => $u->username,
             'email' => $u->email,
-            'role' => $u->role->value,
+            'recovery_gmail' => $u->recovery_gmail,
+            'role' => $u->primaryGlobalRoleName() ?? 'staff',
             'is_active' => $u->is_active,
             'assigned_station_id' => $u->assigned_station_id,
             'assigned_station' => $u->assignedStation ? [
@@ -62,6 +64,7 @@ class UserController extends Controller
             'site' => $u->site ? ['id' => $u->site->id, 'name' => $u->site->name, 'slug' => $u->site->slug] : null,
             'spatie_roles' => $u->roles->pluck('name')->values()->all(),
             'direct_permissions' => $u->getDirectPermissions()->pluck('name')->values()->all(),
+            'pending_assignment' => (bool) $u->pending_assignment,
         ]);
 
         return response()->json(['users' => $users]);
@@ -85,7 +88,10 @@ class UserController extends Controller
             ['program_id' => $programId, 'user_id' => $user->id],
             ['station_id' => $station->id]
         );
-        $user->update(['assigned_station_id' => $station->id]);
+        $user->update([
+            'assigned_station_id' => $station->id,
+            'pending_assignment' => false,
+        ]);
 
         $user->load('assignedStation');
 
@@ -164,21 +170,27 @@ class UserController extends Controller
             $siteId = $authUser->site_id;
         }
 
+        $pendingAssignment = ($valid['role'] === UserRole::Staff->value)
+            && (bool) ($valid['pending_assignment'] ?? false);
+
         $user = new User([
             'site_id' => $siteId,
             'name' => $valid['name'],
+            'username' => $valid['username'],
             'email' => $valid['email'],
+            'recovery_gmail' => $valid['recovery_gmail'],
             'password' => Hash::make($valid['password']),
-            'role' => $valid['role'],
             'is_active' => true,
+            'pending_assignment' => $pendingAssignment,
             'override_pin' => ! empty($valid['override_pin'])
                 ? Hash::make(trim($valid['override_pin']))
                 : Hash::make((string) random_int(100000, 999999)),
             'override_qr_token' => Hash::make(Str::random(64)),
         ]);
-        $user->save();
+        $user->saveQuietly();
+        User::assignGlobalRoleAndSyncProvisioning($user, $valid['role']);
 
-        AdminActionLog::log($authUser->id, 'user_created', 'User', $user->id, ['email' => $user->email, 'role' => $user->role->value]);
+        AdminActionLog::log($authUser->id, 'user_created', 'User', $user->id, ['email' => $user->email, 'role' => $user->role?->value ?? $valid['role']]);
 
         return response()->json([
             'user' => $this->userResource($user),
@@ -195,19 +207,25 @@ class UserController extends Controller
         $valid = $request->validated();
 
         if (isset($valid['role']) && $valid['role'] !== UserRole::Admin->value
-            && $user->role === UserRole::Admin && $user->site_id !== null) {
+            && $user->isAdmin() && $user->site_id !== null) {
             $this->assertAnotherActiveAdminExistsForSite($user, 'role');
         }
         if (array_key_exists('is_active', $valid) && $valid['is_active'] === false
-            && $user->role === UserRole::Admin && $user->site_id !== null) {
+            && $user->isAdmin() && $user->site_id !== null) {
             $this->assertAnotherActiveAdminExistsForSite($user, 'is_active');
         }
 
         if (isset($valid['name'])) {
             $user->name = $valid['name'];
         }
+        if (isset($valid['username'])) {
+            $user->username = $valid['username'];
+        }
         if (isset($valid['email'])) {
             $user->email = $valid['email'];
+        }
+        if (array_key_exists('recovery_gmail', $valid)) {
+            $user->recovery_gmail = $valid['recovery_gmail'];
         }
         if (! empty($valid['password'])) {
             $user->password = Hash::make($valid['password']);
@@ -223,13 +241,18 @@ class UserController extends Controller
             if (! $request->user()->isSuperAdmin() && $requestedRole === UserRole::Admin->value) {
                 throw ValidationException::withMessages(['role' => ['Site admin may not assign the admin role.']]);
             }
-            $user->role = $requestedRole;
+            if ($requestedRole !== UserRole::Staff->value) {
+                $user->pending_assignment = false;
+            }
         }
         if (array_key_exists('is_active', $valid)) {
             if ($user->id === $request->user()->id) {
                 throw ValidationException::withMessages(['is_active' => ['You cannot change your own login status.']]);
             }
             $user->is_active = (bool) $valid['is_active'];
+        }
+        if (array_key_exists('pending_assignment', $valid) && $user->role === UserRole::Staff) {
+            $user->pending_assignment = (bool) $valid['pending_assignment'];
         }
         if (array_key_exists('override_pin', $valid)) {
             $user->override_pin = $valid['override_pin'] ? Hash::make($valid['override_pin']) : null;
@@ -239,6 +262,10 @@ class UserController extends Controller
         }
 
         $user->save();
+
+        if (array_key_exists('role', $valid)) {
+            User::assignGlobalRoleAndSyncProvisioning($user, $valid['role']);
+        }
 
         if (array_key_exists('direct_permissions', $valid)) {
             $this->assertCanAssignDirectPermissions($request->user(), $valid['direct_permissions']);
@@ -274,13 +301,28 @@ class UserController extends Controller
     }
 
     /**
-     * Reset user password (admin sets new password). Per B.4: 404 if user not in site.
+     * Reset user password (admin sets new / temporary password). Per HYBRID_AUTH_ADMIN_FIRST_PRD.md PWD-5 fail-safe.
+     * Per B.4: 404 if user not in site. Local credential row stays in sync via UserProvisioningService.
      */
     public function resetPassword(ResetPasswordRequest $request, User $user): JsonResponse
     {
         $this->ensureUserInSite($request, $user);
 
-        $user->update(['password' => Hash::make($request->validated('password'))]);
+        if ($user->id === $request->user()->id) {
+            abort(403, 'Use profile or account settings to change your own password.');
+        }
+
+        $plain = $request->validated('password');
+        $user->password = $plain;
+        $user->save();
+
+        AdminActionLog::log(
+            $request->user()->id,
+            'user_password_reset_by_admin',
+            'User',
+            $user->id,
+            ['target_username' => $user->username],
+        );
 
         return response()->json(['user_id' => $user->id]);
     }
@@ -292,7 +334,7 @@ class UserController extends Controller
     private function ensureUserInSite(Request $request, User $user): void
     {
         if ($request->user()->isSuperAdmin()) {
-            if ($user->role !== UserRole::Admin) {
+            if (! $user->isAdmin()) {
                 abort(403, 'Super admin may only manage admin accounts.');
             }
 
@@ -314,8 +356,10 @@ class UserController extends Controller
         return [
             'id' => $user->id,
             'name' => $user->name,
+            'username' => $user->username,
             'email' => $user->email,
-            'role' => $user->role->value,
+            'recovery_gmail' => $user->recovery_gmail,
+            'role' => $user->primaryGlobalRoleName() ?? 'staff',
             'is_active' => $user->is_active,
             'assigned_station_id' => $user->assigned_station_id,
             'assigned_station' => $user->assignedStation ? [
@@ -326,6 +370,7 @@ class UserController extends Controller
             'spatie_roles' => $user->roles->pluck('name')->values()->all(),
             'direct_permissions' => $user->getDirectPermissions()->pluck('name')->values()->all(),
             'permissions' => $user->getAllPermissions()->pluck('name')->values()->all(),
+            'pending_assignment' => (bool) $user->pending_assignment,
         ];
     }
 
@@ -336,7 +381,7 @@ class UserController extends Controller
      */
     private function assertCanAssignDirectPermissions(User $auth, array $names): void
     {
-        if (in_array(PermissionCatalog::PLATFORM_MANAGE, $names, true) && ! $auth->isSuperAdmin()) {
+        if (in_array(PermissionCatalog::PLATFORM_MANAGE, $names, true) && ! $auth->can(PermissionCatalog::PLATFORM_MANAGE)) {
             throw ValidationException::withMessages([
                 'direct_permissions' => ['Only a super admin may assign platform.manage.'],
             ]);
@@ -350,12 +395,12 @@ class UserController extends Controller
      */
     private function assertAnotherActiveAdminExistsForSite(User $user, string $field): void
     {
-        $hasOther = User::query()
+        $hasOther = User::withGlobalPermissionsTeam(fn () => User::query()
             ->where('site_id', $user->site_id)
-            ->where('role', UserRole::Admin)
+            ->role(UserRole::Admin->value)
             ->where('is_active', true)
             ->where('id', '!=', $user->id)
-            ->exists();
+            ->exists());
 
         if ($hasOther) {
             return;

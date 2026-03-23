@@ -2,10 +2,10 @@
 
 namespace App\Http\Middleware;
 
-use App\Enums\UserRole;
 use App\Models\Program;
 use App\Models\ProgramAccessToken;
 use App\Models\Site;
+use App\Support\PermissionCatalog;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -42,7 +42,7 @@ class RequireProgramAccess
         }
 
         $user = $request->user();
-        if ($user && in_array($user->role, [UserRole::Staff, UserRole::Admin, UserRole::SuperAdmin], true)) {
+        if ($user && ($user->can(PermissionCatalog::STAFF_OPERATIONS) || $user->can(PermissionCatalog::ADMIN_SHARED))) {
             return $next($request);
         }
 
@@ -121,6 +121,7 @@ class RequireProgramAccess
                 $out[] = $item;
             }
         }
+
         return $out;
     }
 }

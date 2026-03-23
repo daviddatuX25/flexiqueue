@@ -263,15 +263,15 @@
 	--color-surface-950: #ffffff;
 }
 
-/* Temporary highlight for Triage identity registration row when opened from Station via highlight_session_id */
-.triage-row-highlight {
+/* Temporary highlight for Client registration identity row when opened from Station via highlight_session_id */
+.client-registration-row-highlight {
 	position: relative;
 	border-radius: var(--radius-container);
 	background-color: color-mix(in srgb, var(--color-primary-100) 60%, transparent);
-	animation: triage-row-flash 2s ease-out forwards;
+	animation: client-registration-row-flash 2s ease-out forwards;
 }
 
-@keyframes triage-row-flash {
+@keyframes client-registration-row-flash {
 	0% {
 		box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
 	}

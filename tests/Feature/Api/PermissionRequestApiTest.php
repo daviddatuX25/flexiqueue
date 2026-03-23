@@ -40,14 +40,14 @@ class PermissionRequestApiTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->staff = User::factory()->create(['role' => 'staff']);
+        $this->staff = User::factory()->create();
         $this->supervisor = User::factory()->supervisor()->withOverridePin('123456')->create();
         $this->program = Program::create([
             'name' => 'Test',
             'is_active' => true,
             'created_by' => $this->staff->id,
         ]);
-        $this->program->supervisedBy()->attach($this->supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($this->supervisor, $this->program);
         $this->station1 = Station::create([
             'program_id' => $this->program->id,
             'name' => 'S1',

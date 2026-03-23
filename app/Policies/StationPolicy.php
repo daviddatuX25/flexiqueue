@@ -36,11 +36,7 @@ class StationPolicy
             return Response::allow();
         }
 
-        if ($program && $this->rbacContextService->canInProgramTeamOnly($user, PermissionCatalog::PROGRAMS_SUPERVISE, $program)) {
-            return Response::allow();
-        }
-
-        if ($user->can(PermissionCatalog::PROGRAMS_SUPERVISE) && $user->isSupervisorForProgram($station->program_id)) {
+        if ($program && $user->isSupervisorForProgram($station->program_id)) {
             return Response::allow();
         }
 
@@ -50,5 +46,29 @@ class StationPolicy
         }
 
         return Response::deny('You are not assigned to this station.');
+    }
+
+    /**
+     * Toggling priority-first on a station: admin / platform / program supervisor only — not line staff
+     * assigned to the station (they may view queue but must not change this setting).
+     */
+    public function managePriority(User $user, Station $station): bool
+    {
+        $program = $station->program;
+        $site = $program?->site;
+
+        if ($this->rbacContextService->hasPermissionInContext($user, PermissionCatalog::ADMIN_MANAGE, $site, $program)) {
+            return true;
+        }
+
+        if ($user->can(PermissionCatalog::PLATFORM_MANAGE)) {
+            return true;
+        }
+
+        if ($program && $user->isSupervisorForProgram($station->program_id)) {
+            return true;
+        }
+
+        return false;
     }
 }

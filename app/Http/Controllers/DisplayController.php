@@ -531,7 +531,7 @@ class DisplayController extends Controller
     }
 
     /**
-     * First active program with kiosk self-service enabled, or empty PublicStart. Canonical: `/site/{site}/kiosk`.
+     * First active program with kiosk self-service enabled, or empty Kiosk/Start. Canonical: `/site/{site}/kiosk`.
      */
     public function kioskStartWithSite(Site $site): RedirectResponse|Response
     {
@@ -546,7 +546,7 @@ class DisplayController extends Controller
             return redirect()->to('/site/'.$site->slug.'/kiosk/'.$program->slug);
         }
 
-        return Inertia::render('Triage/PublicStart', [
+        return Inertia::render('Kiosk/Start', [
             'allowed' => false,
             'program_id' => null,
             'site_id' => null,
@@ -554,8 +554,11 @@ class DisplayController extends Controller
             'tracks' => [],
             'date' => now()->format('F j, Y'),
             'display_scan_timeout_seconds' => 20,
-            'enable_public_triage_hid_barcode' => true,
-            'enable_public_triage_camera_scanner' => true,
+            'kiosk_enable_hid_barcode' => true,
+            'kiosk_enable_camera_scanner' => true,
+            'kiosk_self_service_triage_enabled' => false,
+            'kiosk_status_checker_enabled' => false,
+            'kiosk_hid_persistent_when_scan_modal_closed' => false,
             'allow_unverified_entry' => false,
         ]);
     }
@@ -619,7 +622,7 @@ class DisplayController extends Controller
         $request = request();
 
         if (! $settings->getKioskSurfaceEnabled()) {
-            return Inertia::render('Triage/PublicStart', [
+            return Inertia::render('Kiosk/Start', [
                 'allowed' => false,
                 'program_id' => $program->id,
                 'site_id' => $program->site_id,
@@ -629,8 +632,8 @@ class DisplayController extends Controller
                 'tracks' => [],
                 'date' => now()->format('F j, Y'),
                 'display_scan_timeout_seconds' => $settings->getKioskModalIdleSeconds(),
-                'enable_public_triage_hid_barcode' => $settings->getKioskEnableHidBarcode(),
-                'enable_public_triage_camera_scanner' => $settings->getKioskEnableCameraScanner(),
+                'kiosk_enable_hid_barcode' => $settings->getKioskEnableHidBarcode(),
+                'kiosk_enable_camera_scanner' => $settings->getKioskEnableCameraScanner(),
                 'allow_unverified_entry' => $settings->getAllowUnverifiedEntry(),
                 'kiosk_self_service_triage_enabled' => $settings->getKioskSelfServiceTriageEnabled(),
                 'kiosk_status_checker_enabled' => $settings->getKioskStatusCheckerEnabled(),
@@ -665,7 +668,7 @@ class DisplayController extends Controller
             'is_default' => (bool) $t->is_default,
         ])->values()->all();
 
-        $response = Inertia::render('Triage/PublicStart', [
+        $response = Inertia::render('Kiosk/Start', [
             'allowed' => true,
             'program_id' => $program->id,
             'site_id' => $program->site_id,
@@ -676,8 +679,8 @@ class DisplayController extends Controller
             'identity_binding_mode' => $settings->getIdentityBindingMode(),
             'date' => now()->format('F j, Y'),
             'display_scan_timeout_seconds' => $settings->getKioskModalIdleSeconds(),
-            'enable_public_triage_hid_barcode' => $settings->getKioskEnableHidBarcode(),
-            'enable_public_triage_camera_scanner' => $settings->getKioskEnableCameraScanner(),
+            'kiosk_enable_hid_barcode' => $settings->getKioskEnableHidBarcode(),
+            'kiosk_enable_camera_scanner' => $settings->getKioskEnableCameraScanner(),
             'allow_unverified_entry' => $settings->getAllowUnverifiedEntry(),
             'kiosk_self_service_triage_enabled' => $settings->getKioskSelfServiceTriageEnabled(),
             'kiosk_status_checker_enabled' => $settings->getKioskStatusCheckerEnabled(),
@@ -764,7 +767,7 @@ class DisplayController extends Controller
     }
 
     /**
-     * Full-page status: optional safe redirect after timer / “Go back” (e.g. kiosk ?return_to=/site/.../public-triage/...).
+     * Full-page status: optional safe redirect after timer / “Go back” (e.g. kiosk ?return_to=/site/.../kiosk/...).
      * Only same-origin path prefixes under /site/ are allowed.
      */
     private function sanitizeStatusReturnTo(mixed $raw): ?string

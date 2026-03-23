@@ -1,0 +1,31 @@
+---
+description: "ECC security checklist + PHP/Laravel specifics reference"
+alwaysApply: true
+---
+
+# Security (ECC-inspired)
+
+## Before committing sensitive areas
+
+- [ ] **No secrets** in source (keys, tokens, passwords); use **env** / secret store.
+- [ ] **Validate** untrusted input at boundaries.
+- [ ] **SQL**: parameterized queries / Eloquent builder—**no** string-concatenated SQL.
+- [ ] **XSS**: escape or sanitize for HTML contexts; follow framework patterns for Blade/Inertia payloads.
+- [ ] **CSRF**: enabled for state-changing **web** routes where the stack expects it.
+- [ ] **Auth / authz**: policy or gate matches the operation (especially admin / program-scoped actions).
+- [ ] **Errors** do not leak internal tokens, stack traces to clients in production, or PII unnecessarily.
+- [ ] **Rate limiting** where the product spec calls for it (don’t claim “all endpoints” if the project differs).
+
+## Secrets
+
+- Validate required env vars **at deploy or boot** when practical.
+- Rotate anything that may have leaked (git history, logs, screenshots).
+
+## If you find a vulnerability
+
+1. **Stop** widening exposure (revert or patch locally).
+2. Fix **critical** issues before unrelated features.
+3. Search for **similar patterns** in the codebase.
+4. Rotate credentials if there was any exposure risk.
+
+PHP-specific hardening is summarized in **`ecc-php-laravel.mdc`** (globs `**/*.php`).

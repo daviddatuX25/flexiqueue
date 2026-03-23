@@ -34,7 +34,7 @@ class TriagePageController extends Controller
             $qs = $request->getQueryString();
             $target = '/station'.($qs !== '' && $qs !== null ? '?'.$qs : '');
 
-            return redirect()->to($target)->with('success', 'Use the footer QR button for triage and token status.');
+            return redirect()->to($target)->with('success', 'Use the footer QR button for client registration and token status.');
         }
 
         $user = $request->user();
@@ -47,7 +47,7 @@ class TriagePageController extends Controller
         // which program to work in; shares the same session key as Station page.
         $staffHasMultiProgramAssignments = ! $user->can(PermissionCatalog::ADMIN_MANAGE)
             && ! $user->can(PermissionCatalog::PLATFORM_MANAGE)
-            && ! ($user->can(PermissionCatalog::PROGRAMS_SUPERVISE) && $user->isSupervisorForAnyProgram())
+            && ! $user->isSupervisorForAnyProgram()
             && $user->programStationAssignments()
                 ->whereHas('program', fn ($q) => $q->where('is_active', true))
                 ->distinct('program_id')
@@ -69,7 +69,7 @@ class TriagePageController extends Controller
             if ($programModel) {
                 $request->session()->put(StationPageController::SESSION_KEY_PROGRAM_ID, $programModel->id);
 
-                return redirect('/triage');
+                return redirect()->route('client-registration');
             }
         }
 
@@ -108,7 +108,6 @@ class TriagePageController extends Controller
         ];
 
         $footerStats = $this->stationQueueService->getProgramFooterStats($program);
-        $displayScanTimeoutSeconds = $program->settings()->getDisplayScanTimeoutSeconds();
 
         $mobileCrypto = app(MobileCryptoService::class);
         $pendingRegistrations = IdentityRegistration::query()
@@ -191,13 +190,9 @@ class TriagePageController extends Controller
             'programs' => $programsForSelector,
             'queueCount' => $footerStats['queue_count'],
             'processedToday' => $footerStats['processed_today'],
-            'display_scan_timeout_seconds' => $displayScanTimeoutSeconds,
-            'staff_triage_allow_hid_barcode' => $user->staff_triage_allow_hid_barcode ?? true,
-            'staff_triage_allow_camera_scanner' => $user->staff_triage_allow_camera_scanner ?? true,
             'pending_identity_registrations' => $pendingRegistrations,
             'site_slug' => $site?->slug,
             'program_slug' => $program->slug,
-            'allow_public_triage' => $programSettings->getAllowPublicTriage(),
         ]);
     }
 }

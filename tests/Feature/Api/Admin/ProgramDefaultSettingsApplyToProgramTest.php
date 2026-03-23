@@ -124,12 +124,12 @@ class ProgramDefaultSettingsApplyToProgramTest extends TestCase
             ->get('/site/'.$site->slug.'/kiosk/'.$program->slug);
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
-            ->component('Triage/PublicStart')
+            ->component('Kiosk/Start')
             ->where('allowed', true)
             ->where('identity_binding_mode', 'required')
             ->where('allow_unverified_entry', false)
             ->where('display_scan_timeout_seconds', 15)
-            ->where('enable_public_triage_hid_barcode', true)
+            ->where('kiosk_enable_hid_barcode', true)
         );
     }
 }

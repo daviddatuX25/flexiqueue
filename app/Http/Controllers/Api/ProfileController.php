@@ -7,7 +7,9 @@ use App\Http\Requests\UpdateAvatarRequest;
 use App\Http\Requests\UpdateOverridePinRequest;
 use App\Http\Requests\UpdatePasswordRequest;
 use App\Http\Requests\UpdateTriageSettingsRequest;
+use App\Models\UserCredential;
 use App\Services\TokenPrintService;
+use App\Support\GoogleOAuthConfig;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -148,6 +150,29 @@ class ProfileController extends Controller
         return response()->json([
             'allow_hid_barcode' => $user->fresh()->staff_triage_allow_hid_barcode ?? true,
             'allow_camera_scanner' => $user->fresh()->staff_triage_allow_camera_scanner ?? true,
+        ]);
+    }
+
+    /**
+     * DELETE /api/profile/google — Unlink Google (local username/password still works).
+     *
+     * Per HYBRID_AUTH_ADMIN_FIRST_PRD.md §3.2 AUTH-5.
+     */
+    public function unlinkGoogle(Request $request): JsonResponse
+    {
+        if (! GoogleOAuthConfig::isConfigured()) {
+            return response()->json(['message' => 'Google sign-in is not enabled.'], 404);
+        }
+
+        $deleted = $request->user()->credentials()
+            ->where('provider', UserCredential::PROVIDER_GOOGLE)
+            ->delete();
+
+        return response()->json([
+            'message' => $deleted > 0
+                ? 'Google account unlinked. You can still sign in with your username and password.'
+                : 'No Google account was linked.',
+            'google_linked' => false,
         ]);
     }
 }

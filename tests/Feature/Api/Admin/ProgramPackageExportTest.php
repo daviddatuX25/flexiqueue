@@ -79,7 +79,7 @@ class ProgramPackageExportTest extends TestCase
             'step_order' => 1,
             'is_required' => true,
         ]);
-        User::factory()->create(['site_id' => $this->site->id, 'role' => 'staff']);
+        User::factory()->create(['site_id' => $this->site->id]);
     }
 
     private function getPackageWithSiteKey(): TestResponse

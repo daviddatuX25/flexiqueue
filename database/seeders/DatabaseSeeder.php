@@ -11,6 +11,7 @@ use App\Models\Site;
 use App\Models\Station;
 use App\Models\TrackStep;
 use App\Models\User;
+use App\Services\ProgramSupervisorGrantService;
 use App\Services\SpatieRbacSyncService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
@@ -30,9 +31,9 @@ use Illuminate\Support\Str;
  * Password for all: "password". Override PIN: "123456".
  * track_steps include station_id for SQLite (NOT NULL on SQLite).
  *
- * Login credentials:
- *   Admin:  admin@tagudinmswdo.gov.ph / password
- *   Staff:  staff1@tagudinmswdo.gov.ph … staff6@tagudinmswdo.gov.ph / password
+ * Login credentials (username / password):
+ *   Admin:  admin.tagudin / password
+ *   Staff:  staff1.tagudin … staff6.tagudin / password
  *   Names:  Lourdes Valdez (admin); Maria Santos, Juan Dela Cruz, Rosa Reyes,
  *           Jose Garcia, Ana Flores, Pedro Villanueva (staff)
  */
@@ -58,14 +59,17 @@ class DatabaseSeeder extends Seeder
             ['email' => 'admin@tagudinmswdo.gov.ph'],
             [
                 'name' => 'Lourdes Valdez',
+                'username' => 'admin.tagudin',
+                // Same as email so forgot-password + Mailpit work locally (PRD: production should use real Gmail).
+                'recovery_gmail' => 'admin@tagudinmswdo.gov.ph',
                 'password' => $password,
-                'role' => UserRole::Admin,
                 'is_active' => true,
                 'override_pin' => $defaultPin,
                 'override_qr_token' => Hash::make(Str::random(64)),
                 'site_id' => $defaultSite->id,
             ]
         );
+        User::assignGlobalRoleAndSyncProvisioning($admin, UserRole::Admin->value);
 
         // 6 Staff with Filipino names (Ilocano/common surnames)
         $staffNames = [
@@ -79,18 +83,21 @@ class DatabaseSeeder extends Seeder
 
         $staff = [];
         foreach ($staffNames as $i => $name) {
-            $staff[] = User::updateOrCreate(
+            $row = User::updateOrCreate(
                 ['email' => 'staff'.($i + 1).'@tagudinmswdo.gov.ph'],
                 [
                     'name' => $name,
+                    'username' => 'staff'.($i + 1).'.tagudin',
+                    'recovery_gmail' => 'staff'.($i + 1).'@tagudinmswdo.gov.ph',
                     'password' => $password,
-                    'role' => UserRole::Staff,
                     'is_active' => true,
                     'override_pin' => $defaultPin,
                     'override_qr_token' => Hash::make(Str::random(64)),
                     'site_id' => $defaultSite->id,
                 ]
             );
+            User::assignGlobalRoleAndSyncProvisioning($row, UserRole::Staff->value);
+            $staff[] = $row;
         }
 
         // --- AICS (Assistance to Individuals in Crisis Situation) ---
@@ -195,7 +202,8 @@ class DatabaseSeeder extends Seeder
         }
 
         // Pedro Villanueva = supervisor for AICS
-        $aics->supervisedBy()->syncWithoutDetaching([$staff[5]->id]);
+        app(ProgramSupervisorGrantService::class)->grantProgramTeamSupervise($staff[5], $aics);
+        app(SpatieRbacSyncService::class)->syncSupervisorDirectPermissions($staff[5]->fresh());
 
         // --- Social Pension for Indigent Senior Citizens ---
         $socpen = Program::updateOrCreate(

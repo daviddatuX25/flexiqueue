@@ -22,9 +22,11 @@ class StaffProgramAccessService
      */
     public function mayUseProgramPickerWithoutAssignedStation(User $user): bool
     {
-        return $user->can(PermissionCatalog::ADMIN_MANAGE)
-            || $user->can(PermissionCatalog::PLATFORM_MANAGE)
-            || ($user->can(PermissionCatalog::PROGRAMS_SUPERVISE) && $user->isSupervisorForAnyProgram());
+        if ($user->can(PermissionCatalog::ADMIN_MANAGE) || $user->can(PermissionCatalog::PLATFORM_MANAGE)) {
+            return true;
+        }
+
+        return $user->isSupervisorForAnyProgram();
     }
 
     /**
@@ -42,29 +44,33 @@ class StaffProgramAccessService
             return true;
         }
 
-        if ($this->rbacContextService->canInProgramTeamOnly($user, PermissionCatalog::PROGRAMS_SUPERVISE, $program)) {
-            return true;
-        }
-
-        return $user->can(PermissionCatalog::PROGRAMS_SUPERVISE)
-            && $user->isSupervisorForProgram($program->id);
+        return $user->isSupervisorForProgram($program->id);
     }
 
     /**
      * Skip interactive supervisor PIN/QR for call override when user is already elevated (admin / platform / supervisor).
+     *
+     * When $program is set (session flows), bypass only if this user supervises that program (pivot or program-team).
+     * When $program is null, do not bypass — caller must supply program context for supervisor checks.
      */
-    public function mayBypassSupervisorInteractiveAuth(User $user): bool
+    public function mayBypassSupervisorInteractiveAuth(User $user, ?Program $program = null): bool
     {
-        return $user->can(PermissionCatalog::ADMIN_MANAGE)
-            || $user->can(PermissionCatalog::PLATFORM_MANAGE)
-            || ($user->can(PermissionCatalog::PROGRAMS_SUPERVISE) && $user->isSupervisorForAnyProgram());
+        if ($user->can(PermissionCatalog::ADMIN_MANAGE) || $user->can(PermissionCatalog::PLATFORM_MANAGE)) {
+            return true;
+        }
+
+        if ($program === null) {
+            return false;
+        }
+
+        return $user->isSupervisorForProgram($program->id);
     }
 
     /**
-     * Force-complete / override without supervisor proof: site admin, platform, or legacy supervisor.
+     * Force-complete / override without supervisor proof: site admin, platform, or supervisor (pivot/program-team).
      */
-    public function mayForceCompleteOrOverrideWithoutSupervisorProof(User $user): bool
+    public function mayForceCompleteOrOverrideWithoutSupervisorProof(User $user, ?Program $program = null): bool
     {
-        return $this->mayBypassSupervisorInteractiveAuth($user);
+        return $this->mayBypassSupervisorInteractiveAuth($user, $program);
     }
 }

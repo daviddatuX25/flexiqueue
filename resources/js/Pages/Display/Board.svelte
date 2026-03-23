@@ -763,7 +763,7 @@ let stationTtsByName = $state({});
 	{#snippet children()}
 	<div class="relative">
 		{#if !showBoardContent}
-			<!-- A.2.4: Program selector / empty state — per 07-UI-UX-SPECS empty-state pattern and PublicStart "not available" (neutral surface, no warning/error). -->
+			<!-- A.2.4: Program selector / empty state — per 07-UI-UX-SPECS empty-state pattern and Kiosk/Start "not available" (neutral surface, no warning/error). -->
 			<div class="flex flex-col gap-6 max-w-4xl mx-auto pb-28 px-3 sm:px-4">
 				{#if program_not_found}
 					<div

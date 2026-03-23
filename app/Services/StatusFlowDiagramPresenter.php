@@ -6,6 +6,7 @@ use App\Models\Program;
 use App\Models\ProgramStationAssignment;
 use App\Models\ServiceTrack;
 use App\Models\Station;
+use App\Models\User;
 
 /**
  * Builds diagram props for client flow view (Display status page + check-status JSON).
@@ -72,10 +73,13 @@ class StatusFlowDiagramPresenter
                 $staffList[] = ['id' => $a->user->id, 'name' => $a->user->name];
             }
         }
-        foreach ($program->supervisedBy()->get() as $u) {
-            if (! in_array($u->id, $seen, true)) {
-                $seen[] = $u->id;
-                $staffList[] = ['id' => $u->id, 'name' => $u->name];
+        $supervisorIds = $program->allSupervisorUserIds();
+        if ($supervisorIds !== []) {
+            foreach (User::query()->whereIn('id', $supervisorIds)->get(['id', 'name']) as $u) {
+                if (! in_array($u->id, $seen, true)) {
+                    $seen[] = $u->id;
+                    $staffList[] = ['id' => $u->id, 'name' => $u->name];
+                }
             }
         }
         usort($staffList, fn ($a, $b) => strcmp($a['name'], $b['name']));
