@@ -30,10 +30,13 @@ Update only when a pattern decision changes — this file is stable.
 ### Listeners / Events (`app/Listeners/`, `app/Events/`)
 - Handle side effects triggered by model events (e.g. deleting TTS files when a model is deleted).
 - Register via `$dispatchesEvents` on the model or in `AppServiceProvider`.
+- No business logic — delegate to a Service if the handler is more than a few lines.
+- Long-running work (e.g. external API calls) → dispatch a queued Job instead.
 
 ### Repositories (`app/Repositories/`)
-- Wrap persistence concerns that don't belong in a model (e.g. singleton-style `getInstance()` patterns).
-- One repository per model when needed.
+- Use only when a persistence concern cannot cleanly live in a Service or Model (e.g. singleton-style `getInstance()` patterns).
+- Do not create a Repository by default for every model — most models do not need one.
+- One repository per model when a Repository is warranted.
 
 ---
 
