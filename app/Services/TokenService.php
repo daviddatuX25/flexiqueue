@@ -39,6 +39,18 @@ class TokenService
     }
 
     /**
+     * Look up a token by its primary key with optional site scoping.
+     *
+     * @param  int|null  $siteId  When set, only return token if token.site_id matches.
+     */
+    public function lookupById(int $tokenId, ?int $siteId = null): ?Token
+    {
+        $scope = $siteId !== null ? Token::where('site_id', $siteId) : Token::query();
+
+        return $scope->find($tokenId);
+    }
+
+    /**
      * Create a batch of tokens. physical_id = prefix + (start_number + i). qr_code_hash is unique per token.
      * pronounce_as: letters | word | custom (custom = optional per-lang token_phrase + digits from ID when phrase empty).
      * Per site-scoping-migration-spec §2: $siteId from auth; caller must 403 if site admin has null site_id.
