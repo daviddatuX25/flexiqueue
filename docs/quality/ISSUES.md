@@ -39,6 +39,11 @@ Address open issues in priority order.
 | 18 | 🟢 | Backend | SessionService | Old `override()` still exists alongside `overrideByTrack()` | open |
 | 19 | 🟢 | Backend | TransactionLog model | Append-only enforcement was PHP-only (no DB trigger) | done |
 | 20 | 🟢 | Backend | TokenService | N+1 inserts in `batchCreate()` loop | done |
+| 21 | 🔴 | Backend | UserAvailabilityController | Schema::hasTable() + DB::table() raw insert in controller | open |
+| 22 | 🔴 | Backend | StationController | Token::where() Eloquent query in controller | open |
+| 23 | 🔴 | Backend | ProgramPackageController | DB::table() raw query in controller | open |
+| 24 | 🔴 | Backend | PublicTriageController | Multiple Token::where() Eloquent queries in controller | open |
+| 25 | 🔴 | Backend | StepController | DB::table() raw join query in controller | open |
 
 ---
 
@@ -58,6 +63,92 @@ Address open issues in priority order.
 2. If no callers found, delete `override()` from `SessionService`.
 3. Run the test suite: `php artisan test`
 4. Commit: `git commit -m "refactor: remove deprecated SessionService::override()"`
+
+---
+
+### #21 — `Schema::hasTable()` + `DB::table()` raw insert in `UserAvailabilityController`
+
+**File:** `app/Http/Controllers/Api/UserAvailabilityController.php`
+**Layer:** Backend
+**Severity:** 🔴 Critical
+**Status:** open
+
+**Background:** Database schema checks and raw inserts belong in services, not controllers. This violates separation of concerns.
+
+**Action:**
+1. Extract `Schema::hasTable('staff_activity_log')` guard and `DB::table('staff_activity_log')->insert(...)` into a `StaffActivityLogService`.
+2. Replace controller code with: `$this->staffActivityLogService->logActivity(...)`.
+3. Run the test suite: `php artisan test`
+4. Commit: `git commit -m "refactor: extract staff activity logging to StaffActivityLogService"`
+
+---
+
+### #22 — `Token::where()` Eloquent query in `StationController`
+
+**File:** `app/Http/Controllers/Api/StationController.php`
+**Layer:** Backend
+**Severity:** 🔴 Critical
+**Status:** open
+
+**Background:** Eloquent queries belong in services or repositories. The `Token::where('qr_code_hash', ...)` lookup should use an existing service.
+
+**Action:**
+1. Move `Token::where('qr_code_hash', $qrHash)->first()` to `TokenService::lookupByPhysicalOrHash()` (already exists).
+2. Replace controller code with: `$token = $this->tokenService->lookupByPhysicalOrHash($qrHash)`.
+3. Run the test suite: `php artisan test`
+4. Commit: `git commit -m "refactor: move Token lookup to TokenService in StationController"`
+
+---
+
+### #23 — `DB::table()` raw query in `ProgramPackageController`
+
+**File:** `app/Http/Controllers/Api/Admin/ProgramPackageController.php`
+**Layer:** Backend
+**Severity:** 🔴 Critical
+**Status:** open
+
+**Background:** Raw database queries belong in services, not controllers. The `DB::table('program_token')` query should be abstracted.
+
+**Action:**
+1. Move `DB::table('program_token')->where(...)` query to `ProgramPackageService` or `TokenService`.
+2. Replace controller code with a service method call.
+3. Run the test suite: `php artisan test`
+4. Commit: `git commit -m "refactor: move program_token query to service layer"`
+
+---
+
+### #24 — Multiple `Token::where()` Eloquent queries in `PublicTriageController`
+
+**File:** `app/Http/Controllers/Api/PublicTriageController.php`
+**Layer:** Backend
+**Severity:** 🔴 Critical
+**Status:** open
+
+**Background:** Multiple `Token::where()` lookups are scattered throughout this controller. All should use `TokenService` for consistency.
+
+**Action:**
+1. Identify all `Token::where(...)` calls (found: lines 108, 114, 163, 169, 274, 419).
+2. Consolidate lookups using `TokenService::lookupByPhysicalOrHash()`, `lookupById()`, etc.
+3. Replace controller code with service method calls.
+4. Run the test suite: `php artisan test`
+5. Commit: `git commit -m "refactor: move all Token lookups to TokenService in PublicTriageController"`
+
+---
+
+### #25 — `DB::table()` raw join query in `StepController`
+
+**File:** `app/Http/Controllers/Api/Admin/StepController.php`
+**Layer:** Backend
+**Severity:** 🔴 Critical
+**Status:** open
+
+**Background:** Raw database joins belong in services or repositories. The `DB::table('track_steps')->join(...)` query should be abstracted.
+
+**Action:**
+1. Move `DB::table('track_steps')->join(...)` query to `StepService` or `TrackService`.
+2. Replace controller code with a service method call.
+3. Run the test suite: `php artisan test`
+4. Commit: `git commit -m "refactor: move track_steps join query to service layer"`
 
 ---
 
