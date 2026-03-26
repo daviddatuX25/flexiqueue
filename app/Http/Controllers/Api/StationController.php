@@ -9,7 +9,7 @@ use App\Http\Requests\SetStationPriorityFirstRequest;
 use App\Http\Requests\UpdateStationDisplaySettingsRequest;
 use App\Models\Program;
 use App\Models\Station;
-use App\Models\Token;
+use App\Services\TokenService;
 use App\Services\StaffProgramAccessService;
 use App\Services\StationQueueService;
 use Illuminate\Http\JsonResponse;
@@ -24,6 +24,7 @@ class StationController extends Controller
     public function __construct(
         private StationQueueService $stationQueueService,
         private StaffProgramAccessService $staffProgramAccessService,
+        private TokenService $tokenService,
     ) {}
 
     /**
@@ -100,7 +101,7 @@ class StationController extends Controller
         $request->validate(['qr_hash' => ['required', 'string']]);
         $qrHash = $request->query('qr_hash');
 
-        $token = Token::where('qr_code_hash', $qrHash)->first();
+        $token = $this->tokenService->lookupByPhysicalOrHash(null, $qrHash);
         if (! $token) {
             return response()->json([
                 'message' => 'Token not found.',
