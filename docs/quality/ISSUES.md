@@ -44,6 +44,17 @@ Address open issues in priority order.
 | 23 | 🔴 | Backend | ProgramPackageController | DB::table() raw query in controller | open |
 | 24 | 🔴 | Backend | PublicTriageController | Multiple Token::where() Eloquent queries in controller | open |
 | 25 | 🔴 | Backend | StepController | DB::table() raw join query in controller | open |
+| 26 | 🔴 | Backend | ClientController | `Client::where()` Eloquent query in controller | open |
+| 27 | 🔴 | Backend | IdentityRegistrationController | `Client::where()` / `Client::findOrFail()` in controller | open |
+| 28 | 🟡 | Backend | PublicDisplaySettingsAuthService | `Request` object as method parameter | open |
+| 29 | 🟡 | Backend | TriageScanLogService | `Request` object as method parameter | open |
+| 30 | 🟡 | Backend | Program model | `static::where()` cross-row query in `booted()` | open |
+| 31 | 🟡 | Backend | User model | `Storage::disk()` in model accessor | open |
+| 32 | 🟡 | Frontend | Admin/Clients pages | Raw `fetch()` for client CRUD mutations | open |
+| 33 | 🟡 | Frontend | Admin/Sites pages | Raw `fetch()` for site mutations and image uploads | open |
+| 34 | 🟡 | Frontend | Admin/Settings/TtsGenerationTab | Raw `fetch()` for TTS settings mutations | open |
+| 35 | 🟡 | Frontend | Profile/Index | Raw `fetch()` for profile mutations (password, PIN, avatar) | open |
+| 36 | 🟡 | Frontend | Admin/Programs/Show, Tokens/Index, Station/Index | Raw `fetch()` for program/token/permission mutations | open |
 
 ---
 
@@ -149,6 +160,169 @@ Address open issues in priority order.
 2. Replace controller code with a service method call.
 3. Run the test suite: `php artisan test`
 4. Commit: `git commit -m "refactor: move track_steps join query to service layer"`
+
+---
+
+### #26 — `Client::where()` Eloquent query in controller
+
+**File:** `app/Http/Controllers/Api/ClientController.php`
+**Layer:** Backend
+**Severity:** 🔴 Critical
+**Status:** open
+
+**Action:**
+1. Move `Client::where('mobile_hash', $hash)->where('id', '!=', $client->id)->first()` (line 263) to `ClientService` or `ClientRepository`.
+2. Inject the service into the controller and call it instead.
+
+---
+
+### #27 — `Client::where()` / `Client::findOrFail()` in controller
+
+**File:** `app/Http/Controllers/Api/IdentityRegistrationController.php`
+**Layer:** Backend
+**Severity:** 🔴 Critical
+**Status:** open
+
+**Action:**
+1. Move `Client::where('mobile_hash', ...)` (line 272) and `Client::findOrFail($clientId)` (line 372) to a `ClientService`.
+2. Inject and call the service in the controller.
+
+---
+
+### #28 — `Request` object as method parameter in service
+
+**File:** `app/Services/PublicDisplaySettingsAuthService.php`
+**Layer:** Backend
+**Severity:** 🟡 Medium
+**Status:** open
+
+**Background:** `verify()` (line 39) and `throttleKey()` (line 168) accept `Request $request`. Services should not depend on the HTTP layer.
+
+**Action:**
+1. Extract the values the service needs from `Request` in the controller before calling the service (e.g. `$ip = $request->ip()`, `$key = $request->input('key')`).
+2. Update `verify()` and `throttleKey()` to accept those primitive values instead of the full `Request` object.
+3. Update the controller call site accordingly.
+
+---
+
+### #29 — `Request` object as method parameter in service
+
+**File:** `app/Services/TriageScanLogService.php`
+**Layer:** Backend
+**Severity:** 🟡 Medium
+**Status:** open
+
+**Background:** `log(Request $request, ...)` (line 20) accepts the full HTTP request. Services should not depend on the HTTP layer.
+
+**Action:**
+1. Extract needed values from `Request` in the controller (e.g. `$ip = $request->ip()`, `$userAgent = $request->userAgent()`).
+2. Update `log()` signature to accept those values as primitive parameters.
+3. Update the controller call site.
+
+---
+
+### #30 — `static::where()` cross-row query in `Program::booted()`
+
+**File:** `app/Models/Program.php`
+**Layer:** Backend
+**Severity:** 🟡 Medium
+**Status:** open
+
+**Background:** Line 256 runs `static::where('site_id', $siteId)->where('slug', $program->slug)->exists()` inside a `booted()` lifecycle hook to generate a unique slug.
+
+**Action:**
+1. Extract the slug uniqueness logic into `ProgramService::generateUniqueSlug(string $baseSlug, int $siteId): string`.
+2. Call it from wherever a new Program is created instead of relying on the model's boot cycle.
+3. Remove the slug-generation logic from `booted()`.
+
+---
+
+### #31 — `Storage::disk()` inside a model accessor
+
+**File:** `app/Models/User.php`
+**Layer:** Backend
+**Severity:** 🟡 Medium
+**Status:** open
+
+**Background:** Line 322 calls `Storage::disk('public')->url('avatars/'.$this->avatar_path)` inside an accessor. File I/O does not belong in model accessors.
+
+**Action:**
+1. Remove the `Storage::` call from the accessor.
+2. Either: return just `$this->avatar_path` from the accessor and resolve the URL at the presentation layer, OR create a `UserAvatarService::getUrl(User $user): string` and call it from controllers/resources that need the URL.
+
+---
+
+### #32 — Raw `fetch()` for client CRUD mutations
+
+**Files:** `resources/js/Pages/Admin/Clients/Index.svelte`, `resources/js/Pages/Admin/Clients/Show.svelte`
+**Layer:** Frontend
+**Severity:** 🟡 Medium
+**Status:** open
+
+**Background:** DELETE, POST, and PUT calls to `/api/admin/clients/*` and `/api/clients/*` are made with raw `fetch()`. These should use Inertia's `useForm()` or `router.visit()` so flash messages, validation errors, and page state are handled consistently.
+
+**Action:**
+1. For delete actions: replace `fetch(url, { method: 'DELETE' })` with `router.delete(url)`.
+2. For create/update form submissions: replace manual `fetch` + JSON body with `useForm()` and `form.post()` / `form.put()`.
+
+---
+
+### #33 — Raw `fetch()` for site mutations and image uploads
+
+**Files:** `resources/js/Pages/Admin/Sites/Index.svelte`, `resources/js/Pages/Admin/Sites/Create.svelte`, `resources/js/Pages/Admin/Sites/Show.svelte`
+**Layer:** Frontend
+**Severity:** 🟡 Medium
+**Status:** open
+
+**Background:** PATCH, POST, PUT, and DELETE calls for site management (set default, create/update site, hero image upload/delete) use raw `fetch()`.
+
+**Action:**
+1. Replace `fetch(url, { method: 'PATCH/POST/PUT/DELETE' })` with `router.patch()`, `router.post()`, `useForm().post()`, etc.
+2. For file uploads: use `useForm()` which handles multipart forms and progress natively.
+
+---
+
+### #34 — Raw `fetch()` for TTS settings mutations
+
+**File:** `resources/js/Pages/Admin/Settings/TtsGenerationTab.svelte`
+**Layer:** Frontend
+**Severity:** 🟡 Medium
+**Status:** open
+
+**Background:** Multiple PUT, POST, and DELETE calls to ElevenLabs integration and TTS budget endpoints use raw `fetch()` (lines 153, 191, 226, 256, 284, 363, 412, 442).
+
+**Action:**
+1. Replace each raw `fetch` mutation with `useForm()` where form data is involved, or `router.post/put/delete()` for action-style calls.
+
+---
+
+### #35 — Raw `fetch()` for profile mutations
+
+**File:** `resources/js/Pages/Profile/Index.svelte`
+**Layer:** Frontend
+**Severity:** 🟡 Medium
+**Status:** open
+
+**Background:** PUT, POST, DELETE calls for password change, PIN override, QR regeneration, avatar upload, and Google OAuth unlinking (lines 79, 98, 156, 199, 238, 278) use raw `fetch()`.
+
+**Action:**
+1. Replace each mutation with `useForm()` so validation errors surface consistently.
+2. For destructive actions (unlink Google, delete QR): use `router.delete()`.
+
+---
+
+### #36 — Raw `fetch()` for program/token/permission mutations
+
+**Files:** `resources/js/Pages/Admin/Programs/Show.svelte`, `resources/js/Pages/Admin/Tokens/Index.svelte`, `resources/js/Pages/Station/Index.svelte`
+**Layer:** Frontend
+**Severity:** 🟡 Medium
+**Status:** open
+
+**Background:** Program banner image upload, station TTS regeneration, token management operations, and permission request creation/cancellation all use raw `fetch()` instead of Inertia helpers.
+
+**Action:**
+1. Replace file upload fetches with `useForm()` (handles multipart natively).
+2. Replace action-style fetches (regenerate TTS, cancel permission request) with `router.post()` / `router.delete()`.
 
 ---
 
