@@ -12,9 +12,9 @@ use App\Models\Client;
 use App\Models\IdentityRegistration;
 use App\Models\Program;
 use App\Models\Site;
-use App\Models\Token;
 use App\Services\MobileCryptoService;
 use App\Services\SessionService;
+use App\Services\TokenService;
 use App\Services\TriageScanLogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -42,6 +42,7 @@ class PublicTriageController extends Controller
         private SessionService $sessionService,
         private TriageScanLogService $triageScanLogService,
         private MobileCryptoService $mobileCrypto,
+        private TokenService $tokenService,
     ) {}
 
     /**
@@ -103,20 +104,7 @@ class PublicTriageController extends Controller
         $qrHash = $request->query('qr_hash');
         $siteId = $program->site_id;
 
-        $token = null;
-        if (is_string($qrHash) && $qrHash !== '') {
-            $q = Token::where('qr_code_hash', $qrHash);
-            if ($siteId !== null) {
-                $q->where('site_id', $siteId);
-            }
-            $token = $q->first();
-        } elseif (is_string($physicalId) && $physicalId !== '') {
-            $q = Token::where('physical_id', $physicalId);
-            if ($siteId !== null) {
-                $q->where('site_id', $siteId);
-            }
-            $token = $q->first();
-        }
+        $token = $this->tokenService->lookupByPhysicalOrHash($physicalId, $qrHash, $siteId);
 
         if (! $token) {
             if (! (is_string($physicalId) && $physicalId !== '') && ! (is_string($qrHash) && $qrHash !== '')) {
@@ -158,20 +146,9 @@ class PublicTriageController extends Controller
         }
 
         $siteId = $program->site_id;
-        $token = null;
-        if ($request->filled('token_id')) {
-            $q = Token::where('id', $request->validated('token_id'));
-            if ($siteId !== null) {
-                $q->where('site_id', $siteId);
-            }
-            $token = $q->first();
-        } elseif ($request->filled('qr_hash')) {
-            $q = Token::where('qr_code_hash', $request->validated('qr_hash'));
-            if ($siteId !== null) {
-                $q->where('site_id', $siteId);
-            }
-            $token = $q->first();
-        }
+        $token = $request->filled('token_id')
+            ? $this->tokenService->lookupById((int) $request->validated('token_id'), $siteId)
+            : $this->tokenService->lookupByPhysicalOrHash(null, $request->validated('qr_hash'), $siteId);
         if (! $token) {
             return response()->json(['verified' => false, 'message' => 'No matching account found.'], 200);
         }
@@ -271,11 +248,7 @@ class PublicTriageController extends Controller
 
         // Per plan §3.5: token hold guard — do not create session/hold if token already has pending verification.
         if ($request->filled('qr_hash')) {
-            $q = Token::where('qr_code_hash', $request->input('qr_hash'));
-            if ($program->site_id !== null) {
-                $q->where('site_id', $program->site_id);
-            }
-            $token = $q->first();
+            $token = $this->tokenService->lookupByPhysicalOrHash(null, $request->input('qr_hash'), $program->site_id);
             if ($token && IdentityRegistration::where('token_id', $token->id)->pending()->exists()) {
                 RateLimiter::hit($key);
 
@@ -415,15 +388,9 @@ class PublicTriageController extends Controller
             }
 
             if (! $registration) {
-                if ($request->filled('qr_hash')) {
-                    $q = Token::where('qr_code_hash', $request->input('qr_hash'));
-                    if ($program->site_id !== null) {
-                        $q->where('site_id', $program->site_id);
-                    }
-                    $tokenForReg = $q->first();
-                } else {
-                    $tokenForReg = null;
-                }
+                $tokenForReg = $request->filled('qr_hash')
+                    ? $this->tokenService->lookupByPhysicalOrHash(null, $request->input('qr_hash'), $program->site_id)
+                    : null;
                 $trackId = $request->filled('track_id') ? (int) $request->validated('track_id') : null;
                 $registration = IdentityRegistration::create([
                     'program_id' => $program->id,
