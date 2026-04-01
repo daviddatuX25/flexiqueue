@@ -39,9 +39,9 @@ Address open issues in priority order.
 | 18 | 🟢 | Backend | SessionService | Old `override()` still exists alongside `overrideByTrack()` | open |
 | 19 | 🟢 | Backend | TransactionLog model | Append-only enforcement was PHP-only (no DB trigger) | done |
 | 20 | 🟢 | Backend | TokenService | N+1 inserts in `batchCreate()` loop | done |
-| 21 | 🔴 | Backend | UserAvailabilityController | Schema::hasTable() + DB::table() raw insert in controller | open |
+| 21 | 🔴 | Backend | UserAvailabilityController | Schema::hasTable() + DB::table() raw insert in controller | done |
 | 22 | 🔴 | Backend | StationController | Token::where() Eloquent query in controller | done |
-| 23 | 🔴 | Backend | ProgramPackageController | DB::table() raw query in controller | open |
+| 23 | 🔴 | Backend | ProgramPackageController | DB::table() raw query in controller | done |
 | 24 | 🔴 | Backend | PublicTriageController | Multiple Token::where() Eloquent queries in controller | done |
 | 25 | 🔴 | Backend | StepController | DB::table() raw join query in controller | open |
 | 26 | 🔴 | Backend | ClientController | `Client::where()` Eloquent query in controller | open |
@@ -82,7 +82,7 @@ Address open issues in priority order.
 **File:** `app/Http/Controllers/Api/UserAvailabilityController.php`
 **Layer:** Backend
 **Severity:** 🔴 Critical
-**Status:** open
+**Status:** done
 
 **Background:** Database schema checks and raw inserts belong in services, not controllers. This violates separation of concerns.
 
@@ -116,7 +116,7 @@ Address open issues in priority order.
 **File:** `app/Http/Controllers/Api/Admin/ProgramPackageController.php`
 **Layer:** Backend
 **Severity:** 🔴 Critical
-**Status:** open
+**Status:** done
 
 **Background:** Raw database queries belong in services, not controllers. The `DB::table('program_token')` query should be abstracted.
 

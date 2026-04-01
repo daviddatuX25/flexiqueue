@@ -8,9 +8,9 @@ use App\Models\Program;
 use App\Models\Site;
 use App\Models\Station;
 use App\Services\ProgramPackageExporter;
+use App\Services\TokenService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -19,6 +19,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class ProgramPackageController extends Controller
 {
+    public function __construct(private TokenService $tokenService) {}
+
     /**
      * Export package (admin session). Logged via AdminActionLog.
      */
@@ -91,10 +93,7 @@ class ProgramPackageController extends Controller
         $entityId = (int) $matches[2];
 
         if ($entityType === 'tokens') {
-            $allowed = DB::table('program_token')
-                ->where('program_id', $program->id)
-                ->where('token_id', $entityId)
-                ->exists();
+            $allowed = $this->tokenService->belongsToProgram($entityId, $program->id);
         } else {
             $allowed = Station::where('id', $entityId)->where('program_id', $program->id)->exists();
         }

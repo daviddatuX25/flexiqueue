@@ -115,6 +115,17 @@ class TokenService
         ];
     }
 
+    /**
+     * Check whether a token belongs to a program via the program_token pivot.
+     * Used for authorization checks (e.g., TTS file streaming).
+     */
+    public function belongsToProgram(int $tokenId, int $programId): bool
+    {
+        return Token::where('id', $tokenId)
+            ->whereHas('programs', fn ($q) => $q->where('programs.id', $programId))
+            ->exists();
+    }
+
     public function tokenResource(Token $token): array
     {
         return [
