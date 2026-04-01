@@ -48,7 +48,11 @@ class CentralHistorySeeder extends Seeder
             $regular = $tracks['Regular'];
             $priority = $tracks['Priority'];
             $stations = Station::where('program_id', $aics->id)->orderBy('id')->get();
-            $staff = User::where('site_id', $site->id)->where('role', 'staff')->orderBy('id')->get();
+            $staff = User::withGlobalPermissionsTeam(fn () => User::query()
+                ->where('site_id', $site->id)
+                ->role(UserRole::Staff->value)
+                ->orderBy('id')
+                ->get());
             $tokens = Token::where('site_id', $site->id)->orderBy('id')->get();
             $clients = DB::table('clients')->where('site_id', $site->id)->get();
             $admin = User::withGlobalPermissionsTeam(fn () => User::query()
