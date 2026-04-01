@@ -43,7 +43,7 @@ Address open issues in priority order.
 | 22 | 🔴 | Backend | StationController | Token::where() Eloquent query in controller | done |
 | 23 | 🔴 | Backend | ProgramPackageController | DB::table() raw query in controller | done |
 | 24 | 🔴 | Backend | PublicTriageController | Multiple Token::where() Eloquent queries in controller | done |
-| 25 | 🔴 | Backend | StepController | DB::table() raw join query in controller | open |
+| 25 | 🔴 | Backend | StepController | DB::table() raw join query in controller | done |
 | 26 | 🔴 | Backend | ClientController | `Client::where()` Eloquent query in controller | open |
 | 27 | 🔴 | Backend | IdentityRegistrationController | `Client::where()` / `Client::findOrFail()` in controller | open |
 | 28 | 🟡 | Backend | PublicDisplaySettingsAuthService | `Request` object as method parameter | open |
@@ -151,7 +151,7 @@ Address open issues in priority order.
 **File:** `app/Http/Controllers/Api/Admin/StepController.php`
 **Layer:** Backend
 **Severity:** 🔴 Critical
-**Status:** open
+**Status:** done
 
 **Background:** Raw database joins belong in services or repositories. The `DB::table('track_steps')->join(...)` query should be abstracted.
 
