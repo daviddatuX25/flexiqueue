@@ -190,7 +190,7 @@ class UserController extends Controller
         $user->saveQuietly();
         User::assignGlobalRoleAndSyncProvisioning($user, $valid['role']);
 
-        AdminActionLog::log($authUser->id, 'user_created', 'User', $user->id, ['email' => $user->email, 'role' => $user->role?->value ?? $valid['role']]);
+        AdminActionLog::log($authUser->id, 'user_created', 'User', $user->id, ['email' => $user->email, 'role' => $user->role ?? $valid['role']]);
 
         return response()->json([
             'user' => $this->userResource($user),
@@ -251,7 +251,7 @@ class UserController extends Controller
             }
             $user->is_active = (bool) $valid['is_active'];
         }
-        if (array_key_exists('pending_assignment', $valid) && $user->role === UserRole::Staff) {
+        if (array_key_exists('pending_assignment', $valid) && $user->role === UserRole::Staff->value) {
             $user->pending_assignment = (bool) $valid['pending_assignment'];
         }
         if (array_key_exists('override_pin', $valid)) {

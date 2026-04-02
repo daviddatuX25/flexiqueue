@@ -44,6 +44,12 @@ class HandleInertiaRequests extends Middleware
     {
         $user = $request->user();
 
+        // Load roles and permissions relationships to ensure user.role attribute works when serialized to JSON
+        // Fix for: primaryGlobalRoleName() was returning null for admin when roles weren't eager-loaded
+        if ($user) {
+            $user->load('roles', 'permissions');
+        }
+
         $canApproveRequests = $user && (
             $user->can(PermissionCatalog::ADMIN_MANAGE)
             || $user->can(PermissionCatalog::ADMIN_SHARED)

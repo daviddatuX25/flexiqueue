@@ -56,6 +56,8 @@ const jobQueue = [];
 let currentJobPromise = null;
 let audioContext = null;
 let currentBufferSource = null;
+let activeStitchedKey = null;
+let announcementGeneration = 0;
 const playbackTelemetry = {
 	stitchedCacheHit: 0,
 	stitchedCacheMiss: 0,
@@ -133,19 +135,43 @@ function decodeMp3ArrayBuffer(arrayBuffer) {
 	return ctx.decodeAudioData(arrayBuffer.slice(0));
 }
 
+/**
+ * Return the sample index where audio goes silent at the end of the buffer.
+ * Silence threshold: peak amplitude < 0.005 across all channels for at least 50 ms.
+ */
+function findTrailingSilenceStart(buffer, silenceThreshold = 0.005) {
+	const minSilentSamples = Math.floor(buffer.sampleRate * 0.05); // 50 ms
+	let silentRun = 0;
+	for (let i = buffer.length - 1; i >= 0; i -= 1) {
+		let peak = 0;
+		for (let ch = 0; ch < buffer.numberOfChannels; ch += 1) {
+			peak = Math.max(peak, Math.abs(buffer.getChannelData(ch)[i]));
+		}
+		if (peak < silenceThreshold) {
+			silentRun += 1;
+		} else {
+			if (silentRun >= minSilentSamples) return i + 1;
+			silentRun = 0;
+		}
+	}
+	return silentRun >= minSilentSamples ? 0 : buffer.length;
+}
+
 function stitchAudioBuffers(first, second) {
 	const ctx = getAudioContext();
 	if (!ctx) throw new Error('WebAudio unavailable');
+	const trimEnd = findTrailingSilenceStart(first);
+	const firstLen = Math.min(trimEnd, first.length);
 	const channels = Math.max(first.numberOfChannels, second.numberOfChannels);
 	const sampleRate = first.sampleRate;
-	const totalLength = first.length + second.length;
+	const totalLength = firstLen + second.length;
 	const stitched = ctx.createBuffer(channels, totalLength, sampleRate);
 	for (let ch = 0; ch < channels; ch += 1) {
 		const channelData = stitched.getChannelData(ch);
 		const firstData = first.getChannelData(Math.min(ch, first.numberOfChannels - 1));
 		const secondData = second.getChannelData(Math.min(ch, second.numberOfChannels - 1));
-		channelData.set(firstData, 0);
-		channelData.set(secondData, first.length);
+		channelData.set(firstData.subarray(0, firstLen), 0);
+		channelData.set(secondData, firstLen);
 	}
 	return stitched;
 }
@@ -253,8 +279,10 @@ function playAudioBuffer(buffer, opts) {
 			source.buffer = buffer;
 			source.connect(gainNode).connect(ctx.destination);
 			currentBufferSource = source;
+			const playGen = announcementGeneration;
 			source.onended = () => {
 				if (currentBufferSource === source) currentBufferSource = null;
+				if (announcementGeneration !== playGen) return;
 				resolve();
 			};
 			source.start(0);
@@ -279,6 +307,7 @@ export function syncStitchedPreloadTargets(targets, options = {}) {
 
 	for (const [key, entry] of stitchedCache.entries()) {
 		if (enabled && uniqueTargets.has(key)) continue;
+		if (key === activeStitchedKey) continue;
 		if (entry?.inflightAbortController) {
 			try {
 				entry.inflightAbortController.abort();
@@ -326,6 +355,8 @@ function resolveOptions(options) {
 }
 
 export function cancelCurrentAnnouncement() {
+	announcementGeneration += 1;
+	activeStitchedKey = null;
 	if (currentBufferSource) {
 		try {
 			currentBufferSource.stop(0);
@@ -500,17 +531,58 @@ function speakBrowser(text, opts) {
 		o.onCompleteFailure?.('browser_unavailable', text);
 		return Promise.resolve();
 	}
-	window.speechSynthesis.cancel();
 	const u = new SpeechSynthesisUtterance(text);
 	u.rate = TTS_DEFAULT_RATE;
 	u.volume = o.volume;
 	const voice = getVoiceForTts(o.preferredVoiceName);
 	if (voice) u.voice = voice;
 	return new Promise((resolve) => {
-		u.onend = () => resolve();
+		let finished = false;
+		const finish = () => {
+			if (finished) return;
+			finished = true;
+			clearInterval(keepAlive);
+			clearTimeout(stallNudge);
+			resolve();
+		};
+
+		// Chrome bug #1: speechSynthesis silently sets paused=true mid-utterance.
+		// Poll every 250 ms and call resume() to keep playback going.
+		const keepAlive = setInterval(() => {
+			if (finished) { clearInterval(keepAlive); return; }
+			if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+		}, 250);
+
+		// Chrome bug #2: speaking=true, paused=false, but audio output silently stops.
+		// The paused check above won't catch this variant. Use a one-shot timeout: if the
+		// utterance hasn't ended naturally within 2 s, nudge the engine once via pause+resume.
+		// Cleared immediately in finish() so it never fires during normal short phrases.
+		const stallNudge = setTimeout(() => {
+			if (!finished && window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+				window.speechSynthesis.pause();
+				window.speechSynthesis.resume();
+			}
+		}, 2000);
+
+		u.onend = () => {
+			// Chrome bug #3: onend fires early while audio tail is still draining.
+			// Wait until speaking is actually false before continuing to the next segment.
+			if (window.speechSynthesis.speaking) {
+				let guard = 0;
+				const poll = setInterval(() => {
+					guard += 50;
+					if (!window.speechSynthesis.speaking || guard > 2000) {
+						clearInterval(poll);
+						finish();
+					}
+				}, 50);
+			} else {
+				finish();
+			}
+		};
 		u.onerror = () => {
 			o.onCompleteFailure?.('browser_tts_failed', text);
-			resolve();
+			finish();
 		};
 		window.speechSynthesis.speak(u);
 	});
@@ -611,46 +683,51 @@ function runOneAnnouncement(params) {
 		prefer &&
 		stitchedKey != null &&
 		getAudioContext() != null;
+	const gen = announcementGeneration;
 
-	const playOnce = () =>
-		(shouldTryStitched
+	const playOnce = () => {
+		if (shouldTryStitched) activeStitchedKey = stitchedKey;
+		return (shouldTryStitched
 			? ensureStitchedBufferForTarget({
 					tokenId: params.tokenId,
 					stationId: params.stationId,
 					lang: opts.ttsLanguage,
 				}).then((buffer) => {
+					activeStitchedKey = null;
 					if (!buffer) throw new Error('No stitched buffer');
 					return playAudioBuffer(buffer, opts);
 				})
 			: Promise.reject(new Error('Stitched path disabled'))
-		).catch(() =>
-		playSegmentA(params.alias, params.pronounceAs, params.tokenId, opts).then(async () => {
-			if (!segment2On) {
-				const closing = (opts.closingWithoutSegment2 ?? '').trim();
-				if (closing !== '') {
-					const seg1Text = buildDisplaySegment1Text(
-						params.alias,
-						params.pronounceAs,
-						opts.tokenSpokenPart,
-						opts.defaultPrePhrase,
-						opts.tokenBridgeTail,
-						opts.segment2Enabled
-					);
-					const norm = (s) =>
-						(s ?? '')
-							.toString()
-							.trim()
-							.toLowerCase()
-							.replace(/[.,!?]+$/g, '');
-					if (!norm(seg1Text).endsWith(norm(closing))) {
-						return speakBrowser(closing, opts);
+		).catch(() => {
+			activeStitchedKey = null;
+			return playSegmentA(params.alias, params.pronounceAs, params.tokenId, opts).then(async () => {
+				if (!segment2On) {
+					const closing = (opts.closingWithoutSegment2 ?? '').trim();
+					if (closing !== '') {
+						const seg1Text = buildDisplaySegment1Text(
+							params.alias,
+							params.pronounceAs,
+							opts.tokenSpokenPart,
+							opts.defaultPrePhrase,
+							opts.tokenBridgeTail,
+							opts.segment2Enabled
+						);
+						const norm = (s) =>
+							(s ?? '')
+								.toString()
+								.trim()
+								.toLowerCase()
+								.replace(/[.,!?]+$/g, '');
+						if (!norm(seg1Text).endsWith(norm(closing))) {
+							return speakBrowser(closing, opts);
+						}
 					}
+					return Promise.resolve();
 				}
-				return Promise.resolve();
-			}
-			return playSegmentB(params.connectorPhrase, stationPhrase, opts);
-		})
-	);
+				return playSegmentB(params.connectorPhrase, stationPhrase, opts);
+			});
+		});
+	};
 
 	const onePlay = repeatCount <= 1
 		? playOnce()
@@ -659,6 +736,7 @@ function runOneAnnouncement(params) {
 					new Promise((resolve) => {
 						pendingRepeatTimeoutId = setTimeout(() => {
 							pendingRepeatTimeoutId = null;
+							if (announcementGeneration !== gen) { resolve(); return; }
 							runOneAnnouncement({ ...params, repeatCount: repeatCount - 1 }).then(resolve);
 						}, repeatDelayMs);
 					})

@@ -2785,17 +2785,17 @@ import {
 <Modal open={showPrintModal} title="Print tokens" onClose={closePrintModal}>
     {#snippet children()}
         <div class="flex flex-col gap-5">
-            <div class="bg-primary-50 border border-primary-200 rounded-container p-3 flex items-start gap-3">
+            <div class="bg-primary-50 dark:bg-slate-800 border border-primary-200 dark:border-slate-600 rounded-container p-3 flex items-start gap-3">
                 <Printer class="w-5 h-5 text-primary-500 shrink-0 mt-0.5" />
                 <div>
-                    <p class="text-sm font-semibold text-surface-900">Ready to print</p>
-                    <p class="text-sm text-surface-700 mt-0.5">
+                    <p class="text-sm font-semibold text-surface-900 dark:text-slate-100">Ready to print</p>
+                    <p class="text-sm text-surface-700 dark:text-slate-300 mt-0.5">
                         Print {printTargetIds.length} token(s) with current defaults. Change defaults in Configuration → Print settings.
                     </p>
                 </div>
             </div>
 
-            <div class="flex justify-end gap-3 pt-2 border-t border-surface-100">
+            <div class="flex justify-end gap-3 pt-2 border-t border-surface-100 dark:border-slate-700">
                 <button type="button" class="btn preset-tonal" onclick={closePrintModal}>Cancel</button>
                 <button
                     type="button"

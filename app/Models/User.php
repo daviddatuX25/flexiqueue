@@ -43,7 +43,7 @@ class User extends Authenticatable
         'staff_triage_allow_camera_scanner',
     ];
 
-    protected $appends = ['avatar_url'];
+    protected $appends = ['avatar_url', 'role'];
 
     protected $hidden = [
         'password',
@@ -66,32 +66,32 @@ class User extends Authenticatable
     }
 
     /**
-     * Primary product role comes from the Spatie global-team role (admin | staff | super_admin).
+     * Primary product role as a plain string for JSON serialization (admin | staff | super_admin | null).
+     * Returns the string value directly so it serializes correctly in Inertia shared data.
      *
      * @see PermissionCatalogSeeder
      */
     protected function role(): Attribute
     {
         return Attribute::make(
-            get: function (): ?UserRole {
-                $name = $this->primaryGlobalRoleName();
-                if ($name === null) {
-                    return null;
-                }
-
-                return UserRole::tryFrom($name);
-            },
+            get: fn (): ?string => $this->primaryGlobalRoleName(),
         );
     }
 
     /**
      * First global-team Spatie role name, or null if none assigned.
+     * Uses eager-loaded relation if available, otherwise queries the database.
      */
     public function primaryGlobalRoleName(): ?string
     {
         return self::withGlobalPermissionsTeam(function (): ?string {
-            $this->unsetRelation('roles');
+            // If roles are already eager-loaded, use them (avoids N+1 and serialization issues)
+            if ($this->relationLoaded('roles')) {
+                return $this->roles->first()?->name;
+            }
 
+            // Otherwise, query fresh (for cases where eager-load wasn't done)
+            $this->unsetRelation('roles');
             return $this->roles()->first()?->name;
         });
     }

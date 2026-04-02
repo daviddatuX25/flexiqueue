@@ -5,9 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Events\StaffAvailabilityUpdated;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\UpdateUserAvailabilityRequest;
+use App\Services\StaffActivityLogService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 /**
  * Per staff-availability-status plan: PATCH /api/users/me/availability.
@@ -17,6 +16,8 @@ use Illuminate\Support\Facades\Schema;
  */
 class UserAvailabilityController extends Controller
 {
+    public function __construct(private readonly StaffActivityLogService $activityLog) {}
+
     public function update(UpdateUserAvailabilityRequest $request): JsonResponse
     {
         $user = $request->user();
@@ -28,7 +29,7 @@ class UserAvailabilityController extends Controller
             'availability_updated_at' => now(),
         ]);
 
-        $this->logAvailabilityChange($user->id, $oldStatus, $status);
+        $this->activityLog->logActivity($user->id, 'availability_change', $oldStatus, $status);
 
         $programId = $user->assignedStation?->program_id;
         if ($programId !== null) {
@@ -46,18 +47,5 @@ class UserAvailabilityController extends Controller
         ]);
     }
 
-    private function logAvailabilityChange(int $userId, string $oldValue, string $newValue): void
-    {
-        if (! Schema::hasTable('staff_activity_log')) {
-            return;
-        }
-        DB::table('staff_activity_log')->insert([
-            'user_id' => $userId,
-            'action_type' => 'availability_change',
-            'old_value' => $oldValue,
-            'new_value' => $newValue,
-            'metadata' => null,
-            'created_at' => now(),
-        ]);
-    }
+
 }
