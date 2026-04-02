@@ -69,6 +69,36 @@ class ClientService
     }
 
     /**
+     * Find a client by mobile hash, excluding the given client id.
+     * Used for duplicate-phone detection during mobile number updates.
+     */
+    public function findByMobileHashExcluding(string $hash, int $excludeId): ?Client
+    {
+        return Client::where('mobile_hash', $hash)
+            ->where('id', '!=', $excludeId)
+            ->first();
+    }
+
+    /**
+     * Find a client by mobile hash scoped to a site.
+     * Used for identity registration matching.
+     */
+    public function findByMobileHashAndSite(string $hash, int $siteId): ?Client
+    {
+        return Client::where('mobile_hash', $hash)
+            ->where('site_id', $siteId)
+            ->first();
+    }
+
+    /**
+     * Retrieve a client by id, throwing ModelNotFoundException if not found.
+     */
+    public function findOrFail(int $id): Client
+    {
+        return Client::findOrFail($id);
+    }
+
+    /**
      * Search clients by name (and optional birth date). Per site-scoping-migration-spec §3:
      * scope by site_id when provided. Name is tokenized by whitespace; each token must appear
      * in at least one of first_name, middle_name, last_name.

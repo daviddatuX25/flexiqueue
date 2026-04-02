@@ -269,9 +269,7 @@ class IdentityRegistrationController extends Controller
 
         $existingClientByPhone = null;
         if ($identityRegistration->mobile_hash !== null) {
-            $clientByPhone = \App\Models\Client::where('mobile_hash', $identityRegistration->mobile_hash)
-                ->where('site_id', $program->site_id)
-                ->first();
+            $clientByPhone = $this->clientService->findByMobileHashAndSite($identityRegistration->mobile_hash, $program->site_id);
             if ($clientByPhone !== null) {
                 $existingClientByPhone = [
                     'id' => $clientByPhone->id,
@@ -369,7 +367,7 @@ class IdentityRegistrationController extends Controller
                     );
                     $clientId = $client->id;
                 } else {
-                    $client = \App\Models\Client::findOrFail($clientId);
+                    $client = $this->clientService->findOrFail($clientId);
                     if ($client->site_id !== $program->site_id) {
                         throw new \Illuminate\Http\Exceptions\HttpResponseException(
                             response()->json(['message' => 'Client does not belong to this program\'s site.'], 404)

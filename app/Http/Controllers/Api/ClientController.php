@@ -260,7 +260,7 @@ class ClientController extends Controller
         }
 
         $hash = $this->mobileCrypto->hash($normalized);
-        $existing = Client::where('mobile_hash', $hash)->where('id', '!=', $client->id)->first();
+        $existing = $this->clientService->findByMobileHashExcluding($hash, $client->id);
         if ($existing) {
             return response()->json(['message' => 'Another client already has this mobile number.'], 409);
         }
