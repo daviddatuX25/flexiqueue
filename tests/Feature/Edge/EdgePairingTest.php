@@ -280,4 +280,42 @@ class EdgePairingTest extends TestCase
 
         $response->assertStatus(200)->assertJsonPath('revoked', true);
     }
+
+    // --- EdgeDeviceSetupService ---
+
+    public function test_setup_service_writes_edge_device_state_after_pairing(): void
+    {
+        \Illuminate\Support\Facades\Http::fake([
+            '*/api/edge/pair' => \Illuminate\Support\Facades\Http::response([
+                'device_token' => 'tok_abc123',
+                'device_id'    => 1,
+                'site_id'      => 99,
+                'site_name'    => 'Demo Site',
+                'id_offset'    => 10_000_000,
+            ], 200),
+        ]);
+
+        $service = new \App\Services\EdgeDeviceSetupService(writeEnv: false);
+        $service->setup('https://central.test', 'ABCD1234', 'auto');
+
+        $state = \App\Models\EdgeDeviceState::current();
+        $this->assertSame('https://central.test', $state->central_url);
+        $this->assertSame('auto', $state->sync_mode);
+        $this->assertSame(10_000_000, $state->id_offset);
+        $this->assertNotNull($state->paired_at);
+    }
+
+    public function test_setup_service_throws_on_pairing_failure(): void
+    {
+        \Illuminate\Support\Facades\Http::fake([
+            '*/api/edge/pair' => \Illuminate\Support\Facades\Http::response(
+                ['error' => 'Invalid or expired pairing code.'], 422
+            ),
+        ]);
+
+        $service = new \App\Services\EdgeDeviceSetupService(writeEnv: false);
+
+        $this->expectException(\RuntimeException::class);
+        $service->setup('https://central.test', 'BADCODE1', 'auto');
+    }
 }

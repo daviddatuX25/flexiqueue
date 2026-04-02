@@ -80,6 +80,7 @@ use App\Http\Controllers\ProgramOverridesPageController;
 use App\Http\Controllers\ShortLinkResolverController;
 use App\Http\Controllers\StaffDashboardController;
 use App\Http\Controllers\StationPageController;
+use App\Http\Controllers\Edge\SetupController;
 use App\Http\Controllers\TriagePageController;
 use App\Models\UserCredential;
 use App\Support\GoogleOAuthConfig;
@@ -315,13 +316,24 @@ Route::middleware(['auth', 'permission:staff.operations'])->prefix('api')->group
     Route::put('/stations/{station}/display-settings', [ApiStationController::class, 'updateDisplaySettings']);
 });
 
-// Per CI-CD-and-Edge-plan B7: edge setup and waiting (placeholder; real UI in B-5, B-6)
-Route::get('/edge/setup', function () {
-    return Inertia::render('Edge/Setup'); // TODO: replace with SetupController when B-5 builds wizard
-})->name('edge.setup');
+// Edge setup wizard (E2.4): one-time device pairing
+Route::get('/edge/setup', [SetupController::class, 'show'])->name('edge.setup');
+Route::post('/edge/setup', [SetupController::class, 'store'])->name('edge.setup.store');
+Route::get('/edge/setup/ping-check', [SetupController::class, 'pingCheck'])->name('edge.setup.ping');
+
+// Edge waiting page (E2.5): polls for assignment
 Route::get('/edge/waiting', function () {
-    return Inertia::render('Edge/Waiting'); // TODO: replace with WaitingController when B-6 builds splash
+    return Inertia::render('Edge/Waiting');
 })->name('edge.waiting');
+
+// Local JSON status poll for the waiting page (no device token exposed to browser)
+Route::get('/edge/waiting-status', function () {
+    $state = \App\Models\EdgeDeviceState::current();
+    return response()->json([
+        'assigned'     => $state->active_program_id !== null,
+        'program_name' => $state->active_program_name,
+    ]);
+})->name('edge.waiting.status');
 
 // Per 05-SECURITY-CONTROLS §2.4: public routes (no auth)
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login')->middleware('guest');
