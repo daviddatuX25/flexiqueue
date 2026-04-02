@@ -31,4 +31,22 @@ class EdgeFoundationTest extends TestCase
             );
         }
     }
+
+    // Task 2 — edge_pairing_codes migration
+
+    public function test_edge_pairing_codes_table_exists(): void
+    {
+        $this->assertTrue(Schema::hasTable('edge_pairing_codes'));
+    }
+
+    public function test_edge_pairing_codes_has_required_columns(): void
+    {
+        $columns = ['id', 'site_id', 'code_hash', 'device_name', 'expires_at', 'consumed_at', 'created_at'];
+        foreach ($columns as $col) {
+            $this->assertTrue(
+                Schema::hasColumn('edge_pairing_codes', $col),
+                "Missing column: {$col}"
+            );
+        }
+    }
 }
