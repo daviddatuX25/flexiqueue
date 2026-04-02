@@ -3,6 +3,7 @@
 namespace Tests\Feature\Edge;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
@@ -48,5 +49,48 @@ class EdgeFoundationTest extends TestCase
                 "Missing column: {$col}"
             );
         }
+    }
+
+    // Task 3 — EdgeDevice and EdgePairingCode models
+
+    private function createTestSite(): \App\Models\Site
+    {
+        return \App\Models\Site::create([
+            'name' => 'Test Site',
+            'slug' => 'test-site-' . uniqid(),
+            'api_key_hash' => Hash::make('test-key'),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+    }
+
+    public function test_edge_device_model_can_be_created(): void
+    {
+        $site = $this->createTestSite();
+        $device = \App\Models\EdgeDevice::create([
+            'site_id' => $site->id,
+            'name' => 'Test Pi',
+            'device_token_hash' => hash('sha256', 'secret-token'),
+            'id_offset' => 10000000,
+            'sync_mode' => 'auto',
+            'paired_at' => now(),
+        ]);
+
+        $this->assertDatabaseHas('edge_devices', ['name' => 'Test Pi']);
+        $this->assertInstanceOf(\App\Models\EdgeDevice::class, $device);
+    }
+
+    public function test_edge_pairing_code_model_can_be_created(): void
+    {
+        $site = $this->createTestSite();
+        $code = \App\Models\EdgePairingCode::create([
+            'site_id' => $site->id,
+            'code_hash' => hash('sha256', '123456'),
+            'device_name' => 'Office Pi',
+            'expires_at' => now()->addMinutes(10),
+        ]);
+
+        $this->assertDatabaseHas('edge_pairing_codes', ['device_name' => 'Office Pi']);
+        $this->assertNull($code->consumed_at);
     }
 }
