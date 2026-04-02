@@ -27,6 +27,7 @@ class EdgeSettingsValidator
             'offline_binding_mode_override',
             'scheduled_sync_time',
             'offline_allow_client_creation',
+            'max_edge_devices',
         ];
 
         $defaults = [
@@ -38,6 +39,7 @@ class EdgeSettingsValidator
             'offline_binding_mode_override' => 'optional',
             'scheduled_sync_time' => '17:00',
             'offline_allow_client_creation' => true,
+            'max_edge_devices' => 0,
         ];
 
         $validator = Validator::make(
@@ -52,6 +54,7 @@ class EdgeSettingsValidator
                 'edge_settings.offline_binding_mode_override' => ['sometimes', 'string', 'in:optional,required'],
                 'edge_settings.scheduled_sync_time' => ['sometimes', 'string'],
                 'edge_settings.offline_allow_client_creation' => ['sometimes', 'boolean'],
+                'edge_settings.max_edge_devices' => ['sometimes', 'integer', 'min:0', 'max:100'],
             ]
         );
 

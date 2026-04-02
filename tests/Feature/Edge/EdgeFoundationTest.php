@@ -100,4 +100,29 @@ class EdgeFoundationTest extends TestCase
     {
         $this->assertTrue(Schema::hasColumn('programs', 'edge_locked_by_device_id'));
     }
+
+    // Task 5 — max_edge_devices in EdgeSettingsValidator
+
+    public function test_edge_settings_validator_accepts_max_edge_devices(): void
+    {
+        $validator = new \App\Validation\EdgeSettingsValidator();
+        $result = $validator->validate(['max_edge_devices' => 3]);
+
+        $this->assertSame(3, $result['max_edge_devices']);
+    }
+
+    public function test_edge_settings_validator_rejects_negative_max_edge_devices(): void
+    {
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        $validator = new \App\Validation\EdgeSettingsValidator();
+        $validator->validate(['max_edge_devices' => -1]);
+    }
+
+    public function test_edge_settings_validator_defaults_max_edge_devices_to_zero(): void
+    {
+        $validator = new \App\Validation\EdgeSettingsValidator();
+        $result = $validator->validate([]);
+
+        $this->assertSame(0, $result['max_edge_devices']);
+    }
 }
