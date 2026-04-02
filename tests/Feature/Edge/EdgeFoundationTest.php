@@ -268,4 +268,57 @@ class EdgeFoundationTest extends TestCase
 
         \Illuminate\Support\Facades\Http::assertSentCount(1);
     }
+
+    // Task 11 — BlockOnEdge middleware
+
+    public function test_block_on_edge_middleware_aborts_404_when_edge(): void
+    {
+        config(['app.mode' => 'edge']);
+        $middleware = new \App\Http\Middleware\BlockOnEdge(
+            new \App\Services\EdgeModeService()
+        );
+
+        $request = \Illuminate\Http\Request::create('/auth/google', 'GET');
+
+        $this->expectException(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+        $middleware->handle($request, fn ($r) => response('ok'));
+    }
+
+    public function test_block_on_edge_middleware_passes_through_on_central(): void
+    {
+        config(['app.mode' => 'central']);
+        $middleware = new \App\Http\Middleware\BlockOnEdge(
+            new \App\Services\EdgeModeService()
+        );
+
+        $request = \Illuminate\Http\Request::create('/auth/google', 'GET');
+        $response = $middleware->handle($request, fn ($r) => response('ok'));
+
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    public function test_google_oauth_routes_are_blocked_on_edge(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        // EdgeBootGuard redirects (302) or BlockOnEdge aborts (404) — either way not a successful response
+        $statusGoogle = $this->get('/auth/google')->status();
+        $statusCallback = $this->get('/auth/google/callback')->status();
+
+        $this->assertNotSame(200, $statusGoogle, '/auth/google should not be accessible on edge');
+        $this->assertNotSame(200, $statusCallback, '/auth/google/callback should not be accessible on edge');
+    }
+
+    public function test_google_oauth_routes_not_blocked_by_edge_middleware_on_central(): void
+    {
+        config(['app.mode' => 'central']);
+        $middleware = new \App\Http\Middleware\BlockOnEdge(
+            new \App\Services\EdgeModeService()
+        );
+
+        $request = \Illuminate\Http\Request::create('/auth/google', 'GET');
+        $response = $middleware->handle($request, fn ($r) => response('passed'));
+
+        $this->assertSame('passed', $response->getContent(), 'BlockOnEdge should not block on central');
+    }
 }

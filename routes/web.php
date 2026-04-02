@@ -330,15 +330,17 @@ Route::get('/forgot-password', [ForgotPasswordController::class, 'create'])->mid
 Route::post('/forgot-password', [ForgotPasswordController::class, 'store'])->middleware(['guest', 'throttle:5,15'])->name('password.email');
 Route::get('/reset-password/{token}', [NewPasswordController::class, 'create'])->middleware(['guest', 'throttle:30,1'])->name('password.reset');
 Route::post('/reset-password', [NewPasswordController::class, 'store'])->middleware(['guest', 'throttle:10,15'])->name('password.store');
-Route::get('/auth/google', [GoogleAuthController::class, 'redirectToGoogle'])
-    ->name('auth.google.redirect')
-    ->middleware(['guest', 'throttle:20,1']);
-Route::get('/auth/google/link', [GoogleAuthController::class, 'redirectToLinkGoogle'])
-    ->name('auth.google.link')
-    ->middleware(['auth', 'permission:profile.self', 'throttle:10,1']);
-Route::get('/auth/google/callback', [GoogleAuthController::class, 'handleGoogleCallback'])
-    ->name('auth.google.callback')
-    ->middleware(['throttle:30,1']);
+Route::middleware(['not.edge'])->group(function () {
+    Route::get('/auth/google', [GoogleAuthController::class, 'redirectToGoogle'])
+        ->name('auth.google.redirect')
+        ->middleware(['guest', 'throttle:20,1']);
+    Route::get('/auth/google/link', [GoogleAuthController::class, 'redirectToLinkGoogle'])
+        ->name('auth.google.link')
+        ->middleware(['auth', 'permission:profile.self', 'throttle:10,1']);
+    Route::get('/auth/google/callback', [GoogleAuthController::class, 'handleGoogleCallback'])
+        ->name('auth.google.callback')
+        ->middleware(['throttle:30,1']);
+});
 Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->middleware('auth');
 
 // Per HYBRID_AUTH_ADMIN_FIRST_PRD.md ONB-5 / H5: holding page until admin assigns station or clears pending_assignment.

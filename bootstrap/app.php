@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\AddPermissionsPolicy;
 use App\Http\Middleware\AuthenticateSiteByApiKey;
+use App\Http\Middleware\BlockOnEdge;
 use App\Http\Middleware\EdgeBootGuard;
 use App\Http\Middleware\EnforceDeviceLock;
 use App\Http\Middleware\EnforcePendingAssignment;
@@ -53,6 +54,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'site.api_key' => AuthenticateSiteByApiKey::class,
             'require.site.access' => RequireSiteAccess::class,
             'require.program.access' => RequireProgramAccess::class,
+            'not.edge' => \App\Http\Middleware\BlockOnEdge::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
