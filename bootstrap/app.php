@@ -54,7 +54,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'site.api_key' => AuthenticateSiteByApiKey::class,
             'require.site.access' => RequireSiteAccess::class,
             'require.program.access' => RequireProgramAccess::class,
-            'not.edge' => \App\Http\Middleware\BlockOnEdge::class,
+            'not.edge'         => \App\Http\Middleware\BlockOnEdge::class,
+            'auth.edge_device' => \App\Http\Middleware\AuthenticateEdgeDevice::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
