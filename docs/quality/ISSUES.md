@@ -44,8 +44,8 @@ Address open issues in priority order.
 | 23 | 🔴 | Backend | ProgramPackageController | DB::table() raw query in controller | done |
 | 24 | 🔴 | Backend | PublicTriageController | Multiple Token::where() Eloquent queries in controller | done |
 | 25 | 🔴 | Backend | StepController | DB::table() raw join query in controller | done |
-| 26 | 🔴 | Backend | ClientController | `Client::where()` Eloquent query in controller | open |
-| 27 | 🔴 | Backend | IdentityRegistrationController | `Client::where()` / `Client::findOrFail()` in controller | open |
+| 26 | 🔴 | Backend | ClientController | `Client::where()` Eloquent query in controller | done |
+| 27 | 🔴 | Backend | IdentityRegistrationController | `Client::where()` / `Client::findOrFail()` in controller | done |
 | 28 | 🟡 | Backend | PublicDisplaySettingsAuthService | `Request` object as method parameter | open |
 | 29 | 🟡 | Backend | TriageScanLogService | `Request` object as method parameter | open |
 | 30 | 🟡 | Backend | Program model | `static::where()` cross-row query in `booted()` | open |
@@ -168,7 +168,7 @@ Address open issues in priority order.
 **File:** `app/Http/Controllers/Api/ClientController.php`
 **Layer:** Backend
 **Severity:** 🔴 Critical
-**Status:** open
+**Status:** done
 
 **Action:**
 1. Move `Client::where('mobile_hash', $hash)->where('id', '!=', $client->id)->first()` (line 263) to `ClientService` or `ClientRepository`.
@@ -181,7 +181,7 @@ Address open issues in priority order.
 **File:** `app/Http/Controllers/Api/IdentityRegistrationController.php`
 **Layer:** Backend
 **Severity:** 🔴 Critical
-**Status:** open
+**Status:** done
 
 **Action:**
 1. Move `Client::where('mobile_hash', ...)` (line 272) and `Client::findOrFail($clientId)` (line 372) to a `ClientService`.
