@@ -169,4 +169,30 @@ class EdgeFoundationTest extends TestCase
             );
         }
     }
+
+    // Task 8 — edge_sync_queue and edge_sync_conflicts tables
+
+    public function test_edge_sync_queue_table_exists(): void
+    {
+        $this->assertTrue(Schema::hasTable('edge_sync_queue'));
+    }
+
+    public function test_edge_sync_queue_has_required_columns(): void
+    {
+        foreach (['id', 'event_type', 'payload', 'attempts', 'last_attempted_at', 'created_at'] as $col) {
+            $this->assertTrue(Schema::hasColumn('edge_sync_queue', $col), "Missing: {$col}");
+        }
+    }
+
+    public function test_edge_sync_conflicts_table_exists(): void
+    {
+        $this->assertTrue(Schema::hasTable('edge_sync_conflicts'));
+    }
+
+    public function test_edge_sync_conflicts_has_required_columns(): void
+    {
+        foreach (['id', 'edge_device_id', 'table_name', 'record_id', 'conflict_type', 'resolution', 'created_at'] as $col) {
+            $this->assertTrue(Schema::hasColumn('edge_sync_conflicts', $col), "Missing: {$col}");
+        }
+    }
 }
