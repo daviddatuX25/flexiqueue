@@ -149,4 +149,24 @@ class EdgeFoundationTest extends TestCase
         \App\Models\EdgeDeviceState::find(1)->update(['sync_mode' => 'end_of_event']);
         $this->assertDatabaseHas('edge_device_state', ['sync_mode' => 'end_of_event']);
     }
+
+    // Task 7 — edge_device_id on session and log tables
+
+    public function test_session_tables_have_edge_device_id(): void
+    {
+        $tables = [
+            'queue_sessions',
+            'transaction_logs',
+            'clients',
+            'identity_registrations',
+            'program_audit_log',
+            'staff_activity_log',
+        ];
+        foreach ($tables as $table) {
+            $this->assertTrue(
+                Schema::hasColumn($table, 'edge_device_id'),
+                "Table {$table} missing edge_device_id"
+            );
+        }
+    }
 }
