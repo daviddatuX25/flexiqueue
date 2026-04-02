@@ -26,6 +26,9 @@ class EdgeDeviceState extends Model
         'active_program_name',
         'session_active',
         'last_synced_at',
+        'id_offset',
+        'app_version',
+        'package_version',
     ];
 
     protected function casts(): array
@@ -36,6 +39,7 @@ class EdgeDeviceState extends Model
             'supervisor_admin_access' => 'boolean',
             'session_active' => 'boolean',
             'device_token' => 'encrypted',
+            'id_offset' => 'integer',
         ];
     }
 
@@ -47,7 +51,7 @@ class EdgeDeviceState extends Model
         return self::updateOrCreate(
             ['id' => 1],
             [
-                'sync_mode' => 'sync',
+                'sync_mode' => 'auto',
                 'supervisor_admin_access' => false,
                 'session_active' => false,
             ]

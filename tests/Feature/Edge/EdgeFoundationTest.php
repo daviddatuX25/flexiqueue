@@ -125,4 +125,28 @@ class EdgeFoundationTest extends TestCase
 
         $this->assertSame(0, $result['max_edge_devices']);
     }
+
+    // Task 6 — edge_device_state schema update
+
+    public function test_edge_device_state_has_new_columns(): void
+    {
+        foreach (['id_offset', 'app_version', 'package_version'] as $col) {
+            $this->assertTrue(
+                Schema::hasColumn('edge_device_state', $col),
+                "Missing column: {$col}"
+            );
+        }
+    }
+
+    public function test_edge_device_state_sync_mode_accepts_new_values(): void
+    {
+        \App\Models\EdgeDeviceState::updateOrCreate(
+            ['id' => 1],
+            ['sync_mode' => 'auto', 'supervisor_admin_access' => false, 'session_active' => false]
+        );
+        $this->assertDatabaseHas('edge_device_state', ['sync_mode' => 'auto']);
+
+        \App\Models\EdgeDeviceState::find(1)->update(['sync_mode' => 'end_of_event']);
+        $this->assertDatabaseHas('edge_device_state', ['sync_mode' => 'end_of_event']);
+    }
 }
