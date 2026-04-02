@@ -26,6 +26,7 @@ class EdgeSettingsValidatorTest extends TestCase
 
         $this->assertSame([
             'bridge_enabled' => false,
+            'max_edge_devices' => 0,
             'offline_allow_client_creation' => true,
             'offline_binding_mode_override' => 'optional',
             'scheduled_sync_time' => '17:00',
@@ -47,6 +48,7 @@ class EdgeSettingsValidatorTest extends TestCase
             'offline_binding_mode_override' => 'required',
             'scheduled_sync_time' => '09:30',
             'offline_allow_client_creation' => false,
+            'max_edge_devices' => 5,
         ];
 
         $result = $this->validator->validate($payload);

@@ -2,6 +2,10 @@
 
 namespace App\Services;
 
+use App\Models\EdgeDeviceState;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+
 /**
  * Single source of truth for central vs edge mode and connectivity.
  *
@@ -23,12 +27,31 @@ class EdgeModeService
     }
 
     /**
-     * Stub: always false. Phase E (bridge layer) will replace with real connectivity detection.
-     * Do not add network checks here.
+     * Returns true when running on edge and the central server responds to a ping.
+     * Result is cached for 30 seconds to avoid hammering the network on every request.
      */
     public function isOnline(): bool
     {
-        return false;
+        if (! $this->isEdge()) {
+            return false;
+        }
+
+        return Cache::remember('edge.is_online', 30, function (): bool {
+            $state = EdgeDeviceState::current();
+            $centralUrl = $state->central_url;
+
+            if (! $centralUrl) {
+                return false;
+            }
+
+            try {
+                $response = Http::timeout(3)->get(rtrim($centralUrl, '/') . '/api/ping');
+
+                return $response->successful();
+            } catch (\Throwable) {
+                return false;
+            }
+        });
     }
 
     public function isOffline(): bool

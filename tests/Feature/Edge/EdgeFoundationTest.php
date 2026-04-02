@@ -204,4 +204,68 @@ class EdgeFoundationTest extends TestCase
         $response->assertStatus(200);
         $response->assertJson(['status' => 'ok']);
     }
+
+    // Task 10 — real isOnline() in EdgeModeService
+
+    public function test_is_online_returns_false_when_not_edge(): void
+    {
+        config(['app.mode' => 'central']);
+        $service = new \App\Services\EdgeModeService();
+
+        $this->assertFalse($service->isOnline());
+    }
+
+    public function test_is_online_returns_true_when_edge_and_ping_succeeds(): void
+    {
+        config(['app.mode' => 'edge']);
+        \App\Models\EdgeDeviceState::updateOrCreate(
+            ['id' => 1],
+            ['central_url' => 'https://central.example.com', 'sync_mode' => 'auto', 'supervisor_admin_access' => false, 'session_active' => false]
+        );
+
+        \Illuminate\Support\Facades\Http::fake([
+            'https://central.example.com/api/ping' => \Illuminate\Support\Facades\Http::response(['status' => 'ok'], 200),
+        ]);
+        \Illuminate\Support\Facades\Cache::flush();
+
+        $service = new \App\Services\EdgeModeService();
+        $this->assertTrue($service->isOnline());
+    }
+
+    public function test_is_online_returns_false_when_edge_and_ping_fails(): void
+    {
+        config(['app.mode' => 'edge']);
+        \App\Models\EdgeDeviceState::updateOrCreate(
+            ['id' => 1],
+            ['central_url' => 'https://central.example.com', 'sync_mode' => 'auto', 'supervisor_admin_access' => false, 'session_active' => false]
+        );
+
+        \Illuminate\Support\Facades\Http::fake([
+            'https://central.example.com/api/ping' => \Illuminate\Support\Facades\Http::response([], 500),
+        ]);
+        \Illuminate\Support\Facades\Cache::flush();
+
+        $service = new \App\Services\EdgeModeService();
+        $this->assertFalse($service->isOnline());
+    }
+
+    public function test_is_online_caches_result_for_30_seconds(): void
+    {
+        config(['app.mode' => 'edge']);
+        \App\Models\EdgeDeviceState::updateOrCreate(
+            ['id' => 1],
+            ['central_url' => 'https://central.example.com', 'sync_mode' => 'auto', 'supervisor_admin_access' => false, 'session_active' => false]
+        );
+
+        \Illuminate\Support\Facades\Http::fake([
+            'https://central.example.com/api/ping' => \Illuminate\Support\Facades\Http::response(['status' => 'ok'], 200),
+        ]);
+        \Illuminate\Support\Facades\Cache::flush();
+
+        $service = new \App\Services\EdgeModeService();
+        $service->isOnline(); // first call — hits HTTP
+        $service->isOnline(); // second call — must use cache, not hit HTTP again
+
+        \Illuminate\Support\Facades\Http::assertSentCount(1);
+    }
 }
