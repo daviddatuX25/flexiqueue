@@ -93,4 +93,11 @@ class EdgeFoundationTest extends TestCase
         $this->assertDatabaseHas('edge_pairing_codes', ['device_name' => 'Office Pi']);
         $this->assertNull($code->consumed_at);
     }
+
+    // Task 4 — programs.edge_locked_by_device_id
+
+    public function test_programs_table_has_edge_locked_by_device_id(): void
+    {
+        $this->assertTrue(Schema::hasColumn('programs', 'edge_locked_by_device_id'));
+    }
 }
