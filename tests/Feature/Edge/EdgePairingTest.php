@@ -318,4 +318,54 @@ class EdgePairingTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $service->setup('https://central.test', 'BADCODE1', 'auto');
     }
+
+    // --- edge:heartbeat command ---
+
+    public function test_heartbeat_command_sends_heartbeat_and_updates_state(): void
+    {
+        \Illuminate\Support\Facades\Http::fake([
+            'https://central.test/api/edge/heartbeat' => \Illuminate\Support\Facades\Http::response([
+                'revoked'                 => false,
+                'sync_mode'               => 'end_of_event',
+                'supervisor_admin_access' => true,
+                'update_available'        => false,
+            ], 200),
+        ]);
+
+        \App\Models\EdgeDeviceState::updateOrCreate(
+            ['id' => 1],
+            [
+                'central_url'             => 'https://central.test',
+                'device_token'            => 'fake_device_token_for_test',
+                'site_id'                 => 1,
+                'site_name'               => 'Test Site',
+                'id_offset'               => 10_000_000,
+                'sync_mode'               => 'auto',
+                'paired_at'               => now(),
+                'session_active'          => false,
+                'supervisor_admin_access' => false,
+            ]
+        );
+
+        config(['app.mode' => 'edge']);
+
+        $this->artisan('edge:heartbeat')->assertSuccessful();
+
+        $state = \App\Models\EdgeDeviceState::current();
+        $this->assertSame('end_of_event', $state->sync_mode);
+        $this->assertTrue($state->supervisor_admin_access);
+    }
+
+    public function test_heartbeat_command_skips_when_not_paired(): void
+    {
+        config(['app.mode' => 'edge']);
+        \App\Models\EdgeDeviceState::updateOrCreate(
+            ['id' => 1],
+            ['paired_at' => null, 'device_token' => null]
+        );
+
+        $this->artisan('edge:heartbeat')->assertSuccessful();
+
+        \Illuminate\Support\Facades\Http::assertNothingSent();
+    }
 }

@@ -105,3 +105,10 @@ Schedule::command('tts:cleanup-superseded --days=14 --limit=200')
     ->dailyAt('02:30')
     ->name('tts-cleanup-superseded')
     ->withoutOverlapping();
+
+use App\Console\Commands\EdgeHeartbeat;
+
+Schedule::command(EdgeHeartbeat::class)
+    ->everyFiveMinutes()
+    ->name('edge-heartbeat')
+    ->withoutOverlapping();

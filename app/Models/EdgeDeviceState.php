@@ -48,7 +48,7 @@ class EdgeDeviceState extends Model
      */
     public static function current(): self
     {
-        return self::updateOrCreate(
+        return self::firstOrCreate(
             ['id' => 1],
             [
                 'sync_mode' => 'auto',
