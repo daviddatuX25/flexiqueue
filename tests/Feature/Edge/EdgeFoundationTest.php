@@ -195,4 +195,13 @@ class EdgeFoundationTest extends TestCase
             $this->assertTrue(Schema::hasColumn('edge_sync_conflicts', $col), "Missing: {$col}");
         }
     }
+
+    // Task 9 — GET /api/ping endpoint
+
+    public function test_api_ping_returns_200(): void
+    {
+        $response = $this->getJson('/api/ping');
+        $response->assertStatus(200);
+        $response->assertJson(['status' => 'ok']);
+    }
 }
