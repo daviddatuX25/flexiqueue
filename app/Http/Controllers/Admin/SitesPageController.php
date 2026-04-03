@@ -124,6 +124,18 @@ class SitesPageController extends Controller
                 ->all();
         }
 
+        $payload['programs'] = \App\Models\Program::where('site_id', $site->id)
+            ->select(['id', 'name', 'edge_locked_by_device_id'])
+            ->orderBy('name')
+            ->get()
+            ->map(fn (\App\Models\Program $p) => [
+                'id'                       => $p->id,
+                'name'                     => $p->name,
+                'edge_locked_by_device_id' => $p->edge_locked_by_device_id,
+            ])
+            ->values()
+            ->all();
+
         return Inertia::render('Admin/Sites/Show', $payload);
     }
 }

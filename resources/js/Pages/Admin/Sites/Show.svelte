@@ -12,6 +12,7 @@
     import { compressImage, HERO_BANNER_PRESET, getUploadHint } from "../../../lib/imageUtils.js";
     import QrDisplay from "../../../Components/QrDisplay.svelte";
     import ScopedRbacTeamAccessPanel from "../../../Components/admin/ScopedRbacTeamAccessPanel.svelte";
+    import EdgeDevicesPanel from "../../../Components/admin/EdgeDevicesPanel.svelte";
     import {
         Building2,
         Key,
@@ -39,6 +40,7 @@
         offline_binding_mode_override: "optional" | "required";
         scheduled_sync_time: string;
         offline_allow_client_creation: boolean;
+        max_edge_devices?: number;
     }
 
     const DEFAULT_EDGE: EdgeSettings = {
@@ -50,6 +52,7 @@
         offline_binding_mode_override: "optional",
         scheduled_sync_time: "17:00",
         offline_allow_client_creation: true,
+        max_edge_devices: 0,
     };
 
     interface SiteOption {
@@ -67,6 +70,7 @@
         default_site_id = null,
         auth_is_super_admin = false,
         sites = [],
+        programs = [],
         rbac_team = null as {
             id: number;
             type: string;
@@ -91,6 +95,7 @@
         default_site_id?: number | null;
         auth_is_super_admin?: boolean;
         sites?: SiteOption[];
+        programs?: { id: number; name: string; edge_locked_by_device_id: number | null }[];
         rbac_team?: {
             id: number;
             type: string;
@@ -1219,6 +1224,26 @@
                     {/if}
                 </div>
 
+                {#if auth_is_super_admin}
+                    <div>
+                        <label class="label" for="max-edge-devices">
+                            <span class="label-text text-xs font-semibold uppercase tracking-wide text-surface-500">Max Edge Devices</span>
+                        </label>
+                        <input
+                            id="max-edge-devices"
+                            type="number"
+                            min="0"
+                            max="50"
+                            class="input input-sm w-24 mt-1"
+                            bind:value={edge.max_edge_devices}
+                            disabled={edgeSectionDisabled}
+                        />
+                        <p class="text-xs text-surface-500 mt-1">
+                            Number of edge devices allowed for this site (0 = disabled). Super admin only.
+                        </p>
+                    </div>
+                {/if}
+
                 <div class="flex gap-3 pt-2">
                     <button
                         type="submit"
@@ -1231,6 +1256,20 @@
                 </div>
             </form>
         </section>
+
+        {#if (site?.edge_settings?.max_edge_devices ?? 0) > 0}
+            <section
+                id="edge-devices-section"
+                class="card p-6 flex flex-col gap-4"
+                aria-labelledby="edge-devices-heading"
+            >
+                <EdgeDevicesPanel
+                    siteId={site.id}
+                    slotsTotal={site?.edge_settings?.max_edge_devices ?? 0}
+                    {programs}
+                />
+            </section>
+        {/if}
     </div>
 </AdminLayout>
 
