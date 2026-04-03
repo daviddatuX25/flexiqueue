@@ -21,8 +21,8 @@ class EdgePairingTest extends TestCase
             'name' => 'Test Site',
             'slug' => 'test-site-' . Str::random(4),
             'api_key_hash' => Hash::make(Str::random(40)),
-            'settings' => ['max_edge_devices' => $maxDevices],
-            'edge_settings' => [],
+            'settings' => [],
+            'edge_settings' => ['max_edge_devices' => $maxDevices],
         ]);
     }
 
