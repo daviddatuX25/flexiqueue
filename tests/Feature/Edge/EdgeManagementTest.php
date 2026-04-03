@@ -309,4 +309,51 @@ class EdgeManagementTest extends TestCase
             ])
             ->assertForbidden();
     }
+
+    // ── Task 4: programResource edge lock fields ──────────────────────
+
+    /** @test */
+    public function program_api_includes_edge_lock_fields(): void
+    {
+        $site    = $this->createSite();
+        $admin   = $this->createAdminUser($site);
+        $device  = $this->createDevice($site, ['name' => 'Field Pi']);
+        $program = Program::create([
+            'site_id'    => $site->id,
+            'name'       => 'Locked Prog',
+            'slug'       => 'locked-' . uniqid(),
+            'created_by' => $admin->id,
+        ]);
+
+        $program->update(['edge_locked_by_device_id' => $device->id]);
+
+        $res = $this->actingAs($admin)->getJson('/api/admin/programs');
+
+        $res->assertOk()
+            ->assertJsonFragment([
+                'edge_locked_by_device_id'   => $device->id,
+                'edge_locked_by_device_name' => 'Field Pi',
+            ]);
+    }
+
+    /** @test */
+    public function program_api_edge_lock_fields_are_null_when_unlocked(): void
+    {
+        $site    = $this->createSite();
+        $admin   = $this->createAdminUser($site);
+        $program = Program::create([
+            'site_id'    => $site->id,
+            'name'       => 'Free Prog',
+            'slug'       => 'free-' . uniqid(),
+            'created_by' => $admin->id,
+        ]);
+
+        $res = $this->actingAs($admin)->getJson('/api/admin/programs');
+
+        $res->assertOk()
+            ->assertJsonFragment([
+                'edge_locked_by_device_id'   => null,
+                'edge_locked_by_device_name' => null,
+            ]);
+    }
 }

@@ -37,6 +37,7 @@ class ProgramController extends Controller
 
         $programs = Program::query()
             ->forSite($siteId)
+            ->with('lockedByDevice:id,name')
             ->orderBy('name')
             ->get()
             ->map(fn (Program $p) => $this->programResource($p));
@@ -74,6 +75,7 @@ class ProgramController extends Controller
         $this->ensureProgramInSite($request, $program);
 
         $program->loadCount(['serviceTracks', 'stations', 'queueSessions']);
+        $program->load('lockedByDevice:id,name');
 
         return response()->json([
             'program' => $this->programResource($program),
@@ -338,6 +340,10 @@ class ProgramController extends Controller
             'is_paused' => $program->is_paused ?? false,
             'is_published' => $program->is_published ?? true,
             'created_at' => $program->created_at?->toIso8601String(),
+            'edge_locked_by_device_id'   => $program->edge_locked_by_device_id,
+            'edge_locked_by_device_name' => $program->edge_locked_by_device_id
+                ? optional($program->lockedByDevice)->name
+                : null,
             'settings' => [
                 'no_show_timer_seconds' => (int) ($settings['no_show_timer_seconds'] ?? 10),
                 'max_no_show_attempts' => $programSettings->getMaxNoShowAttempts(),
