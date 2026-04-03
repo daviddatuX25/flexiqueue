@@ -30,6 +30,7 @@ class Program extends Model
         'is_published',
         'settings',
         'created_by',
+        'edge_locked_by_device_id',
     ];
 
     protected function casts(): array
@@ -39,6 +40,7 @@ class Program extends Model
             'is_paused' => 'boolean',
             'is_published' => 'boolean',
             'settings' => 'array',
+            'edge_locked_by_device_id' => 'integer',
         ];
     }
 
@@ -295,5 +297,10 @@ class Program extends Model
         }
 
         return $query->where('site_id', $siteId);
+    }
+
+    public function lockedByDevice(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(\App\Models\EdgeDevice::class, 'edge_locked_by_device_id');
     }
 }
