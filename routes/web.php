@@ -10,6 +10,7 @@ use App\Http\Controllers\Admin\TokenPrintController;
 use App\Http\Controllers\Admin\UserPageController;
 use App\Http\Controllers\Api\Admin\AnalyticsController as AdminAnalyticsController;
 use App\Http\Controllers\Api\Admin\ClientAdminController;
+use App\Http\Controllers\Api\Admin\EdgeDeviceController;
 use App\Http\Controllers\Api\Admin\EdgeImportController;
 use App\Http\Controllers\Api\Admin\ElevenLabsIntegrationController;
 use App\Http\Controllers\Api\Admin\PermissionCatalogController;
@@ -170,6 +171,12 @@ Route::middleware(['auth', 'permission:admin.manage'])->prefix('api/admin')->gro
     Route::get('/analytics/token-tts-health', [AdminAnalyticsController::class, 'tokenTtsHealth']);
     // Deprecated: use PUT /api/admin/sites/{site} for site and settings.
     Route::patch('/site/settings', [SiteSettingsController::class, 'update'])->name('api.admin.site.settings');
+
+    // Edge device management — E3, §20.2
+    Route::get('/sites/{site}/edge-devices', [EdgeDeviceController::class, 'index'])->name('api.admin.edge-devices.index');
+    Route::post('/sites/{site}/edge-devices/pairing-code', [EdgeDeviceController::class, 'generatePairingCode'])->name('api.admin.edge-devices.pairing-code');
+    Route::put('/edge-devices/{device}', [EdgeDeviceController::class, 'update'])->name('api.admin.edge-devices.update');
+    Route::delete('/edge-devices/{device}', [EdgeDeviceController::class, 'revoke'])->name('api.admin.edge-devices.revoke');
 });
 
 // Per SUPER-ADMIN-VS-ADMIN-SPEC: integrations API is super_admin only.

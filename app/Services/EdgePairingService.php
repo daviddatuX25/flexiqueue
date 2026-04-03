@@ -15,7 +15,7 @@ class EdgePairingService
     public function canGenerateCode(int $siteId): bool
     {
         $site = Site::findOrFail($siteId);
-        $maxDevices = $site->settings['max_edge_devices'] ?? 0;
+        $maxDevices = $site->edge_settings['max_edge_devices'] ?? 0;
 
         if ($maxDevices <= 0) {
             return false;
