@@ -9,6 +9,7 @@ use App\Models\Site;
 use App\Services\EdgePairingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class EdgeDeviceController extends Controller
 {
@@ -77,37 +78,59 @@ class EdgeDeviceController extends Controller
 
         $newProgramId = $validated['assigned_program_id'];
 
+        // Validate new program belongs to this site before the transaction
         if ($newProgramId !== null) {
             $program = Program::findOrFail($newProgramId);
 
             if ((int) $program->site_id !== (int) $device->site_id) {
                 return response()->json(['message' => 'Program does not belong to this site.'], 422);
             }
+        }
 
-            if ($program->edge_locked_by_device_id !== null
-                && $program->edge_locked_by_device_id !== $device->id) {
-                return response()->json(['message' => 'Program is already assigned to another edge device.'], 422);
+        $lockConflict = DB::transaction(function () use ($device, $newProgramId, &$validated) {
+            // Re-read device inside transaction for fresh state
+            $device->refresh();
+
+            // Check new program lock inside transaction (atomic)
+            if ($newProgramId !== null) {
+                $freshProgram = Program::lockForUpdate()->find($newProgramId);
+                if ($freshProgram === null) {
+                    return 'not_found';
+                }
+                if ($freshProgram->edge_locked_by_device_id !== null
+                    && $freshProgram->edge_locked_by_device_id !== $device->id) {
+                    return 'locked';
+                }
             }
-        }
 
-        // Clear old lock if changing assignment
-        if ($device->assigned_program_id !== null
-            && $device->assigned_program_id !== $newProgramId) {
-            Program::where('id', $device->assigned_program_id)
-                ->update(['edge_locked_by_device_id' => null]);
-        }
+            // Clear old lock
+            if ($device->assigned_program_id !== null
+                && $device->assigned_program_id !== $newProgramId) {
+                Program::where('id', $device->assigned_program_id)
+                    ->update(['edge_locked_by_device_id' => null]);
+            }
 
-        // Set new lock
-        if ($newProgramId !== null) {
-            Program::where('id', $newProgramId)
-                ->update(['edge_locked_by_device_id' => $device->id]);
-        }
+            // Set new lock
+            if ($newProgramId !== null) {
+                Program::where('id', $newProgramId)
+                    ->update(['edge_locked_by_device_id' => $device->id]);
+            }
 
-        $device->update([
-            'assigned_program_id'     => $newProgramId,
-            'sync_mode'               => $validated['sync_mode'],
-            'supervisor_admin_access' => $validated['supervisor_admin_access'],
-        ]);
+            $device->update([
+                'assigned_program_id'     => $newProgramId,
+                'sync_mode'               => $validated['sync_mode'],
+                'supervisor_admin_access' => $validated['supervisor_admin_access'],
+            ]);
+
+            return null;
+        });
+
+        if ($lockConflict === 'locked') {
+            return response()->json(['message' => 'Program is already assigned to another edge device.'], 422);
+        }
+        if ($lockConflict === 'not_found') {
+            return response()->json(['message' => 'Program not found.'], 422);
+        }
 
         return response()->json(['device' => $this->deviceResource($device->fresh(['assignedProgram']))]);
     }
