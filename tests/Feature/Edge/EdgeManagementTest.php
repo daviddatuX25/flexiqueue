@@ -79,4 +79,67 @@ class EdgeManagementTest extends TestCase
         $this->assertInstanceOf(EdgeDevice::class, $fresh->lockedByDevice);
         $this->assertEquals($device->id, $fresh->lockedByDevice->id);
     }
+
+    // ── Task 2: EdgeDevice::getStatus() ──────────────────────────────────
+
+    /** @test */
+    public function device_status_is_online_when_seen_within_6_min_and_session_active(): void
+    {
+        $site   = $this->createSite();
+        $device = $this->createDevice($site, [
+            'last_seen_at'   => now()->subMinutes(3),
+            'session_active' => true,
+        ]);
+
+        $this->assertEquals('online', $device->getStatus());
+    }
+
+    /** @test */
+    public function device_status_is_waiting_when_seen_recently_and_no_program(): void
+    {
+        $site   = $this->createSite();
+        $device = $this->createDevice($site, [
+            'last_seen_at'        => now()->subMinutes(3),
+            'session_active'      => false,
+            'assigned_program_id' => null,
+        ]);
+
+        $this->assertEquals('waiting', $device->getStatus());
+    }
+
+    /** @test */
+    public function device_status_is_idle_when_seen_recently_with_program_no_session(): void
+    {
+        $site    = $this->createSite();
+        $program = Program::create(['site_id' => $site->id, 'name' => 'P', 'slug' => 'p-idle-' . uniqid(), 'created_by' => $this->createAdminUser($site)->id]);
+        $device  = $this->createDevice($site, [
+            'last_seen_at'        => now()->subMinutes(30),
+            'session_active'      => false,
+            'assigned_program_id' => $program->id,
+        ]);
+
+        $this->assertEquals('idle', $device->getStatus());
+    }
+
+    /** @test */
+    public function device_status_is_stale_when_offline_with_assigned_program(): void
+    {
+        $site    = $this->createSite();
+        $program = Program::create(['site_id' => $site->id, 'name' => 'P', 'slug' => 'p-stale-' . uniqid(), 'created_by' => $this->createAdminUser($site)->id]);
+        $device  = $this->createDevice($site, [
+            'last_seen_at'        => now()->subHours(2),
+            'assigned_program_id' => $program->id,
+        ]);
+
+        $this->assertEquals('stale', $device->getStatus());
+    }
+
+    /** @test */
+    public function device_status_is_offline_when_never_seen(): void
+    {
+        $site   = $this->createSite();
+        $device = $this->createDevice($site, ['last_seen_at' => null]);
+
+        $this->assertEquals('offline', $device->getStatus());
+    }
 }

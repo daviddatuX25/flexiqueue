@@ -58,4 +58,34 @@ class EdgeDevice extends Model
     {
         return $this->revoked_at === null;
     }
+
+    /**
+     * Compute display status for the admin UI.
+     * online  — seen within 6 min, session active
+     * waiting — seen within 60 min, no assigned program
+     * idle    — seen within 60 min, has program, no active session
+     * stale   — not seen for >60 min but has assigned program
+     * offline — not seen for >60 min and no program, or never seen
+     */
+    public function getStatus(): string
+    {
+        if (! $this->last_seen_at) {
+            return $this->assigned_program_id ? 'stale' : 'offline';
+        }
+
+        $minutesAgo = (int) $this->last_seen_at->diffInMinutes(now());
+
+        if ($minutesAgo <= 6) {
+            if ($this->session_active) {
+                return 'online';
+            }
+            return $this->assigned_program_id ? 'idle' : 'waiting';
+        }
+
+        if ($minutesAgo <= 60) {
+            return $this->assigned_program_id ? 'idle' : 'waiting';
+        }
+
+        return $this->assigned_program_id ? 'stale' : 'offline';
+    }
 }
