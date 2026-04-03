@@ -31,6 +31,8 @@
         is_paused?: boolean;
         created_at: string | null;
         settings?: ProgramSettingsSummary;
+        edge_locked_by_device_id?: number | null;
+        edge_locked_by_device_name?: string | null;
     }
 
     let {
@@ -458,7 +460,7 @@
                                 >
                                     {program.name}
                                 </span>
-                                <div class="shrink-0 mt-1">
+                                <div class="shrink-0 mt-1 flex flex-col items-end gap-1">
                                     {#if program.is_active && !program.is_paused}
                                         <span
                                             class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded preset-filled-success-500 animate-pulse"
@@ -474,6 +476,12 @@
                                             class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded preset-tonal text-surface-600"
                                             >Inactive</span
                                         >
+                                    {/if}
+                                    {#if program.edge_locked_by_device_id}
+                                        <span
+                                            class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded preset-tonal-primary flex items-center gap-1"
+                                            title="Assigned to edge device {program.edge_locked_by_device_name ?? 'unknown'}. Unassign the device to use this program on central."
+                                        >🔒 Edge: {program.edge_locked_by_device_name ?? "device"}</span>
                                     {/if}
                                 </div>
                             </div>

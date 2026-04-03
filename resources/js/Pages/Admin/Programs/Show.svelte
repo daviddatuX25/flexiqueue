@@ -103,6 +103,8 @@
         };
         is_published?: boolean;
         short_links?: { type: string; code: string; url: string; has_embedded_key?: boolean }[];
+        edge_locked_by_device_id?: number | null;
+        edge_locked_by_device_name?: string | null;
     }
 
     interface StepItem {
@@ -2469,6 +2471,19 @@
                 {/if}
             </div>
         </div>
+
+        <!-- Edge lock alert -->
+        {#if program?.edge_locked_by_device_id}
+            <div class="alert preset-tonal-warning flex items-start gap-3 mb-4" role="alert">
+                <span class="text-xl flex-shrink-0">🔒</span>
+                <div>
+                    <p class="font-semibold text-sm">Edge-locked by {program.edge_locked_by_device_name ?? "an edge device"}</p>
+                    <p class="text-xs text-surface-600 mt-0.5">
+                        This program is assigned to an edge device. Go to Site Settings → Edge Devices to unassign it before starting a session from central.
+                    </p>
+                </div>
+            </div>
+        {/if}
 
         <!-- Status banner + primary actions (dark mode styling via .program-status-banner in theme) -->
         {#if program.is_active && !program.is_paused}
