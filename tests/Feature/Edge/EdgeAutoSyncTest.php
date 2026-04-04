@@ -13,6 +13,7 @@ use App\Models\Station;
 use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\TransactionLog;
+use App\Listeners\PushEdgeEventToCentral;
 use App\Services\EdgeEventPushService;
 use App\Services\EdgeModeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -300,6 +301,40 @@ class EdgeAutoSyncTest extends TestCase
             return isset($request['session_state'])
                 && $request['session_state']['id'] === $session->id
                 && $request['session_state']['status'] === 'called';
+        });
+    }
+
+    public function test_listener_pushes_transaction_log_to_central(): void
+    {
+        Http::fake([
+            '*/api/edge/event' => Http::response(['status' => 'ok'], 200),
+        ]);
+
+        $state = EdgeDeviceState::current();
+        $state->update([
+            'central_url' => 'https://central.test',
+            'device_token' => 'test-token-abc',
+            'sync_mode' => 'auto',
+            'session_active' => true,
+        ]);
+
+        $session = $this->createMinimalSession('auto', true);
+
+        $log = TransactionLog::create([
+            'session_id' => $session->id,
+            'station_id' => null,
+            'staff_user_id' => null,
+            'action_type' => 'bind',
+        ]);
+
+        $event = new \App\Events\EdgeSyncableEventCreated($log, $session);
+        $listener = new PushEdgeEventToCentral(new EdgeEventPushService());
+        $listener->handle($event);
+
+        Http::assertSent(function ($request) {
+            return $request['event_type'] === 'transaction_log'
+                && $request['payload']['action_type'] === 'bind'
+                && isset($request['session_state']);
         });
     }
 }
