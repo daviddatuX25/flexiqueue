@@ -641,4 +641,78 @@ class EdgeAutoSyncTest extends TestCase
             'status' => 'pending',
         ]);
     }
+
+    public function test_full_auto_sync_flow_bind_fires_event_and_pushes(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        Http::fake([
+            '*/api/edge/event' => Http::response(['status' => 'ok'], 200),
+        ]);
+
+        $state = EdgeDeviceState::current();
+        $state->update([
+            'central_url' => 'https://central.test',
+            'device_token' => 'test-token-abc',
+            'sync_mode' => 'auto',
+            'session_active' => true,
+        ]);
+
+        $session = $this->createMinimalSession('auto', true);
+
+        TransactionLog::create([
+            'session_id' => $session->id,
+            'station_id' => null,
+            'staff_user_id' => null,
+            'action_type' => 'bind',
+        ]);
+
+        Http::assertSent(function ($request) {
+            return str_contains($request->url(), '/api/edge/event')
+                && $request['event_type'] === 'transaction_log'
+                && $request['payload']['action_type'] === 'bind';
+        });
+    }
+
+    public function test_full_auto_sync_flow_failure_then_retry_recovery(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        Http::fake([
+            '*/api/edge/event' => Http::sequence()
+                ->push('Error', 500)   // initial push fails
+                ->push(['status' => 'ok'], 200),  // retry succeeds
+        ]);
+
+        $state = EdgeDeviceState::current();
+        $state->update([
+            'central_url' => 'https://central.test',
+            'device_token' => 'test-token-abc',
+            'sync_mode' => 'auto',
+            'session_active' => true,
+        ]);
+
+        $session = $this->createMinimalSession('auto', true);
+
+        // This will fail the HTTP push and queue for retry
+        TransactionLog::create([
+            'session_id' => $session->id,
+            'station_id' => null,
+            'staff_user_id' => null,
+            'action_type' => 'bind',
+        ]);
+
+        // Verify it's queued
+        $this->assertDatabaseHas('edge_sync_queue', [
+            'status' => 'pending',
+            'event_type' => 'transaction_log',
+        ]);
+
+        // Now retry (second HTTP call succeeds)
+        $this->artisan('edge:sync-retry')->assertSuccessful();
+
+        $this->assertDatabaseHas('edge_sync_queue', [
+            'status' => 'sent',
+        ]);
+    }
 }
