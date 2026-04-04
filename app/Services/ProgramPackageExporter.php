@@ -204,22 +204,36 @@ class ProgramPackageExporter
     }
 
     /**
+     * Recursively sort array keys to ensure consistent JSON serialization order.
+     */
+    private function sortRecursive(array $arr): array
+    {
+        foreach ($arr as &$value) {
+            if (is_array($value)) {
+                $value = $this->sortRecursive($value);
+            }
+        }
+        ksort($arr);
+        return $arr;
+    }
+
+    /**
      * Build the 11-key checksums array from a sections array.
      */
     private function buildChecksums(array $sections): array
     {
         return [
-            'site' => hash('sha256', json_encode($sections['site'])),
-            'program' => hash('sha256', json_encode($sections['program'])),
-            'tracks' => hash('sha256', json_encode($sections['tracks'])),
-            'steps' => hash('sha256', json_encode($sections['steps'])),
-            'processes' => hash('sha256', json_encode($sections['processes'])),
-            'stations' => hash('sha256', json_encode($sections['stations'])),
-            'station_process' => hash('sha256', json_encode($sections['station_process'])),
-            'users' => hash('sha256', json_encode($sections['users'])),
-            'tokens' => hash('sha256', json_encode($sections['tokens'])),
-            'clients' => hash('sha256', json_encode($sections['clients'])),
-            'tts_asset_references' => hash('sha256', json_encode($sections['tts_asset_references'])),
+            'site' => hash('sha256', json_encode($this->sortRecursive($sections['site']))),
+            'program' => hash('sha256', json_encode($this->sortRecursive($sections['program']))),
+            'tracks' => hash('sha256', json_encode($this->sortRecursive($sections['tracks']))),
+            'steps' => hash('sha256', json_encode($this->sortRecursive($sections['steps']))),
+            'processes' => hash('sha256', json_encode($this->sortRecursive($sections['processes']))),
+            'stations' => hash('sha256', json_encode($this->sortRecursive($sections['stations']))),
+            'station_process' => hash('sha256', json_encode($this->sortRecursive($sections['station_process']))),
+            'users' => hash('sha256', json_encode($this->sortRecursive($sections['users']))),
+            'tokens' => hash('sha256', json_encode($this->sortRecursive($sections['tokens']))),
+            'clients' => hash('sha256', json_encode($this->sortRecursive($sections['clients']))),
+            'tts_asset_references' => hash('sha256', json_encode($this->sortRecursive($sections['tts_asset_references']))),
         ];
     }
 

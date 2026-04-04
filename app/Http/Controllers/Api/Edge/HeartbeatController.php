@@ -4,11 +4,16 @@ namespace App\Http\Controllers\Api\Edge;
 
 use App\Http\Controllers\Controller;
 use App\Models\EdgeDevice;
+use App\Services\ProgramPackageExporter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class HeartbeatController extends Controller
 {
+    public function __construct(
+        private readonly ProgramPackageExporter $packageExporter,
+    ) {}
+
     public function __invoke(Request $request): JsonResponse
     {
         /** @var EdgeDevice $device */
@@ -44,6 +49,14 @@ class HeartbeatController extends Controller
 
         $isVoided = $device->force_cancelled_at !== null;
 
+        $packageStale = false;
+        if ($device->assigned_program_id !== null && ! empty($validated['package_version'])) {
+            $program = $device->assignedProgram;
+            $site = $device->site;
+            $currentVersion = $this->packageExporter->computePackageVersion($program, $site);
+            $packageStale = $currentVersion !== $validated['package_version'];
+        }
+
         return response()->json([
             'revoked'                 => false,
             'sync_mode'               => $device->sync_mode,
@@ -52,6 +65,7 @@ class HeartbeatController extends Controller
             'dump_session'            => (bool) $device->dump_requested,
             'session_voided'          => $isVoided,
             'voided_at'               => $isVoided ? $device->force_cancelled_at->toIso8601String() : null,
+            'package_stale'           => $packageStale,
         ]);
     }
 }

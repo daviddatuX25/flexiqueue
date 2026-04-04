@@ -160,4 +160,96 @@ class EdgePackageVersioningTest extends TestCase
         $data = $response->json();
         $this->assertArrayNotHasKey('package_version', $data);
     }
+
+    /** @test */
+    public function heartbeat_returns_package_stale_true_when_version_mismatch(): void
+    {
+        $site    = \App\Models\Site::factory()->create();
+        $program = \App\Models\Program::factory()->create(['site_id' => $site->id]);
+        $plainToken = \Illuminate\Support\Str::random(64);
+        $device  = \App\Models\EdgeDevice::create([
+            'site_id'                 => $site->id,
+            'name'                    => 'Test Pi',
+            'device_token_hash'       => hash('sha256', $plainToken),
+            'id_offset'               => 10_000_000,
+            'sync_mode'               => 'auto',
+            'supervisor_admin_access' => false,
+            'assigned_program_id'     => $program->id,
+            'session_active'          => false,
+            'paired_at'               => now(),
+        ]);
+
+        $this->withToken($plainToken)
+            ->postJson('/api/edge/heartbeat', [
+                'session_active'  => false,
+                'sync_mode'       => 'auto',
+                'last_synced_at'  => null,
+                'package_version' => 'outdated-version-hash',
+                'app_version'     => null,
+            ])
+            ->assertOk()
+            ->assertJsonFragment(['package_stale' => true]);
+    }
+
+    /** @test */
+    public function heartbeat_returns_package_stale_false_when_version_matches(): void
+    {
+        $site    = \App\Models\Site::factory()->create();
+        $program = \App\Models\Program::factory()->create(['site_id' => $site->id]);
+        $plainToken = \Illuminate\Support\Str::random(64);
+        $device  = \App\Models\EdgeDevice::create([
+            'site_id'                 => $site->id,
+            'name'                    => 'Test Pi',
+            'device_token_hash'       => hash('sha256', $plainToken),
+            'id_offset'               => 10_000_000,
+            'sync_mode'               => 'auto',
+            'supervisor_admin_access' => false,
+            'assigned_program_id'     => $program->id,
+            'session_active'          => false,
+            'paired_at'               => now(),
+        ]);
+
+        $currentVersion = app(\App\Services\ProgramPackageExporter::class)
+            ->computePackageVersion($program, $site);
+
+        $this->withToken($plainToken)
+            ->postJson('/api/edge/heartbeat', [
+                'session_active'  => false,
+                'sync_mode'       => 'auto',
+                'last_synced_at'  => null,
+                'package_version' => $currentVersion,
+                'app_version'     => null,
+            ])
+            ->assertOk()
+            ->assertJsonFragment(['package_stale' => false]);
+    }
+
+    /** @test */
+    public function heartbeat_returns_package_stale_false_when_no_program_assigned(): void
+    {
+        $site   = \App\Models\Site::factory()->create();
+        $plainToken = \Illuminate\Support\Str::random(64);
+        $device = \App\Models\EdgeDevice::create([
+            'site_id'                 => $site->id,
+            'name'                    => 'Test Pi',
+            'device_token_hash'       => hash('sha256', $plainToken),
+            'id_offset'               => 10_000_000,
+            'sync_mode'               => 'auto',
+            'supervisor_admin_access' => false,
+            'assigned_program_id'     => null,
+            'session_active'          => false,
+            'paired_at'               => now(),
+        ]);
+
+        $this->withToken($plainToken)
+            ->postJson('/api/edge/heartbeat', [
+                'session_active'  => false,
+                'sync_mode'       => 'auto',
+                'last_synced_at'  => null,
+                'package_version' => null,
+                'app_version'     => null,
+            ])
+            ->assertOk()
+            ->assertJsonFragment(['package_stale' => false]);
+    }
 }
