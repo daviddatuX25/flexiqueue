@@ -412,4 +412,33 @@ class EdgeBatchSyncTest extends TestCase
             'last_receipt',
         ]);
     }
+
+    public function test_sync_receipts_endpoint_returns_recent_receipts(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        // Create 3 receipts
+        for ($i = 1; $i <= 3; $i++) {
+            \App\Models\EdgeSyncReceipt::create([
+                'batch_id' => (string) Str::uuid(),
+                'status' => $i === 2 ? 'failed' : 'complete',
+                'payload_summary' => ['queue_sessions' => $i * 5],
+                'receipt_data' => $i !== 2 ? ['status' => 'complete'] : null,
+                'started_at' => now()->subHours(4 - $i),
+                'completed_at' => now()->subHours(4 - $i),
+                'created_at' => now()->subHours(4 - $i),
+            ]);
+        }
+
+        $user = User::factory()->admin()->create();
+
+        $response = $this->actingAs($user)
+            ->getJson('/api/edge/sync-receipts');
+
+        $response->assertOk();
+        $receipts = $response->json('receipts');
+        $this->assertCount(3, $receipts);
+        // Most recent first
+        $this->assertEquals('complete', $receipts[0]['status']);
+    }
 }

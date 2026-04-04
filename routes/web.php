@@ -290,6 +290,7 @@ Route::middleware(['auth', 'permission:admin.manage'])->prefix('api')->group(fun
 Route::middleware(['auth', 'permission:admin.manage'])->prefix('api/edge')->group(function (): void {
     Route::post('/sync-trigger', [\App\Http\Controllers\Edge\SyncTriggerController::class, 'trigger'])->name('api.edge.sync-trigger');
     Route::get('/sync-status', [\App\Http\Controllers\Edge\SyncTriggerController::class, 'status'])->name('api.edge.sync-status');
+    Route::get('/sync-receipts', [\App\Http\Controllers\Edge\SyncTriggerController::class, 'receipts'])->name('api.edge.sync-receipts');
 });
 
 // Per 08-API-SPEC-PHASE1 §3–4: Session and station endpoints (any staff)

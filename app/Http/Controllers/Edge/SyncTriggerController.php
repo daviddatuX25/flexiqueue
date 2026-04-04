@@ -56,4 +56,22 @@ class SyncTriggerController extends Controller
             ] : null,
         ]);
     }
+
+    public function receipts(): JsonResponse
+    {
+        $receipts = EdgeSyncReceipt::orderByDesc('id')
+            ->limit(20)
+            ->get()
+            ->map(fn ($r) => [
+                'batch_id' => $r->batch_id,
+                'status' => $r->status,
+                'payload_summary' => $r->payload_summary,
+                'receipt_data' => $r->receipt_data,
+                'started_at' => $r->started_at?->toIso8601String(),
+                'completed_at' => $r->completed_at?->toIso8601String(),
+                'created_at' => $r->created_at?->toIso8601String(),
+            ]);
+
+        return response()->json(['receipts' => $receipts]);
+    }
 }
