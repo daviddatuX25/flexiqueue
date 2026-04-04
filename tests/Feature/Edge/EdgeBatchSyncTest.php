@@ -441,4 +441,124 @@ class EdgeBatchSyncTest extends TestCase
         // Most recent first
         $this->assertEquals('complete', $receipts[0]['status']);
     }
+
+    public function test_full_end_of_event_flow(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        // 1. Setup: edge in end_of_event mode, session data exists
+        Http::fake([
+            '*/api/edge/sync' => Http::response([
+                'status' => 'complete',
+                'synced_at' => now()->toIso8601String(),
+                'records_received' => [
+                    'queue_sessions' => 1,
+                    'transaction_logs' => 2,
+                    'clients' => 0,
+                    'identity_registrations' => 0,
+                ],
+                'conflicts' => [],
+            ], 200),
+        ]);
+
+        $state = $this->setupEdgeState('end_of_event', false);
+        $currentTime = now()->format('H:i');
+        $state->update(['scheduled_sync_time' => $currentTime]);
+
+        [$session, $program, $token] = $this->createEdgeSessionData();
+
+        // 2. Verify data exists locally
+        $this->assertDatabaseHas('queue_sessions', ['id' => $session->id]);
+        $this->assertEquals(2, DB::table('transaction_logs')->count());
+
+        // 3. Trigger batch sync via command
+        $this->artisan('edge:auto-sync')->assertSuccessful();
+
+        // 4. Verify receipt was stored
+        $this->assertDatabaseHas('edge_sync_receipts', ['status' => 'complete']);
+
+        // 5. Verify last_synced_at was updated
+        $state->refresh();
+        $this->assertNotNull($state->last_synced_at);
+
+        // 6. Verify HTTP was sent with correct payload
+        Http::assertSent(function ($request) use ($session) {
+            return str_contains($request->url(), '/api/edge/sync')
+                && count($request['queue_sessions']) === 1
+                && count($request['transaction_logs']) === 2
+                && $request['queue_sessions'][0]['id'] == $session->id;
+        });
+    }
+
+    public function test_full_end_of_event_flow_failure_then_retry(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        Http::fake([
+            '*/api/edge/sync' => Http::sequence()
+                ->push('Error', 500)  // First attempt fails
+                ->push([              // Second attempt succeeds
+                    'status' => 'complete',
+                    'synced_at' => now()->toIso8601String(),
+                    'records_received' => [
+                        'queue_sessions' => 1,
+                        'transaction_logs' => 2,
+                        'clients' => 0,
+                        'identity_registrations' => 0,
+                    ],
+                    'conflicts' => [],
+                ], 200),
+        ]);
+
+        $state = $this->setupEdgeState('end_of_event', false);
+        $state->update(['scheduled_sync_time' => now()->format('H:i')]);
+        $this->createEdgeSessionData();
+
+        // First attempt — fails
+        $this->artisan('edge:auto-sync')->assertSuccessful();
+        $this->assertTrue(Cache::has('edge.auto_sync_retry_until'));
+        $this->assertDatabaseHas('edge_sync_receipts', ['status' => 'failed']);
+
+        // Simulate retry window — set next_retry to now
+        Cache::put('edge.auto_sync_next_retry', now()->subSecond()->toIso8601String(), 7200);
+
+        // Second attempt — succeeds
+        $this->artisan('edge:auto-sync')->assertSuccessful();
+        $this->assertFalse(Cache::has('edge.auto_sync_retry_until'));
+        $this->assertDatabaseHas('edge_sync_receipts', ['status' => 'complete']);
+    }
+
+    public function test_no_duplicate_sync_after_successful_batch(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        Http::fake([
+            '*/api/edge/sync' => Http::response([
+                'status' => 'complete',
+                'synced_at' => now()->toIso8601String(),
+                'records_received' => [
+                    'queue_sessions' => 1,
+                    'transaction_logs' => 2,
+                    'clients' => 0,
+                    'identity_registrations' => 0,
+                ],
+                'conflicts' => [],
+            ], 200),
+        ]);
+
+        $state = $this->setupEdgeState('end_of_event', false);
+        $state->update(['scheduled_sync_time' => now()->format('H:i')]);
+        $this->createEdgeSessionData();
+
+        // First sync
+        $this->artisan('edge:auto-sync')->assertSuccessful();
+        Http::assertSentCount(1);
+
+        // Reset HTTP fake for second run
+        Http::fake();
+
+        // Second sync — should detect no unsynced data
+        $this->artisan('edge:auto-sync')->assertSuccessful();
+        Http::assertNothingSent();
+    }
 }
