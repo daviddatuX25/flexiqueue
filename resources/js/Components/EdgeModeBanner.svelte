@@ -5,7 +5,7 @@
      */
     import { usePage, router } from "@inertiajs/svelte";
     import { onMount, onDestroy } from "svelte";
-    import { Wifi, WifiOff, RefreshCw } from "lucide-svelte";
+    import { Wifi, WifiOff, RefreshCw, Info } from "lucide-svelte";
 
     const page = usePage();
     const edgeMode = $derived($page.props?.edge_mode ?? null);
@@ -144,6 +144,18 @@
         >
             <span class="text-sm text-warning-700 dark:text-warning-300 font-medium">
                 Program configuration updated on central. Changes will apply after the current session ends.
+            </span>
+        </div>
+    {/if}
+    {#if importStatus?.update_available}
+        <div
+            class="py-2 px-4 flex items-center gap-2 bg-primary-50 dark:bg-primary-900/30 border-b border-primary-200 dark:border-primary-700"
+            role="status"
+            aria-live="polite"
+        >
+            <Info class="w-4 h-4 text-primary-600 dark:text-primary-400 shrink-0" aria-hidden="true" />
+            <span class="text-sm text-primary-700 dark:text-primary-300 font-medium">
+                A newer edge app version is available on central. Update to receive the latest features and improvements.
             </span>
         </div>
     {/if}

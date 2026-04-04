@@ -73,14 +73,15 @@ class EdgeImportController extends Controller
         return response()->json($this->appendStateFields(is_array($data) ? $data : ['status' => 'unknown']));
     }
 
-    /** Append package_stale and session_active from EdgeDeviceState to the response. */
+    /** Append package_stale, update_available, and session_active from EdgeDeviceState to the response. */
     private function appendStateFields(array $data): array
     {
         $state = EdgeDeviceState::current();
 
         return array_merge($data, [
-            'package_stale'  => $state->package_stale ?? false,
-            'session_active' => $state->session_active ?? false,
+            'package_stale'    => $state->package_stale ?? false,
+            'update_available' => $state->update_available ?? false,
+            'session_active'   => $state->session_active ?? false,
         ]);
     }
 }

@@ -6,9 +6,6 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * Single-row state for an edge device (id always 1).
- * Per CI-CD-and-Edge-plan Part B: paired_at, central_url, site_id, site_name,
- * device_token, sync_mode, supervisor_admin_access, active_program_id,
- * active_program_name, session_active, last_synced_at.
  */
 class EdgeDeviceState extends Model
 {
@@ -31,6 +28,7 @@ class EdgeDeviceState extends Model
         'app_version',
         'package_version',
         'package_stale',
+        'update_available',  // E8.2: set by EdgeHeartbeat command
     ];
 
     protected function casts(): array
@@ -41,6 +39,7 @@ class EdgeDeviceState extends Model
             'supervisor_admin_access' => 'boolean',
             'session_active' => 'boolean',
             'package_stale' => 'boolean',
+            'update_available' => 'boolean',  // E8.2
             'device_token' => 'encrypted',
             'id_offset' => 'integer',
         ];
@@ -57,6 +56,8 @@ class EdgeDeviceState extends Model
                 'sync_mode' => 'auto',
                 'supervisor_admin_access' => false,
                 'session_active' => false,
+                'package_stale' => false,
+                'update_available' => false,
             ]
         );
     }

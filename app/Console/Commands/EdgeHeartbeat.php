@@ -114,6 +114,10 @@ class EdgeHeartbeat extends Command
                 $updates['package_stale'] = (bool) $data['package_stale'];
             }
 
+            if (isset($data['update_available'])) {
+                $updates['update_available'] = (bool) $data['update_available'];
+            }
+
             if (! empty($updates)) {
                 $state->update($updates);
             }

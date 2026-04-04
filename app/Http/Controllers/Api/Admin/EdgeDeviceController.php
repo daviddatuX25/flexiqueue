@@ -227,6 +227,8 @@ class EdgeDeviceController extends Controller
             'last_seen_at'            => $device->last_seen_at?->toIso8601String(),
             'last_synced_at'          => $device->last_synced_at?->toIso8601String(),
             'paired_at'               => $device->paired_at?->toIso8601String(),
+            'app_version'             => $device->app_version,
+            'update_status'           => $device->update_status,
         ];
     }
 }
