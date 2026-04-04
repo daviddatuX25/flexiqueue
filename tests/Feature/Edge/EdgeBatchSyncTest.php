@@ -344,10 +344,28 @@ class EdgeBatchSyncTest extends TestCase
     public function test_sync_trigger_returns_no_data_when_nothing_to_sync(): void
     {
         config(['app.mode' => 'edge']);
-        Http::fake();
+
+        // Fake both the sync endpoint AND the /api/ping health check that
+        // HandleInertiaRequests middleware calls via EdgeModeService::isOnline().
+        Http::fake([
+            '*/api/edge/sync' => Http::response(['status' => 'complete'], 200),
+            '*/api/ping' => Http::response(['ok' => true], 200),
+        ]);
 
         $state = $this->setupEdgeState('end_of_event', false);
         $state->update(['last_synced_at' => now()]);
+
+        // hasUnsyncedData checks: queue_sessions, transaction_logs, clients,
+        // identity_registrations, program_audit_log.
+        // Use DELETE (transactional) instead of TRUNCATE to stay within RefreshDatabase rollback.
+        foreach (['queue_sessions', 'transaction_logs', 'clients', 'identity_registrations', 'program_audit_log'] as $table) {
+            if (DB::getSchemaBuilder()->hasTable($table)) {
+                DB::table($table)->delete();
+            }
+        }
+        if (DB::getSchemaBuilder()->hasTable('staff_activity_log')) {
+            DB::table('staff_activity_log')->delete();
+        }
 
         $user = User::factory()->admin()->create();
 
@@ -356,7 +374,13 @@ class EdgeBatchSyncTest extends TestCase
 
         $response->assertOk();
         $this->assertEquals('no_data', $response->json('status'));
-        Http::assertNothingSent();
+
+        // Only the /api/ping health check should be made (from HandleInertiaRequests
+        // middleware); no /api/edge/sync push should occur.
+        Http::assertSent(function ($request) {
+            return str_contains($request->url(), '/api/ping')
+                && ! str_contains($request->url(), '/api/edge/sync');
+        });
     }
 
     public function test_sync_status_endpoint_returns_current_state(): void

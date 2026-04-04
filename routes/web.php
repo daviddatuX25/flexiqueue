@@ -286,6 +286,12 @@ Route::middleware(['auth', 'permission:admin.manage'])->prefix('api')->group(fun
     Route::post('/clients/{client}/reveal-phone', [ApiClientController::class, 'revealPhone']);
 });
 
+// Edge-local sync trigger + status endpoints (E6.3) — runs ON the edge device, staff session auth
+Route::middleware(['auth', 'permission:admin.manage'])->prefix('api/edge')->group(function (): void {
+    Route::post('/sync-trigger', [\App\Http\Controllers\Edge\SyncTriggerController::class, 'trigger'])->name('api.edge.sync-trigger');
+    Route::get('/sync-status', [\App\Http\Controllers\Edge\SyncTriggerController::class, 'status'])->name('api.edge.sync-status');
+});
+
 // Per 08-API-SPEC-PHASE1 §3–4: Session and station endpoints (any staff)
 Route::middleware(['auth', 'permission:staff.operations'])->prefix('api')->group(function (): void {
     Route::get('/clients/search', [ApiClientController::class, 'search'])
