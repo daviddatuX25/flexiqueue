@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\EdgeDevice;
 use App\Models\Program;
 use App\Models\Site;
+use App\Services\EdgeForceCancelService;
 use App\Services\EdgePairingService;
 use App\Services\ProgramLockService;
 use Illuminate\Http\JsonResponse;
@@ -17,6 +18,7 @@ class EdgeDeviceController extends Controller
     public function __construct(
         private readonly EdgePairingService $pairingService,
         private readonly ProgramLockService $lockService,
+        private readonly EdgeForceCancelService $forceCancelService,
     ) {}
 
     /**
@@ -178,6 +180,22 @@ class EdgeDeviceController extends Controller
         $device->update(['dump_requested' => true]);
 
         return response()->json(['message' => 'Dump signal sent.']);
+    }
+
+    /**
+     * POST /api/admin/edge-devices/{device}/force-cancel
+     */
+    public function forceCancel(Request $request, EdgeDevice $device): JsonResponse
+    {
+        $this->authorizeSiteAccess($request, $device->site);
+
+        try {
+            $this->forceCancelService->cancel($device, $request->user()->id);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['message' => 'Session force-cancelled.']);
     }
 
     // ── private ───────────────────────────────────────────────────────

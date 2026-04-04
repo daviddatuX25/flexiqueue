@@ -391,6 +391,123 @@ class EdgeSessionControlTest extends TestCase
             ->assertJsonFragment(['message' => 'Cannot reassign program while a session is active. End or dump the session first.']);
     }
 
+    // ── E4.7 Force-cancel ─────────────────────────────────────────────────
+
+    /** @test */
+    public function force_cancel_releases_lock_and_sets_force_cancelled_at(): void
+    {
+        $site    = $this->makeSite();
+        $admin   = $this->makeAdmin($site);
+        $program = $this->makeProgram($site);
+        $device  = EdgeDevice::create([
+            'site_id'             => $site->id,
+            'name'                => 'Test Pi',
+            'device_token_hash'   => hash('sha256', 'tok-fc'),
+            'id_offset'           => 10_000_000,
+            'sync_mode'           => 'auto',
+            'supervisor_admin_access' => false,
+            'assigned_program_id' => $program->id,
+            'session_active'      => true,
+            'paired_at'           => now(),
+            'last_seen_at'        => now()->subHours(3),
+        ]);
+        $program->update(['edge_locked_by_device_id' => $device->id]);
+
+        $this->actingAs($admin)
+            ->postJson("/api/admin/edge-devices/{$device->id}/force-cancel")
+            ->assertOk()
+            ->assertJson(['message' => 'Session force-cancelled.']);
+
+        $this->assertDatabaseHas('edge_devices', [
+            'id'             => $device->id,
+            'session_active' => false,
+        ]);
+        $this->assertNotNull($device->fresh()->force_cancelled_at);
+        $this->assertDatabaseHas('programs', [
+            'id'                       => $program->id,
+            'edge_locked_by_device_id' => null,
+        ]);
+    }
+
+    /** @test */
+    public function force_cancel_requires_offline_or_stale_device(): void
+    {
+        $site    = $this->makeSite();
+        $admin   = $this->makeAdmin($site);
+        $program = $this->makeProgram($site);
+        $device  = EdgeDevice::create([
+            'site_id'             => $site->id,
+            'name'                => 'Test Pi',
+            'device_token_hash'   => hash('sha256', 'tok-fc2'),
+            'id_offset'           => 10_000_000,
+            'sync_mode'           => 'auto',
+            'supervisor_admin_access' => false,
+            'assigned_program_id' => $program->id,
+            'session_active'      => true,
+            'paired_at'           => now(),
+            'last_seen_at'        => now()->subSeconds(30),
+        ]);
+
+        $this->actingAs($admin)
+            ->postJson("/api/admin/edge-devices/{$device->id}/force-cancel")
+            ->assertUnprocessable()
+            ->assertJsonFragment(['message' => 'Force cancel is only allowed for offline or stale devices.']);
+    }
+
+    /** @test */
+    public function force_cancel_requires_active_session(): void
+    {
+        $site    = $this->makeSite();
+        $admin   = $this->makeAdmin($site);
+        $device  = EdgeDevice::create([
+            'site_id'             => $site->id,
+            'name'                => 'Test Pi',
+            'device_token_hash'   => hash('sha256', 'tok-fc3'),
+            'id_offset'           => 10_000_000,
+            'sync_mode'           => 'auto',
+            'supervisor_admin_access' => false,
+            'session_active'      => false,
+            'paired_at'           => now(),
+            'last_seen_at'        => now()->subHours(5),
+        ]);
+
+        $this->actingAs($admin)
+            ->postJson("/api/admin/edge-devices/{$device->id}/force-cancel")
+            ->assertUnprocessable()
+            ->assertJsonFragment(['message' => 'Device does not have an active session.']);
+    }
+
+    /** @test */
+    public function force_cancel_writes_program_audit_log(): void
+    {
+        $site    = $this->makeSite();
+        $admin   = $this->makeAdmin($site);
+        $program = $this->makeProgram($site);
+        $device  = EdgeDevice::create([
+            'site_id'             => $site->id,
+            'name'                => 'Offline Pi',
+            'device_token_hash'   => hash('sha256', 'tok-fc4'),
+            'id_offset'           => 10_000_000,
+            'sync_mode'           => 'auto',
+            'supervisor_admin_access' => false,
+            'assigned_program_id' => $program->id,
+            'session_active'      => true,
+            'paired_at'           => now(),
+            'last_seen_at'        => now()->subHours(2),
+        ]);
+        $program->update(['edge_locked_by_device_id' => $device->id]);
+
+        $this->actingAs($admin)
+            ->postJson("/api/admin/edge-devices/{$device->id}/force-cancel")
+            ->assertOk();
+
+        $this->assertDatabaseHas('program_audit_log', [
+            'program_id'    => $program->id,
+            'staff_user_id' => $admin->id,
+            'action'        => 'edge_session_force_cancelled',
+        ]);
+    }
+
     /** @test */
     public function update_allows_non_program_changes_when_session_is_active(): void
     {
