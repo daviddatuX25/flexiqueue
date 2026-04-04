@@ -26,10 +26,88 @@ class ProgramPackageExporter
      */
     public function export(Program $program, Site $site): array
     {
+        $sections = $this->buildSections($program, $site);
+
+        $edgeSettings = $site->edge_settings ?? [];
+        $syncTts = (bool) ($edgeSettings['sync_tts'] ?? false);
+
+        if ($syncTts) {
+            $sections['tts_files'] = $this->collectTtsFilePaths($sections);
+        } else {
+            $sections['tts_files'] = [];
+        }
+
+        $checksums = $this->computeChecksums($sections, $syncTts);
+
+        $manifest = [
+            'program_id' => $program->id,
+            'site_id' => $site->id,
+            'exported_at' => now()->toIso8601String(),
+            'sync_tokens' => (bool) ($edgeSettings['sync_tokens'] ?? false),
+            'sync_clients' => (bool) ($edgeSettings['sync_clients'] ?? false),
+            'sync_tts' => $syncTts,
+            'checksums' => $checksums,
+            'tts_asset_contract_version' => 2,
+            'package_version' => hash('sha256', json_encode($checksums)),
+        ];
+
+        return [
+            'manifest' => $manifest,
+            'site' => $sections['site'],
+            'program' => $sections['program'],
+            'tracks' => $sections['tracks'],
+            'steps' => $sections['steps'],
+            'processes' => $sections['processes'],
+            'stations' => $sections['stations'],
+            'station_process' => $sections['station_process'],
+            'users' => $sections['users'],
+            'tokens' => $sections['tokens'],
+            'program_token' => $sections['program_token'],
+            'clients' => $sections['clients'],
+            'tts_files' => $sections['tts_files'],
+            'tts_asset_references' => $sections['tts_asset_references'],
+        ];
+    }
+
+    /**
+     * Compute a version hash for the program package — safe to call on every heartbeat/assignment poll.
+     * Does NOT fetch TTS files. Includes tts_asset_references based on edge sync settings.
+     */
+    public function computePackageVersion(Program $program, Site $site): string
+    {
+        $sections = $this->buildSections($program, $site);
+
+        $edgeSettings = $site->edge_settings ?? [];
+        $syncTts = (bool) ($edgeSettings['sync_tts'] ?? false);
+
+        $checksums = $this->computeChecksums($sections, $syncTts);
+
+        return hash('sha256', json_encode($checksums));
+    }
+
+    /**
+     * Compute checksums from sections, including TTS asset references if enabled.
+     */
+    private function computeChecksums(array $sections, bool $syncTts): array
+    {
+        if ($syncTts) {
+            $sections['tts_asset_references'] = $this->collectTtsAssetReferences($sections);
+        } else {
+            $sections['tts_asset_references'] = [];
+        }
+        return $this->buildChecksums($sections);
+    }
+
+    /**
+     * Build all data sections (site, program, tracks, steps, processes, stations,
+     * station_process, users, tokens, program_token, clients) WITHOUT tts_files or
+     * tts_asset_references.
+     */
+    private function buildSections(Program $program, Site $site): array
+    {
         $edgeSettings = $site->edge_settings ?? [];
         $syncTokens = (bool) ($edgeSettings['sync_tokens'] ?? false);
         $syncClients = (bool) ($edgeSettings['sync_clients'] ?? false);
-        $syncTts = (bool) ($edgeSettings['sync_tts'] ?? false);
 
         $sections = [];
 
@@ -118,52 +196,30 @@ class ProgramPackageExporter
             $sections['clients'] = [];
         }
 
-        if ($syncTts) {
-            $sections['tts_files'] = $this->collectTtsFilePaths($sections);
-            $sections['tts_asset_references'] = $this->collectTtsAssetReferences($sections);
-        } else {
-            $sections['tts_files'] = [];
-            $sections['tts_asset_references'] = [];
-        }
+        // Placeholders — caller (export) is responsible for setting these when syncTts is true.
+        $sections['tts_asset_references'] = [];
+        $sections['tts_files'] = [];
 
-        $manifest = [
-            'program_id' => $program->id,
-            'site_id' => $site->id,
-            'exported_at' => now()->toIso8601String(),
-            'sync_tokens' => $syncTokens,
-            'sync_clients' => $syncClients,
-            'sync_tts' => $syncTts,
-            'checksums' => [
-                'site' => hash('sha256', json_encode($sections['site'])),
-                'program' => hash('sha256', json_encode($sections['program'])),
-                'tracks' => hash('sha256', json_encode($sections['tracks'])),
-                'steps' => hash('sha256', json_encode($sections['steps'])),
-                'processes' => hash('sha256', json_encode($sections['processes'])),
-                'stations' => hash('sha256', json_encode($sections['stations'])),
-                'station_process' => hash('sha256', json_encode($sections['station_process'])),
-                'users' => hash('sha256', json_encode($sections['users'])),
-                'tokens' => hash('sha256', json_encode($sections['tokens'])),
-                'clients' => hash('sha256', json_encode($sections['clients'])),
-                'tts_asset_references' => hash('sha256', json_encode($sections['tts_asset_references'])),
-            ],
-            'tts_asset_contract_version' => 2,
-        ];
+        return $sections;
+    }
 
+    /**
+     * Build the 11-key checksums array from a sections array.
+     */
+    private function buildChecksums(array $sections): array
+    {
         return [
-            'manifest' => $manifest,
-            'site' => $sections['site'],
-            'program' => $sections['program'],
-            'tracks' => $sections['tracks'],
-            'steps' => $sections['steps'],
-            'processes' => $sections['processes'],
-            'stations' => $sections['stations'],
-            'station_process' => $sections['station_process'],
-            'users' => $sections['users'],
-            'tokens' => $sections['tokens'],
-            'program_token' => $sections['program_token'],
-            'clients' => $sections['clients'],
-            'tts_files' => $sections['tts_files'],
-            'tts_asset_references' => $sections['tts_asset_references'],
+            'site' => hash('sha256', json_encode($sections['site'])),
+            'program' => hash('sha256', json_encode($sections['program'])),
+            'tracks' => hash('sha256', json_encode($sections['tracks'])),
+            'steps' => hash('sha256', json_encode($sections['steps'])),
+            'processes' => hash('sha256', json_encode($sections['processes'])),
+            'stations' => hash('sha256', json_encode($sections['stations'])),
+            'station_process' => hash('sha256', json_encode($sections['station_process'])),
+            'users' => hash('sha256', json_encode($sections['users'])),
+            'tokens' => hash('sha256', json_encode($sections['tokens'])),
+            'clients' => hash('sha256', json_encode($sections['clients'])),
+            'tts_asset_references' => hash('sha256', json_encode($sections['tts_asset_references'])),
         ];
     }
 
