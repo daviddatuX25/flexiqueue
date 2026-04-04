@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\EdgeBatchSyncService;
 use App\Services\EdgeModeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -206,5 +207,185 @@ class EdgeBatchSyncTest extends TestCase
 
         $this->assertTrue($result); // nothing to sync = success (no-op)
         Http::assertNothingSent();
+    }
+
+    public function test_auto_sync_command_triggers_at_scheduled_time(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        Http::fake([
+            '*/api/edge/sync' => Http::response([
+                'status' => 'complete',
+                'synced_at' => now()->toIso8601String(),
+                'records_received' => ['queue_sessions' => 1, 'transaction_logs' => 2, 'clients' => 0, 'identity_registrations' => 0],
+                'conflicts' => [],
+            ], 200),
+        ]);
+
+        $state = $this->setupEdgeState('end_of_event', false);
+        $currentTime = now()->format('H:i');
+        $state->update(['scheduled_sync_time' => $currentTime]);
+
+        $this->createEdgeSessionData();
+
+        $this->artisan('edge:auto-sync')->assertSuccessful();
+
+        Http::assertSent(function ($request) {
+            return str_contains($request->url(), '/api/edge/sync');
+        });
+    }
+
+    public function test_auto_sync_command_skips_when_not_sync_time(): void
+    {
+        config(['app.mode' => 'edge']);
+        Http::fake();
+
+        $state = $this->setupEdgeState('end_of_event', false);
+        // Set scheduled time to 2 hours from now (never matches)
+        $state->update(['scheduled_sync_time' => now()->addHours(2)->format('H:i')]);
+
+        $this->artisan('edge:auto-sync')
+            ->expectsOutputToContain('Not scheduled sync time')
+            ->assertSuccessful();
+
+        Http::assertNothingSent();
+    }
+
+    public function test_auto_sync_command_skips_on_auto_mode(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        $this->setupEdgeState('auto', false);
+
+        $this->artisan('edge:auto-sync')
+            ->expectsOutputToContain('not end_of_event')
+            ->assertSuccessful();
+    }
+
+    public function test_auto_sync_command_retries_on_failure(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        Http::fake([
+            '*/api/edge/sync' => Http::response('Error', 500),
+        ]);
+
+        $state = $this->setupEdgeState('end_of_event', false);
+        $state->update(['scheduled_sync_time' => now()->format('H:i')]);
+        $this->createEdgeSessionData();
+
+        $this->artisan('edge:auto-sync')->assertSuccessful();
+
+        // Should have set a retry cache key
+        $this->assertTrue(Cache::has('edge.auto_sync_retry_until'));
+    }
+
+    public function test_auto_sync_command_runs_during_retry_window(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        Http::fake([
+            '*/api/edge/sync' => Http::response([
+                'status' => 'complete',
+                'synced_at' => now()->toIso8601String(),
+                'records_received' => ['queue_sessions' => 0, 'transaction_logs' => 1, 'clients' => 0, 'identity_registrations' => 0],
+                'conflicts' => [],
+            ], 200),
+        ]);
+
+        $state = $this->setupEdgeState('end_of_event', false);
+        // Not the scheduled time, but retry window is active
+        $state->update(['scheduled_sync_time' => now()->subHour()->format('H:i')]);
+
+        Cache::put('edge.auto_sync_retry_until', now()->addHour()->toIso8601String(), 7200);
+        Cache::put('edge.auto_sync_next_retry', now()->subMinute()->toIso8601String(), 7200);
+
+        $this->createEdgeSessionData();
+
+        $this->artisan('edge:auto-sync')->assertSuccessful();
+
+        Http::assertSent(function ($request) {
+            return str_contains($request->url(), '/api/edge/sync');
+        });
+
+        // Retry keys cleared on success
+        $this->assertFalse(Cache::has('edge.auto_sync_retry_until'));
+    }
+
+    public function test_sync_trigger_endpoint_starts_batch_sync(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        Http::fake([
+            '*/api/edge/sync' => Http::response([
+                'status' => 'complete',
+                'synced_at' => now()->toIso8601String(),
+                'records_received' => ['queue_sessions' => 1, 'transaction_logs' => 2, 'clients' => 0, 'identity_registrations' => 0],
+                'conflicts' => [],
+            ], 200),
+        ]);
+
+        $state = $this->setupEdgeState('end_of_event', false);
+        $this->createEdgeSessionData();
+
+        $user = User::factory()->admin()->create();
+
+        $response = $this->actingAs($user)
+            ->postJson('/api/edge/sync-trigger');
+
+        $response->assertOk()->assertJsonStructure([
+            'status',
+            'message',
+        ]);
+
+        $this->assertEquals('complete', $response->json('status'));
+    }
+
+    public function test_sync_trigger_returns_no_data_when_nothing_to_sync(): void
+    {
+        config(['app.mode' => 'edge']);
+        Http::fake();
+
+        $state = $this->setupEdgeState('end_of_event', false);
+        $state->update(['last_synced_at' => now()]);
+
+        $user = User::factory()->admin()->create();
+
+        $response = $this->actingAs($user)
+            ->postJson('/api/edge/sync-trigger');
+
+        $response->assertOk();
+        $this->assertEquals('no_data', $response->json('status'));
+        Http::assertNothingSent();
+    }
+
+    public function test_sync_status_endpoint_returns_current_state(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        $state = $this->setupEdgeState('end_of_event', false);
+        $state->update(['last_synced_at' => now()->subHour()]);
+
+        \App\Models\EdgeSyncReceipt::create([
+            'batch_id' => (string) Str::uuid(),
+            'status' => 'complete',
+            'payload_summary' => ['queue_sessions' => 5, 'transaction_logs' => 20],
+            'receipt_data' => ['status' => 'complete', 'records_received' => ['queue_sessions' => 5]],
+            'started_at' => now()->subHour(),
+            'completed_at' => now()->subHour(),
+            'created_at' => now()->subHour(),
+        ]);
+
+        $user = User::factory()->admin()->create();
+
+        $response = $this->actingAs($user)
+            ->getJson('/api/edge/sync-status');
+
+        $response->assertOk()->assertJsonStructure([
+            'sync_mode',
+            'last_synced_at',
+            'has_unsynced_data',
+            'last_receipt',
+        ]);
     }
 }
