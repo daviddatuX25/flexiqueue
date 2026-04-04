@@ -105,4 +105,59 @@ class EdgePackageVersioningTest extends TestCase
             ->assertOk()
             ->assertJsonFragment(['package_version' => str_repeat('b', 64)]);
     }
+
+    /** @test */
+    public function assignment_poll_returns_package_version_when_assigned(): void
+    {
+        $site    = \App\Models\Site::factory()->create();
+        $program = \App\Models\Program::factory()->create(['site_id' => $site->id]);
+        $plainToken = \Illuminate\Support\Str::random(64);
+        $device  = \App\Models\EdgeDevice::create([
+            'site_id'                 => $site->id,
+            'name'                    => 'Test Pi',
+            'device_token_hash'       => hash('sha256', $plainToken),
+            'id_offset'               => 10_000_000,
+            'sync_mode'               => 'auto',
+            'supervisor_admin_access' => false,
+            'assigned_program_id'     => $program->id,
+            'session_active'          => false,
+            'paired_at'               => now(),
+        ]);
+
+        $response = $this->withToken($plainToken)
+            ->getJson('/api/edge/assignment')
+            ->assertOk();
+
+        $data = $response->json();
+
+        $this->assertArrayHasKey('package_version', $data);
+        $this->assertIsString($data['package_version']);
+        $this->assertSame(64, strlen($data['package_version']));
+    }
+
+    /** @test */
+    public function assignment_poll_omits_package_version_when_not_assigned(): void
+    {
+        $site   = \App\Models\Site::factory()->create();
+        $plainToken = \Illuminate\Support\Str::random(64);
+        $device = \App\Models\EdgeDevice::create([
+            'site_id'                 => $site->id,
+            'name'                    => 'Test Pi',
+            'device_token_hash'       => hash('sha256', $plainToken),
+            'id_offset'               => 10_000_000,
+            'sync_mode'               => 'auto',
+            'supervisor_admin_access' => false,
+            'assigned_program_id'     => null,
+            'session_active'          => false,
+            'paired_at'               => now(),
+        ]);
+
+        $response = $this->withToken($plainToken)
+            ->getJson('/api/edge/assignment')
+            ->assertOk()
+            ->assertJson(['assigned' => false]);
+
+        $data = $response->json();
+        $this->assertArrayNotHasKey('package_version', $data);
+    }
 }
