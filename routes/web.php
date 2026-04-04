@@ -177,6 +177,7 @@ Route::middleware(['auth', 'permission:admin.manage'])->prefix('api/admin')->gro
     Route::post('/sites/{site}/edge-devices/pairing-code', [EdgeDeviceController::class, 'generatePairingCode'])->name('api.admin.edge-devices.pairing-code');
     Route::put('/edge-devices/{device}', [EdgeDeviceController::class, 'update'])->name('api.admin.edge-devices.update');
     Route::delete('/edge-devices/{device}', [EdgeDeviceController::class, 'revoke'])->name('api.admin.edge-devices.revoke');
+    Route::post('/edge-devices/{device}/dump', [EdgeDeviceController::class, 'dump'])->name('api.admin.edge-devices.dump');
 });
 
 // Per SUPER-ADMIN-VS-ADMIN-SPEC: integrations API is super_admin only.

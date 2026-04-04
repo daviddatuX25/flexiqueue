@@ -61,6 +61,19 @@ class EdgeHeartbeat extends Command
                 return self::SUCCESS;
             }
 
+            // Dump session signal — end session locally and notify central
+            if ($data['dump_session'] ?? false) {
+                $state->update([
+                    'session_active'    => false,
+                    'active_program_id' => null,
+                ]);
+                $this->info('Dump signal received. Session ended locally. Notifying central...');
+
+                Http::timeout(10)
+                    ->withToken($state->device_token)
+                    ->post("{$centralUrl}/api/edge/session/end");
+            }
+
             $updates = [];
 
             if (isset($data['sync_mode'])) {

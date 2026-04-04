@@ -26,7 +26,7 @@ class EdgeSessionControlTest extends TestCase
 
     private function makeAdmin(Site $site): User
     {
-        return User::factory()->create(['site_id' => $site->id, 'role' => 'admin']);
+        return User::factory()->admin()->create(['site_id' => $site->id]);
     }
 
     private function makeDevice(Site $site, ?Program $program = null): EdgeDevice
@@ -267,5 +267,96 @@ class EdgeSessionControlTest extends TestCase
             'id'              => $device->id,
             'dump_requested'  => false,
         ]);
+    }
+
+    // ── E4.5 Dump session flow ────────────────────────────────────────────
+
+    /** @test */
+    public function dump_endpoint_sets_dump_requested_on_device(): void
+    {
+        $site    = $this->makeSite();
+        $admin   = $this->makeAdmin($site);
+        $program = $this->makeProgram($site);
+        $plainToken = 'tok-' . uniqid();
+        $device  = EdgeDevice::create([
+            'site_id'             => $site->id,
+            'name'                => 'Test Pi',
+            'device_token_hash'   => hash('sha256', $plainToken),
+            'id_offset'           => 10_000_000,
+            'sync_mode'           => 'auto',
+            'supervisor_admin_access' => false,
+            'assigned_program_id' => $program->id,
+            'session_active'      => true,
+            'dump_requested'      => false,
+            'paired_at'           => now(),
+        ]);
+
+        $this->actingAs($admin)
+            ->postJson("/api/admin/edge-devices/{$device->id}/dump")
+            ->assertOk()
+            ->assertJson(['message' => 'Dump signal sent.']);
+
+        $this->assertDatabaseHas('edge_devices', [
+            'id'             => $device->id,
+            'dump_requested' => true,
+        ]);
+    }
+
+    /** @test */
+    public function heartbeat_response_includes_dump_session_true_when_dump_requested(): void
+    {
+        $site    = $this->makeSite();
+        $plainToken = 'tok-' . uniqid();
+        $device  = EdgeDevice::create([
+            'site_id'             => $site->id,
+            'name'                => 'Test Pi',
+            'device_token_hash'   => hash('sha256', $plainToken),
+            'id_offset'           => 10_000_000,
+            'sync_mode'           => 'auto',
+            'supervisor_admin_access' => false,
+            'session_active'      => true,
+            'dump_requested'      => true,
+            'paired_at'           => now(),
+        ]);
+
+        $response = $this->withToken($plainToken)
+            ->postJson('/api/edge/heartbeat', [
+                'session_active'  => true,
+                'sync_mode'       => 'auto',
+                'last_synced_at'  => null,
+                'package_version' => null,
+                'app_version'     => null,
+            ]);
+
+        $response->assertOk()->assertJson(['dump_session' => true]);
+    }
+
+    /** @test */
+    public function heartbeat_response_dump_session_is_false_when_not_requested(): void
+    {
+        $site    = $this->makeSite();
+        $plainToken = 'tok-' . uniqid();
+        EdgeDevice::create([
+            'site_id'             => $site->id,
+            'name'                => 'Test Pi',
+            'device_token_hash'   => hash('sha256', $plainToken),
+            'id_offset'           => 10_000_000,
+            'sync_mode'           => 'auto',
+            'supervisor_admin_access' => false,
+            'session_active'      => true,
+            'dump_requested'      => false,
+            'paired_at'           => now(),
+        ]);
+
+        $this->withToken($plainToken)
+            ->postJson('/api/edge/heartbeat', [
+                'session_active'  => true,
+                'sync_mode'       => 'auto',
+                'last_synced_at'  => null,
+                'package_version' => null,
+                'app_version'     => null,
+            ])
+            ->assertOk()
+            ->assertJson(['dump_session' => false]);
     }
 }

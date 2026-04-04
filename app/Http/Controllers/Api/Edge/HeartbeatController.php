@@ -47,6 +47,7 @@ class HeartbeatController extends Controller
             'sync_mode'               => $device->sync_mode,
             'supervisor_admin_access' => $device->supervisor_admin_access,
             'update_available'        => false,
+            'dump_session'            => (bool) $device->dump_requested,
         ]);
     }
 }

@@ -156,6 +156,22 @@ class EdgeDeviceController extends Controller
         return response()->json(['message' => 'Device revoked.']);
     }
 
+    /**
+     * POST /api/admin/edge-devices/{device}/dump
+     */
+    public function dump(Request $request, EdgeDevice $device): JsonResponse
+    {
+        $this->authorizeSiteAccess($request, $device->site);
+
+        if (! $device->session_active) {
+            return response()->json(['message' => 'Device has no active session.'], 422);
+        }
+
+        $device->update(['dump_requested' => true]);
+
+        return response()->json(['message' => 'Dump signal sent.']);
+    }
+
     // ── private ───────────────────────────────────────────────────────
 
     private function authorizeSiteAccess(Request $request, Site $site): void
