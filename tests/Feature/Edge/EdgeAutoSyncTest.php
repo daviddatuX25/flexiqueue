@@ -14,6 +14,8 @@ use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\TransactionLog;
 use App\Listeners\PushEdgeEventToCentral;
+use App\Models\EdgeDevice;
+use App\Models\Site;
 use App\Services\EdgeEventPushService;
 use App\Services\EdgeModeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -336,5 +338,153 @@ class EdgeAutoSyncTest extends TestCase
                 && $request['payload']['action_type'] === 'bind'
                 && isset($request['session_state']);
         });
+    }
+
+    private function createCentralSessionAndDevice(string $rawToken, int $sessionId, array $sessionData = []): array
+    {
+        $site = Site::factory()->create();
+        $program = Program::factory()->for($site)->create();
+
+        $user = User::factory()->admin()->create();
+        $program->update(['created_by' => $user->id]);
+
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'S1',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+
+        $track = ServiceTrack::create([
+            'program_id' => $program->id,
+            'name' => 'Default',
+            'is_default' => true,
+            'color_code' => '#333',
+        ]);
+
+        TrackStep::create([
+            'track_id' => $track->id,
+            'station_id' => $station->id,
+            'step_order' => 1,
+            'is_required' => true,
+        ]);
+
+        $token = new Token;
+        $token->qr_code_hash = hash('sha256', Str::random(32).$rawToken);
+        $token->physical_id = 'TOKEN-'.Str::random(4);
+        $token->status = 'in_use';
+        $token->save();
+
+        $device = EdgeDevice::factory()->create([
+            'site_id' => $site->id,
+            'device_token_hash' => hash('sha256', $rawToken),
+            'assigned_program_id' => $program->id,
+            'session_active' => true,
+            'id_offset' => 10_000_000,
+        ]);
+
+        $session = Session::create(array_merge([
+            'id' => $sessionId,
+            'token_id' => $token->id,
+            'program_id' => $program->id,
+            'track_id' => $track->id,
+            'alias' => 'A1',
+            'status' => 'waiting',
+        ], $sessionData));
+
+        return [$session, $rawToken, $device, $program];
+    }
+
+    public function test_central_event_endpoint_accepts_valid_transaction_log(): void
+    {
+        [$session, $rawToken] = $this->createCentralSessionAndDevice(
+            'device-token-secret-123',
+            10_000_001
+        );
+
+        $response = $this->postJson('/api/edge/event', [
+            'event_type' => 'transaction_log',
+            'payload' => [
+                'id' => 10_000_001,
+                'session_id' => $session->id,
+                'station_id' => null,
+                'staff_user_id' => null,
+                'action_type' => 'bind',
+                'created_at' => '2026-04-04T10:00:00Z',
+            ],
+            'session_state' => [
+                'id' => $session->id,
+                'status' => 'waiting',
+                'current_station_id' => null,
+                'updated_at' => '2026-04-04T10:00:00Z',
+            ],
+        ], ['Authorization' => "Bearer {$rawToken}"]);
+
+        $response->assertOk()
+            ->assertJson(['status' => 'ok']);
+
+        $this->assertDatabaseHas('transaction_logs', [
+            'session_id' => $session->id,
+            'action_type' => 'bind',
+        ]);
+    }
+
+    public function test_central_event_endpoint_rejects_without_auth(): void
+    {
+        $response = $this->postJson('/api/edge/event', [
+            'event_type' => 'transaction_log',
+            'payload' => ['action_type' => 'bind'],
+        ]);
+
+        $response->assertUnauthorized();
+    }
+
+    public function test_central_event_endpoint_rejects_invalid_event_type(): void
+    {
+        $rawToken = 'device-token-secret-456';
+        $site = Site::factory()->create();
+        EdgeDevice::factory()->create([
+            'site_id' => $site->id,
+            'device_token_hash' => hash('sha256', $rawToken),
+            'session_active' => true,
+        ]);
+
+        $response = $this->postJson('/api/edge/event', [
+            'event_type' => 'not_a_real_type',
+            'payload' => ['id' => 1],
+        ], ['Authorization' => "Bearer {$rawToken}"]);
+
+        $response->assertUnprocessable();
+    }
+
+    public function test_central_event_endpoint_updates_session_state(): void
+    {
+        [$session, $rawToken] = $this->createCentralSessionAndDevice(
+            'device-token-secret-789',
+            10_000_002
+        );
+
+        $this->postJson('/api/edge/event', [
+            'event_type' => 'transaction_log',
+            'payload' => [
+                'id' => 10_000_002,
+                'session_id' => $session->id,
+                'station_id' => 1,
+                'staff_user_id' => 1,
+                'action_type' => 'call',
+                'created_at' => '2026-04-04T10:05:00Z',
+            ],
+            'session_state' => [
+                'id' => $session->id,
+                'status' => 'called',
+                'current_station_id' => 1,
+                'updated_at' => '2026-04-04T10:05:00Z',
+            ],
+        ], ['Authorization' => "Bearer {$rawToken}"]);
+
+        $this->assertDatabaseHas('queue_sessions', [
+            'id' => $session->id,
+            'status' => 'called',
+        ]);
     }
 }

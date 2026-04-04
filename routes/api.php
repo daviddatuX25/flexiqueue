@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Edge\AssignmentController;
+use App\Http\Controllers\Api\Edge\EventController;
 use App\Http\Controllers\Api\Edge\HeartbeatController;
 use App\Http\Controllers\Api\Edge\PairController;
 use App\Http\Controllers\Api\Edge\SessionEndController;
@@ -20,4 +21,5 @@ Route::middleware(['auth.edge_device'])->group(function () {
     Route::post('/edge/heartbeat', HeartbeatController::class)->name('api.edge.heartbeat');
     Route::post('/edge/session/start', \App\Http\Controllers\Api\Edge\SessionStartController::class)->name('api.edge.session.start');
     Route::post('/edge/session/end', SessionEndController::class)->name('api.edge.session.end');
+    Route::post('/edge/event', EventController::class)->name('api.edge.event');
 });
