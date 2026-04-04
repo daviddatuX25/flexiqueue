@@ -4,6 +4,7 @@ namespace App\Listeners;
 
 use App\Events\EdgeSyncableEventCreated;
 use App\Services\EdgeEventPushService;
+use Illuminate\Support\Facades\Cache;
 
 class PushEdgeEventToCentral
 {
@@ -28,6 +29,17 @@ class PushEdgeEventToCentral
             'metadata' => $log->metadata,
             'created_at' => $log->created_at->toIso8601String(),
         ];
+
+        // When degraded, skip HTTP and queue directly for retry
+        if (Cache::get('edge.sync_degraded', false)) {
+            $this->pushService->queueOnly(
+                eventType: 'transaction_log',
+                payload: $payload,
+                transactionLogId: $log->id,
+                sessionId: $session->id,
+            );
+            return;
+        }
 
         $this->pushService->pushWithSession(
             eventType: 'transaction_log',

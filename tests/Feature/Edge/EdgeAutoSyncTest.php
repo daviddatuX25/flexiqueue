@@ -604,4 +604,41 @@ class EdgeAutoSyncTest extends TestCase
             ->expectsOutputToContain('Not running on edge')
             ->assertSuccessful();
     }
+
+    public function test_listener_skips_http_and_queues_when_degraded(): void
+    {
+        Http::fake();
+
+        Cache::put('edge.sync_degraded', true);
+
+        $state = EdgeDeviceState::current();
+        $state->update([
+            'central_url' => 'https://central.test',
+            'device_token' => 'test-token-abc',
+            'sync_mode' => 'auto',
+            'session_active' => true,
+        ]);
+
+        $session = $this->createMinimalSession('auto', true);
+
+        $log = TransactionLog::create([
+            'session_id' => $session->id,
+            'station_id' => null,
+            'staff_user_id' => null,
+            'action_type' => 'bind',
+        ]);
+
+        $event = new \App\Events\EdgeSyncableEventCreated($log, $session);
+        $listener = new PushEdgeEventToCentral(new EdgeEventPushService());
+        $listener->handle($event);
+
+        // Should NOT have made any HTTP call
+        Http::assertNothingSent();
+
+        // Should have queued for retry
+        $this->assertDatabaseHas('edge_sync_queue', [
+            'transaction_log_id' => $log->id,
+            'status' => 'pending',
+        ]);
+    }
 }
