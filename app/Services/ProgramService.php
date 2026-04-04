@@ -56,6 +56,12 @@ class ProgramService
      */
     public function activate(Program $program): Program
     {
+        if ($program->edge_locked_by_device_id !== null) {
+            throw new \InvalidArgumentException(
+                'This program is currently assigned to an edge device and cannot be started from central. Unassign the edge device first.'
+            );
+        }
+
         return DB::transaction(function () use ($program) {
             $program->update(['is_active' => true, 'is_paused' => false]);
 
@@ -81,6 +87,12 @@ class ProgramService
      */
     public function activateExclusive(Program $program): Program
     {
+        if ($program->edge_locked_by_device_id !== null) {
+            throw new \InvalidArgumentException(
+                'This program is currently assigned to an edge device and cannot be started from central. Unassign the edge device first.'
+            );
+        }
+
         $previousActive = Program::where('is_active', true)->where('id', '!=', $program->id)->first();
         if ($previousActive && $previousActive->queueSessions()->active()->exists()) {
             throw new \InvalidArgumentException(

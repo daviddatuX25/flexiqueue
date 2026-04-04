@@ -108,4 +108,46 @@ class EdgeSessionControlTest extends TestCase
             app(ProgramLockService::class)->isLockedByOtherDevice($program, $device)
         );
     }
+
+    // ── E4.2 Block central session start ─────────────────────────────────
+
+    /** @test */
+    public function activate_throws_when_program_is_edge_locked(): void
+    {
+        $site    = $this->makeSite();
+        $device  = $this->makeDevice($site);
+        $program = $this->makeProgram($site);
+        $program->update(['edge_locked_by_device_id' => $device->id]);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/edge device/i');
+
+        app(\App\Services\ProgramService::class)->activate($program);
+    }
+
+    /** @test */
+    public function activate_exclusive_throws_when_program_is_edge_locked(): void
+    {
+        $site    = $this->makeSite();
+        $device  = $this->makeDevice($site);
+        $program = $this->makeProgram($site);
+        $program->update(['edge_locked_by_device_id' => $device->id]);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/edge device/i');
+
+        app(\App\Services\ProgramService::class)->activateExclusive($program);
+    }
+
+    /** @test */
+    public function activate_succeeds_when_program_is_not_edge_locked(): void
+    {
+        $site    = $this->makeSite();
+        $program = $this->makeProgram($site);
+
+        // Should not throw
+        $result = app(\App\Services\ProgramService::class)->activate($program->fresh());
+
+        $this->assertTrue($result->is_active);
+    }
 }
