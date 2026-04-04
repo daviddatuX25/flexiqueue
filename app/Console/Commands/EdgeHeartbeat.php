@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\ImportProgramPackageJob;
 use App\Models\EdgeDeviceState;
 use App\Services\EdgeModeService;
 use Illuminate\Console\Command;
@@ -109,8 +110,19 @@ class EdgeHeartbeat extends Command
                 $updates['supervisor_admin_access'] = (bool) $data['supervisor_admin_access'];
             }
 
+            if (isset($data['package_stale'])) {
+                $updates['package_stale'] = (bool) $data['package_stale'];
+            }
+
             if (! empty($updates)) {
                 $state->update($updates);
+            }
+
+            // Auto-dispatch re-import when package is stale and device is in waiting state
+            $packageStale = (bool) ($data['package_stale'] ?? false);
+            if ($packageStale && ! $state->session_active && $state->active_program_id !== null) {
+                $apiKey = config('app.central_api_key');
+                ImportProgramPackageJob::dispatch($state->active_program_id, $centralUrl, $apiKey);
             }
 
         } catch (\Throwable $e) {

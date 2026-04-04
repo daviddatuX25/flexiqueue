@@ -252,4 +252,104 @@ class EdgePackageVersioningTest extends TestCase
             ->assertOk()
             ->assertJsonFragment(['package_stale' => false]);
     }
+
+    /** @test */
+    public function heartbeat_command_dispatches_import_when_stale_and_waiting(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+
+        $state = \App\Models\EdgeDeviceState::firstOrCreate(
+            ['id' => 1],
+            ['sync_mode' => 'auto', 'supervisor_admin_access' => false, 'session_active' => false]
+        );
+        $state->update([
+            'paired_at'          => now(),
+            'device_token'       => 'test-token',
+            'central_url'        => 'http://central.test',
+            'session_active'     => false,
+            'active_program_id'  => 99,
+            'sync_mode'          => 'auto',
+        ]);
+
+        \Illuminate\Support\Facades\Http::fake([
+            'http://central.test/api/edge/heartbeat' => \Illuminate\Support\Facades\Http::response([
+                'revoked'       => false,
+                'package_stale' => true,
+                'sync_mode'     => 'auto',
+            ], 200),
+        ]);
+
+        config(['app.mode' => 'edge']);
+        config(['app.central_api_key' => 'test-api-key']);
+
+        $this->artisan('edge:heartbeat')->assertSuccessful();
+
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\ImportProgramPackageJob::class, function ($job) {
+            return $job->programId === 99;
+        });
+    }
+
+    /** @test */
+    public function heartbeat_command_does_not_dispatch_import_when_stale_but_session_active(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+
+        $state = \App\Models\EdgeDeviceState::firstOrCreate(
+            ['id' => 1],
+            ['sync_mode' => 'auto', 'supervisor_admin_access' => false, 'session_active' => false]
+        );
+        $state->update([
+            'paired_at'         => now(),
+            'device_token'      => 'test-token',
+            'central_url'       => 'http://central.test',
+            'session_active'    => true,
+            'active_program_id' => 99,
+            'sync_mode'         => 'auto',
+        ]);
+
+        \Illuminate\Support\Facades\Http::fake([
+            'http://central.test/api/edge/heartbeat' => \Illuminate\Support\Facades\Http::response([
+                'revoked'       => false,
+                'package_stale' => true,
+                'sync_mode'     => 'auto',
+            ], 200),
+        ]);
+
+        config(['app.mode' => 'edge']);
+        config(['app.central_api_key' => 'test-api-key']);
+
+        $this->artisan('edge:heartbeat')->assertSuccessful();
+
+        \Illuminate\Support\Facades\Queue::assertNotPushed(\App\Jobs\ImportProgramPackageJob::class);
+    }
+
+    /** @test */
+    public function heartbeat_command_stores_package_stale_in_device_state(): void
+    {
+        $state = \App\Models\EdgeDeviceState::firstOrCreate(
+            ['id' => 1],
+            ['sync_mode' => 'auto', 'supervisor_admin_access' => false, 'session_active' => false]
+        );
+        $state->update([
+            'paired_at'      => now(),
+            'device_token'   => 'test-token',
+            'central_url'    => 'http://central.test',
+            'session_active' => true,
+            'sync_mode'      => 'auto',
+        ]);
+
+        \Illuminate\Support\Facades\Http::fake([
+            'http://central.test/api/edge/heartbeat' => \Illuminate\Support\Facades\Http::response([
+                'revoked'       => false,
+                'package_stale' => true,
+                'sync_mode'     => 'auto',
+            ], 200),
+        ]);
+
+        config(['app.mode' => 'edge']);
+
+        $this->artisan('edge:heartbeat')->assertSuccessful();
+
+        $this->assertTrue((bool) \App\Models\EdgeDeviceState::current()->package_stale);
+    }
 }
