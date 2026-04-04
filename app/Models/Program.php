@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Support\PermissionCatalog;
 use App\Support\ProgramSettings;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -16,6 +17,7 @@ use Spatie\Permission\Models\Permission;
 
 class Program extends Model
 {
+    use HasFactory;
     protected $attributes = [
         'slug' => 'program',
     ];

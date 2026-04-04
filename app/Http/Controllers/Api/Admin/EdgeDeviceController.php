@@ -7,13 +7,17 @@ use App\Models\EdgeDevice;
 use App\Models\Program;
 use App\Models\Site;
 use App\Services\EdgePairingService;
+use App\Services\ProgramLockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class EdgeDeviceController extends Controller
 {
-    public function __construct(private readonly EdgePairingService $pairingService) {}
+    public function __construct(
+        private readonly EdgePairingService $pairingService,
+        private readonly ProgramLockService $lockService,
+    ) {}
 
     /**
      * GET /api/admin/sites/{site}/edge-devices
@@ -87,7 +91,7 @@ class EdgeDeviceController extends Controller
             }
         }
 
-        $lockConflict = DB::transaction(function () use ($device, $newProgramId, &$validated) {
+        $lockConflict = DB::transaction(function () use ($device, $newProgramId, $program, &$validated) {
             // Re-read device inside transaction for fresh state
             $device->refresh();
 
@@ -106,14 +110,12 @@ class EdgeDeviceController extends Controller
             // Clear old lock
             if ($device->assigned_program_id !== null
                 && $device->assigned_program_id !== $newProgramId) {
-                Program::where('id', $device->assigned_program_id)
-                    ->update(['edge_locked_by_device_id' => null]);
+                $this->lockService->unlock($device->assignedProgram);
             }
 
             // Set new lock
             if ($newProgramId !== null) {
-                Program::where('id', $newProgramId)
-                    ->update(['edge_locked_by_device_id' => $device->id]);
+                $this->lockService->lock($device, $program);
             }
 
             $device->update([
@@ -143,8 +145,7 @@ class EdgeDeviceController extends Controller
         $this->authorizeSiteAccess($request, $device->site);
 
         if ($device->assigned_program_id !== null) {
-            Program::where('id', $device->assigned_program_id)
-                ->update(['edge_locked_by_device_id' => null]);
+            $this->lockService->unlock($device->assignedProgram);
         }
 
         $device->update([
