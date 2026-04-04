@@ -25,6 +25,7 @@ class EdgeDevice extends Model
         'revoked_at',
         'force_cancelled_at',
         'update_status',
+        'dump_requested',
     ];
 
     protected function casts(): array
@@ -38,6 +39,7 @@ class EdgeDevice extends Model
             'force_cancelled_at' => 'datetime',
             'last_seen_at' => 'datetime',
             'last_synced_at' => 'datetime',
+            'dump_requested' => 'boolean',
         ];
     }
 

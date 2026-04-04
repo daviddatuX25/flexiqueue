@@ -202,4 +202,70 @@ class EdgeSessionControlTest extends TestCase
             ->postJson('/api/edge/session/start')
             ->assertUnprocessable();
     }
+
+    // ── E4.4 POST /api/edge/session/end ──────────────────────────────────
+
+    /** @test */
+    public function session_end_clears_session_active_and_releases_lock(): void
+    {
+        $site    = $this->makeSite();
+        $program = $this->makeProgram($site);
+        $plainToken = 'tok-' . uniqid();
+        $device  = EdgeDevice::create([
+            'site_id'             => $site->id,
+            'name'                => 'Test Pi',
+            'device_token_hash'   => hash('sha256', $plainToken),
+            'id_offset'           => 10_000_000,
+            'sync_mode'           => 'auto',
+            'supervisor_admin_access' => false,
+            'assigned_program_id' => $program->id,
+            'session_active'      => true,
+            'paired_at'           => now(),
+        ]);
+        $program->update(['edge_locked_by_device_id' => $device->id]);
+
+        $this->withToken($plainToken)
+            ->postJson('/api/edge/session/end')
+            ->assertOk()
+            ->assertJson(['session_active' => false]);
+
+        $this->assertDatabaseHas('edge_devices', [
+            'id'             => $device->id,
+            'session_active' => false,
+        ]);
+        $this->assertDatabaseHas('programs', [
+            'id'                       => $program->id,
+            'edge_locked_by_device_id' => null,
+        ]);
+    }
+
+    /** @test */
+    public function session_end_clears_dump_requested_flag(): void
+    {
+        $site    = $this->makeSite();
+        $program = $this->makeProgram($site);
+        $plainToken = 'tok-' . uniqid();
+        $device  = EdgeDevice::create([
+            'site_id'             => $site->id,
+            'name'                => 'Test Pi',
+            'device_token_hash'   => hash('sha256', $plainToken),
+            'id_offset'           => 10_000_000,
+            'sync_mode'           => 'auto',
+            'supervisor_admin_access' => false,
+            'assigned_program_id' => $program->id,
+            'session_active'      => true,
+            'dump_requested'      => true,
+            'paired_at'           => now(),
+        ]);
+        $program->update(['edge_locked_by_device_id' => $device->id]);
+
+        $this->withToken($plainToken)
+            ->postJson('/api/edge/session/end')
+            ->assertOk();
+
+        $this->assertDatabaseHas('edge_devices', [
+            'id'              => $device->id,
+            'dump_requested'  => false,
+        ]);
+    }
 }
