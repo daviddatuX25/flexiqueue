@@ -42,12 +42,16 @@ class HeartbeatController extends Controller
 
         $device->update($updates);
 
+        $isVoided = $device->force_cancelled_at !== null;
+
         return response()->json([
             'revoked'                 => false,
             'sync_mode'               => $device->sync_mode,
             'supervisor_admin_access' => $device->supervisor_admin_access,
             'update_available'        => false,
             'dump_session'            => (bool) $device->dump_requested,
+            'session_voided'          => $isVoided,
+            'voided_at'               => $isVoided ? $device->force_cancelled_at->toIso8601String() : null,
         ]);
     }
 }

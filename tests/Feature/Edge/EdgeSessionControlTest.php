@@ -536,4 +536,66 @@ class EdgeSessionControlTest extends TestCase
             ])
             ->assertOk();
     }
+
+    // ── E4.8 session_voided heartbeat signal ─────────────────────────────
+
+    /** @test */
+    public function heartbeat_response_includes_session_voided_true_when_force_cancelled(): void
+    {
+        $site    = $this->makeSite();
+        $plainToken = 'tok-sv';
+        $device  = EdgeDevice::create([
+            'site_id'             => $site->id,
+            'name'                => 'Test Pi',
+            'device_token_hash'   => hash('sha256', $plainToken),
+            'id_offset'           => 10_000_000,
+            'sync_mode'           => 'auto',
+            'supervisor_admin_access' => false,
+            'session_active'      => false,
+            'force_cancelled_at'  => now()->subMinutes(5),
+            'paired_at'           => now(),
+        ]);
+
+        $response = $this->withToken($plainToken)
+            ->postJson('/api/edge/heartbeat', [
+                'session_active'  => false,
+                'sync_mode'       => 'auto',
+                'last_synced_at'  => null,
+                'package_version' => null,
+                'app_version'     => null,
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('session_voided', true)
+            ->assertJsonPath('voided_at', fn ($v) => $v !== null);
+    }
+
+    /** @test */
+    public function heartbeat_response_session_voided_is_false_when_not_cancelled(): void
+    {
+        $site    = $this->makeSite();
+        $plainToken = 'tok-sv2';
+        EdgeDevice::create([
+            'site_id'             => $site->id,
+            'name'                => 'Test Pi',
+            'device_token_hash'   => hash('sha256', $plainToken),
+            'id_offset'           => 10_000_000,
+            'sync_mode'           => 'auto',
+            'supervisor_admin_access' => false,
+            'session_active'      => false,
+            'force_cancelled_at'  => null,
+            'paired_at'           => now(),
+        ]);
+
+        $this->withToken($plainToken)
+            ->postJson('/api/edge/heartbeat', [
+                'session_active'  => false,
+                'sync_mode'       => 'auto',
+                'last_synced_at'  => null,
+                'package_version' => null,
+                'app_version'     => null,
+            ])
+            ->assertOk()
+            ->assertJsonPath('session_voided', false);
+    }
 }

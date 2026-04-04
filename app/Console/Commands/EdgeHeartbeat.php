@@ -74,6 +74,31 @@ class EdgeHeartbeat extends Command
                     ->post("{$centralUrl}/api/edge/session/end");
             }
 
+            // Session voided by central force-cancel
+            if ($data['session_voided'] ?? false) {
+                $voidedAt = $data['voided_at'] ?? now()->toIso8601String();
+
+                // Archive path for potential manual recovery
+                $archiveDir = storage_path('app/voided-sessions/' . date('Y-m-d'));
+                if (! is_dir($archiveDir)) {
+                    @mkdir($archiveDir, 0755, true);
+                }
+                $archivePath = $archiveDir . '/voided-' . time() . '.json';
+                @file_put_contents($archivePath, json_encode([
+                    'voided_at'          => $voidedAt,
+                    'active_program_id'  => $state->active_program_id,
+                    'session_active'     => $state->session_active,
+                    'note'               => 'Session force-cancelled by central admin. Data archived for manual recovery.',
+                ]));
+
+                $state->update([
+                    'session_active'    => false,
+                    'active_program_id' => null,
+                ]);
+
+                $this->warn("Session was voided by central at {$voidedAt}. Local state cleared. Archive: {$archivePath}");
+            }
+
             $updates = [];
 
             if (isset($data['sync_mode'])) {
