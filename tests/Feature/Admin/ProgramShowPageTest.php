@@ -12,6 +12,7 @@ use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -34,7 +35,7 @@ class ProgramShowPageTest extends TestCase
         $this->site = Site::create([
             'name' => 'Default Site',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -108,7 +109,7 @@ class ProgramShowPageTest extends TestCase
 
     public function test_program_show_with_require_override_and_supervisors_present_no_warning_data(): void
     {
-        $staffWithPin = User::factory()->create(['role' => 'staff']);
+        $staffWithPin = User::factory()->create();
         $program = Program::create([
             'site_id' => $this->siteId(),
             'name' => 'With Supervisors',
@@ -117,7 +118,7 @@ class ProgramShowPageTest extends TestCase
             'created_by' => $this->admin->id,
             'settings' => ['require_permission_before_override' => true],
         ]);
-        $program->supervisedBy()->attach($staffWithPin->id);
+        $this->grantProgramTeamSuperviseForTests($staffWithPin, $program);
         ServiceTrack::create([
             'program_id' => $program->id,
             'name' => 'Default',
@@ -233,7 +234,7 @@ class ProgramShowPageTest extends TestCase
             'capacity' => 1,
             'is_active' => true,
         ]);
-        $token = new Token();
+        $token = new Token;
         $token->qr_code_hash = str_repeat('a', 64);
         $token->physical_id = 'A1';
         $token->status = 'in_use';

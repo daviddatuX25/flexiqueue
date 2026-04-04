@@ -4,12 +4,13 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Program;
-use App\Models\Session;
+use App\Models\RbacTeam;
 use App\Models\ServiceTrack;
+use App\Models\Session;
 use App\Models\SiteShortLink;
 use App\Models\Station;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -226,11 +227,18 @@ class ProgramPageController extends Controller
                 'display_audio_volume' => $programSettings->getDisplayAudioVolume(),
                 'display_tts_repeat_count' => $programSettings->getDisplayTtsRepeatCount(),
                 'display_tts_repeat_delay_ms' => $programSettings->getDisplayTtsRepeatDelayMs(),
-                'allow_public_triage' => $programSettings->getAllowPublicTriage(),
+                'allow_public_triage' => $programSettings->getKioskSelfServiceTriageEnabled(),
+                'allow_unverified_entry' => $programSettings->getAllowUnverifiedEntry(),
+                'kiosk_self_service_triage_enabled' => $programSettings->getKioskSelfServiceTriageEnabled(),
+                'kiosk_status_checker_enabled' => $programSettings->getKioskStatusCheckerEnabled(),
+                'kiosk_enable_hid_barcode' => $programSettings->getKioskEnableHidBarcode(),
+                'kiosk_enable_camera_scanner' => $programSettings->getKioskEnableCameraScanner(),
+                'kiosk_modal_idle_seconds' => $programSettings->getKioskModalIdleSeconds(),
                 'identity_binding_mode' => $programSettings->getIdentityBindingMode(),
                 'enable_display_hid_barcode' => $programSettings->getEnableDisplayHidBarcode(),
                 'enable_public_triage_hid_barcode' => $programSettings->getEnablePublicTriageHidBarcode(),
                 'enable_display_camera_scanner' => $programSettings->getEnableDisplayCameraScanner(),
+                'enable_public_triage_camera_scanner' => $programSettings->getEnablePublicTriageCameraScanner(),
                 'public_access_key' => $programSettings->getPublicAccessKey(),
                 'public_access_expiry_hours' => $programSettings->getPublicAccessExpiryHours(),
                 'page_description' => $programSettings->getPageDescription(),
@@ -258,6 +266,12 @@ class ProgramPageController extends Controller
             'tab_order' => ['Overview', 'Public Page', 'Processes', 'Stations', 'Staff', 'Track', 'Diagram', 'Settings'],
             'site_slug' => $site->slug,
             'app_url' => rtrim(config('app.url'), '/'),
+            'rbac_team' => [
+                'id' => RbacTeam::forProgram($program)->id,
+                'type' => 'program',
+                'site_id' => $program->site_id,
+                'scope_label' => $program->name,
+            ],
         ]);
     }
 }

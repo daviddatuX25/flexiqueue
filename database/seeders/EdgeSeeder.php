@@ -21,6 +21,7 @@ class EdgeSeeder extends Seeder
 {
     public function run(): void
     {
+        $this->call(PermissionCatalogSeeder::class);
         $this->call(EdgeSiteSeeder::class);
         $this->call(EdgeUsersSeeder::class);
         $this->call(EdgeProgramSeeder::class);

@@ -47,8 +47,8 @@ class MultiProgramSessionLifecycleTest extends TestCase
     {
         parent::setUp();
 
-        $this->staffA = User::factory()->create(['role' => 'staff']);
-        $this->staffB = User::factory()->create(['role' => 'staff']);
+        $this->staffA = User::factory()->create();
+        $this->staffB = User::factory()->create();
 
         // Program A
         $this->programA = Program::create([
@@ -199,6 +199,8 @@ class MultiProgramSessionLifecycleTest extends TestCase
         $sessionA->refresh();
         $this->assertSame($this->stationA2->id, $sessionA->current_station_id);
 
+        $this->staffA->update(['assigned_station_id' => $this->stationA2->id]);
+
         // Serve again at second station before completing (per SessionActions flow)
         $this->actingAs($this->staffA)->postJson("/api/sessions/{$sessionA->id}/serve", [
             'station_id' => $this->stationA2->id,
@@ -228,6 +230,8 @@ class MultiProgramSessionLifecycleTest extends TestCase
 
         $sessionB->refresh();
         $this->assertSame($this->stationB2->id, $sessionB->current_station_id);
+
+        $this->staffB->update(['assigned_station_id' => $this->stationB2->id]);
 
         // Serve again at second station before completing
         $this->actingAs($this->staffB)->postJson("/api/sessions/{$sessionB->id}/serve", [
@@ -313,4 +317,3 @@ class MultiProgramSessionLifecycleTest extends TestCase
         return $alias;
     }
 }
-

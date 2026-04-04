@@ -5,6 +5,7 @@ use App\Models\Session;
 use App\Models\Site;
 use App\Models\Token;
 use App\Services\ClientService;
+use App\Services\Tts\TtsAssetCleanupService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -24,9 +25,11 @@ Artisan::command('flexiqueue:session-active', function () {
     $inSession = $activeProgram || $activeSessions;
     if ($inSession) {
         $this->comment('Session active (program or queue).');
+
         return 0;
     }
     $this->comment('No session active.');
+
     return 1;
 })->purpose('Report if app has active program or queue sessions (exit 0=active, 1=idle).');
 
@@ -80,4 +83,44 @@ Schedule::command('flexiqueue:deploy-update')
 Schedule::command('flexiqueue:initial-setup')
     ->everyMinute()
     ->name('initial-setup')
+    ->withoutOverlapping();
+
+Artisan::command('tts:cleanup-superseded {--days=14 : Retention days before deleting replaced assets} {--limit=200 : Max files to process} {--dry-run : Preview only}', function (
+    TtsAssetCleanupService $cleanupService
+) {
+    $days = (int) $this->option('days');
+    $limit = (int) $this->option('limit');
+    $dryRun = (bool) $this->option('dry-run');
+
+    $summary = $cleanupService->cleanupSupersededAssets($days, $limit, $dryRun);
+
+    $this->info('TTS cleanup complete.');
+    $this->line('dry_run='.($dryRun ? 'true' : 'false'));
+    $this->line('candidates='.$summary['candidates']);
+    $this->line('scanned='.$summary['scanned']);
+    $this->line('deleted='.$summary['deleted']);
+})->purpose('Cleanup superseded TTS assets from lifecycle metadata with retention and dry-run support.');
+
+Schedule::command('tts:cleanup-superseded --days=14 --limit=200')
+    ->dailyAt('02:30')
+    ->name('tts-cleanup-superseded')
+    ->withoutOverlapping();
+
+use App\Console\Commands\EdgeAutoSync;
+use App\Console\Commands\EdgeHeartbeat;
+use App\Console\Commands\EdgeSyncRetry;
+
+Schedule::command(EdgeHeartbeat::class)
+    ->everyFiveMinutes()
+    ->name('edge-heartbeat')
+    ->withoutOverlapping();
+
+Schedule::command(EdgeSyncRetry::class)
+    ->everyThirtySeconds()
+    ->name('edge-sync-retry')
+    ->withoutOverlapping();
+
+Schedule::command(EdgeAutoSync::class)
+    ->everyMinute()
+    ->name('edge-auto-sync')
     ->withoutOverlapping();

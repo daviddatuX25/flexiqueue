@@ -1,0 +1,35 @@
+---
+description: "ECC testing: TDD loop, layers, coverage ambition — matches FlexiQueue PHPUnit + E2E"
+alwaysApply: true
+---
+
+# Testing (ECC-inspired)
+
+## Layers (all matter over time)
+
+1. **Unit** — pure logic, small surface (helpers, services with mocks).
+2. **Feature / integration** — HTTP, DB, queues (PHPUnit feature tests in this project).
+3. **E2E** — critical user flows (**Playwright** per project workflow when UI is in scope).
+
+## TDD loop (when adding behavior)
+
+1. Write or extend a test that **fails** for the right reason (**RED**).
+2. Implement **minimal** code to pass (**GREEN**).
+3. **Refactor** with tests green (**IMPROVE**).
+
+## Coverage ambition
+
+- Treat **~80%** coverage as a **directional goal** for code under active development, not a hard gate unless CI enforces it.
+- Prefer **high-value** tests (rules, services, policies) over trivial getters.
+
+## Troubleshooting
+
+- Fix **production code** when tests expose real bugs; fix **tests** when requirements or spec changed intentionally.
+- Keep tests **isolated**; avoid order-dependent suites.
+
+## Project specifics
+
+- Backend: **PHPUnit** (`php artisan test`), targeted paths while iterating.
+- Canonical UI verification: **Playwright** when the bead calls for browser-level checks.
+
+If guidance here conflicts with **`agentic-workflow.mdc`** (cadence, beads, Playwright), follow the **FlexiQueue** rule.

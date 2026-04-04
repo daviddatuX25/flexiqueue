@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -29,6 +30,7 @@ class EdgePackageImportService
                 $row[$key] = json_encode($value);
             }
         }
+
         return $row;
     }
 
@@ -40,12 +42,12 @@ class EdgePackageImportService
     public function runImport(int $programId, string $centralUrl, string $apiKey): void
     {
         $response = Http::withHeaders([
-            'Authorization' => 'Bearer ' . $apiKey,
+            'Authorization' => 'Bearer '.$apiKey,
             'Accept' => 'application/json',
         ])->timeout(60)->get("{$centralUrl}/api/admin/programs/{$programId}/package");
 
         if ($response->failed()) {
-            throw new RuntimeException('Failed to fetch package. HTTP ' . $response->status());
+            throw new RuntimeException('Failed to fetch package. HTTP '.$response->status());
         }
 
         $package = $response->json();
@@ -63,6 +65,11 @@ class EdgePackageImportService
             }
         }
 
+        $contractVersion = (int) ($manifest['tts_asset_contract_version'] ?? 1);
+        if ($contractVersion >= 2 && ! array_key_exists('tts_asset_references', $package)) {
+            throw new RuntimeException('Invalid package: missing tts_asset_references for contract version >= 2.');
+        }
+
         DB::transaction(function () use ($package, $manifest): void {
             // Site and users first so program.site_id and program.created_by FKs exist.
             if (! empty($package['site'])) {
@@ -74,11 +81,27 @@ class EdgePackageImportService
                 );
             }
 
+            $userRowsForDb = array_map(static function (array $row): array {
+                unset($row['role']);
+
+                return $row;
+            }, $package['users']);
             DB::table('users')->upsert(
-                $package['users'],
+                $userRowsForDb,
                 ['id'],
-                ['site_id', 'name', 'email', 'password', 'role', 'override_pin', 'override_qr_token', 'assigned_station_id', 'is_active', 'availability_status', 'staff_triage_allow_hid_barcode', 'staff_triage_allow_camera_scanner', 'updated_at']
+                ['site_id', 'name', 'email', 'password', 'override_pin', 'override_qr_token', 'assigned_station_id', 'is_active', 'availability_status', 'staff_triage_allow_hid_barcode', 'staff_triage_allow_camera_scanner', 'updated_at']
             );
+            foreach ($package['users'] as $row) {
+                $id = $row['id'] ?? null;
+                $role = $row['role'] ?? null;
+                if (! is_numeric($id) || ! is_string($role) || $role === '') {
+                    continue;
+                }
+                $u = User::query()->find((int) $id);
+                if ($u) {
+                    User::assignGlobalRoleAndSyncProvisioning($u, $role);
+                }
+            }
 
             $programRow = self::encodeJsonColumns($package['program'], ['settings']);
             DB::table('programs')->upsert(
@@ -164,7 +187,7 @@ class EdgePackageImportService
             foreach ($package['tts_files'] as $filePath) {
                 $encoded = implode('/', array_map('rawurlencode', explode('/', $filePath)));
                 $fileResponse = Http::withHeaders([
-                    'Authorization' => 'Bearer ' . $apiKey,
+                    'Authorization' => 'Bearer '.$apiKey,
                 ])->timeout(30)->get("{$centralUrl}/api/admin/programs/{$programId}/tts-files/{$encoded}");
 
                 if ($fileResponse->ok()) {
@@ -181,6 +204,8 @@ class EdgePackageImportService
             'sync_tokens' => $manifest['sync_tokens'],
             'sync_clients' => $manifest['sync_clients'],
             'sync_tts' => $manifest['sync_tts'],
+            'tts_asset_contract_version' => $contractVersion,
+            'tts_asset_references_count' => is_array($package['tts_asset_references'] ?? null) ? count($package['tts_asset_references']) : 0,
             'status' => 'complete',
         ]));
     }

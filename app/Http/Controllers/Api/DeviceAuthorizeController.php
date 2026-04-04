@@ -4,9 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\DeviceAuthorizeRequest;
+use App\Models\DeviceAuthorization;
 use App\Models\Program;
+use App\Models\User;
 use App\Services\DeviceAuthorizationService;
 use App\Services\PinService;
+use App\Support\PermissionCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Cookie;
@@ -44,14 +47,19 @@ class DeviceAuthorizeController extends Controller
             return response()->json(['message' => 'Invalid PIN or QR code.'], 401);
         }
 
+        $authorizer = User::find((int) $verified['user_id']);
+        if (! $authorizer || ! $authorizer->can(PermissionCatalog::PUBLIC_DEVICE_AUTHORIZE)) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+
         $deviceKey = $request->validated('device_key');
         if (! is_string($deviceKey) || trim($deviceKey) === '') {
             $deviceKey = Str::uuid()->toString();
         }
 
         $scope = $request->boolean('allow_persistent')
-            ? \App\Models\DeviceAuthorization::SCOPE_PERSISTENT
-            : \App\Models\DeviceAuthorization::SCOPE_SESSION;
+            ? DeviceAuthorization::SCOPE_PERSISTENT
+            : DeviceAuthorization::SCOPE_SESSION;
 
         $result = $this->deviceAuth->authorize($program, $deviceKey, $scope);
 

@@ -24,7 +24,7 @@ class VerifyPinTest extends TestCase
             'created_by' => $admin->id,
         ]);
         $supervisor = User::factory()->supervisor()->withOverridePin('123456')->create();
-        $program->supervisedBy()->attach($supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $program);
         $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->postJson('/api/auth/verify-pin', [
@@ -48,7 +48,7 @@ class VerifyPinTest extends TestCase
             'created_by' => $admin->id,
         ]);
         $supervisor = User::factory()->supervisor()->withOverridePin('123456')->create();
-        $program->supervisedBy()->attach($supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $program);
         $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->postJson('/api/auth/verify-pin', [

@@ -9,6 +9,7 @@ use App\Http\Requests\UpdateTrackStepRequest;
 use App\Models\Session;
 use App\Models\ServiceTrack;
 use App\Models\TrackStep;
+use App\Services\StepService;
 use Illuminate\Http\JsonResponse;
 
 /**
@@ -16,6 +17,8 @@ use Illuminate\Http\JsonResponse;
  */
 class StepController extends Controller
 {
+    public function __construct(private StepService $stepService) {}
+
     /**
      * List steps for track (ordered).
      */
@@ -101,16 +104,7 @@ class StepController extends Controller
      */
     private function migrateSessionsToNewOrder(ServiceTrack $track): void
     {
-        // Build station_id => step_order map via station_process pivot
-        $stepsByStation = [];
-        $rows = \Illuminate\Support\Facades\DB::table('track_steps')
-            ->join('station_process', 'track_steps.process_id', '=', 'station_process.process_id')
-            ->where('track_steps.track_id', $track->id)
-            ->select('track_steps.step_order', 'station_process.station_id')
-            ->get();
-        foreach ($rows as $row) {
-            $stepsByStation[(int) $row->station_id] = (int) $row->step_order;
-        }
+        $stepsByStation = $this->stepService->getStationToStepOrderMap($track);
 
         Session::active()
             ->where('track_id', $track->id)

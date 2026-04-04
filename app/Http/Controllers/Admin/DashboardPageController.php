@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\Site;
 use App\Models\User;
+use App\Support\PermissionCatalog;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -19,9 +21,11 @@ class DashboardPageController extends Controller
     {
         $user = $request->user();
 
-        if ($user->isSuperAdmin()) {
+        if ($user->can(PermissionCatalog::PLATFORM_MANAGE)) {
             $sitesCount = Site::query()->count();
-            $adminsCount = User::query()->where('role', 'admin')->count();
+            $adminsCount = User::withGlobalPermissionsTeam(fn () => User::query()
+                ->role(UserRole::Admin->value)
+                ->count());
 
             return Inertia::render('Admin/DashboardSuperAdmin', [
                 'sites_count' => $sitesCount,

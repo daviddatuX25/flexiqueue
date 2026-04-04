@@ -43,6 +43,9 @@ class DisplayBoardServiceTest extends TestCase
         $this->assertNull($data['program_name']);
         $this->assertSame([], $data['now_serving']);
         $this->assertSame(0, $data['total_in_queue']);
+        $this->assertArrayHasKey('prefer_generated_audio', $data);
+        $this->assertArrayHasKey('segment_2_enabled', $data);
+        $this->assertArrayHasKey('tts_closing_without_segment2', $data);
     }
 
     /** A.2.4: getBoardData(programId) returns data scoped to that program. */
@@ -151,6 +154,10 @@ class DisplayBoardServiceTest extends TestCase
         ]);
 
         $data = $this->service->getStationBoardData($station);
+
+        $this->assertArrayHasKey('can_update_station_display_settings', $data);
+        $this->assertFalse($data['can_update_station_display_settings']);
+        $this->assertSame(1.0, $data['display_page_zoom']);
 
         $this->assertSame('alternate', $data['balance_mode']);
         $this->assertSame('least_busy', $data['station_selection_mode']);

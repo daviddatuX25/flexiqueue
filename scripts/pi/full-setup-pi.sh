@@ -73,5 +73,5 @@ systemctl enable --now flexiqueue-queue
 
 echo ""
 echo "=== Full setup complete. ==="
-echo "Next: from your PC run: PI_HOST=${FQ_HOSTNAME:-<pi-ip>} ./scripts/deploy-to-pi.sh --build"
+echo "Next: from your PC run: PI_HOST=${FQ_HOSTNAME:-<pi-ip>} ./scripts/edge/deploy/pi/deploy-edge-pi.sh --build"
 echo ""

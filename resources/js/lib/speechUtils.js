@@ -134,6 +134,10 @@ export function ensureVoicesLoaded(onReady) {
  */
 export function speakSample(text, voiceName, volume = 1) {
 	if (typeof window === 'undefined' || !window.speechSynthesis || !text) return;
+	// Prevent overlapping utterances (reduces stutter in admin previews).
+	try {
+		window.speechSynthesis.cancel();
+	} catch (_) {}
 	const u = new SpeechSynthesisUtterance(String(text));
 	u.rate = TTS_DEFAULT_RATE;
 	u.volume = Math.max(0, Math.min(1, Number(volume)));
@@ -153,6 +157,10 @@ export function speakSample(text, voiceName, volume = 1) {
  */
 export function speakSampleAsync(text, voiceName, volume = 1, rate = TTS_DEFAULT_RATE) {
 	if (typeof window === 'undefined' || !window.speechSynthesis || !text) return Promise.resolve();
+	// Prevent overlapping utterances (reduces stutter in admin previews).
+	try {
+		window.speechSynthesis.cancel();
+	} catch (_) {}
 	const u = new SpeechSynthesisUtterance(String(text));
 	u.rate = Math.max(0.1, Math.min(10, Number(rate) || TTS_DEFAULT_RATE));
 	u.volume = Math.max(0, Math.min(1, Number(volume)));

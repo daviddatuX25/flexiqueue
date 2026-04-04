@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Token;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -38,8 +39,20 @@ class TokenService
     }
 
     /**
+     * Look up a token by its primary key with optional site scoping.
+     *
+     * @param  int|null  $siteId  When set, only return token if token.site_id matches.
+     */
+    public function lookupById(int $tokenId, ?int $siteId = null): ?Token
+    {
+        $scope = $siteId !== null ? Token::where('site_id', $siteId) : Token::query();
+
+        return $scope->find($tokenId);
+    }
+
+    /**
      * Create a batch of tokens. physical_id = prefix + (start_number + i). qr_code_hash is unique per token.
-     * pronounce_as: 'letters' (e.g. "A 3") or 'word' (e.g. "A3") for TTS.
+     * pronounce_as: letters | word | custom (custom = optional per-lang token_phrase + digits from ID when phrase empty).
      * Per site-scoping-migration-spec §2: $siteId from auth; caller must 403 if site admin has null site_id.
      *
      * @param  int|null  $siteId  Site to assign tokens to; null for super_admin (tokens remain unscoped).
@@ -57,7 +70,7 @@ class TokenService
         $now = now();
         $rows = [];
         $hashes = [];
-        $normalizedPronounceAs = in_array($pronounceAs, ['letters', 'word'], true) ? $pronounceAs : 'letters';
+        $normalizedPronounceAs = in_array($pronounceAs, ['letters', 'word', 'custom'], true) ? $pronounceAs : 'letters';
 
         for ($i = 0; $i < $count; $i++) {
             $num = $startNumber + $i;
@@ -86,7 +99,7 @@ class TokenService
             $startPhysicalId = $prefix.(string) $startNumber;
             $endPhysicalId = $prefix.(string) ($startNumber + $count - 1);
 
-            /** @var \Illuminate\Support\Collection<int, Token> $inserted */
+            /** @var Collection<int, Token> $inserted */
             $inserted = Token::query()
                 ->whereBetween('physical_id', [$startPhysicalId, $endPhysicalId])
                 ->whereIn('qr_code_hash', $hashes)
@@ -100,6 +113,17 @@ class TokenService
             'created' => count($tokens),
             'tokens' => array_map(fn (Token $t) => $this->tokenResource($t), $tokens),
         ];
+    }
+
+    /**
+     * Check whether a token belongs to a program via the program_token pivot.
+     * Used for authorization checks (e.g., TTS file streaming).
+     */
+    public function belongsToProgram(int $tokenId, int $programId): bool
+    {
+        return Token::where('id', $tokenId)
+            ->whereHas('programs', fn ($q) => $q->where('programs.id', $programId))
+            ->exists();
     }
 
     public function tokenResource(Token $token): array

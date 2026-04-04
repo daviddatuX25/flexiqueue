@@ -1,0 +1,27 @@
+---
+description: "ECC git: conventional commits, full-branch PR view"
+alwaysApply: true
+---
+
+# Git workflow (ECC-inspired)
+
+## Commit messages
+
+```
+<type>: <description>
+
+<optional body>
+```
+
+**Types:** `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`
+
+Use imperative mood in the subject line (“Add…”, “Fix…”).
+
+## Pull requests
+
+1. Consider **full branch history**, not only the last commit.
+2. Use `git diff <base-branch>...HEAD` (three-dot) for the **merge-base range** when summarizing what the PR contains.
+3. PR description: **what** changed, **why**, and a **test plan** (commands run, manual checks if any).
+4. Push new branches with upstream: `git push -u origin <branch>` when appropriate.
+
+For planning / TDD / review **before** Git, see **`ecc-development-pipeline.mdc`**.

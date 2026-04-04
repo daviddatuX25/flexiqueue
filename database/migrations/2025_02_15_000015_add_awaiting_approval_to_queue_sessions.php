@@ -8,11 +8,11 @@ return new class extends Migration
     /**
      * Run the migrations.
      * Per docs/plans/TRACK-OVERRIDES-REFACTOR.md §1.1: add awaiting_approval session status.
-     * ENUM MODIFY is MySQL/MariaDB only; SQLite uses string columns so no schema change needed.
+     * ENUM MODIFY is MySQL only; SQLite uses string columns so no schema change needed.
      */
     public function up(): void
     {
-        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() === 'mysql') {
             DB::statement("ALTER TABLE queue_sessions MODIFY COLUMN status ENUM('waiting', 'called', 'serving', 'awaiting_approval', 'completed', 'cancelled', 'no_show') DEFAULT 'waiting'");
         }
     }
@@ -21,7 +21,7 @@ return new class extends Migration
     {
         DB::table('queue_sessions')->where('status', 'awaiting_approval')->update(['status' => 'waiting']);
 
-        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() === 'mysql') {
             DB::statement("ALTER TABLE queue_sessions MODIFY COLUMN status ENUM('waiting', 'called', 'serving', 'completed', 'cancelled', 'no_show') DEFAULT 'waiting'");
         }
     }

@@ -6,9 +6,9 @@ use App\Events\DisplaySettingsUpdated;
 use App\Http\Controllers\Controller;
 use App\Models\DisplaySettingsRequest;
 use App\Models\Program;
+use App\Support\ProgramSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 
 /**
  * Authenticated: approve display settings requests (e.g. when supervisor scans QR on Program Overrides).
@@ -40,11 +40,18 @@ class DisplaySettingsRequestController extends Controller
 
         $payload = $display_settings_request->settings_payload ?? [];
         $settings = $program->settings ?? [];
-        foreach (['display_audio_muted', 'display_audio_volume', 'enable_display_hid_barcode', 'enable_public_triage_hid_barcode', 'enable_display_camera_scanner', 'enable_public_triage_camera_scanner'] as $key) {
+        foreach ([
+            'display_audio_muted', 'display_audio_volume',
+            'enable_display_hid_barcode', 'enable_public_triage_hid_barcode',
+            'enable_display_camera_scanner', 'enable_public_triage_camera_scanner',
+            'kiosk_enable_hid_barcode', 'kiosk_enable_camera_scanner',
+            'kiosk_hid_persistent_when_scan_modal_closed',
+        ] as $key) {
             if (array_key_exists($key, $payload)) {
                 $settings[$key] = $payload[$key];
             }
         }
+        $settings = ProgramSettings::normalizeStoredProgramSettingsKioskKeys($settings);
         $program->update(['settings' => $settings]);
         $program = $program->fresh();
 
@@ -64,6 +71,7 @@ class DisplaySettingsRequestController extends Controller
             $program->settings()->getDisplayTtsRepeatCount(),
             $program->settings()->getDisplayTtsRepeatDelayMs(),
             $program->settings()->getEnablePublicTriageCameraScanner(),
+            $program->settings()->getKioskHidPersistentWhenScanModalClosed(),
         ));
 
         return response()->json(['message' => 'Display settings updated.']);

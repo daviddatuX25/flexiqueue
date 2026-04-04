@@ -2,6 +2,7 @@
 
 namespace Database\Seeders\Central;
 
+use App\Enums\UserRole;
 use App\Models\Process;
 use App\Models\Program;
 use App\Models\ProgramStationAssignment;
@@ -10,6 +11,8 @@ use App\Models\Site;
 use App\Models\Station;
 use App\Models\TrackStep;
 use App\Models\User;
+use App\Services\ProgramSupervisorGrantService;
+use App\Services\SpatieRbacSyncService;
 use Illuminate\Database\Seeder;
 
 /**
@@ -22,8 +25,15 @@ class CentralProgramSeeder extends Seeder
     {
         foreach (['tagudin-mswdo', 'candon-mswdo'] as $slug) {
             $site = Site::where('slug', $slug)->firstOrFail();
-            $admin = User::where('site_id', $site->id)->where('role', 'admin')->firstOrFail();
-            $staff = User::where('site_id', $site->id)->where('role', 'staff')->orderBy('id')->get();
+            $admin = User::withGlobalPermissionsTeam(fn () => User::query()
+                ->where('site_id', $site->id)
+                ->role(UserRole::Admin->value)
+                ->firstOrFail());
+            $staff = User::withGlobalPermissionsTeam(fn () => User::query()
+                ->where('site_id', $site->id)
+                ->role(UserRole::Staff->value)
+                ->orderBy('id')
+                ->get());
             $this->seedProgramsForSite($site, $admin, $staff);
         }
     }
@@ -106,7 +116,8 @@ class CentralProgramSeeder extends Seeder
             );
             $staff[$i]->update(['assigned_station_id' => $aicsStations[$i]->id]);
         }
-        $aics->supervisedBy()->syncWithoutDetaching([$staff[5]->id]);
+        app(ProgramSupervisorGrantService::class)->grantProgramTeamSupervise($staff[5], $aics);
+        app(SpatieRbacSyncService::class)->syncSupervisorDirectPermissions($staff[5]->fresh());
 
         // --- Social Pension (inactive) ---
         $socpen = Program::updateOrCreate(

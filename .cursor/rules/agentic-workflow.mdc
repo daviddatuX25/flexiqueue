@@ -157,15 +157,16 @@ if (application.status === 'approved') {
 
 ### TDD LOOP (Implementation)
 
-- **New behavior:** The test steps in the plan come from step 4 (explore edge cases). Write the failing PHPUnit test for the next scenario, run `./vendor/bin/sail artisan test` (or `php artisan test` when not using Sail), implement until the test passes, then refactor if needed. Repeat for each test scenario.
-- **Fixes or small changes:** Add or update the PHPUnit test that captures the fix, then implement; run full suite before marking the bead done.
+- **New behavior:** The test steps in the plan come from step 4 (explore edge cases). Write the failing PHPUnit test for the next scenario, run `./vendor/bin/sail artisan test` (or `php artisan test` when not using Sail) **on the affected test file(s) or filter**, implement until the test passes, then refactor if needed. Repeat for each test scenario.
+- **Fixes or small changes:** Add or update the PHPUnit test that captures the fix, then implement; use targeted `php artisan test` paths while iterating.
+- **Full suite cadence:** Run **`php artisan test` (entire suite)** only after **every four** substantive implementation steps (e.g. four TDD cycles, four scenarios closed)—not after every single edit. Still run **targeted** tests on every behavior change. Before merging or marking a bead **done**, run the full suite at least once.
 - **Reference:** Laravel Testing Expert skill and `docs/plans/QUALITY-GATES.md` for test layout and naming (`test_{action}_{scenario}_{expected_outcome}`).
 
 ### TESTING WORKFLOW
 
 **Backend (PHPUnit only):**
 - All backend tests are PHPUnit (feature and unit). Run: `./vendor/bin/sail artisan test` (or `php artisan test` when not using Sail).
-- Write/update PHPUnit tests per the TDD loop above. Run tests before marking task done.
+- Write/update PHPUnit tests per the TDD loop above. Prefer **targeted** runs (`php artisan test path/to/Test.php`) during iteration; **full suite** on the **every-four-steps** cadence above and before marking work complete.
 - Reference `docs/plans/QUALITY-GATES.md` for coverage targets.
 
 **Browser verification (Playwright E2E only):** Canonical verification for UI beads is the Playwright E2E suite. Do not use cursor-ide-browser or Dusk for bead verification.

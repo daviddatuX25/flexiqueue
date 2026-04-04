@@ -2,12 +2,14 @@
 
 namespace Tests\Feature\Api\Admin;
 
-use App\Enums\UserRole;
+use App\Models\Program;
 use App\Models\Site;
 use App\Models\Token;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Spatie\Permission\Middleware\PermissionMiddleware;
 use Tests\TestCase;
 
 /**
@@ -34,20 +36,20 @@ class TokenSiteIsolationTest extends TestCase
         $this->siteA = Site::create([
             'name' => 'Site A',
             'slug' => 'site-a',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
         $this->siteB = Site::create([
             'name' => 'Site B',
             'slug' => 'site-b',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
         $this->adminA = User::factory()->admin()->create(['site_id' => $this->siteA->id]);
         $this->adminB = User::factory()->admin()->create(['site_id' => $this->siteB->id]);
-        $this->superAdmin = User::factory()->create(['role' => UserRole::SuperAdmin, 'site_id' => null]);
+        $this->superAdmin = User::factory()->superAdmin()->create(['site_id' => null]);
     }
 
     private function createTokenForSite(string $physicalId, int $siteId, string $status = 'available'): Token
@@ -170,7 +172,7 @@ class TokenSiteIsolationTest extends TestCase
 
     public function test_bulk_assign_only_attaches_same_site_tokens(): void
     {
-        $programA = \App\Models\Program::create([
+        $programA = Program::create([
             'site_id' => $this->siteA->id,
             'name' => 'Program A',
             'description' => null,
@@ -201,7 +203,7 @@ class TokenSiteIsolationTest extends TestCase
         $this->createTokenForSite('A1', $this->siteA->id);
         $this->createTokenForSite('B1', $this->siteB->id);
 
-        $response = $this->withoutMiddleware(\App\Http\Middleware\EnsureRole::class)
+        $response = $this->withoutMiddleware(PermissionMiddleware::class)
             ->actingAs($this->superAdmin)
             ->getJson('/api/admin/tokens?site_id='.$this->siteA->id);
 
@@ -219,7 +221,7 @@ class TokenSiteIsolationTest extends TestCase
         $this->createTokenForSite('A1', $this->siteA->id);
         $this->createTokenForSite('B1', $this->siteB->id);
 
-        $response = $this->withoutMiddleware(\App\Http\Middleware\EnsureRole::class)
+        $response = $this->withoutMiddleware(PermissionMiddleware::class)
             ->actingAs($this->superAdmin)
             ->getJson('/api/admin/tokens');
 

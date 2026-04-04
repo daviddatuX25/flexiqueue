@@ -11,6 +11,8 @@
     import { toaster } from "../../../lib/toaster.js";
     import { compressImage, HERO_BANNER_PRESET, getUploadHint } from "../../../lib/imageUtils.js";
     import QrDisplay from "../../../Components/QrDisplay.svelte";
+    import ScopedRbacTeamAccessPanel from "../../../Components/admin/ScopedRbacTeamAccessPanel.svelte";
+    import EdgeDevicesPanel from "../../../Components/admin/EdgeDevicesPanel.svelte";
     import {
         Building2,
         Key,
@@ -24,6 +26,9 @@
         Pencil,
         Trash2,
         Plus,
+        Gauge,
+        Info,
+        AlertTriangle,
     } from "lucide-svelte";
 
     interface EdgeSettings {
@@ -35,6 +40,7 @@
         offline_binding_mode_override: "optional" | "required";
         scheduled_sync_time: string;
         offline_allow_client_creation: boolean;
+        max_edge_devices?: number;
     }
 
     const DEFAULT_EDGE: EdgeSettings = {
@@ -46,6 +52,7 @@
         offline_binding_mode_override: "optional",
         scheduled_sync_time: "17:00",
         offline_allow_client_creation: true,
+        max_edge_devices: 0,
     };
 
     interface SiteOption {
@@ -63,6 +70,13 @@
         default_site_id = null,
         auth_is_super_admin = false,
         sites = [],
+        programs = [],
+        rbac_team = null as {
+            id: number;
+            type: string;
+            site_id: number;
+            scope_label: string;
+        } | null,
     }: {
         site: {
             id: number;
@@ -81,7 +95,16 @@
         default_site_id?: number | null;
         auth_is_super_admin?: boolean;
         sites?: SiteOption[];
+        programs?: { id: number; name: string; edge_locked_by_device_id: number | null }[];
+        rbac_team?: {
+            id: number;
+            type: string;
+            site_id: number;
+            scope_label: string;
+        } | null;
     } = $props();
+
+    const page = usePage();
 
     let edge = $state<EdgeSettings>({
         ...DEFAULT_EDGE,
@@ -120,7 +143,81 @@
     let landingSections = $state<LandingSection[]>(getInitialLandingSections());
     let editingSectionIndex = $state<number | null>(null);
 
-    const page = usePage();
+    /** TTS generation budget (`sites.settings.tts_budget`) — per docs/architecture/TTS.md */
+    interface TtsBudgetForm {
+        enabled: boolean;
+        mode: "chars";
+        period: "daily" | "monthly";
+        limit: number;
+        warning_threshold_pct: number;
+        block_on_limit: boolean;
+    }
+    function parseTtsBudget(raw: unknown): TtsBudgetForm {
+        const b = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+        const period = b.period === "daily" ? "daily" : "monthly";
+        return {
+            enabled: !!b.enabled,
+            mode: "chars",
+            period,
+            limit: Math.max(0, Number(b.limit ?? 0)),
+            warning_threshold_pct: Math.min(
+                100,
+                Math.max(0, Number(b.warning_threshold_pct ?? 80)),
+            ),
+            block_on_limit: !!b.block_on_limit,
+        };
+    }
+    let ttsBudget = $state<TtsBudgetForm>(
+        parseTtsBudget(site?.settings?.tts_budget),
+    );
+    let budgetSubmitting = $state(false);
+
+    /** When true, per-site TTS budget policy is managed platform-wide (super admin Configuration). */
+    const ttsGlobalBudgetEnabled = $derived(
+        (($page?.props as { tts_global_budget_enabled?: boolean } | undefined)
+            ?.tts_global_budget_enabled) ?? false,
+    );
+
+    interface TtsBudgetMonitorPayload {
+        platform_global_budget_enabled?: boolean;
+        global_monitoring?: {
+            period_key?: string;
+            effective_char_limit?: number;
+            chars_used?: number;
+            remaining?: number;
+            at_limit?: boolean;
+            platform_char_limit?: number;
+            platform_chars_used_total?: number;
+            warning_threshold_pct?: number;
+            message?: string;
+        };
+        policy?: { enabled?: boolean; limit?: number; warning_threshold_pct?: number };
+        usage?: { chars_used: number; period_key: string } | null;
+        remaining?: number | null;
+        at_limit?: boolean;
+    }
+    let ttsBudgetMonitor = $state<TtsBudgetMonitorPayload | null>(null);
+    let ttsBudgetMonitorLoading = $state(false);
+
+    const ttsGlobalMon = $derived(ttsBudgetMonitor?.global_monitoring);
+    const ttsGlobalMonUsagePct = $derived.by(() => {
+        const g = ttsBudgetMonitor?.global_monitoring;
+        if (
+            !g ||
+            g.effective_char_limit === undefined ||
+            g.effective_char_limit === null ||
+            g.effective_char_limit <= 0
+        ) {
+            return 0;
+        }
+        return Math.min(
+            100,
+            ((g.chars_used ?? 0) / g.effective_char_limit) * 100,
+        );
+    });
+    const ttsGlobalMonIsWarning = $derived(
+        ttsGlobalMonUsagePct >= (ttsGlobalMon?.warning_threshold_pct ?? 80),
+    );
 
     const isDefaultSite = $derived(default_site_id !== null && site.id === default_site_id);
 
@@ -158,6 +255,41 @@
                 : "";
         return meta ?? "";
     }
+
+    $effect(() => {
+        if (!ttsGlobalBudgetEnabled || !site?.id) {
+            ttsBudgetMonitor = null;
+            ttsBudgetMonitorLoading = false;
+            return;
+        }
+        let cancelled = false;
+        ttsBudgetMonitorLoading = true;
+        (async () => {
+            try {
+                const res = await fetch(`/api/admin/sites/${site.id}/tts-budget`, {
+                    headers: {
+                        Accept: "application/json",
+                        "X-CSRF-TOKEN": getCsrfToken(),
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
+                    credentials: "same-origin",
+                });
+                const json = (await res.json().catch(() => null)) as TtsBudgetMonitorPayload | null;
+                if (!cancelled && res.ok && json) {
+                    ttsBudgetMonitor = json;
+                } else if (!cancelled) {
+                    ttsBudgetMonitor = null;
+                }
+            } catch {
+                if (!cancelled) ttsBudgetMonitor = null;
+            } finally {
+                if (!cancelled) ttsBudgetMonitorLoading = false;
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    });
 
     async function handleHeroUpload(file: File): Promise<void> {
         if (heroUploading) return;
@@ -382,6 +514,39 @@
             if (errs) edgeErrors = errs;
             toaster.error({
                 title: (result as { message?: string })?.message ?? "Failed to save.",
+            });
+        }
+    }
+
+    async function handleTtsBudgetSubmit(e: SubmitEvent): Promise<void> {
+        e.preventDefault();
+        if (ttsGlobalBudgetEnabled) return;
+        if (budgetSubmitting) return;
+        budgetSubmitting = true;
+        const result = await api("PUT", `/api/admin/sites/${site.id}`, {
+            settings: {
+                tts_budget: {
+                    enabled: ttsBudget.enabled,
+                    mode: ttsBudget.mode,
+                    period: ttsBudget.period,
+                    limit: Math.max(0, Math.floor(ttsBudget.limit)),
+                    warning_threshold_pct: Math.min(
+                        100,
+                        Math.max(0, Math.floor(ttsBudget.warning_threshold_pct)),
+                    ),
+                    block_on_limit: ttsBudget.block_on_limit,
+                },
+            },
+        });
+        budgetSubmitting = false;
+        if (result.ok) {
+            toaster.success({ title: "TTS generation budget saved." });
+            router.reload();
+        } else {
+            toaster.error({
+                title:
+                    (result as { message?: string })?.message ??
+                    "Failed to save TTS budget.",
             });
         }
     }
@@ -729,6 +894,192 @@
             </form>
         </section>
 
+        <!-- TTS generation budget (site policy; metering + guard — see docs/architecture/TTS.md) -->
+        <section
+            class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6"
+            aria-labelledby="tts-budget-heading"
+        >
+            <h2
+                id="tts-budget-heading"
+                class="text-base font-semibold text-surface-950 flex items-center gap-2 mb-1"
+            >
+                <Gauge class="w-5 h-5 text-primary-500 shrink-0" />
+                TTS generation budget
+            </h2>
+            {#if ttsGlobalBudgetEnabled}
+                <div
+                    class="rounded-lg border border-primary-200 bg-primary-50/70 p-4 mb-4 flex gap-3 text-sm text-surface-800"
+                    role="status"
+                >
+                    <Info class="w-5 h-5 text-primary-600 shrink-0 mt-0.5" aria-hidden="true" />
+                    <div class="space-y-2 min-w-0">
+                        <p class="font-medium text-surface-900">
+                            Platform-wide TTS budget is enabled
+                        </p>
+                        <p class="text-surface-600 text-xs leading-relaxed">
+                            Per-site limits are not edited here. Usage below reflects your site’s share of
+                            the platform pool (weights and pool size are set in Configuration).
+                        </p>
+                        {#if auth_is_super_admin}
+                            <Link
+                                href="/admin/settings?tab=tts-generation"
+                                class="btn btn-sm preset-tonal w-fit touch-target-h"
+                            >
+                                Open Configuration → TTS generation
+                            </Link>
+                        {:else}
+                            <p class="text-xs text-surface-600">
+                                Ask your organization super admin to adjust the shared pool or site weights in
+                                Configuration.
+                            </p>
+                        {/if}
+                    </div>
+                </div>
+                {#if ttsBudgetMonitorLoading}
+                    <div
+                        class="rounded-lg border border-surface-200 bg-surface-100/80 p-4 animate-pulse h-24"
+                        aria-busy="true"
+                    ></div>
+                {:else if ttsGlobalMon != null && ttsGlobalMon.effective_char_limit != null}
+                    <div class="space-y-3 max-w-xl">
+                        <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-surface-500">
+                            {#if ttsGlobalMon.period_key}
+                                <span class="font-mono">{ttsGlobalMon.period_key}</span>
+                            {/if}
+                            <span>Effective limit (this site)</span>
+                        </div>
+                        <div class="flex items-baseline gap-2">
+                            <span class="text-lg font-semibold text-surface-900"
+                                >{(ttsGlobalMon.chars_used ?? 0).toLocaleString()}</span
+                            >
+                            <span class="text-sm text-surface-600"
+                                >/ {(ttsGlobalMon.effective_char_limit ?? 0).toLocaleString()} chars</span
+                            >
+                        </div>
+                        <div class="w-full bg-surface-200 rounded-full h-2">
+                            <div
+                                class="h-2 rounded-full transition-all {ttsGlobalMon.at_limit
+                                    ? 'bg-error'
+                                    : ttsGlobalMonIsWarning
+                                      ? 'bg-warning'
+                                      : 'bg-primary'}"
+                                style="width: {Math.min(100, ttsGlobalMonUsagePct)}%"
+                            ></div>
+                        </div>
+                        <div class="flex items-center justify-between text-xs text-surface-600">
+                            <span>{(ttsGlobalMon.remaining ?? 0).toLocaleString()} remaining</span>
+                            {#if ttsGlobalMon.at_limit}
+                                <span class="flex items-center gap-1 text-error font-medium">
+                                    <AlertTriangle class="w-3.5 h-3.5" aria-hidden="true" />
+                                    Limit reached — generation blocked
+                                </span>
+                            {/if}
+                        </div>
+                        {#if ttsGlobalMon.platform_char_limit != null && ttsGlobalMon.platform_chars_used_total != null}
+                            <p class="text-xs text-surface-500">
+                                Platform pool (all sites):
+                                <span class="font-mono"
+                                    >{(ttsGlobalMon.platform_chars_used_total ?? 0).toLocaleString()}</span
+                                >
+                                /
+                                <span class="font-mono"
+                                    >{(ttsGlobalMon.platform_char_limit ?? 0).toLocaleString()}</span
+                                >
+                                chars
+                            </p>
+                        {/if}
+                    </div>
+                {:else if ttsGlobalMon?.message}
+                    <p class="text-sm text-surface-600 max-w-xl">{ttsGlobalMon.message}</p>
+                {/if}
+            {:else}
+                <p class="text-xs text-surface-600 mb-4">
+                    Limits apply to server-side synthesis (jobs and authenticated admin preview) for this site.
+                    Usage is tracked in rollups; when enabled with a limit &gt; 0, optional blocking can stop
+                    generation at the cap.
+                </p>
+                <form class="space-y-4 max-w-xl" onsubmit={handleTtsBudgetSubmit}>
+                    <label class="flex items-center gap-3 cursor-pointer touch-target-h min-h-[48px] text-surface-900">
+                        <input
+                            type="checkbox"
+                            class="checkbox checkbox-primary"
+                            bind:checked={ttsBudget.enabled}
+                        />
+                        <span>Enable budget tracking for this site</span>
+                    </label>
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        <div>
+                            <label for="tts-budget-mode" class="block text-sm font-medium text-surface-900 mb-1"
+                                >Measure usage by</label
+                            >
+                            <select
+                                id="tts-budget-mode"
+                                class="select select-bordered w-full select-theme"
+                                bind:value={ttsBudget.mode}
+                            >
+                                <option value="chars">Characters generated</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="tts-budget-period" class="block text-sm font-medium text-surface-900 mb-1"
+                                >Reset period</label
+                            >
+                            <select
+                                id="tts-budget-period"
+                                class="select select-bordered w-full select-theme"
+                                bind:value={ttsBudget.period}
+                            >
+                                <option value="daily">Daily</option>
+                                <option value="monthly">Monthly</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="tts-budget-limit" class="block text-sm font-medium text-surface-900 mb-1"
+                            >Limit (0 = no numeric cap; policy still “off” for enforcement until enabled + limit)</label
+                        >
+                        <input
+                            id="tts-budget-limit"
+                            type="number"
+                            min="0"
+                            class="input w-full max-w-xs font-mono"
+                            bind:value={ttsBudget.limit}
+                        />
+                    </div>
+                    <div>
+                        <label
+                            for="tts-budget-warn"
+                            class="block text-sm font-medium text-surface-900 mb-1"
+                            >Warning threshold (% of limit)</label
+                        >
+                        <input
+                            id="tts-budget-warn"
+                            type="number"
+                            min="0"
+                            max="100"
+                            class="input w-full max-w-xs font-mono"
+                            bind:value={ttsBudget.warning_threshold_pct}
+                        />
+                    </div>
+                    <label class="flex items-center gap-3 cursor-pointer touch-target-h min-h-[48px] text-surface-900">
+                        <input
+                            type="checkbox"
+                            class="checkbox checkbox-primary"
+                            bind:checked={ttsBudget.block_on_limit}
+                        />
+                        <span>Block new generation when over limit</span>
+                    </label>
+                    <button
+                        type="submit"
+                        class="btn preset-filled-primary-500 touch-target-h"
+                        disabled={budgetSubmitting}
+                    >
+                        {budgetSubmitting ? "Saving…" : "Save TTS budget"}
+                    </button>
+                </form>
+            {/if}
+        </section>
+
         <!-- API key (masked) + Regenerate -->
         <section
             class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6"
@@ -756,6 +1107,10 @@
                 </button>
             </div>
         </section>
+
+        {#if rbac_team}
+            <ScopedRbacTeamAccessPanel rbacTeam={rbac_team} />
+        {/if}
 
         <!-- Edge settings form (central only when SYNC_BACK=true; on edge SYNC_BACK=false disables inputs) -->
         <section
@@ -869,6 +1224,26 @@
                     {/if}
                 </div>
 
+                {#if auth_is_super_admin}
+                    <div>
+                        <label class="label" for="max-edge-devices">
+                            <span class="label-text text-xs font-semibold uppercase tracking-wide text-surface-500">Max Edge Devices</span>
+                        </label>
+                        <input
+                            id="max-edge-devices"
+                            type="number"
+                            min="0"
+                            max="50"
+                            class="input input-sm w-24 mt-1"
+                            bind:value={edge.max_edge_devices}
+                            disabled={edgeSectionDisabled}
+                        />
+                        <p class="text-xs text-surface-500 mt-1">
+                            Number of edge devices allowed for this site (0 = disabled). Super admin only.
+                        </p>
+                    </div>
+                {/if}
+
                 <div class="flex gap-3 pt-2">
                     <button
                         type="submit"
@@ -881,6 +1256,20 @@
                 </div>
             </form>
         </section>
+
+        {#if (site?.edge_settings?.max_edge_devices ?? 0) > 0}
+            <section
+                id="edge-devices-section"
+                class="card p-6 flex flex-col gap-4"
+                aria-labelledby="edge-devices-heading"
+            >
+                <EdgeDevicesPanel
+                    siteId={site.id}
+                    slotsTotal={site?.edge_settings?.max_edge_devices ?? 0}
+                    {programs}
+                />
+            </section>
+        {/if}
     </div>
 </AdminLayout>
 

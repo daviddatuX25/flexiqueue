@@ -26,7 +26,7 @@ class SitesPageTest extends TestCase
         parent::setUp();
         $this->site = $this->createSite(['name' => 'Default Site', 'slug' => 'default']);
         $this->admin = User::factory()->admin()->create(['site_id' => $this->site->id]);
-        $this->superAdmin = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+        $this->superAdmin = User::factory()->superAdmin()->create(['site_id' => null]);
     }
 
     private function createSite(array $attrs = []): Site
@@ -101,7 +101,7 @@ class SitesPageTest extends TestCase
 
     public function test_staff_cannot_access_sites_index_returns_403(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->get(route('admin.sites'));
 
@@ -110,7 +110,7 @@ class SitesPageTest extends TestCase
 
     public function test_staff_cannot_access_site_show_returns_403(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $site = $this->createSite();
 
         $response = $this->actingAs($staff)->get(route('admin.sites.show', $site));

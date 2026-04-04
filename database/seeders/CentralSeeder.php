@@ -22,6 +22,7 @@ class CentralSeeder extends Seeder
     public function run(): void
     {
         $this->call(DefaultSiteSeeder::class);
+        $this->call(PermissionCatalogSeeder::class);
         $this->call(SuperAdminSeeder::class);
         $this->call(CentralSiteSeeder::class);
         $this->call(CentralUsersSeeder::class);

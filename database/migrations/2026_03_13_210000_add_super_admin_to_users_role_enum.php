@@ -10,14 +10,14 @@ return new class extends Migration
      */
     public function up(): void
     {
-        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() === 'mysql') {
             DB::statement("ALTER TABLE users MODIFY COLUMN role ENUM('admin', 'staff', 'super_admin') DEFAULT 'staff'");
         }
     }
 
     public function down(): void
     {
-        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() === 'mysql') {
             DB::table('users')->where('role', 'super_admin')->update(['role' => 'admin']);
             DB::statement("ALTER TABLE users MODIFY COLUMN role ENUM('admin', 'staff') DEFAULT 'staff'");
         }

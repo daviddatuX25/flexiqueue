@@ -87,4 +87,72 @@ class TokenServiceTest extends TestCase
         $this->assertNull($this->service->lookupByPhysicalOrHash(null, null));
         $this->assertNull($this->service->lookupByPhysicalOrHash('', ''));
     }
+
+    public function test_lookup_by_id_returns_token(): void
+    {
+        $token = new Token;
+        $token->qr_code_hash = hash('sha256', Str::random(32).'ID1');
+        $token->physical_id = 'ID1';
+        $token->status = 'available';
+        $token->save();
+
+        $result = $this->service->lookupById($token->id);
+
+        $this->assertInstanceOf(Token::class, $result);
+        $this->assertSame($token->id, $result->id);
+    }
+
+    public function test_lookup_by_id_with_site_scoping_returns_token(): void
+    {
+        $site = new \App\Models\Site;
+        $site->name = 'Test Site';
+        $site->slug = 'test-site';
+        $site->api_key_hash = hash('sha256', Str::random(32));
+        $site->save();
+
+        $token = new Token;
+        $token->qr_code_hash = hash('sha256', Str::random(32).'ID2');
+        $token->physical_id = 'ID2';
+        $token->status = 'available';
+        $token->site_id = $site->id;
+        $token->save();
+
+        $result = $this->service->lookupById($token->id, $site->id);
+
+        $this->assertInstanceOf(Token::class, $result);
+        $this->assertSame($token->id, $result->id);
+    }
+
+    public function test_lookup_by_id_wrong_site_returns_null(): void
+    {
+        $site1 = new \App\Models\Site;
+        $site1->name = 'Site 1';
+        $site1->slug = 'site-1';
+        $site1->api_key_hash = hash('sha256', Str::random(32).'site1');
+        $site1->save();
+
+        $site2 = new \App\Models\Site;
+        $site2->name = 'Site 2';
+        $site2->slug = 'site-2';
+        $site2->api_key_hash = hash('sha256', Str::random(32).'site2');
+        $site2->save();
+
+        $token = new Token;
+        $token->qr_code_hash = hash('sha256', Str::random(32).'ID3');
+        $token->physical_id = 'ID3';
+        $token->status = 'available';
+        $token->site_id = $site1->id;
+        $token->save();
+
+        $result = $this->service->lookupById($token->id, $site2->id);
+
+        $this->assertNull($result);
+    }
+
+    public function test_lookup_by_id_not_found_returns_null(): void
+    {
+        $result = $this->service->lookupById(999999);
+
+        $this->assertNull($result);
+    }
 }

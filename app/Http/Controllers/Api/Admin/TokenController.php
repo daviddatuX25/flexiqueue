@@ -8,14 +8,15 @@ use App\Http\Requests\BatchDeleteTokenRequest;
 use App\Http\Requests\RegenerateTokenTtsRequest;
 use App\Http\Requests\UpdateTokenRequest;
 use App\Jobs\GenerateTokenTtsJob;
+use App\Models\Program;
 use App\Models\Token;
 use App\Repositories\TokenTtsSettingRepository;
 use App\Services\TokenService;
+use App\Services\Tts\TtsLanguageStatusPresenter;
 use App\Services\TtsService;
 use App\Support\QueueWorkerIdleCheck;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 /**
  * Per 08-API-SPEC-PHASE1 §5.5: Token list, batch create, update status. Auth: role:admin.
@@ -26,7 +27,8 @@ class TokenController extends Controller
     public function __construct(
         private TokenService $tokenService,
         private TtsService $ttsService,
-        private TokenTtsSettingRepository $tokenTtsSettingRepository
+        private TokenTtsSettingRepository $tokenTtsSettingRepository,
+        private TtsLanguageStatusPresenter $ttsLanguageStatusPresenter
     ) {}
 
     /**
@@ -80,9 +82,9 @@ class TokenController extends Controller
                 $query->whereDoesntHave('programs');
             } elseif ($assignment === 'global') {
                 $query->where('is_global', true);
-            }             elseif (preg_match('/^program_id:(\d+)$/', (string) $assignment, $m)) {
+            } elseif (preg_match('/^program_id:(\d+)$/', (string) $assignment, $m)) {
                 $programId = (int) $m[1];
-                $program = \App\Models\Program::query()->where('id', $programId)->first();
+                $program = Program::query()->where('id', $programId)->first();
                 if ($program && ($siteId === null || (int) $program->site_id === (int) $siteId)) {
                     $query->whereHas('programs', fn ($q) => $q->where('programs.id', $programId));
                 }
@@ -118,6 +120,9 @@ class TokenController extends Controller
 
         $validated = $request->validated();
         $pronounceAs = $validated['pronounce_as'] ?? 'letters';
+        if ($this->ttsPayloadHasNonEmptyTokenPhrase($validated['tts'] ?? [])) {
+            $pronounceAs = 'custom';
+        }
         $allowSyncFallback = (bool) config('tts.allow_sync_when_queue_unavailable', false);
         $maxSync = (int) config('tts.max_sync_tokens', 20);
         $workerIdle = QueueWorkerIdleCheck::appearsIdle();
@@ -178,6 +183,11 @@ class TokenController extends Controller
                         $config['pre_phrase'] = is_string($value) && trim($value) !== '' ? trim($value) : null;
                     }
 
+                    if (array_key_exists('token_phrase', $langInput)) {
+                        $value = $langInput['token_phrase'];
+                        $config['token_phrase'] = is_string($value) && trim($value) !== '' ? trim($value) : null;
+                    }
+
                     $token->setTtsConfigFor($lang, $config);
                 }
 
@@ -198,6 +208,7 @@ class TokenController extends Controller
                     Token::query()
                         ->whereIn('id', $tokenIds)
                         ->update(['tts_status' => 'failed']);
+
                     return response()->json([
                         'message' => 'Queue worker is not running. Start it with: php artisan queue:work',
                     ], 503);
@@ -209,6 +220,7 @@ class TokenController extends Controller
                     Token::query()
                         ->whereIn('id', $tokenIds)
                         ->update(['tts_status' => 'failed']);
+
                     return response()->json([
                         'message' => 'Queue worker is required for large batches. Start it with: php artisan queue:work, or reduce batch size to '.$maxSync.' or fewer.',
                     ], 503);
@@ -238,7 +250,7 @@ class TokenController extends Controller
     }
 
     /**
-     * Update token. Admin can set status (available/deactivated) and/or pronounce_as (letters/word).
+     * Update token. Admin can set status (available/deactivated) and/or pronounce_as (letters/word/custom).
      * Cannot deactivate a token that is in_use.
      * Per site-scoping-migration-spec §2: token must belong to user's site or 404.
      */
@@ -260,8 +272,17 @@ class TokenController extends Controller
             $updates['current_session_id'] = $status !== 'in_use' ? null : $token->current_session_id;
         }
 
-        if (array_key_exists('pronounce_as', $validated)) {
-            $updates['pronounce_as'] = $validated['pronounce_as'];
+        $shouldSetPronounce = array_key_exists('pronounce_as', $validated)
+            || $this->ttsPayloadHasNonEmptyTokenPhrase($validated['tts'] ?? []);
+
+        if ($shouldSetPronounce) {
+            $finalPronounce = array_key_exists('pronounce_as', $validated)
+                ? $validated['pronounce_as']
+                : ($token->pronounce_as ?? 'letters');
+            if ($this->ttsPayloadHasNonEmptyTokenPhrase($validated['tts'] ?? [])) {
+                $finalPronounce = 'custom';
+            }
+            $updates['pronounce_as'] = $finalPronounce;
         }
 
         if (array_key_exists('is_global', $validated)) {
@@ -298,12 +319,20 @@ class TokenController extends Controller
                     $config['pre_phrase'] = is_string($value) && trim($value) !== '' ? trim($value) : null;
                 }
 
+                if (array_key_exists('token_phrase', $langInput)) {
+                    $value = $langInput['token_phrase'];
+                    $config['token_phrase'] = is_string($value) && trim($value) !== '' ? trim($value) : null;
+                }
+
                 $token->setTtsConfigFor($lang, $config);
             }
 
             $token->save();
             $token->refresh();
         }
+
+        $this->normalizeNonCustomPerLangTts($token);
+        $token->refresh();
 
         return response()->json(['token' => $this->tokenResource($token)]);
     }
@@ -405,6 +434,7 @@ class TokenController extends Controller
             $workerIdle = QueueWorkerIdleCheck::appearsIdle();
             if ($workerIdle && ! config('tts.allow_sync_when_queue_unavailable', false)) {
                 Token::query()->whereIn('id', $tokenIds)->update(['tts_pre_generate_enabled' => true, 'tts_status' => 'failed']);
+
                 return response()->json([
                     'message' => 'Queue worker is not running. Start it with: php artisan queue:work',
                 ], 503);
@@ -412,6 +442,7 @@ class TokenController extends Controller
             $maxSync = (int) config('tts.max_sync_tokens', 20);
             if ($workerIdle && config('tts.allow_sync_when_queue_unavailable', false) && count($tokenIds) > $maxSync) {
                 Token::query()->whereIn('id', $tokenIds)->update(['tts_pre_generate_enabled' => true, 'tts_status' => 'failed']);
+
                 return response()->json([
                     'message' => 'Queue worker is required for large batches. Start it with: php artisan queue:work, or select '.$maxSync.' or fewer tokens.',
                 ], 503);
@@ -440,6 +471,7 @@ class TokenController extends Controller
                 Token::query()
                     ->whereIn('id', $tokenIds)
                     ->update(['tts_status' => 'failed']);
+
                 return response()->json([
                     'message' => 'Queue worker is not running. Start it with: php artisan queue:work',
                 ], 503);
@@ -449,6 +481,7 @@ class TokenController extends Controller
                 Token::query()
                     ->whereIn('id', $tokenIds)
                     ->update(['tts_status' => 'failed']);
+
                 return response()->json([
                     'message' => 'Queue worker is required for large batches. Start it with: php artisan queue:work, or select '.$maxSync.' or fewer tokens.',
                 ], 503);
@@ -480,9 +513,56 @@ class TokenController extends Controller
     }
 
     /**
-     * Per site-scoping-migration-spec §2: ensure token belongs to user's site. 404 if not.
+     * @param  array<string, mixed>  $tts
      */
-    private function ensureTokenInUserSite(\Illuminate\Http\Request $request, Token $token): void
+    private function ttsPayloadHasNonEmptyTokenPhrase(array $tts): bool
+    {
+        foreach (['en', 'fil', 'ilo'] as $lang) {
+            if (! isset($tts[$lang]) || ! is_array($tts[$lang])) {
+                continue;
+            }
+            $v = $tts[$lang]['token_phrase'] ?? null;
+            if (is_string($v) && trim($v) !== '') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Letters/word modes use site defaults only for per-lang voice, rate, pre-phrase, and token phrase.
+     */
+    private function normalizeNonCustomPerLangTts(Token $token): void
+    {
+        if (($token->pronounce_as ?? 'letters') === 'custom') {
+            return;
+        }
+        $dirty = false;
+        foreach (['en', 'fil', 'ilo'] as $lang) {
+            $config = $token->getTtsConfigFor($lang);
+            foreach (['token_phrase', 'pre_phrase', 'voice_id'] as $key) {
+                if (! array_key_exists($key, $config)) {
+                    continue;
+                }
+                if ($config[$key] !== null) {
+                    $config[$key] = null;
+                    $dirty = true;
+                }
+            }
+            if (array_key_exists('rate', $config)) {
+                unset($config['rate']);
+                $dirty = true;
+            }
+            $token->setTtsConfigFor($lang, $config);
+        }
+        if ($dirty) {
+            $token->save();
+        }
+    }
+
+    /** Per site-scoping-migration-spec §2: ensure token belongs to user's site. 404 if not. */
+    private function ensureTokenInUserSite(Request $request, Token $token): void
     {
         $user = $request->user();
         if ($user->isSuperAdmin()) {
@@ -499,6 +579,12 @@ class TokenController extends Controller
     private function tokenResource(Token $token): array
     {
         $ttsSettings = $token->tts_settings ?? [];
+        if (! is_array($ttsSettings)) {
+            $ttsSettings = [];
+        }
+        $ttsSettings['languages'] = $this->ttsLanguageStatusPresenter->present(
+            is_array($ttsSettings['languages'] ?? null) ? $ttsSettings['languages'] : []
+        );
 
         $assignedPrograms = $token->relationLoaded('programs')
             ? $token->programs->map(fn ($p) => ['id' => $p->id, 'name' => $p->name])->values()->all()

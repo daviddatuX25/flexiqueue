@@ -9,8 +9,12 @@ use App\Models\Station;
 use App\Models\User;
 use App\Services\DeviceAuthorizationService;
 use App\Support\DeviceLock;
+use App\Support\PermissionCatalog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 /**
@@ -26,7 +30,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         $site = Site::create([
             'name' => 'Default',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -65,12 +69,12 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         $site = Site::create([
             'name' => 'Default',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'Station Program',
@@ -102,7 +106,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         $site = Site::create([
             'name' => 'Default',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -132,7 +136,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         $site = Site::create([
             'name' => 'Default',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -161,7 +165,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         $site = Site::create([
             'name' => 'Default',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -191,12 +195,12 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         $site = Site::create([
             'name' => 'Default',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'Station Program',
@@ -228,12 +232,12 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         $site = Site::create([
             'name' => 'Default',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'Triage Program',
@@ -249,7 +253,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         ]);
         $staff->update(['assigned_station_id' => $station->id]);
 
-        $response = $this->actingAs($staff)->get(route('triage'));
+        $response = $this->actingAs($staff)->get(route('client-registration'));
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -272,7 +276,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         $site = Site::create([
             'name' => 'Default',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -307,7 +311,7 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
     {
         $site = Site::firstOrCreate(
             ['slug' => 'default'],
-            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
+            ['name' => 'Default', 'api_key_hash' => Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
         );
 
         $response = $this->withKnownSiteCookie($site)->get('/site/'.$site->slug.'/display');
@@ -316,6 +320,95 @@ class HandleInertiaRequestsAdminProgramsTest extends TestCase
         $response->assertInertia(fn ($page) => $page
             ->has('currentProgram')
             ->where('currentProgram', null)
+        );
+    }
+
+    /** Phase 5: shared auth.can mirrors Spatie; staff receive public_device_authorize from seeded role. */
+    public function test_station_page_includes_auth_can_public_device_authorize_true_for_staff(): void
+    {
+        $site = Site::create([
+            'name' => 'Default',
+            'slug' => 'default',
+            'api_key_hash' => Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
+        $program = Program::create([
+            'site_id' => $site->id,
+            'name' => 'Station Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $admin->id,
+        ]);
+        $station = Station::create([
+            'program_id' => $program->id,
+            'name' => 'Desk One',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+        $staff->update(['assigned_station_id' => $station->id]);
+
+        $response = $this->actingAs($staff)->get(route('station'));
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->where('auth.can.public_device_authorize', true)
+            ->where('auth.can.public_display_settings_apply', true)
+        );
+    }
+
+    /**
+     * Without public.device.authorize, shared props report device_locked on an allowed display URL
+     * (EnforceDeviceLock would 302 /station while a display lock is active — test on /site/.../display?program=).
+     */
+    public function test_staff_without_public_device_authorize_gets_device_locked_when_lock_in_session(): void
+    {
+        Role::findByName('staff', PermissionCatalog::guardName())
+            ?->revokePermissionTo(PermissionCatalog::PUBLIC_DEVICE_AUTHORIZE);
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        $site = Site::create([
+            'name' => 'Default',
+            'slug' => 'default',
+            'api_key_hash' => Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $admin = User::factory()->admin()->create(['site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
+        $program = Program::create([
+            'site_id' => $site->id,
+            'name' => 'Display Program',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $admin->id,
+        ]);
+        Station::create([
+            'program_id' => $program->id,
+            'name' => 'Desk One',
+            'capacity' => 1,
+            'is_active' => true,
+        ]);
+
+        $knownSites = json_encode([['slug' => $site->slug, 'name' => $site->name]]);
+
+        $response = $this->withUnencryptedCookie('known_sites', $knownSites)
+            ->actingAs($staff)
+            ->withSession([
+                DeviceLock::SESSION_KEY => [
+                    'site_slug' => $site->slug,
+                    'program_slug' => $program->slug,
+                    'device_type' => DeviceLock::TYPE_DISPLAY,
+                ],
+            ])
+            ->get('/site/'.$site->slug.'/display?program='.$program->id);
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->where('auth.can.public_device_authorize', false)
+            ->where('device_locked', true)
         );
     }
 }

@@ -18,17 +18,17 @@ export default defineConfig({
     ],
     server: {
         host: '0.0.0.0',
-        port: parseInt(process.env.VITE_PORT || '5173', 10),
+        port: parseInt(process.env.VITE_PORT || '5174', 10),
         strictPort: true,
         // Important for Sail/WSL: browser must NOT try to load from 0.0.0.0
-        origin: process.env.VITE_ORIGIN || `http://localhost:${parseInt(process.env.VITE_PORT || '5173', 10)}`,
-        // Allow Laravel app (localhost on any port) to load dev assets without CORS issues.
+        origin: process.env.VITE_ORIGIN || `http://localhost:${parseInt(process.env.VITE_PORT || '5174', 10)}`,
+        // Allow local app hosts (localhost, 127.0.0.1, *.test, *.local) to load dev assets.
         cors: {
-            origin: /^https?:\/\/(?:(?:[^:]+\.)?localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/,
+            origin: /^https?:\/\/(?:(?:[^:]+\.)?localhost|127\.0\.0\.1|\[::1\]|(?:[^:]+\.)?(?:test|local))(?::\d+)?$/,
         },
         hmr: {
             host: process.env.VITE_HMR_HOST || 'localhost',
-            clientPort: parseInt(process.env.VITE_PORT || '5173', 10),
+            clientPort: parseInt(process.env.VITE_PORT || '5174', 10),
         },
         watch: {
             ignored: ['**/storage/framework/views/**'],

@@ -4,7 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\IdentityRegistration;
 use App\Models\Program;
+use App\Models\Site;
+use App\Services\EdgeModeService;
+use App\Services\MobileCryptoService;
+use App\Services\StaffProgramAccessService;
 use App\Services\StationQueueService;
+use App\Support\PermissionCatalog;
 use App\Support\SiteResolver;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,19 +24,29 @@ use Inertia\Response;
 class TriagePageController extends Controller
 {
     public function __construct(
-        private StationQueueService $stationQueueService
+        private StationQueueService $stationQueueService,
+        private StaffProgramAccessService $staffProgramAccessService,
     ) {}
 
     public function __invoke(Request $request): Response|RedirectResponse
     {
+        if (! config('flexiqueue.staff_triage_page_enabled', true)) {
+            $qs = $request->getQueryString();
+            $target = '/station'.($qs !== '' && $qs !== null ? '?'.$qs : '');
+
+            return redirect()->to($target)->with('success', 'Use the footer QR button for client registration and token status.');
+        }
+
         $user = $request->user();
         $user->load(['assignedStation.program.serviceTracks']);
 
-        $isAdminOrSupervisorWithoutStation = ($user->isAdmin() || $user->isSupervisorForAnyProgram()) && $user->assignedStation === null;
+        $isAdminOrSupervisorWithoutStation = $this->staffProgramAccessService->mayUseProgramPickerWithoutAssignedStation($user)
+            && $user->assignedStation === null;
 
         // Staff with per-program station assignments in more than one active program can choose
         // which program to work in; shares the same session key as Station page.
-        $staffHasMultiProgramAssignments = ! $user->isAdmin()
+        $staffHasMultiProgramAssignments = ! $user->can(PermissionCatalog::ADMIN_MANAGE)
+            && ! $user->can(PermissionCatalog::PLATFORM_MANAGE)
             && ! $user->isSupervisorForAnyProgram()
             && $user->programStationAssignments()
                 ->whereHas('program', fn ($q) => $q->where('is_active', true))
@@ -54,7 +69,7 @@ class TriagePageController extends Controller
             if ($programModel) {
                 $request->session()->put(StationPageController::SESSION_KEY_PROGRAM_ID, $programModel->id);
 
-                return redirect('/triage');
+                return redirect()->route('client-registration');
             }
         }
 
@@ -72,7 +87,7 @@ class TriagePageController extends Controller
         $program->load('serviceTracks:id,program_id,name,color_code,is_default');
         $programSettings = $program->settings();
 
-        $site = \App\Models\Site::find($siteId);
+        $site = Site::find($siteId);
 
         $programPayload = [
             'id' => $program->id,
@@ -81,7 +96,7 @@ class TriagePageController extends Controller
             'is_paused' => $program->is_paused,
             // Per XM2O identity-binding plan: expose mode to staff triage UI.
             // Per final-edge-mode-rush-plann [DF-13]: use effective mode (required→optional when edge offline).
-            'identity_binding_mode' => app(\App\Services\EdgeModeService::class)
+            'identity_binding_mode' => app(EdgeModeService::class)
                 ->getEffectiveBindingMode($programSettings->getIdentityBindingMode()),
             'allow_unverified_entry' => $programSettings->getAllowUnverifiedEntry(),
             'tracks' => $program->serviceTracks->map(fn ($t) => [
@@ -93,9 +108,8 @@ class TriagePageController extends Controller
         ];
 
         $footerStats = $this->stationQueueService->getProgramFooterStats($program);
-        $displayScanTimeoutSeconds = $program->settings()->getDisplayScanTimeoutSeconds();
 
-        $mobileCrypto = app(\App\Services\MobileCryptoService::class);
+        $mobileCrypto = app(MobileCryptoService::class);
         $pendingRegistrations = IdentityRegistration::query()
             ->forProgram($program->id)
             ->pending()
@@ -176,13 +190,9 @@ class TriagePageController extends Controller
             'programs' => $programsForSelector,
             'queueCount' => $footerStats['queue_count'],
             'processedToday' => $footerStats['processed_today'],
-            'display_scan_timeout_seconds' => $displayScanTimeoutSeconds,
-            'staff_triage_allow_hid_barcode' => $user->staff_triage_allow_hid_barcode ?? true,
-            'staff_triage_allow_camera_scanner' => $user->staff_triage_allow_camera_scanner ?? true,
             'pending_identity_registrations' => $pendingRegistrations,
             'site_slug' => $site?->slug,
             'program_slug' => $program->slug,
-            'allow_public_triage' => $programSettings->getAllowPublicTriage(),
         ]);
     }
 }

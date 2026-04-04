@@ -2,6 +2,7 @@
 
 namespace Database\Seeders\Edge;
 
+use App\Enums\UserRole;
 use App\Models\Program;
 use App\Models\Site;
 use App\Models\Station;
@@ -45,10 +46,17 @@ class EdgeHistorySeeder extends Seeder
         $regular = $tracks['Regular'];
         $priority = $tracks['Priority'];
         $stations = Station::where('program_id', $aics->id)->orderBy('id')->get();
-        $staff = User::where('site_id', $site->id)->where('role', 'staff')->orderBy('id')->get();
+        $staff = User::withGlobalPermissionsTeam(fn () => User::query()
+            ->where('site_id', $site->id)
+            ->role(UserRole::Staff->value)
+            ->orderBy('id')
+            ->get());
         $tokens = Token::where('site_id', $site->id)->orderBy('id')->get();
         $clients = DB::table('clients')->where('site_id', $site->id)->get();
-        $admin = User::where('site_id', $site->id)->where('role', 'admin')->firstOrFail();
+        $admin = User::withGlobalPermissionsTeam(fn () => User::query()
+            ->where('site_id', $site->id)
+            ->role(UserRole::Admin->value)
+            ->firstOrFail());
         $clientsArray = $clients->all();
 
         foreach (self::DAILY_VOLUMES as $dayOffset => $volume) {

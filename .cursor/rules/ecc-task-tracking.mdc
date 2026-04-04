@@ -1,0 +1,29 @@
+---
+description: "ECC task tracking: multi-step work visibility in Cursor"
+alwaysApply: true
+---
+
+# Task tracking (ECC “hooks” analogue)
+
+Claude Code documents **TodoWrite** and hook-style discipline. In Cursor, use the editor’s **todo list** (`todo_write`) for multi-step work.
+
+## When to use todos
+
+- **3+** distinct steps, or any task easy to mis-order.
+- When the user should see **granular progress** and steer mid-flight.
+
+## Good granularity
+
+Each todo is a **verifiable** step (e.g. “Add failing feature test for X”, “Implement Service method”, “Run targeted tests”).
+
+Todos help surface:
+
+- Missing steps
+- Wrong order
+- Extra unnecessary work
+- Misread requirements
+
+## Permissions / automation
+
+- Do **not** assume “auto-accept” or bypass confirmations for destructive or unclear operations.
+- Prefer explicit approval for risky commands and production-touching changes.

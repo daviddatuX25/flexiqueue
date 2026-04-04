@@ -1,13 +1,23 @@
 <script lang="ts">
 	/**
 	 * Program default settings form — embedded in Configuration tab.
-	 * Migrated from ProgramDefaultSettings.svelte.
+	 * `platform`: super_admin template (copied to new sites). `site`: site admin (new programs in this site).
 	 */
 	import { get } from "svelte/store";
 	import { usePage } from "@inertiajs/svelte";
 	import { onMount } from "svelte";
 	import { toaster } from "../../../lib/toaster.js";
 	import { Clock, Users, GitMerge, AlertCircle } from "lucide-svelte";
+
+	interface Props {
+		variant?: "site" | "platform";
+	}
+	let { variant = "site" }: Props = $props();
+
+	const apiBase =
+		variant === "platform"
+			? "/api/admin/program-platform-default-settings"
+			: "/api/admin/program-default-settings";
 
 	const page = usePage();
 	function getCsrfToken(): string {
@@ -75,7 +85,7 @@
 	async function loadSettings() {
 		loading = true;
 		loadFailed = false;
-		const { ok, data, message } = await api("GET", "/api/admin/program-default-settings");
+		const { ok, data, message } = await api("GET", apiBase);
 		loading = false;
 		if (!ok || !data) {
 			loadFailed = true;
@@ -116,7 +126,7 @@
 
 	async function handleSave() {
 		submitting = true;
-		const { ok, message } = await api("PUT", "/api/admin/program-default-settings", {
+		const { ok, message } = await api("PUT", apiBase, {
 			settings: {
 				no_show_timer_seconds: noShowTimer,
 				max_no_show_attempts: maxNoShowAttempts,
@@ -148,7 +158,11 @@
 </script>
 
 <p class="text-sm text-surface-600 mb-4">
-	These values are used when you click &quot;Apply default settings&quot; on a program&apos;s Settings tab. New programs do not auto-apply.
+	{#if variant === "platform"}
+		Template copied into each <strong>new site&apos;s</strong> program defaults when the site is created. Existing sites keep their own copies until edited under that site.
+	{:else}
+		Applied when a <strong>new program</strong> is created in this site. Use &quot;Apply default settings&quot; on a program&apos;s Settings tab to refresh that program from here.
+	{/if}
 </p>
 
 {#if loading}
@@ -285,26 +299,26 @@
 			</div>
 			<div class="flex flex-col sm:flex-row gap-4">
 				<div class="sm:w-1/3 shrink-0">
-					<h3 class="font-medium text-surface-950">Public triage &amp; identity</h3>
-					<p class="text-xs text-surface-500 mt-1">Default behavior when clients start at Public triage.</p>
+					<h3 class="font-medium text-surface-950">Kiosk &amp; identity</h3>
+					<p class="text-xs text-surface-500 mt-1">Defaults for kiosk self-service and staff Client registration (identity).</p>
 				</div>
 				<div class="sm:w-2/3 space-y-3">
 					<div class="form-control">
 						<label class="label cursor-pointer justify-start gap-3 w-fit">
 							<input type="checkbox" class="checkbox" bind:checked={allowPublicTriage} />
-							<span class="label-text text-sm">Allow public triage</span>
+							<span class="label-text text-sm">Allow kiosk self-service</span>
 						</label>
 					</div>
 					<div class="space-y-2">
-						<label class="text-xs font-medium text-surface-600" for="cfg-identity-policy">Identity policy at triage</label>
+						<label class="text-xs font-medium text-surface-600" for="cfg-identity-policy">Identity policy (kiosk + staff)</label>
 						<select id="cfg-identity-policy" class="select rounded-container border border-surface-200 px-3 py-1 h-9 w-full max-w-xs" bind:value={identityBindingMode}>
-							<option value="disabled">No ID at triage</option>
+							<option value="disabled">No identity step</option>
 							<option value="required">ID or registration required</option>
 						</select>
 						<div class="form-control pt-1">
 							<label class="label cursor-pointer justify-start gap-3 w-fit text-xs">
 								<input type="checkbox" class="checkbox checkbox-xs" bind:checked={allowUnverifiedEntry} disabled={!allowPublicTriage || identityBindingMode !== "required"} />
-								<span class="label-text">Allow unverified registrations to start visits from public triage</span>
+								<span class="label-text">Allow unverified registrations to start visits from kiosk</span>
 							</label>
 						</div>
 					</div>
@@ -313,7 +327,7 @@
 			<div class="flex flex-col sm:flex-row gap-4">
 				<div class="sm:w-1/3 shrink-0">
 					<h3 class="font-medium text-surface-950">Scanners</h3>
-					<p class="text-xs text-surface-500 mt-1">Default scanner inputs on Display and Public triage.</p>
+					<p class="text-xs text-surface-500 mt-1">Default scanner inputs on Display board and kiosk.</p>
 				</div>
 				<div class="sm:w-2/3 space-y-2">
 					<div class="form-control">

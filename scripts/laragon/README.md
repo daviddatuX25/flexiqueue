@@ -1,39 +1,76 @@
-# Laragon / Laptop deployment
+# Laragon setup and deploy
 
-Deploy FlexiQueue to a Laragon host or laptop using the same tarball and apply flow as the Pi. The **prod-as-staging** flow: merge to prod and push, build from prod worktree, then scp + run apply script on the target.
+Laragon is a host target for both roles:
 
-## Prepare the target (once)
+- Central on Laragon
+- Edge on Laragon
 
-- **App directory:** Create the app root (e.g. `/var/www/flexiqueue` on WSL, or your Laragon www path). The deploy script will scp the tarball and run `scripts/laragon/apply-tarball.sh` there.
-- **SSH:** Target must be reachable via SSH (e.g. OpenSSH on Windows, or WSL). Use `LARAGON_USER` if not root.
-- **PHP:** PHP 8.2+ with required extensions (sqlite3, mbstring, xml, curl, zip, bcmath, intl). Laragon provides this.
-- **Reverb (WebSocket):** Run `php artisan reverb:start` or install as a service (e.g. systemd on WSL). For same-origin proxy, configure Nginx or your web server to proxy `/app` to `127.0.0.1:6001` (see [scripts/pi/nginx-flexiqueue.conf](../pi/nginx-flexiqueue.conf)).
-- **Queue worker (TTS and other queued jobs):** For token/station TTS pre-generation and any queued jobs, the queue worker must be running. Run `php artisan queue:work --tries=3` in a separate terminal, or on WSL with systemd copy `scripts/pi/flexiqueue-queue.service` to `/etc/systemd/system/`, then `sudo systemctl enable --now flexiqueue-queue`. Apply-tarball restarts `flexiqueue-queue` if the unit is present.
+Use canonical role-first entrypoints from repo root.
 
-## Deploy from your PC
+## 1) Prepare Laragon once
+
+- Ensure PHP 8.2+, Composer, Node, npm are installed.
+- Ensure SSH access from your deployment machine (`LARAGON_HOST`, `LARAGON_USER`).
+- Choose app path (default used by scripts): `/var/www/flexiqueue`.
+- Ensure database exists when running central mode (example DB name: `flexiqueue`).
+
+## 2) Choose env template
+
+### Central on Laragon
+
+1. Start from `env.laragon.central.example`
+2. Copy to target `.env`
+3. Set DB values:
+   - `DB_DATABASE=flexiqueue` (or your chosen DB)
+   - `DB_USERNAME`, `DB_PASSWORD`
+4. Choose realtime mode:
+   - Pusher-style vars from `env.central.pusher.example`, or
+   - Reverb-style vars from `env.central.reverb.example`
+
+### Edge on Laragon
+
+1. Start from `env.laragon.edge.example` (or `env.edge.reverb.example`)
+2. Copy to target `.env`
+3. Set edge sync values:
+   - `CENTRAL_URL`
+   - `CENTRAL_API_KEY`
+   - `SITE_ID`
+4. Keep sqlite values for edge:
+   - `DB_CONNECTION=sqlite`
+   - `DB_DATABASE=database/database.sqlite`
+
+## 3) Deploy commands
+
+### Central on Laragon
 
 ```bash
-# From repo root: merge current branch into prod, build from prod, deploy to Laragon host
-LARAGON_HOST=laptop.local ./scripts/deploy-to-laragon.sh --build
-
-# Optional: skip merge (e.g. already on prod), or set migrate option
-LARAGON_HOST=192.168.1.10 ./scripts/deploy-to-laragon.sh --build --no-merge --migrate=incremental
+LARAGON_HOST=laptop.local ./scripts/central/deploy/laragon/deploy-central-laragon.sh --build --migrate=incremental
 ```
 
-You will see: **"Merged to prod and pushed. Tarball built from prod."** before the tarball is copied to the target.
-
-## Apply tarball on the target (manual)
-
-If you already have the tarball on the target (e.g. copied by hand):
+### Edge on Laragon
 
 ```bash
-cd /var/www/flexiqueue   # or set LARAGON_APP_DIR
-sudo ./scripts/laragon/apply-tarball.sh /path/to/flexiqueue-deploy.tar.gz [--migrate=incremental|fresh|skip]
+LARAGON_HOST=laptop.local ./scripts/edge/deploy/laragon/deploy-edge-laragon.sh --build --migrate=incremental
 ```
 
-Default is `--migrate=incremental`. Use `LARAGON_APP_DIR=/path` and `RUN_USER=www-data` (or your user) if different from defaults.
+## 4) Manual apply (on target)
 
-## See also
+```bash
+cd /var/www/flexiqueue
+sudo ./scripts/laragon/apply-tarball-central.sh /tmp/flexiqueue-deploy.tar.gz --migrate=incremental
+sudo ./scripts/laragon/apply-tarball-edge.sh /tmp/flexiqueue-deploy.tar.gz --migrate=incremental
+```
 
-- [scripts/README.md](../README.md) — Quick reference and all script types
-- [docs/architecture/10-DEPLOYMENT.md](../../docs/architecture/10-DEPLOYMENT.md) — Full deployment runbook
+## 5) Post-deploy checks
+
+- App loads at configured host URL
+- `php artisan migrate:status` works
+- Queue worker running (if used)
+- Reverb running (if used)
+- For edge: admin shows edge mode banner and sync settings are present
+
+## Laragon + Apache + SSL + Reverb (local HTTPS)
+
+If you use **HTTPS** on Laragon (`*.test` with SSL enabled), WebSockets must use **`wss://`** via Apache proxying **`/app`** to Reverb. Plain **`wss://localhost:6001`** will not work unless Reverb terminates TLS itself.
+
+**Canonical guide:** [docs/SETUP-LARAGON-APACHE-REVERB-HTTPS.md](../SETUP-LARAGON-APACHE-REVERB-HTTPS.md) — SSL menu, `httpd-ssl.conf` vs site vhost, **`ProxyPass` with `ws://`**, `VITE_REVERB_VIA_PROXY=true`, verification, and troubleshooting.

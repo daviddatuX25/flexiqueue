@@ -31,12 +31,9 @@ class UserSiteAssignmentTest extends TestCase
             'settings' => [],
             'edge_settings' => [],
         ]);
-        $superAdmin = User::factory()->create([
-            'role' => 'super_admin',
-            'site_id' => null,
-        ]);
-        $userA = User::factory()->create(['site_id' => $siteA->id, 'name' => 'User A', 'role' => 'admin']);
-        $userB = User::factory()->create(['site_id' => $siteB->id, 'name' => 'User B', 'role' => 'admin']);
+        $superAdmin = User::factory()->superAdmin()->create(['site_id' => null]);
+        $userA = User::factory()->admin()->create(['site_id' => $siteA->id, 'name' => 'User A']);
+        $userB = User::factory()->admin()->create(['site_id' => $siteB->id, 'name' => 'User B']);
 
         $response = $this->actingAs($superAdmin)->getJson('/api/admin/users');
 
@@ -68,13 +65,14 @@ class UserSiteAssignmentTest extends TestCase
             'settings' => [],
             'edge_settings' => [],
         ]);
-        $superAdmin = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
-        $user = User::factory()->create(['site_id' => $siteA->id, 'name' => 'Movable User', 'role' => 'admin']);
+        $superAdmin = User::factory()->superAdmin()->create(['site_id' => null]);
+        $user = User::factory()->admin()->create(['site_id' => $siteA->id, 'name' => 'Movable User']);
 
         $response = $this->actingAs($superAdmin)->putJson("/api/admin/users/{$user->id}", [
             'name' => $user->name,
+            'username' => $user->username,
             'email' => $user->email,
-            'role' => $user->role->value,
+            'role' => $user->primaryGlobalRoleName() ?? 'staff',
             'is_active' => true,
             'site_id' => $siteB->id,
         ]);
@@ -105,8 +103,9 @@ class UserSiteAssignmentTest extends TestCase
 
         $response = $this->actingAs($admin)->putJson("/api/admin/users/{$userInA->id}", [
             'name' => $userInA->name,
+            'username' => $userInA->username,
             'email' => $userInA->email,
-            'role' => $userInA->role->value,
+            'role' => $userInA->primaryGlobalRoleName() ?? 'staff',
             'is_active' => true,
             'site_id' => $siteB->id,
         ]);
@@ -124,11 +123,13 @@ class UserSiteAssignmentTest extends TestCase
             'settings' => [],
             'edge_settings' => [],
         ]);
-        $superAdmin = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+        $superAdmin = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $response = $this->actingAs($superAdmin)->postJson('/api/admin/users', [
             'name' => 'New Admin',
+            'username' => 'newadmin.site',
             'email' => 'newadmin@example.com',
+            'recovery_gmail' => 'newadmin.recovery@gmail.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
             'role' => 'admin',
@@ -136,7 +137,10 @@ class UserSiteAssignmentTest extends TestCase
         ]);
 
         $response->assertStatus(201);
-        $this->assertDatabaseHas('users', ['email' => 'newadmin@example.com', 'site_id' => $site->id, 'role' => 'admin']);
+        $this->assertDatabaseHas('users', ['email' => 'newadmin@example.com', 'site_id' => $site->id]);
+        $created = User::where('email', 'newadmin@example.com')->first();
+        $this->assertNotNull($created);
+        $this->assertTrue($created->hasSpatieRole('admin'));
         $response->assertJsonPath('user.site.id', $site->id);
     }
 
@@ -149,14 +153,15 @@ class UserSiteAssignmentTest extends TestCase
             'settings' => [],
             'edge_settings' => [],
         ]);
-        $superAdmin = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+        $superAdmin = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $response = $this->actingAs($superAdmin)->postJson('/api/admin/users', [
             'name' => 'New Staff',
+            'username' => 'newstaff.blocked',
             'email' => 'staff@example.com',
+            'recovery_gmail' => 'staff.recovery@gmail.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
-            'role' => 'staff',
             'site_id' => $site->id,
         ]);
 
@@ -178,7 +183,9 @@ class UserSiteAssignmentTest extends TestCase
 
         $response = $this->actingAs($admin)->postJson('/api/admin/users', [
             'name' => 'Another Admin',
+            'username' => 'another.admin',
             'email' => 'admin2@example.com',
+            'recovery_gmail' => 'admin2.recovery@gmail.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
             'role' => 'admin',
@@ -187,9 +194,11 @@ class UserSiteAssignmentTest extends TestCase
         $response->assertStatus(201);
         $this->assertDatabaseHas('users', [
             'email' => 'admin2@example.com',
-            'role' => 'admin',
             'site_id' => $site->id,
         ]);
+        $created = User::where('email', 'admin2@example.com')->first();
+        $this->assertNotNull($created);
+        $this->assertTrue($created->hasSpatieRole('admin'));
     }
 
     public function test_site_admin_cannot_update_user_role_to_admin(): void
@@ -202,10 +211,11 @@ class UserSiteAssignmentTest extends TestCase
             'edge_settings' => [],
         ]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['site_id' => $site->id, 'role' => 'staff']);
+        $staff = User::factory()->create(['site_id' => $site->id]);
 
         $response = $this->actingAs($admin)->putJson("/api/admin/users/{$staff->id}", [
             'name' => $staff->name,
+            'username' => $staff->username,
             'email' => $staff->email,
             'role' => 'admin',
             'is_active' => true,
@@ -213,7 +223,8 @@ class UserSiteAssignmentTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['role']);
-        $this->assertDatabaseHas('users', ['id' => $staff->id, 'role' => 'staff']);
+        $this->assertDatabaseHas('users', ['id' => $staff->id]);
+        $this->assertTrue($staff->fresh()->hasSpatieRole('staff'));
     }
 
     public function test_cannot_create_super_admin_via_api(): void
@@ -225,11 +236,13 @@ class UserSiteAssignmentTest extends TestCase
             'settings' => [],
             'edge_settings' => [],
         ]);
-        $superAdmin = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+        $superAdmin = User::factory()->superAdmin()->create(['site_id' => null]);
 
         $response = $this->actingAs($superAdmin)->postJson('/api/admin/users', [
             'name' => 'Fake Super',
+            'username' => 'fakesuper.user',
             'email' => 'super@example.com',
+            'recovery_gmail' => 'super.recovery@gmail.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
             'role' => 'super_admin',
@@ -257,8 +270,8 @@ class UserSiteAssignmentTest extends TestCase
             'settings' => [],
             'edge_settings' => [],
         ]);
-        $superAdmin = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
-        $userInB = User::factory()->create(['site_id' => $siteB->id, 'role' => 'admin']);
+        $superAdmin = User::factory()->superAdmin()->create(['site_id' => null]);
+        $userInB = User::factory()->admin()->create(['site_id' => $siteB->id]);
 
         $response = $this->actingAs($superAdmin)->getJson("/api/admin/users?site_id={$siteB->id}");
 

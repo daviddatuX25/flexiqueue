@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\RbacTeam;
 use App\Models\Site;
 use App\Models\SiteShortLink;
 use App\Services\SiteApiKeyService;
+use App\Support\PermissionCatalog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -22,7 +24,7 @@ class SitesPageController extends Controller
     {
         $authUser = $request->user();
         // Per plan: site-scoped admin has no Sites nav; redirect if they hit the URL directly.
-        if (! $authUser->isSuperAdmin()) {
+        if (! $authUser->can(PermissionCatalog::PLATFORM_MANAGE)) {
             return redirect()->route('admin.dashboard');
         }
         $query = Site::query()->orderBy('name');
@@ -39,13 +41,13 @@ class SitesPageController extends Controller
         return Inertia::render('Admin/Sites/Index', [
             'sites' => $sites,
             'default_site_id' => $defaultSiteId,
-            'auth_is_super_admin' => $authUser->isSuperAdmin(),
+            'auth_is_super_admin' => $authUser->can(PermissionCatalog::PLATFORM_MANAGE),
         ]);
     }
 
     public function create(Request $request): Response
     {
-        if (! $request->user()->isSuperAdmin()) {
+        if (! $request->user()->can(PermissionCatalog::PLATFORM_MANAGE)) {
             abort(403, 'Only a super admin can create sites.');
         }
 
@@ -55,7 +57,7 @@ class SitesPageController extends Controller
     public function show(Request $request, Site $site): Response
     {
         $authUser = $request->user();
-        if (! $authUser->isSuperAdmin() && $authUser->site_id !== $site->id) {
+        if (! $authUser->can(PermissionCatalog::PLATFORM_MANAGE) && $authUser->site_id !== $site->id) {
             abort(404);
         }
 
@@ -99,10 +101,16 @@ class SitesPageController extends Controller
             'site_landing_url' => url('/site/'.$site->slug),
             'api_key_masked' => SiteApiKeyService::maskedPlaceholder(),
             'default_site_id' => $defaultSiteId,
-            'auth_is_super_admin' => $authUser->isSuperAdmin(),
+            'auth_is_super_admin' => $authUser->can(PermissionCatalog::PLATFORM_MANAGE),
+            'rbac_team' => [
+                'id' => RbacTeam::forSite($site)->id,
+                'type' => 'site',
+                'site_id' => $site->id,
+                'scope_label' => $site->name,
+            ],
         ];
 
-        if ($authUser->isSuperAdmin()) {
+        if ($authUser->can(PermissionCatalog::PLATFORM_MANAGE)) {
             $payload['sites'] = Site::query()
                 ->orderBy('name')
                 ->get(['id', 'name', 'slug', 'is_default'])
@@ -115,6 +123,18 @@ class SitesPageController extends Controller
                 ->values()
                 ->all();
         }
+
+        $payload['programs'] = \App\Models\Program::where('site_id', $site->id)
+            ->select(['id', 'name', 'edge_locked_by_device_id'])
+            ->orderBy('name')
+            ->get()
+            ->map(fn (\App\Models\Program $p) => [
+                'id'                       => $p->id,
+                'name'                     => $p->name,
+                'edge_locked_by_device_id' => $p->edge_locked_by_device_id,
+            ])
+            ->values()
+            ->all();
 
         return Inertia::render('Admin/Sites/Show', $payload);
     }

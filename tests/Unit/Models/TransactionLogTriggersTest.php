@@ -7,8 +7,8 @@ use App\Models\ServiceTrack;
 use App\Models\Session;
 use App\Models\Station;
 use App\Models\Token;
-use App\Models\TransactionLog;
 use App\Models\TrackStep;
+use App\Models\TransactionLog;
 use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -55,8 +55,8 @@ class TransactionLogTriggersTest extends TestCase
 
     public function test_mysql_triggers_prevent_update_and_delete_via_raw_queries(): void
     {
-        if (! in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
-            $this->markTestSkipped('MySQL/MariaDB trigger behavior only verified on mysql/mariadb drivers.');
+        if (DB::getDriverName() !== 'mysql') {
+            $this->markTestSkipped('MySQL trigger behavior only verified on mysql driver.');
         }
 
         $log = $this->createTransactionLog();
@@ -88,7 +88,7 @@ class TransactionLogTriggersTest extends TestCase
 
     private function createTransactionLog(): TransactionLog
     {
-        $user = User::factory()->create(['role' => 'admin']);
+        $user = User::factory()->admin()->create();
 
         $program = Program::create([
             'name' => 'Test',
@@ -118,7 +118,7 @@ class TransactionLogTriggersTest extends TestCase
         ]);
 
         $token = new Token;
-        $token->qr_code_hash = hash('sha256', Str::random(32) . 'A1');
+        $token->qr_code_hash = hash('sha256', Str::random(32).'A1');
         $token->physical_id = 'A1';
         $token->status = 'in_use';
         $token->save();
@@ -142,4 +142,3 @@ class TransactionLogTriggersTest extends TestCase
         ]);
     }
 }
-

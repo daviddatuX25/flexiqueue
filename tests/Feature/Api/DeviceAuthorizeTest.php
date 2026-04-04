@@ -6,9 +6,13 @@ use App\Models\DeviceAuthorization;
 use App\Models\Program;
 use App\Models\Site;
 use App\Models\User;
+use App\Support\DeviceLock;
+use App\Support\PermissionCatalog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 /**
@@ -45,11 +49,10 @@ class DeviceAuthorizeTest extends TestCase
             'created_by' => $user->id,
         ]);
         $supervisor = User::factory()->create([
-            'role' => 'staff',
             'site_id' => $site->id,
             'override_pin' => Hash::make('123456'),
         ]);
-        $program->supervisedBy()->attach($supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $program);
 
         $response = $this->postJson('/api/public/device-authorize', [
             'program_id' => $program->id,
@@ -72,11 +75,10 @@ class DeviceAuthorizeTest extends TestCase
             'created_by' => $user->id,
         ]);
         $supervisor = User::factory()->create([
-            'role' => 'staff',
             'site_id' => $site->id,
             'override_pin' => Hash::make('123456'),
         ]);
-        $program->supervisedBy()->attach($supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $program);
 
         $response = $this->postJson('/api/public/device-authorize', [
             'program_id' => $program->id,
@@ -107,11 +109,10 @@ class DeviceAuthorizeTest extends TestCase
             'created_by' => $user->id,
         ]);
         $supervisor = User::factory()->create([
-            'role' => 'staff',
             'site_id' => $site->id,
             'override_pin' => Hash::make('123456'),
         ]);
-        $program->supervisedBy()->attach($supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $program);
 
         $response = $this->postJson('/api/public/device-authorize', [
             'program_id' => $program->id,
@@ -120,5 +121,76 @@ class DeviceAuthorizeTest extends TestCase
 
         $response->assertStatus(400);
         $response->assertJsonPath('message', 'Program not found or not active.');
+    }
+
+    public function test_device_authorize_returns_403_when_pin_valid_but_user_lacks_public_device_authorize(): void
+    {
+        Role::findByName('staff', PermissionCatalog::guardName())
+            ?->revokePermissionTo(PermissionCatalog::PUBLIC_DEVICE_AUTHORIZE);
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        $site = $this->defaultSite();
+        $user = User::factory()->create([
+            'site_id' => $site->id,
+            'override_pin' => null,
+        ]);
+        $program = Program::create([
+            'site_id' => $site->id,
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $supervisor = User::factory()->create([
+            'site_id' => $site->id,
+            'override_pin' => Hash::make('987654'),
+        ]);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $program);
+
+        $response = $this->postJson('/api/public/device-authorize', [
+            'program_id' => $program->id,
+            'pin' => '987654',
+        ]);
+
+        $response->assertStatus(403);
+        $response->assertJsonPath('message', 'Unauthorized.');
+    }
+
+    public function test_device_unlock_with_auth_returns_403_when_pin_valid_but_user_lacks_public_device_authorize(): void
+    {
+        Role::findByName('staff', PermissionCatalog::guardName())
+            ?->revokePermissionTo(PermissionCatalog::PUBLIC_DEVICE_AUTHORIZE);
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        $site = $this->defaultSite();
+        $user = User::factory()->create([
+            'site_id' => $site->id,
+            'override_pin' => null,
+        ]);
+        $program = Program::create([
+            'site_id' => $site->id,
+            'name' => 'Test',
+            'description' => null,
+            'is_active' => true,
+            'created_by' => $user->id,
+        ]);
+        $supervisor = User::factory()->create([
+            'site_id' => $site->id,
+            'override_pin' => Hash::make('987654'),
+        ]);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $program);
+
+        $response = $this->withSession([
+            DeviceLock::SESSION_KEY => [
+                'site_slug' => $site->slug,
+                'program_slug' => $program->slug,
+                'device_type' => DeviceLock::TYPE_DISPLAY,
+            ],
+        ])->postJson('/api/public/device-unlock-with-auth', [
+            'pin' => '987654',
+        ]);
+
+        $response->assertStatus(403);
+        $response->assertJsonPath('message', 'Unauthorized.');
     }
 }

@@ -21,8 +21,11 @@ class PublicDisplaySettingsRequestController extends Controller
             'display_audio_volume' => ['sometimes', 'numeric', 'min:0', 'max:1'],
             'enable_display_hid_barcode' => ['sometimes', 'boolean'],
             'enable_public_triage_hid_barcode' => ['sometimes', 'boolean'],
+            'kiosk_enable_hid_barcode' => ['sometimes', 'boolean'],
             'enable_display_camera_scanner' => ['sometimes', 'boolean'],
             'enable_public_triage_camera_scanner' => ['sometimes', 'boolean'],
+            'kiosk_enable_camera_scanner' => ['sometimes', 'boolean'],
+            'kiosk_hid_persistent_when_scan_modal_closed' => ['sometimes', 'boolean'],
         ]);
 
         $program = Program::findOrFail($validated['program_id']);
@@ -33,7 +36,10 @@ class PublicDisplaySettingsRequestController extends Controller
         $payload = array_intersect_key($validated, array_flip([
             'display_audio_muted', 'display_audio_volume',
             'enable_display_hid_barcode', 'enable_public_triage_hid_barcode',
+            'kiosk_enable_hid_barcode',
             'enable_display_camera_scanner', 'enable_public_triage_camera_scanner',
+            'kiosk_enable_camera_scanner',
+            'kiosk_hid_persistent_when_scan_modal_closed',
         ]));
 
         $req = DisplaySettingsRequest::create([

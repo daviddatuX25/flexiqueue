@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         $driver = DB::getDriverName();
-        if (in_array($driver, ['mysql', 'mariadb'], true)) {
+        if ($driver === 'mysql') {
             DB::statement('ALTER TABLE track_steps MODIFY station_id BIGINT UNSIGNED NULL');
         }
     }
@@ -20,7 +20,7 @@ return new class extends Migration
     public function down(): void
     {
         $driver = DB::getDriverName();
-        if (in_array($driver, ['mysql', 'mariadb'], true)) {
+        if ($driver === 'mysql') {
             DB::statement('ALTER TABLE track_steps MODIFY station_id BIGINT UNSIGNED NOT NULL');
         }
     }

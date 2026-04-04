@@ -10,7 +10,7 @@ use Illuminate\Queue\SerializesModels;
 
 /**
  * Per plan: broadcast display audio and HID settings to display.activity.{programId} so the general display board
- * and public triage can update in real time when admin or PIN-verified user changes them.
+ * and kiosk can update in real time when admin or PIN-verified user changes them.
  * Per central-edge-v2-final Phase A: program-scoped channel only.
  */
 class DisplaySettingsUpdated implements ShouldBroadcastNow
@@ -27,10 +27,11 @@ class DisplaySettingsUpdated implements ShouldBroadcastNow
         public int $displayTtsRepeatCount = 1,
         public int $displayTtsRepeatDelayMs = 2000,
         public bool $enablePublicTriageCameraScanner = true,
+        public bool $kioskHidPersistentWhenScanModalClosed = false,
     ) {}
 
     /**
-     * @return array<int, \Illuminate\Broadcasting\Channel>
+     * @return array<int, Channel>
      */
     public function broadcastOn(): array
     {
@@ -53,11 +54,14 @@ class DisplaySettingsUpdated implements ShouldBroadcastNow
             'display_audio_muted' => $this->displayAudioMuted,
             'display_audio_volume' => $this->displayAudioVolume,
             'enable_display_hid_barcode' => $this->enableDisplayHidBarcode,
+            'kiosk_enable_hid_barcode' => $this->enablePublicTriageHidBarcode,
             'enable_public_triage_hid_barcode' => $this->enablePublicTriageHidBarcode,
             'enable_display_camera_scanner' => $this->enableDisplayCameraScanner,
+            'kiosk_enable_camera_scanner' => $this->enablePublicTriageCameraScanner,
             'enable_public_triage_camera_scanner' => $this->enablePublicTriageCameraScanner,
             'display_tts_repeat_count' => $this->displayTtsRepeatCount,
             'display_tts_repeat_delay_ms' => $this->displayTtsRepeatDelayMs,
+            'kiosk_hid_persistent_when_scan_modal_closed' => $this->kioskHidPersistentWhenScanModalClosed,
         ];
     }
 }

@@ -6,8 +6,7 @@ final class ProgramSettings
 {
     private function __construct(
         private readonly array $settings,
-    ) {
-    }
+    ) {}
 
     public static function fromArray(array $settings): self
     {
@@ -137,6 +136,128 @@ final class ProgramSettings
         return (bool) ($this->settings['enable_public_triage_camera_scanner'] ?? true);
     }
 
+    /**
+     * Kiosk self-service triage (canonical `kiosk_*`; legacy `allow_public_triage`).
+     *
+     * @see docs/plans/DEVICE_REFACTOR_KIOSK_QR_MODULARITY_PLAN.md §6.3
+     */
+    public function getKioskSelfServiceTriageEnabled(): bool
+    {
+        if (array_key_exists('kiosk_self_service_triage_enabled', $this->settings)) {
+            return (bool) $this->settings['kiosk_self_service_triage_enabled'];
+        }
+
+        return $this->getAllowPublicTriage();
+    }
+
+    /**
+     * Kiosk status checker when token already in queue. If no explicit `kiosk_status_checker_enabled`,
+     * mirror legacy `allow_public_triage` so existing programs keep the same token-lookup availability.
+     */
+    public function getKioskStatusCheckerEnabled(): bool
+    {
+        if (array_key_exists('kiosk_status_checker_enabled', $this->settings)) {
+            return (bool) $this->settings['kiosk_status_checker_enabled'];
+        }
+
+        return $this->getAllowPublicTriage();
+    }
+
+    /** True when any kiosk feature is enabled (self-service triage and/or status checker). */
+    public function getKioskSurfaceEnabled(): bool
+    {
+        return $this->getKioskSelfServiceTriageEnabled() || $this->getKioskStatusCheckerEnabled();
+    }
+
+    /**
+     * After merging incoming settings, mirror canonical `kiosk_*` keys to legacy aliases so raw JSON readers stay aligned.
+     *
+     * @param  array<string, mixed>  $settings
+     * @return array<string, mixed>
+     */
+    public static function syncKioskKeysToLegacyAliases(array $settings): array
+    {
+        if (array_key_exists('kiosk_self_service_triage_enabled', $settings)) {
+            $settings['allow_public_triage'] = (bool) $settings['kiosk_self_service_triage_enabled'];
+        }
+        if (array_key_exists('kiosk_enable_hid_barcode', $settings)) {
+            $settings['enable_public_triage_hid_barcode'] = (bool) $settings['kiosk_enable_hid_barcode'];
+        }
+        if (array_key_exists('kiosk_enable_camera_scanner', $settings)) {
+            $settings['enable_public_triage_camera_scanner'] = (bool) $settings['kiosk_enable_camera_scanner'];
+        }
+        if (array_key_exists('kiosk_hid_persistent_when_scan_modal_closed', $settings)) {
+            $settings['enable_public_triage_hid_persistent_when_scan_modal_closed'] = (bool) $settings['kiosk_hid_persistent_when_scan_modal_closed'];
+        }
+
+        return $settings;
+    }
+
+    /**
+     * After merging request/display payload into stored settings: ensure canonical `kiosk_*` exist
+     * when only legacy triage keys were sent, then mirror kiosk → legacy.
+     *
+     * @param  array<string, mixed>  $settings
+     * @return array<string, mixed>
+     */
+    public static function normalizeStoredProgramSettingsKioskKeys(array $settings): array
+    {
+        if (! array_key_exists('kiosk_enable_hid_barcode', $settings) && array_key_exists('enable_public_triage_hid_barcode', $settings)) {
+            $settings['kiosk_enable_hid_barcode'] = (bool) $settings['enable_public_triage_hid_barcode'];
+        }
+        if (! array_key_exists('kiosk_enable_camera_scanner', $settings) && array_key_exists('enable_public_triage_camera_scanner', $settings)) {
+            $settings['kiosk_enable_camera_scanner'] = (bool) $settings['enable_public_triage_camera_scanner'];
+        }
+        if (! array_key_exists('kiosk_hid_persistent_when_scan_modal_closed', $settings) && array_key_exists('enable_public_triage_hid_persistent_when_scan_modal_closed', $settings)) {
+            $settings['kiosk_hid_persistent_when_scan_modal_closed'] = (bool) $settings['enable_public_triage_hid_persistent_when_scan_modal_closed'];
+        }
+
+        return self::syncKioskKeysToLegacyAliases($settings);
+    }
+
+    public function getKioskEnableHidBarcode(): bool
+    {
+        if (array_key_exists('kiosk_enable_hid_barcode', $this->settings)) {
+            return (bool) $this->settings['kiosk_enable_hid_barcode'];
+        }
+
+        return $this->getEnablePublicTriageHidBarcode();
+    }
+
+    public function getKioskEnableCameraScanner(): bool
+    {
+        if (array_key_exists('kiosk_enable_camera_scanner', $this->settings)) {
+            return (bool) $this->settings['kiosk_enable_camera_scanner'];
+        }
+
+        return $this->getEnablePublicTriageCameraScanner();
+    }
+
+    /** Modal auto-close on kiosk; falls back to display scan timeout then 20s. */
+    public function getKioskModalIdleSeconds(): int
+    {
+        if (array_key_exists('kiosk_modal_idle_seconds', $this->settings)) {
+            return max(0, (int) $this->settings['kiosk_modal_idle_seconds']);
+        }
+
+        return $this->getDisplayScanTimeoutSeconds();
+    }
+
+    /**
+     * When true, kiosk HID stays refocused when the scan modal is closed (program default for devices with no local override).
+     */
+    public function getKioskHidPersistentWhenScanModalClosed(): bool
+    {
+        if (array_key_exists('kiosk_hid_persistent_when_scan_modal_closed', $this->settings)) {
+            return (bool) $this->settings['kiosk_hid_persistent_when_scan_modal_closed'];
+        }
+        if (array_key_exists('enable_public_triage_hid_persistent_when_scan_modal_closed', $this->settings)) {
+            return (bool) $this->settings['enable_public_triage_hid_persistent_when_scan_modal_closed'];
+        }
+
+        return false;
+    }
+
     /** Per IDENTITY-BINDING-FINAL-IMPLEMENTATION-PLAN: only disabled | required; optional washed out. */
     public function getIdentityBindingMode(): string
     {
@@ -159,7 +280,7 @@ final class ProgramSettings
     /** When true, public triage can bind token (with or without identity). Only for mode 'required'. */
     public function allowsPublicBinding(): bool
     {
-        if (! $this->getAllowPublicTriage()) {
+        if (! $this->getKioskSelfServiceTriageEnabled()) {
             return false;
         }
 
@@ -168,7 +289,7 @@ final class ProgramSettings
 
     public function requiresPublicBinding(): bool
     {
-        if (! $this->getAllowPublicTriage()) {
+        if (! $this->getKioskSelfServiceTriageEnabled()) {
             return false;
         }
 
@@ -235,4 +356,3 @@ final class ProgramSettings
         return $this->getPublicAccessKey() !== null;
     }
 }
-

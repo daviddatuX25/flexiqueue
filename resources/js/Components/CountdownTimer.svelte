@@ -3,7 +3,7 @@
 
 	/**
 	 * Self-contained countdown timer. Holds its own state and interval so only this
-	 * component re-renders every second — avoids re-rendering large parents (e.g. PublicStart).
+	 * component re-renders every second — avoids re-rendering large parents (e.g. Kiosk/Start).
 	 */
 	let {
 		active = false,

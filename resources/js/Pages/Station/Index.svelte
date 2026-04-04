@@ -23,6 +23,7 @@
 	Monitor,
 	ArrowUpRight,
 	StickyNote,
+	Settings,
 } from 'lucide-svelte';
 	import { get } from 'svelte/store';
 	import { tick, onMount } from 'svelte';
@@ -31,6 +32,10 @@
 	import { router } from '@inertiajs/svelte';
 	import { toaster } from '../../lib/toaster.js';
 	import { shouldFocusHidInput, shouldUseInputModeNone } from '../../lib/displayHid.js';
+	import {
+		normalizeDisplayZoom,
+		DISPLAY_ZOOM_LEVELS,
+	} from '../../lib/displayAppearance.js';
 
 	type AuthType = 'preset_pin' | 'request_approval' | 'request_list';
 
@@ -114,6 +119,10 @@
 		stats: { total_waiting: number; total_served_today: number; avg_service_time_minutes: number };
 		display_audio_muted?: boolean;
 		display_audio_volume?: number;
+		/** Public /display/station page zoom (server + broadcast). */
+		display_page_zoom?: number;
+		queue_mode_display?: string | null;
+		alternate_ratio?: number[] | null;
 		authorizers?: { id: number; name: string }[];
 	}
 
@@ -205,11 +214,15 @@
 	/** Countdown per called session_id: when 0, No-show button enabled. Set when session enters 'called'. */
 	let noShowCountdown = $state<Record<number, number>>({});
 
-	/** Display board audio (for /display/station/{id}): staff can change mute/volume and save without PIN/QR. */
+	/** Public station display (/display/station): mute, volume, page zoom — saved on server (not this browser’s theme/zoom). */
 	let displaySettingsSaving = $state(false);
-	let showDisplayAudioModal = $state(false);
+	let showStationSettingsModal = $state(false);
 	let displayAudioMutedLocal = $state(false);
 	let displayAudioVolumeLocal = $state(1);
+	let displayPageZoomLocal = $state(1);
+	let audioMutedBaseline = $state(false);
+	let audioVolumeBaseline = $state(1);
+	let zoomBaseline = $state(1);
 	let displayAudioError = $state('');
 	/** Available browser TTS voices for dropdown (loaded on mount). */
 	let availableTtsVoices = $state<{ name: string; lang: string }[]>([]);
@@ -224,6 +237,12 @@
 	const servingCount = $derived(queue?.station?.serving_count ?? queue?.serving?.length ?? 0);
 	const atCapacity = $derived(servingCount >= clientCapacity);
 	const noShowTimerSeconds = $derived(queue?.no_show_timer_seconds ?? 10);
+
+	const stationPublicDisplayPending = $derived(
+		displayAudioMutedLocal !== audioMutedBaseline ||
+			Math.abs(displayAudioVolumeLocal - audioVolumeBaseline) > 0.001 ||
+			normalizeDisplayZoom(displayPageZoomLocal) !== normalizeDisplayZoom(zoomBaseline)
+	);
 
 	/** Staff needs auth for override/force-complete when program requires it; admin/supervisor never. Per flexiqueue-i87: when require_permission_before_override is OFF, reason-only (no PIN/QR). */
 	const needsAuthForOverride = $derived(!canSwitchStation && (queue?.require_permission_before_override ?? true));
@@ -526,47 +545,60 @@
 	async function saveDisplaySettings(updates: {
 		display_audio_muted?: boolean;
 		display_audio_volume?: number;
+		display_page_zoom?: number;
 	}): Promise<boolean> {
 		if (!station || !queue || displaySettingsSaving) return false;
 		displaySettingsSaving = true;
 		const body: {
 			display_audio_muted?: boolean;
 			display_audio_volume?: number;
+			display_page_zoom?: number;
 		} = {};
 		if (updates.display_audio_muted !== undefined) body.display_audio_muted = updates.display_audio_muted;
 		if (updates.display_audio_volume !== undefined) body.display_audio_volume = updates.display_audio_volume;
+		if (updates.display_page_zoom !== undefined) body.display_page_zoom = normalizeDisplayZoom(updates.display_page_zoom);
 		const { ok, data } = await api('PUT', `/api/stations/${station.id}/display-settings`, body);
 		displaySettingsSaving = false;
 		if (ok && data && typeof data === 'object' && 'display_audio_muted' in data) {
 			const d = data as {
 				display_audio_muted?: boolean;
 				display_audio_volume?: number;
+				display_page_zoom?: number;
 			};
 			queue = {
 				...queue,
 				display_audio_muted: d.display_audio_muted ?? queue.display_audio_muted,
 				display_audio_volume: d.display_audio_volume ?? queue.display_audio_volume,
+				display_page_zoom: normalizeDisplayZoom(d.display_page_zoom ?? queue.display_page_zoom ?? 1),
 			};
 			return true;
 		}
 		return false;
 	}
 
-	function openDisplayAudioModal() {
-		displayAudioMutedLocal = queue?.display_audio_muted ?? false;
-		displayAudioVolumeLocal = queue?.display_audio_volume ?? 1;
+	function openStationSettingsModal() {
+		audioMutedBaseline = queue?.display_audio_muted ?? false;
+		audioVolumeBaseline = queue?.display_audio_volume ?? 1;
+		zoomBaseline = normalizeDisplayZoom(queue?.display_page_zoom ?? 1);
+		displayAudioMutedLocal = audioMutedBaseline;
+		displayAudioVolumeLocal = audioVolumeBaseline;
+		displayPageZoomLocal = zoomBaseline;
 		displayAudioError = '';
-		showDisplayAudioModal = true;
+		showStationSettingsModal = true;
 	}
 
-	async function saveDisplayAudio() {
+	async function saveStationSettings() {
 		displayAudioError = '';
 		const ok = await saveDisplaySettings({
 			display_audio_muted: displayAudioMutedLocal,
 			display_audio_volume: displayAudioVolumeLocal,
+			display_page_zoom: displayPageZoomLocal,
 		});
-		if (ok) showDisplayAudioModal = false;
-		else displayAudioError = 'Failed to save.';
+		if (ok) {
+			showStationSettingsModal = false;
+		} else {
+			displayAudioError = 'Failed to save.';
+		}
 	}
 
 	async function togglePriorityFirst(priorityFirst: boolean) {
@@ -727,7 +759,7 @@
 						description: 'Send the client to triage to register and get in the queue.',
 						action: {
 							label: 'Go to triage',
-							onClick: () => router.visit('/triage')
+							onClick: () => router.visit('/client-registration')
 						},
 						duration: 10000
 					});
@@ -1387,9 +1419,11 @@
 				</nav>
 			{/if}
 
-			<!-- Toolbar: capacity, priority, display audio (single row, wraps on small) -->
-			<div class="flex flex-wrap items-center justify-between gap-3 py-2 px-3 rounded-container bg-surface-50/80 border border-surface-200 elevation-card">
-				<div class="flex items-center gap-3 touch-target-h">
+			<!-- Toolbar: left = serving + priority; right = queue mode + public display settings -->
+			<div
+				class="flex flex-wrap items-stretch justify-between gap-3 py-2 px-3 rounded-container bg-surface-50/80 border border-surface-200 elevation-card"
+			>
+				<div class="flex flex-wrap items-center gap-3 touch-target-h min-w-0">
 					<span class="text-sm font-medium text-surface-950/80 tabular-nums" aria-label="Serving count">
 						Serving {servingCount}/{clientCapacity}
 					</span>
@@ -1410,28 +1444,27 @@
 						</label>
 					{/if}
 				</div>
-				<button
-					type="button"
-					class="btn preset-tonal btn-sm gap-2 touch-target md:min-w-auto px-3"
-					title="Scan client token to identify and act"
-					onclick={openStationTokenScanner}
-					aria-label="Scan token"
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-surface-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-						<path stroke-linecap="round" stroke-linejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-					</svg>
-					<span class="hidden md:inline text-sm">Scan token</span>
-				</button>
-				<button
-					type="button"
-					class="btn preset-tonal btn-sm gap-2 touch-target md:min-w-auto px-3"
-					title="Display board audio"
-					onclick={openDisplayAudioModal}
-					aria-label="Display board audio settings"
-				>
-					<Volume2 class="w-5 h-5 text-surface-600 shrink-0" />
-					<span class="hidden md:inline text-sm">Display audio</span>
-				</button>
+				<div class="flex flex-wrap items-center gap-3 justify-end min-w-0 sm:max-w-[min(100%,28rem)]">
+					{#if queue?.queue_mode_display && String(queue.queue_mode_display).trim() !== ''}
+						<div class="text-right min-w-0">
+							<p class="text-sm font-semibold text-surface-950 leading-tight">{queue.queue_mode_display}</p>
+							{#if queue.alternate_ratio && Array.isArray(queue.alternate_ratio) && queue.alternate_ratio.length >= 2}
+								<p class="text-xs text-surface-600 mt-0.5 tabular-nums">
+									Priority {queue.alternate_ratio[0]} : Regular {queue.alternate_ratio[1]}
+								</p>
+							{/if}
+						</div>
+					{/if}
+					<button
+						type="button"
+						class="btn btn-icon preset-tonal shrink-0 touch-target"
+						aria-label="Public station display settings"
+						title="Public display settings"
+						onclick={openStationSettingsModal}
+					>
+						<Settings class="w-5 h-5" />
+					</button>
+				</div>
 			</div>
 
 			<!-- Main content: grid on desktop, stack on mobile -->
@@ -1468,7 +1501,7 @@
 												Unverified
 											</span>
 											<a
-												href="/triage?highlight_session_id={scannedSession.session_id}"
+												href="/client-registration?highlight_session_id={scannedSession.session_id}"
 												class="text-[11px] px-2 py-0.5 rounded preset-tonal text-surface-900 hover:underline touch-target-h"
 												title="Open triage and highlight this client"
 											>
@@ -1517,7 +1550,7 @@
 								<CategoryBadge category={s.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(s.client_category)} />
 								{#if s.unverified}
 									<a
-										href="/triage?highlight_session_id={s.session_id}"
+										href="/client-registration?highlight_session_id={s.session_id}"
 										class="text-xs px-2 py-0.5 rounded preset-filled-warning-500/30 text-warning-800 hover:preset-filled-warning-500/50 touch-target-h inline-block"
 										title="Identity not yet verified — go to triage"
 									>
@@ -1816,7 +1849,7 @@
 													<CategoryBadge category={w.client_category ?? 'Regular'} badgeClass={categoryBadgeClass(w.client_category)} size="sm" />
 													{#if w.unverified}
 														<a
-															href="/triage?highlight_session_id={w.session_id}"
+															href="/client-registration?highlight_session_id={w.session_id}"
 															class="text-xs px-2 py-0.5 rounded preset-filled-warning-500/30 text-warning-800 hover:preset-filled-warning-500/50 touch-target-h"
 															title="Identity not yet verified — go to triage"
 														>
@@ -2244,45 +2277,81 @@
 	{/if}
 
 	<Modal
-		open={showDisplayAudioModal}
-		title="Display board audio"
-		onClose={() => { showDisplayAudioModal = false; }}
+		open={showStationSettingsModal}
+		title="Public station display"
+		onClose={() => { showStationSettingsModal = false; }}
 	>
 		{#snippet children()}
-			<p class="text-sm text-surface-950/70 mb-4">Change mute and volume for this station’s display. Save to apply.</p>
-			<div class="flex flex-col gap-4">
-				<label for="display-audio-mute-switch" class="flex items-center justify-between cursor-pointer gap-3">
-					<span class="text-sm font-medium text-surface-950">Mute</span>
-					<div class="relative inline-block w-11 h-5">
+			<div class="flex flex-col gap-6">
+				<p class="text-sm text-surface-950/70">
+					These settings apply to the <strong class="font-medium text-surface-950">public station monitor</strong> (
+					<code class="text-xs bg-surface-100 px-1 rounded">/display/station/…</code>
+					), not this staff browser.
+				</p>
+				{#if stationPublicDisplayPending}
+					<p
+						class="text-xs text-primary-700 dark:text-primary-400 rounded-container border border-primary-500/30 bg-primary-500/5 px-3 py-2"
+						role="status"
+					>
+						<span class="font-medium">Pending until you save:</span>
+						changes to audio or page zoom for the public display.
+					</p>
+				{/if}
+				<div class="flex flex-col gap-4">
+					<h3 class="text-sm font-semibold text-surface-950">Audio on public display</h3>
+					<p class="text-xs text-surface-950/60">Mute and volume for call announcements on the station’s display screen.</p>
+					<label for="display-audio-mute-switch" class="flex items-center justify-between cursor-pointer gap-3">
+						<span class="text-sm font-medium text-surface-950">Mute</span>
+						<div class="relative inline-block w-11 h-5">
+							<input
+								id="display-audio-mute-switch"
+								type="checkbox"
+								class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300 disabled:opacity-50"
+								bind:checked={displayAudioMutedLocal}
+								disabled={displaySettingsSaving}
+							/>
+							<span class="absolute top-0 left-0 w-5 h-5 bg-surface-950 rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none" aria-hidden="true"></span>
+						</div>
+					</label>
+					<label class="flex flex-col gap-2">
+						<span class="text-sm font-medium text-surface-950">Volume</span>
+						<p class="text-xs text-surface-950/60">Updates on the public display after you save.</p>
 						<input
-							id="display-audio-mute-switch"
-							type="checkbox"
-							class="peer appearance-none w-11 h-5 bg-surface-200 rounded-full checked:bg-surface-800 cursor-pointer transition-colors duration-300 disabled:opacity-50"
-							bind:checked={displayAudioMutedLocal}
-							disabled={displaySettingsSaving}
+							type="range"
+							min="0"
+							max="1"
+							step="0.1"
+							class="range range-sm w-full max-w-xs"
+							bind:value={displayAudioVolumeLocal}
+							disabled={displaySettingsSaving || displayAudioMutedLocal}
 						/>
-						<span class="absolute top-0 left-0 w-5 h-5 bg-surface-950 rounded-full border border-surface-300 shadow-sm transition-transform duration-300 peer-checked:translate-x-6 peer-checked:border-surface-800 pointer-events-none" aria-hidden="true"></span>
-					</div>
-				</label>
-				<label class="flex flex-col gap-2">
-					<span class="text-sm font-medium text-surface-950">Volume</span>
-					<input
-						type="range"
-						min="0"
-						max="1"
-						step="0.1"
-						class="range range-sm w-full max-w-xs"
-						bind:value={displayAudioVolumeLocal}
-						disabled={displaySettingsSaving || displayAudioMutedLocal}
-					/>
-				</label>
-			</div>
-			{#if displayAudioError}
-				<p class="text-sm text-error-600 mt-2">{displayAudioError}</p>
-			{/if}
-			<div class="flex flex-wrap gap-2 justify-end pt-4">
-				<button type="button" class="btn preset-tonal" onclick={() => { showDisplayAudioModal = false; }} disabled={displaySettingsSaving}>Cancel</button>
-				<button type="button" class="btn preset-filled-primary-500" onclick={saveDisplayAudio} disabled={displaySettingsSaving}>{displaySettingsSaving ? 'Saving…' : 'Save'}</button>
+					</label>
+				</div>
+				<div class="border-t border-surface-200 pt-4 flex flex-col gap-3">
+					<h3 class="text-sm font-semibold text-surface-950">Page zoom (public display)</h3>
+					<p class="text-xs text-surface-950/60">
+						Scales the station monitor page (best in Chromium). Saved for this station’s public display.
+					</p>
+					<label class="flex flex-col gap-1 max-w-xs">
+						<span class="text-sm font-medium text-surface-950">Zoom level</span>
+						<select
+							class="select select-theme rounded-container border border-surface-200 px-3 py-2 text-sm"
+							bind:value={displayPageZoomLocal}
+							disabled={displaySettingsSaving}
+						>
+							{#each DISPLAY_ZOOM_LEVELS as z (z.value)}
+								<option value={z.value}>{z.label}</option>
+							{/each}
+						</select>
+					</label>
+				</div>
+				{#if displayAudioError}
+					<p class="text-sm text-error-600">{displayAudioError}</p>
+				{/if}
+				<div class="flex flex-wrap gap-2 justify-end pt-2">
+					<button type="button" class="btn preset-tonal" onclick={() => { showStationSettingsModal = false; }} disabled={displaySettingsSaving}>Cancel</button>
+					<button type="button" class="btn preset-filled-primary-500" onclick={saveStationSettings} disabled={displaySettingsSaving}>{displaySettingsSaving ? 'Saving…' : 'Save'}</button>
+				</div>
 			</div>
 		{/snippet}
 	</Modal>

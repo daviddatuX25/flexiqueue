@@ -3,7 +3,7 @@
 # DEPRECATED — Do not use in new scripts.
 # This file is no longer used by the main build/deploy scripts. The new release
 # model builds directly from the current branch using Sail/Docker via
-# scripts/release-central.sh and scripts/release-edge.sh. Kept only because
+# scripts/central/release/release-central.sh and scripts/edge/release/release-edge.sh. Kept only because
 # scripts/legacy/ scripts may still source it. Do not delete the file.
 # -----------------------------------------------------------------------------
 

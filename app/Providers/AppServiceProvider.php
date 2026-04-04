@@ -6,14 +6,22 @@ use App\Events\StationDeleted;
 use App\Events\TokenDeleted;
 use App\Listeners\CleanupStationTtsFiles;
 use App\Listeners\CleanupTokenTtsFiles;
+use App\Models\Program;
 use App\Models\Session;
+use App\Models\Site;
 use App\Models\Station;
+use App\Observers\ProgramObserver;
+use App\Observers\SiteObserver;
 use App\Policies\SessionPolicy;
 use App\Policies\StationPolicy;
 use App\Repositories\PrintSettingRepository;
 use App\Repositories\TokenTtsSettingRepository;
 use App\Services\EdgeModeService;
+use App\Services\Tts\Contracts\TtsEngine;
+use App\Services\Tts\Engines\ElevenLabsEngine;
+use App\Services\Tts\Engines\NullTtsEngine;
 use App\Services\TtsService;
+use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
@@ -25,6 +33,15 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->bind(TtsEngine::class, function ($app) {
+            $driver = config('tts.driver', 'null');
+
+            return match ($driver) {
+                'elevenlabs' => $app->make(ElevenLabsEngine::class),
+                default => $app->make(NullTtsEngine::class),
+            };
+        });
+
         $this->app->bind(TtsService::class, fn () => TtsService::fromConfig());
         $this->app->singleton(EdgeModeService::class);
         $this->app->singleton(PrintSettingRepository::class);
@@ -40,7 +57,18 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Station::class, StationPolicy::class);
         Gate::policy(Session::class, SessionPolicy::class);
 
+        Site::observe(SiteObserver::class);
+        Program::observe(ProgramObserver::class);
+
         Event::listen(StationDeleted::class, CleanupStationTtsFiles::class);
         Event::listen(TokenDeleted::class, CleanupTokenTtsFiles::class);
+
+        // Per HYBRID_AUTH_ADMIN_FIRST_PRD.md: reset link identifies account by username (not users.email).
+        ResetPassword::createUrlUsing(function ($user, string $token): string {
+            return url(route('password.reset', [
+                'token' => $token,
+                'username' => $user->username,
+            ], false));
+        });
     }
 }

@@ -10,12 +10,18 @@ use App\Models\TtsAccount;
 class TtsAccountService
 {
     /**
-     * Set the given account as active; deactivate all others.
-     * At most one TtsAccount is active at a time.
+     * Set the given account as active; deactivate other accounts with the same {@see TtsAccount::$provider}.
+     * At most one active row per provider (ADR 001).
      */
     public function setActive(TtsAccount $account): void
     {
-        TtsAccount::where('id', '!=', $account->id)->update(['is_active' => false]);
+        $provider = $account->provider ?? 'elevenlabs';
+
+        TtsAccount::query()
+            ->where('id', '!=', $account->id)
+            ->where('provider', $provider)
+            ->update(['is_active' => false]);
+
         $account->update(['is_active' => true]);
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Models\Program;
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Validator;
 
@@ -37,7 +38,7 @@ class UpdateProgramDiagramRequest extends FormRequest
     }
 
     /**
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
@@ -90,7 +91,7 @@ class UpdateProgramDiagramRequest extends FormRequest
             $validTrackIds = $program->serviceTracks()->pluck('id')->all();
             $validProcessIds = $program->processes()->pluck('id')->all();
             $validStaffUserIds = $program->stationAssignments()->pluck('user_id')
-                ->merge($program->supervisedBy()->pluck('users.id'))
+                ->merge(collect($program->allSupervisorUserIds()))
                 ->unique()->values()->all();
             $stationProcessIds = $program->stations()->with('processes')->get()
                 ->mapWithKeys(fn ($s) => [$s->id => $s->processes->pluck('id')->all()]);
@@ -118,6 +119,7 @@ class UpdateProgramDiagramRequest extends FormRequest
                             "layout.nodes.{$index}.data",
                             'Process handle node requires data.stationId and data.processId.'
                         );
+
                         continue;
                     }
                     if (! in_array($stationId, $validStationIds, true)) {
@@ -125,6 +127,7 @@ class UpdateProgramDiagramRequest extends FormRequest
                             "layout.nodes.{$index}.data.stationId",
                             "Station id {$stationId} does not belong to this program."
                         );
+
                         continue;
                     }
                     if (! in_array($processId, $validProcessIds, true)) {
@@ -132,6 +135,7 @@ class UpdateProgramDiagramRequest extends FormRequest
                             "layout.nodes.{$index}.data.processId",
                             "Process id {$processId} does not belong to this program."
                         );
+
                         continue;
                     }
                     $allowedProcessIds = $stationProcessIds[$stationId] ?? [];
@@ -141,6 +145,7 @@ class UpdateProgramDiagramRequest extends FormRequest
                             "Process id {$processId} is not assigned to station id {$stationId}."
                         );
                     }
+
                     continue;
                 }
 
@@ -151,6 +156,7 @@ class UpdateProgramDiagramRequest extends FormRequest
                             "layout.nodes.{$index}.entityId",
                             'Station group node requires a valid station (entityId or data.stationId).'
                         );
+
                         continue;
                     }
                     $entityId = (int) $entityId;
@@ -160,6 +166,7 @@ class UpdateProgramDiagramRequest extends FormRequest
                             "Station id {$entityId} does not belong to this program."
                         );
                     }
+
                     continue;
                 }
 
@@ -169,6 +176,7 @@ class UpdateProgramDiagramRequest extends FormRequest
                         "layout.nodes.{$index}.entityId",
                         "Node type \"{$type}\" requires a valid entityId."
                     );
+
                     continue;
                 }
 

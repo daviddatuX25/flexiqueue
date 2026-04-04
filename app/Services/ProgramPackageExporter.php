@@ -10,6 +10,7 @@ use App\Models\Site;
 use App\Models\Station;
 use App\Models\Token;
 use App\Models\TrackStep;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
@@ -59,16 +60,27 @@ class ProgramPackageExporter
         $sections['station_process'] = $stationProcessRows->map(fn ($r) => (array) $r)->values()->all();
 
         // Per plan: use raw DB so password/override_pin/override_qr_token are included (User $hidden would strip them).
+        // `role` in the package is the primary Spatie global role name (not a users table column).
+        $userIds = DB::table('users')->where('site_id', $site->id)->pluck('id');
+        $roleByUserId = [];
+        foreach (User::query()->whereIn('id', $userIds)->get() as $u) {
+            $roleByUserId[$u->id] = $u->primaryGlobalRoleName() ?? 'staff';
+        }
         $userRows = DB::table('users')
             ->where('site_id', $site->id)
             ->get([
-                'id', 'site_id', 'name', 'email', 'password', 'role',
+                'id', 'site_id', 'name', 'email', 'password',
                 'override_pin', 'override_qr_token',
                 'assigned_station_id', 'is_active', 'availability_status',
                 'staff_triage_allow_hid_barcode', 'staff_triage_allow_camera_scanner',
                 'created_at', 'updated_at',
             ]);
-        $sections['users'] = $userRows->map(fn ($r) => (array) $r)->values()->all();
+        $sections['users'] = $userRows->map(function ($r) use ($roleByUserId) {
+            $a = (array) $r;
+            $a['role'] = $roleByUserId[$r->id] ?? 'staff';
+
+            return $a;
+        })->values()->all();
 
         if ($syncTokens) {
             $sections['tokens'] = Token::forSite($site->id)
@@ -108,8 +120,10 @@ class ProgramPackageExporter
 
         if ($syncTts) {
             $sections['tts_files'] = $this->collectTtsFilePaths($sections);
+            $sections['tts_asset_references'] = $this->collectTtsAssetReferences($sections);
         } else {
             $sections['tts_files'] = [];
+            $sections['tts_asset_references'] = [];
         }
 
         $manifest = [
@@ -130,7 +144,9 @@ class ProgramPackageExporter
                 'users' => hash('sha256', json_encode($sections['users'])),
                 'tokens' => hash('sha256', json_encode($sections['tokens'])),
                 'clients' => hash('sha256', json_encode($sections['clients'])),
+                'tts_asset_references' => hash('sha256', json_encode($sections['tts_asset_references'])),
             ],
+            'tts_asset_contract_version' => 2,
         ];
 
         return [
@@ -147,6 +163,7 @@ class ProgramPackageExporter
             'program_token' => $sections['program_token'],
             'clients' => $sections['clients'],
             'tts_files' => $sections['tts_files'],
+            'tts_asset_references' => $sections['tts_asset_references'],
         ];
     }
 
@@ -192,5 +209,65 @@ class ProgramPackageExporter
         }
 
         return $existing;
+    }
+
+    /**
+     * Build sync-safe references to revision-ready TTS metadata.
+     */
+    private function collectTtsAssetReferences(array $sections): array
+    {
+        $rows = [];
+
+        foreach ($sections['tokens'] ?? [] as $token) {
+            $languages = $token['tts_settings']['languages'] ?? [];
+            if (! is_array($languages)) {
+                continue;
+            }
+            foreach ($languages as $langCode => $cfg) {
+                if (! is_array($cfg)) {
+                    continue;
+                }
+                $meta = $cfg['asset_meta'] ?? null;
+                if (! is_array($meta)) {
+                    continue;
+                }
+                $rows[] = [
+                    'scope' => 'token',
+                    'entity_id' => (int) ($token['id'] ?? 0),
+                    'language' => (string) $langCode,
+                    'audio_path' => $cfg['audio_path'] ?? null,
+                    'canonical_key' => $meta['canonical_key'] ?? null,
+                    'revision' => $meta['revision'] ?? null,
+                    'hash' => $meta['hash'] ?? null,
+                ];
+            }
+        }
+
+        foreach ($sections['stations'] ?? [] as $station) {
+            $languages = $station['settings']['tts']['languages'] ?? [];
+            if (! is_array($languages)) {
+                continue;
+            }
+            foreach ($languages as $langCode => $cfg) {
+                if (! is_array($cfg)) {
+                    continue;
+                }
+                $meta = $cfg['asset_meta'] ?? null;
+                if (! is_array($meta)) {
+                    continue;
+                }
+                $rows[] = [
+                    'scope' => 'station',
+                    'entity_id' => (int) ($station['id'] ?? 0),
+                    'language' => (string) $langCode,
+                    'audio_path' => $cfg['audio_path'] ?? null,
+                    'canonical_key' => $meta['canonical_key'] ?? null,
+                    'revision' => $meta['revision'] ?? null,
+                    'hash' => $meta['hash'] ?? null,
+                ];
+            }
+        }
+
+        return $rows;
     }
 }

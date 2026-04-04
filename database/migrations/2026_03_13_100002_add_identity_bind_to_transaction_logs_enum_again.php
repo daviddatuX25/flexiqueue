@@ -8,11 +8,11 @@ return new class extends Migration
     /**
      * Run the migrations.
      * Add 'identity_bind' to action_type ENUM (was dropped when enqueue_back was added in 000220).
-     * MariaDB/MySQL only; SQLite uses VARCHAR(255).
+     * MySQL only; SQLite uses VARCHAR(255).
      */
     public function up(): void
     {
-        if (! in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() !== 'mysql') {
             return;
         }
 
@@ -40,7 +40,7 @@ return new class extends Migration
      */
     public function down(): void
     {
-        if (! in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() !== 'mysql') {
             return;
         }
 

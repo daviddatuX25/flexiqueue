@@ -6,6 +6,8 @@ use App\Enums\UserRole;
 use App\Models\Program;
 use App\Models\TemporaryAuthorization;
 use App\Models\User;
+use App\Support\PermissionCatalog;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 
@@ -30,10 +32,11 @@ class PinService
                     return null;
                 }
                 $user = $auth->user;
+
                 return [
                     'verified' => true,
                     'user_id' => $user->id,
-                    'role' => $user->role->value,
+                    'role' => $user->primaryGlobalRoleName() ?? 'staff',
                 ];
             }
         }
@@ -60,7 +63,7 @@ class PinService
                 return [
                     'verified' => true,
                     'user_id' => $user->id,
-                    'role' => $user->role->value,
+                    'role' => $user->primaryGlobalRoleName() ?? 'staff',
                 ];
             }
         }
@@ -72,7 +75,7 @@ class PinService
      * Pull a bounded set of candidate temporary authorizations to check via Hash::check().
      * We can't look up by hash directly, so we filter by type and likely-not-expired conditions.
      *
-     * @return \Illuminate\Support\Collection<int, TemporaryAuthorization>
+     * @return Collection<int, TemporaryAuthorization>
      */
     private function candidateTemporaryAuthorizations(string $type)
     {
@@ -153,7 +156,7 @@ class PinService
         return [
             'verified' => true,
             'user_id' => $user->id,
-            'role' => $user->role->value,
+            'role' => $user->primaryGlobalRoleName() ?? 'staff',
         ];
     }
 
@@ -179,7 +182,7 @@ class PinService
                 return [
                     'verified' => true,
                     'user_id' => $user->id,
-                    'role' => $user->role->value,
+                    'role' => $user->primaryGlobalRoleName() ?? 'staff',
                 ];
             }
         }
@@ -200,8 +203,10 @@ class PinService
             return null;
         }
 
-        $supervisorIds = $program->supervisedBy()->pluck('users.id');
-        $adminIds = User::query()->where('role', UserRole::Admin)->pluck('id');
+        $supervisorIds = collect($program->allSupervisorUserIds());
+        $adminIds = User::withGlobalPermissionsTeam(fn () => User::query()
+            ->role([UserRole::Admin->value, UserRole::SuperAdmin->value])
+            ->pluck('id'));
         $userIds = $supervisorIds->merge($adminIds)->unique()->values()->all();
 
         $users = User::query()
@@ -214,7 +219,7 @@ class PinService
                 return [
                     'verified' => true,
                     'user_id' => $user->id,
-                    'role' => $user->role->value,
+                    'role' => $user->primaryGlobalRoleName() ?? 'staff',
                 ];
             }
         }
@@ -241,11 +246,11 @@ class PinService
         }
 
         $userId = $result['user_id'];
-        $isSupervisor = $program->supervisedBy()->where('users.id', $userId)->exists();
         $user = User::find($userId);
-        $isAdminOrSuperAdmin = $user && in_array($user->role, [UserRole::Admin, UserRole::SuperAdmin], true);
+        $isSupervisor = $user && $user->isSupervisorForProgram($program->id);
+        $hasAdminShell = $user && $user->can(PermissionCatalog::ADMIN_SHARED);
 
-        if (! $isSupervisor && ! $isAdminOrSuperAdmin) {
+        if (! $isSupervisor && ! $hasAdminShell) {
             return null;
         }
 

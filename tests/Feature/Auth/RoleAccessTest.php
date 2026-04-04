@@ -9,6 +9,7 @@ use App\Models\Site;
 use App\Models\Station;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -21,7 +22,7 @@ class RoleAccessTest extends TestCase
 
     public function test_staff_cannot_access_admin_dashboard_returns_403(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->get(route('admin.dashboard'));
 
@@ -30,7 +31,7 @@ class RoleAccessTest extends TestCase
 
     public function test_staff_cannot_access_admin_programs_returns_403(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->get(route('admin.programs'));
 
@@ -87,9 +88,9 @@ class RoleAccessTest extends TestCase
     {
         $site = Site::firstOrCreate(
             ['slug' => 'default'],
-            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
+            ['name' => 'Default', 'api_key_hash' => Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
         );
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
@@ -107,16 +108,16 @@ class RoleAccessTest extends TestCase
         $staff->update(['assigned_station_id' => $station->id]);
 
         $this->actingAs($staff)->get(route('station'))->assertStatus(200);
-        $this->actingAs($staff)->get(route('triage'))->assertStatus(200);
+        $this->actingAs($staff)->get(route('client-registration'))->assertStatus(200);
     }
 
     public function test_station_route_with_explicit_station_uses_station_program_when_multiple_active_programs(): void
     {
         $site = Site::firstOrCreate(
             ['slug' => 'default'],
-            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
+            ['name' => 'Default', 'api_key_hash' => Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
         );
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
 
         $programA = Program::create([
@@ -176,9 +177,9 @@ class RoleAccessTest extends TestCase
     {
         $site = Site::firstOrCreate(
             ['slug' => 'default'],
-            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
+            ['name' => 'Default', 'api_key_hash' => Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
         );
-        $staff = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null, 'site_id' => $site->id]);
+        $staff = User::factory()->create(['assigned_station_id' => null, 'site_id' => $site->id]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
@@ -215,7 +216,7 @@ class RoleAccessTest extends TestCase
     {
         $site = Site::firstOrCreate(
             ['slug' => 'default'],
-            ['name' => 'Default', 'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
+            ['name' => 'Default', 'api_key_hash' => Hash::make(Str::random(40)), 'settings' => [], 'edge_settings' => []]
         );
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
         $program = Program::create([
@@ -234,15 +235,15 @@ class RoleAccessTest extends TestCase
         $admin->update(['assigned_station_id' => $station->id]);
 
         $this->actingAs($admin)->get(route('station'))->assertStatus(200);
-        $this->actingAs($admin)->get(route('triage'))->assertStatus(200);
+        $this->actingAs($admin)->get(route('client-registration'))->assertStatus(200);
     }
 
     public function test_admin_can_access_program_show_returns_200(): void
     {
-        $site = \App\Models\Site::create([
+        $site = Site::create([
             'name' => 'Default',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(\Illuminate\Support\Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -262,15 +263,15 @@ class RoleAccessTest extends TestCase
 
     public function test_staff_cannot_access_program_show_returns_403(): void
     {
-        $site = \App\Models\Site::create([
+        $site = Site::create([
             'name' => 'Default',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(\Illuminate\Support\Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'Test',
@@ -287,7 +288,7 @@ class RoleAccessTest extends TestCase
     /** Per docs/plans/STAFF-DASHBOARD-PLAN.md: staff/supervisor see Staff Dashboard at /dashboard. */
     public function test_staff_dashboard_returns_200_with_metrics(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->get(route('dashboard'));
 

@@ -186,7 +186,6 @@ class ProfileApiTest extends TestCase
     public function test_triage_settings_get_returns_preferences(): void
     {
         $user = User::factory()->create([
-            'role' => 'staff',
             'staff_triage_allow_hid_barcode' => true,
             'staff_triage_allow_camera_scanner' => false,
         ]);
@@ -201,7 +200,6 @@ class ProfileApiTest extends TestCase
     public function test_triage_settings_put_updates_preferences(): void
     {
         $user = User::factory()->create([
-            'role' => 'staff',
             'staff_triage_allow_hid_barcode' => true,
             'staff_triage_allow_camera_scanner' => true,
         ]);

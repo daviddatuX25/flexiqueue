@@ -7,7 +7,11 @@ use App\Models\Process;
 use App\Models\Program;
 use App\Models\Station;
 use App\Models\User;
-use App\Services\DisplayBoardService;
+use App\Repositories\TokenTtsSettingRepository;
+use App\Services\Tts\AnnouncementBuilder;
+use App\Services\Tts\TtsAssetIdentity;
+use App\Services\Tts\TtsAssetLifecycleManager;
+use App\Services\Tts\TtsGenerationLock;
 use App\Services\TtsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
@@ -41,7 +45,11 @@ class GenerateStationTtsJobTest extends TestCase
         $job = new GenerateStationTtsJob($station);
         $job->handle(
             $this->app->make(TtsService::class),
-            $this->app->make(DisplayBoardService::class)
+            $this->app->make(AnnouncementBuilder::class),
+            $this->app->make(TokenTtsSettingRepository::class),
+            $this->app->make(TtsAssetIdentity::class),
+            $this->app->make(TtsAssetLifecycleManager::class),
+            $this->app->make(TtsGenerationLock::class),
         );
 
         $station->refresh();
@@ -72,7 +80,11 @@ class GenerateStationTtsJobTest extends TestCase
         $job = new GenerateStationTtsJob($station);
         $job->handle(
             $this->app->make(TtsService::class),
-            $this->app->make(DisplayBoardService::class)
+            $this->app->make(AnnouncementBuilder::class),
+            $this->app->make(TokenTtsSettingRepository::class),
+            $this->app->make(TtsAssetIdentity::class),
+            $this->app->make(TtsAssetLifecycleManager::class),
+            $this->app->make(TtsGenerationLock::class),
         );
 
         $this->assertTrue(true);

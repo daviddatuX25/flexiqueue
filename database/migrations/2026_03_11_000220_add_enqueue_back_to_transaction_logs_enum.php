@@ -9,11 +9,11 @@ return new class extends Migration
      * Run the migrations.
      * Per flexiqueue-a3wh: add 'enqueue_back' transaction log action.
      *
-     * MariaDB/MySQL use ENUM; SQLite already uses VARCHAR(255) so no schema change is required there.
+     * MySQL uses ENUM; SQLite already uses VARCHAR(255) so no schema change is required there.
      */
     public function up(): void
     {
-        if (! in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() !== 'mysql') {
             return;
         }
 
@@ -40,7 +40,7 @@ return new class extends Migration
      */
     public function down(): void
     {
-        if (! in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (DB::getDriverName() !== 'mysql') {
             return;
         }
 

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -18,7 +19,7 @@ class UpdateSiteRequest extends FormRequest
     }
 
     /**
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
@@ -43,6 +44,13 @@ class UpdateSiteRequest extends FormRequest
             'settings.landing_sections.*.title' => ['required_with:settings.landing_sections.*', 'string', 'max:200'],
             'settings.landing_sections.*.body' => ['nullable', 'string'],
             'settings.landing_show_stats' => ['nullable', 'boolean'],
+            'settings.tts_budget' => ['sometimes', 'nullable', 'array'],
+            'settings.tts_budget.enabled' => ['sometimes', 'boolean'],
+            'settings.tts_budget.mode' => ['sometimes', 'string', 'in:chars'],
+            'settings.tts_budget.period' => ['sometimes', 'string', 'in:daily,monthly'],
+            'settings.tts_budget.limit' => ['sometimes', 'integer', 'min:0'],
+            'settings.tts_budget.warning_threshold_pct' => ['sometimes', 'integer', 'min:0', 'max:100'],
+            'settings.tts_budget.block_on_limit' => ['sometimes', 'boolean'],
         ];
     }
 }

@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Services\Tts\TtsBudgetPolicy;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Site extends Model
 {
+    use HasFactory;
     protected $fillable = [
         'name',
         'slug',
@@ -38,7 +41,12 @@ class Site extends Model
     /** Per addition-to-public-site-plan: short links for site/program QR codes. */
     public function shortLinks(): HasMany
     {
-        return $this->hasMany(\App\Models\SiteShortLink::class);
+        return $this->hasMany(SiteShortLink::class);
+    }
+
+    /** Per phase4 governance: TTS budget policy from settings. */
+    public function getTtsBudgetPolicy(): TtsBudgetPolicy
+    {
+        return TtsBudgetPolicy::fromSiteSettings($this->settings);
     }
 }
-

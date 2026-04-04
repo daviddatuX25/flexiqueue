@@ -3,10 +3,11 @@
 namespace Tests\Feature\Api\Admin;
 
 use App\Models\Site;
-use App\Repositories\PrintSettingRepository;
 use App\Models\User;
+use App\Repositories\PrintSettingRepository;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -21,7 +22,7 @@ class PrintSettingsTest extends TestCase
         $site = Site::create([
             'name' => 'Test Site',
             'slug' => 'test-site',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -74,9 +75,16 @@ class PrintSettingsTest extends TestCase
         $response->assertJsonPath('print_settings.bg_image_url', 'https://example.com/bg.png');
     }
 
+    public function test_super_admin_without_site_cannot_access_site_print_settings(): void
+    {
+        $super = User::factory()->superAdmin()->create(['site_id' => null]);
+
+        $this->actingAs($super)->getJson('/api/admin/print-settings')->assertStatus(403);
+    }
+
     public function test_non_admin_cannot_access(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $this->actingAs($staff)->getJson('/api/admin/print-settings')->assertStatus(403);
         $this->actingAs($staff);

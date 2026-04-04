@@ -2,8 +2,9 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
+use App\Support\ClientCategory;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -23,6 +24,7 @@ class Session extends Model
         'track_id',
         'alias',
         'client_category',
+        'priority_lane_override',
         'current_station_id',
         'holding_station_id',
         'is_on_hold',
@@ -111,10 +113,14 @@ class Session extends Model
     }
 
     /**
-     * Whether this session is in the priority lane (PWD, Senior, Pregnant).
+     * Whether this session is in the priority lane (PWD, Senior, Pregnant), or staff override for "Other: …".
      */
     public function isPriorityCategory(): bool
     {
-        return \App\Support\ClientCategory::isPriority($this->client_category);
+        if ($this->priority_lane_override !== null) {
+            return (bool) $this->priority_lane_override;
+        }
+
+        return ClientCategory::isPriority($this->client_category);
     }
 }

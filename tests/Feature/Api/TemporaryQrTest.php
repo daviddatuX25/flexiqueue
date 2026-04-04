@@ -3,6 +3,7 @@
 namespace Tests\Feature\Api;
 
 use App\Models\Program;
+use App\Models\ServiceTrack;
 use App\Models\Session;
 use App\Models\Station;
 use App\Models\TemporaryAuthorization;
@@ -29,9 +30,9 @@ class TemporaryQrTest extends TestCase
 
     private Station $station2;
 
-    private \App\Models\ServiceTrack $track;
+    private ServiceTrack $track;
 
-    private \App\Models\ServiceTrack $trackToStation2;
+    private ServiceTrack $trackToStation2;
 
     private Session $session;
 
@@ -39,14 +40,14 @@ class TemporaryQrTest extends TestCase
     {
         parent::setUp();
         $this->supervisor = User::factory()->supervisor()->withOverridePin('123456')->create();
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $this->program = Program::create([
             'name' => 'Test',
             'description' => null,
             'is_active' => true,
             'created_by' => $staff->id,
         ]);
-        $this->program->supervisedBy()->attach($this->supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($this->supervisor, $this->program);
         $this->station1 = Station::create([
             'program_id' => $this->program->id,
             'name' => 'S1',
@@ -59,7 +60,7 @@ class TemporaryQrTest extends TestCase
             'capacity' => 1,
             'is_active' => true,
         ]);
-        $this->track = \App\Models\ServiceTrack::create([
+        $this->track = ServiceTrack::create([
             'program_id' => $this->program->id,
             'name' => 'Default',
             'is_default' => true,
@@ -67,7 +68,7 @@ class TemporaryQrTest extends TestCase
         ]);
         TrackStep::create(['track_id' => $this->track->id, 'station_id' => $this->station1->id, 'step_order' => 1, 'is_required' => true]);
         TrackStep::create(['track_id' => $this->track->id, 'station_id' => $this->station2->id, 'step_order' => 2, 'is_required' => true]);
-        $this->trackToStation2 = \App\Models\ServiceTrack::create([
+        $this->trackToStation2 = ServiceTrack::create([
             'program_id' => $this->program->id,
             'name' => 'To S2',
             'is_default' => false,
@@ -122,7 +123,7 @@ class TemporaryQrTest extends TestCase
             'expires_at' => now()->addMinutes(5),
         ]);
 
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $response = $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
             'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Skip step',
@@ -146,7 +147,7 @@ class TemporaryQrTest extends TestCase
             'expires_at' => now()->addMinutes(5),
         ]);
 
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
             'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Use 1',
@@ -176,7 +177,7 @@ class TemporaryQrTest extends TestCase
             'expires_at' => now()->addMinutes(5),
         ]);
 
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $response = $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/force-complete", [
             'reason' => 'Client left',
             'auth_type' => 'temp_qr',
@@ -204,7 +205,7 @@ class TemporaryQrTest extends TestCase
         $scanToken = $genResponse->json('scan_token');
         $this->assertNotEmpty($scanToken);
 
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
         $this->actingAs($staff)->postJson("/api/sessions/{$this->session->id}/override", [
             'target_track_id' => $this->trackToStation2->id,
             'reason' => 'Use 1',
@@ -231,7 +232,7 @@ class TemporaryQrTest extends TestCase
 
     public function test_temporary_qr_staff_cannot_generate(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->postJson('/api/auth/temporary-qr');
 

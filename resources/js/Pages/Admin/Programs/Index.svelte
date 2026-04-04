@@ -31,6 +31,8 @@
         is_paused?: boolean;
         created_at: string | null;
         settings?: ProgramSettingsSummary;
+        edge_locked_by_device_id?: number | null;
+        edge_locked_by_device_name?: string | null;
     }
 
     let {
@@ -458,7 +460,7 @@
                                 >
                                     {program.name}
                                 </span>
-                                <div class="shrink-0 mt-1">
+                                <div class="shrink-0 mt-1 flex flex-col items-end gap-1">
                                     {#if program.is_active && !program.is_paused}
                                         <span
                                             class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded preset-filled-success-500 animate-pulse"
@@ -474,6 +476,12 @@
                                             class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded preset-tonal text-surface-600"
                                             >Inactive</span
                                         >
+                                    {/if}
+                                    {#if program.edge_locked_by_device_id}
+                                        <span
+                                            class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded preset-tonal-primary flex items-center gap-1"
+                                            title="Assigned to edge device {program.edge_locked_by_device_name ?? 'unknown'}. Unassign the device to use this program on central."
+                                        >🔒 Edge: {program.edge_locked_by_device_name ?? "device"}</span>
                                     {/if}
                                 </div>
                             </div>
@@ -659,7 +667,7 @@
             <div class="divider my-1"></div>
             <fieldset class="space-y-3">
                 <legend class="text-sm font-semibold text-surface-900">
-                    Public triage
+                    Kiosk (self-service)
                 </legend>
                 <label class="flex items-start gap-3 cursor-pointer">
                     <input
@@ -668,10 +676,11 @@
                         bind:checked={editAllowPublicTriage}
                     />
                     <span class="text-sm">
-                        <span class="font-medium">Allow public triage</span>
+                        <span class="font-medium">Allow kiosk self-service</span>
                         <span class="block text-surface-500 text-xs">
-                            When enabled, clients can start at the public triage
-                            entry page for this program.
+                            When enabled, visitors can use this program’s kiosk
+                            (site URL) to start a visit or check queue status,
+                            per program kiosk settings.
                         </span>
                     </span>
                 </label>
@@ -684,18 +693,15 @@
                     />
                     <span class="text-sm">
                         <span class="font-medium"
-                            >Allow visits to start with unverified ID (public triage)</span
+                            >Allow visits to start with unverified ID (kiosk)</span
                         >
                         <span class="block text-surface-500 text-xs">
-                            When enabled, public triage can create a
+                            When identity is required, if enabled the kiosk can create a
                             <span class="font-semibold">queue session</span>
-                            together with an identity registration, even if the
-                            identification is not yet verified; the session is
-                            marked unverified until staff accept it. When
-                            disabled, public triage only records an identity
-                            registration and does
-                            <span class="font-semibold">not</span> start a
-                            session.
+                            together with an identity registration before staff verify; the session stays
+                            marked unverified until staff accept. If disabled, the kiosk only submits a
+                            registration for <span class="font-semibold">client registration</span> (staff)
+                            and does <span class="font-semibold">not</span> start a session.
                         </span>
                     </span>
                 </label>

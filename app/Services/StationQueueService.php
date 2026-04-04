@@ -98,6 +98,19 @@ class StationQueueService
         $noShowTimerSeconds = $station->program?->settings()->getNoShowTimerSeconds() ?? 10;
         $maxNoShowAttempts = $station->program?->settings()->getMaxNoShowAttempts() ?? 3;
 
+        $queueModeDisplay = null;
+        $alternateRatio = null;
+        if ($program) {
+            $bm = $program->settings()->getBalanceMode();
+            if ($bm === 'alternate') {
+                [$p, $r] = $program->settings()->getAlternateRatio();
+                $queueModeDisplay = 'Alternate ('.$p.' : '.$r.')';
+                $alternateRatio = [$p, $r];
+            } else {
+                $queueModeDisplay = 'FIFO';
+            }
+        }
+
         $waitingFormatted = $ordered->map(fn (Session $s) => $this->formatWaitingSession($s))->all();
         $first = $ordered->first();
 
@@ -111,12 +124,12 @@ class StationQueueService
 
         $authorizers = [];
         if ($program) {
-            $supervisorIds = $program->supervisedBy()->pluck('users.id')->all();
-            $adminIds = User::query()
+            $supervisorIds = $program->allSupervisorUserIds();
+            $adminIds = User::withGlobalPermissionsTeam(fn () => User::query()
                 ->where('site_id', $program->site_id)
-                ->where('role', UserRole::Admin)
+                ->role(UserRole::Admin->value)
                 ->pluck('id')
-                ->all();
+                ->all());
             $authorizerIds = array_unique(array_merge($supervisorIds, $adminIds));
             $authorizers = User::query()
                 ->whereIn('id', $authorizerIds)
@@ -139,6 +152,9 @@ class StationQueueService
             'holding' => $heldSessions->map(fn (Session $s) => $this->formatHoldingSession($s))->values()->all(),
             'display_audio_muted' => $station->getDisplayAudioMuted(),
             'display_audio_volume' => $station->getDisplayAudioVolume(),
+            'display_page_zoom' => $station->getDisplayPageZoom(),
+            'queue_mode_display' => $queueModeDisplay,
+            'alternate_ratio' => $alternateRatio,
             'priority_first' => $priorityFirst,
             'require_permission_before_override' => $requirePermissionBeforeOverride,
             'call_next_requires_override' => $callNextRequiresOverride,
@@ -162,8 +178,8 @@ class StationQueueService
     /**
      * Order waiting sessions by priority_first and balance_mode.
      *
-     * @param  \Illuminate\Support\Collection<int, Session>  $waiting
-     * @return \Illuminate\Support\Collection<int, Session>
+     * @param  Collection<int, Session>  $waiting
+     * @return Collection<int, Session>
      */
     private function orderWaiting(Station $station, $waiting, bool $priorityFirst, string $balanceMode, ?bool $alternatePriorityFirst): Collection
     {
@@ -193,8 +209,8 @@ class StationQueueService
     /**
      * Alternate mode: use ratio to determine next. Put next first, rest by queued_at.
      *
-     * @param  \Illuminate\Support\Collection<int, Session>  $waiting
-     * @return \Illuminate\Support\Collection<int, Session>
+     * @param  Collection<int, Session>  $waiting
+     * @return Collection<int, Session>
      */
     private function orderByAlternate(Station $station, $waiting, ?bool $alternatePriorityFirst): Collection
     {

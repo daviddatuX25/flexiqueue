@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Token;
 use App\Repositories\PrintSettingRepository;
 use App\Services\TokenPrintService;
+use App\Support\PermissionCatalog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
@@ -87,7 +88,7 @@ class TokenPrintController extends Controller
     {
         $user = $request->user();
         $siteId = $user->site_id;
-        if ($siteId === null && ! $user->isSuperAdmin()) {
+        if ($siteId === null && ! $user->can(PermissionCatalog::PLATFORM_MANAGE)) {
             return collect();
         }
 

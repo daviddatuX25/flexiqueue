@@ -8,8 +8,10 @@ use App\Models\ServiceTrack;
 use App\Models\Site;
 use App\Models\Station;
 use App\Models\User;
-use Illuminate\Support\Str;
+use App\Services\ProgramSupervisorGrantService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class ProgramStaffControllerTest extends TestCase
@@ -34,13 +36,13 @@ class ProgramStaffControllerTest extends TestCase
         $site = Site::create([
             'name' => 'Default Site',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
         $this->admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $this->staff1 = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
-        $this->staff2 = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $this->staff1 = User::factory()->create(['site_id' => $site->id]);
+        $this->staff2 = User::factory()->create(['site_id' => $site->id]);
 
         $this->program = Program::create([
             'site_id' => $site->id,
@@ -159,7 +161,6 @@ class ProgramStaffControllerTest extends TestCase
     public function test_add_supervisor_requires_override_pin(): void
     {
         $staffNoPin = User::factory()->create([
-            'role' => 'staff',
             'override_pin' => null,
             'site_id' => $this->program->site_id,
         ]);
@@ -185,10 +186,10 @@ class ProgramStaffControllerTest extends TestCase
         $response->assertStatus(201);
         $response->assertJsonPath('user_id', $staffWithPin->id);
 
-        $this->assertDatabaseHas('program_supervisors', [
-            'program_id' => $this->program->id,
-            'user_id' => $staffWithPin->id,
-        ]);
+        $this->assertTrue(
+            $staffWithPin->fresh()->isSupervisorForProgram($this->program->id),
+            'R4: supervisor is granted via program RbacTeam, not pivot',
+        );
     }
 
     public function test_remove_supervisor_returns_200(): void
@@ -196,15 +197,15 @@ class ProgramStaffControllerTest extends TestCase
         $staffWithPin = User::factory()->supervisor()->withOverridePin('123456')->create([
             'site_id' => $this->program->site_id,
         ]);
-        $this->program->supervisedBy()->attach($staffWithPin->id);
+        app(ProgramSupervisorGrantService::class)->grantProgramTeamSupervise($staffWithPin, $this->program);
 
         $response = $this->actingAs($this->admin)->deleteJson("/api/admin/programs/{$this->program->id}/supervisors/{$staffWithPin->id}");
 
         $response->assertStatus(200);
-        $this->assertDatabaseMissing('program_supervisors', [
-            'program_id' => $this->program->id,
-            'user_id' => $staffWithPin->id,
-        ]);
+        $this->assertFalse(
+            $staffWithPin->fresh()->isSupervisorForProgram($this->program->id),
+            'program-team supervise revoked after remove',
+        );
     }
 
     public function test_staff_cannot_access_program_staff_apis_returns_403(): void

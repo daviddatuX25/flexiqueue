@@ -8,7 +8,10 @@ use App\Models\Session;
 use App\Models\Station;
 use App\Models\TransactionLog;
 use App\Models\User;
-use Illuminate\Support\Collection;
+use App\Repositories\TokenTtsSettingRepository;
+use App\Services\Tts\AnnouncementBuilder;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * Per 09-UI-ROUTES §3.4: Data for client-facing informant display (no auth).
@@ -21,6 +24,45 @@ use Illuminate\Support\Collection;
  */
 class DisplayBoardService
 {
+    public function __construct(
+        private AnnouncementBuilder $announcementBuilder,
+        private TokenTtsSettingRepository $tokenTtsSettingRepository,
+    ) {}
+
+    /**
+     * Token TTS playback flags + per-active-lang phrase parts for display (segment 1 browser path + segment-2-off closing).
+     *
+     * @return array{
+     *     prefer_generated_audio: bool,
+     *     allow_custom_pronunciation: bool,
+     *     segment_2_enabled: bool,
+     *     tts_default_pre_phrase: string,
+     *     tts_token_bridge_tail: string,
+     *     tts_closing_without_segment2: string
+     * }
+     */
+    public function getDisplayTtsPlaybackProps(string $activeLanguage): array
+    {
+        $settings = $this->tokenTtsSettingRepository->getInstance();
+        $playback = $settings->getPlayback();
+        $lang = in_array($activeLanguage, ['en', 'fil', 'ilo'], true) ? $activeLanguage : 'en';
+        $langRow = $settings->getDefaultLanguages()[$lang] ?? [];
+        $pre = isset($langRow['pre_phrase']) && is_string($langRow['pre_phrase']) ? trim($langRow['pre_phrase']) : '';
+        $tail = isset($langRow['token_bridge_tail']) && is_string($langRow['token_bridge_tail']) ? trim($langRow['token_bridge_tail']) : '';
+        $closing = isset($langRow['closing_without_segment2']) && is_string($langRow['closing_without_segment2'])
+            ? trim($langRow['closing_without_segment2'])
+            : '';
+
+        return [
+            'prefer_generated_audio' => $playback['prefer_generated_audio'],
+            'allow_custom_pronunciation' => $playback['allow_custom_pronunciation'],
+            'segment_2_enabled' => $playback['segment_2_enabled'],
+            'tts_default_pre_phrase' => $pre,
+            'tts_token_bridge_tail' => $tail,
+            'tts_closing_without_segment2' => $closing,
+        ];
+    }
+
     /**
      * Get board data for the informant display: now serving, waiting by station, program name.
      * A.2.4: When $programId is null, return no-program structure. When set, use that program (must be active).
@@ -44,7 +86,7 @@ class DisplayBoardService
         }
 
         if (! $program) {
-            return [
+            return array_merge([
                 'program_name' => null,
                 'date' => now()->format('F j, Y'),
                 'now_serving' => [],
@@ -70,11 +112,11 @@ class DisplayBoardService
                 'queue_mode_display' => null,
                 'alternate_ratio' => null,
                 'priority_first' => null,
-            ];
+            ], $this->getDisplayTtsPlaybackProps('en'));
         }
 
         $activeLanguage = $program->settings()->getTtsActiveLanguage();
-        $connectorPhrase = $this->getConnectorPhraseForLang($program, $activeLanguage);
+        $connectorPhrase = $this->announcementBuilder->resolveConnectorPhrase($program, $activeLanguage);
 
         $servingAndCalled = Session::query()
             ->where('program_id', $program->id)
@@ -119,11 +161,13 @@ class DisplayBoardService
                 $process = $this->currentProcessForSession($s);
 
                 return [
+                    'token_id' => $s->token_id,
                     'alias' => $s->alias,
                     'process_name' => $process ? $process['process_name'] : null,
                 ];
             })->values()->all();
             $waitingByStation[] = [
+                'station_id' => (int) $stationId,
                 'station_name' => $station?->name ?? '—',
                 'aliases' => $waitingAtStation->pluck('alias')->values()->all(),
                 'waiting_clients' => $waitingClients,
@@ -166,10 +210,11 @@ class DisplayBoardService
             ->where('availability_status', 'available')
             ->count();
 
+        $tokenTtsSite = $this->tokenTtsSettingRepository->getInstance();
         $stationTtsByName = $program->stations()
             ->get()
-            ->mapWithKeys(function (Station $station) use ($activeLanguage) {
-                $phrase = $this->getStationTtsPhrase($station, $activeLanguage);
+            ->mapWithKeys(function (Station $station) use ($activeLanguage, $tokenTtsSite) {
+                $phrase = $this->announcementBuilder->resolveStationTtsPhrase($station, $activeLanguage, $tokenTtsSite);
 
                 return [$station->name => $phrase];
             })
@@ -183,7 +228,7 @@ class DisplayBoardService
             ? (bool) $settings['alternate_priority_first']
             : (bool) ($settings['priority_first'] ?? true);
 
-        $result = [
+        $result = array_merge([
             'program_name' => $program->name,
             'date' => now()->format('F j, Y'),
             'now_serving' => $nowServing,
@@ -211,7 +256,7 @@ class DisplayBoardService
             'alternate_ratio' => $alternateRatio,
             'priority_first' => $program->settings()->getPriorityFirst(),
             'alternate_priority_first' => $alternatePriorityFirst,
-        ];
+        ], $this->getDisplayTtsPlaybackProps($activeLanguage));
 
         $durationMs = (microtime(true) - $startedAt) * 1000;
 
@@ -371,8 +416,9 @@ class DisplayBoardService
         $stationActivity = $this->getStationActivity([$station->id], 20);
 
         $activeLanguage = $program ? $program->settings()->getTtsActiveLanguage() : 'en';
-        $connectorPhrase = $program ? $this->getConnectorPhraseForLang($program, $activeLanguage) : null;
-        $stationPhrase = $program ? $this->getStationTtsPhrase($station, $activeLanguage) : null;
+        $tokenTtsSite = $this->tokenTtsSettingRepository->getInstance();
+        $connectorPhrase = $program ? $this->announcementBuilder->resolveConnectorPhrase($program, $activeLanguage) : null;
+        $stationPhrase = $program ? $this->announcementBuilder->resolveStationTtsPhrase($station, $activeLanguage, $tokenTtsSite) : null;
 
         $balanceMode = $program ? $program->settings()->getBalanceMode() : null;
         $stationSelectionMode = $program ? $program->settings()->getStationSelectionMode() : null;
@@ -387,7 +433,7 @@ class DisplayBoardService
                 : (bool) ($settings['priority_first'] ?? true);
         }
 
-        return [
+        return array_merge([
             'program_name' => $programName,
             'date' => $date,
             'station_name' => $station->name,
@@ -398,6 +444,7 @@ class DisplayBoardService
             'station_activity' => $stationActivity,
             'display_audio_muted' => $station->getDisplayAudioMuted(),
             'display_audio_volume' => $station->getDisplayAudioVolume(),
+            'display_page_zoom' => $station->getDisplayPageZoom(),
             'tts_active_language' => $activeLanguage,
             'tts_connector_phrase' => $connectorPhrase,
             'station_tts_phrase' => $stationPhrase,
@@ -409,21 +456,9 @@ class DisplayBoardService
             'priority_first' => $priorityFirst,
             'alternate_priority_first' => $alternatePriorityFirst,
             'max_no_show_attempts' => $maxNoShowAttempts,
-        ];
-    }
-
-    private function getStationTtsPhrase(Station $station, string $lang): ?string
-    {
-        $settings = $station->settings ?? [];
-        $languages = $settings['tts']['languages'] ?? [];
-        $config = $languages[$lang] ?? null;
-        if (! is_array($config)) {
-            return null;
-        }
-
-        $phrase = $config['station_phrase'] ?? null;
-
-        return is_string($phrase) && trim($phrase) !== '' ? trim($phrase) : null;
+            /** Staff session on same browser: can persist station display audio via PUT /api/stations/{id}/display-settings. */
+            'can_update_station_display_settings' => Auth::check() && Gate::allows('view', $station),
+        ], $this->getDisplayTtsPlaybackProps($activeLanguage));
     }
 
     /**
@@ -431,16 +466,7 @@ class DisplayBoardService
      */
     public function getConnectorPhraseForLang(Program $program, string $lang): ?string
     {
-        $settings = $program->settings ?? [];
-        if (
-            ! isset($settings['tts']['connector']['languages'][$lang])
-            || ! is_array($settings['tts']['connector']['languages'][$lang])
-        ) {
-            return null;
-        }
-        $raw = $settings['tts']['connector']['languages'][$lang]['connector_phrase'] ?? null;
-
-        return is_string($raw) && trim($raw) !== '' ? trim($raw) : null;
+        return $this->announcementBuilder->resolveConnectorPhrase($program, $lang);
     }
 
     /**
@@ -449,17 +475,9 @@ class DisplayBoardService
      */
     public function getSecondSegmentText(Program $program, Station $station, string $lang): string
     {
-        $connectorPhrase = $this->getConnectorPhraseForLang($program, $lang);
-        $stationPhrase = $this->getStationTtsPhrase($station, $lang);
-        $stationPhrase = $stationPhrase !== null && $stationPhrase !== ''
-            ? $stationPhrase
-            : $station->name;
+        $site = $this->tokenTtsSettingRepository->getInstance();
 
-        if ($connectorPhrase !== null && $connectorPhrase !== '') {
-            return trim($connectorPhrase.' '.$stationPhrase);
-        }
-
-        return trim($stationPhrase);
+        return $this->announcementBuilder->buildSegment2($station, $program, $lang, $site);
     }
 
     /**

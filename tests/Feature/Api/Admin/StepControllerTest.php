@@ -4,15 +4,15 @@ namespace Tests\Feature\Api\Admin;
 
 use App\Models\Process;
 use App\Models\Program;
-use App\Models\Session;
 use App\Models\ServiceTrack;
+use App\Models\Session;
 use App\Models\Station;
 use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
@@ -254,7 +254,7 @@ class StepControllerTest extends TestCase
 
     public function test_staff_cannot_access_steps_api_returns_403(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->getJson("/api/admin/tracks/{$this->track->id}/steps");
 

@@ -2,11 +2,14 @@
 
 namespace Tests\Feature\Api\Admin;
 
+use App\Models\AdminActionLog;
 use App\Models\Program;
 use App\Models\Site;
 use App\Models\Station;
 use App\Models\User;
+use App\Support\PermissionCatalog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -31,12 +34,12 @@ class UserControllerTest extends TestCase
         $site = Site::create([
             'name' => 'Default Site',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+            'api_key_hash' => Hash::make(Str::random(40)),
             'settings' => [],
             'edge_settings' => [],
         ]);
         $this->admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $this->staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id, 'assigned_station_id' => null]);
+        $this->staff = User::factory()->create(['site_id' => $site->id, 'assigned_station_id' => null]);
         $program = Program::create([
             'site_id' => $site->id,
             'name' => 'Test Program',
@@ -104,7 +107,9 @@ class UserControllerTest extends TestCase
     {
         $response = $this->actingAs($this->admin)->postJson('/api/admin/users', [
             'name' => 'New Staff',
+            'username' => 'new.staff',
             'email' => 'new@example.com',
+            'recovery_gmail' => 'new.recovery@gmail.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
             'role' => 'staff',
@@ -112,10 +117,12 @@ class UserControllerTest extends TestCase
 
         $response->assertStatus(201);
         $response->assertJsonPath('user.name', 'New Staff');
+        $response->assertJsonPath('user.username', 'new.staff');
         $response->assertJsonPath('user.email', 'new@example.com');
+        $response->assertJsonPath('user.recovery_gmail', 'new.recovery@gmail.com');
         $response->assertJsonPath('user.role', 'staff');
         $response->assertJsonPath('user.is_active', true);
-        $this->assertDatabaseHas('users', ['email' => 'new@example.com']);
+        $this->assertDatabaseHas('users', ['email' => 'new@example.com', 'username' => 'new.staff']);
         $user = User::where('email', 'new@example.com')->first();
         $this->assertNotNull($user->override_pin, 'New user should have default preset PIN');
         $this->assertNotNull($user->override_qr_token, 'New user should have default preset QR token');
@@ -125,7 +132,9 @@ class UserControllerTest extends TestCase
     {
         $response = $this->actingAs($this->admin)->postJson('/api/admin/users', [
             'name' => 'Supervisor Staff',
+            'username' => 'super.staff',
             'email' => 'super@example.com',
+            'recovery_gmail' => 'super.recovery@gmail.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
             'role' => 'staff',
@@ -137,14 +146,36 @@ class UserControllerTest extends TestCase
         $this->assertNotNull($user->override_pin);
     }
 
+    public function test_store_staff_with_pending_assignment_sets_flag(): void
+    {
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/users', [
+            'name' => 'Pending Staff',
+            'username' => 'pending.staff',
+            'email' => 'pending@example.com',
+            'recovery_gmail' => 'pending.recovery@gmail.com',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+            'role' => 'staff',
+            'pending_assignment' => true,
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('user.pending_assignment', true);
+        $this->assertDatabaseHas('users', [
+            'email' => 'pending@example.com',
+            'pending_assignment' => true,
+        ]);
+    }
+
     public function test_store_validates_email_unique(): void
     {
         $response = $this->actingAs($this->admin)->postJson('/api/admin/users', [
             'name' => 'Duplicate',
+            'username' => 'duplicate.user',
             'email' => $this->staff->email,
+            'recovery_gmail' => 'dup.recovery@gmail.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
-            'role' => 'staff',
         ]);
 
         $response->assertStatus(422);
@@ -154,14 +185,28 @@ class UserControllerTest extends TestCase
     {
         $response = $this->actingAs($this->admin)->putJson("/api/admin/users/{$this->staff->id}", [
             'name' => 'Updated Name',
+            'username' => $this->staff->username,
             'email' => $this->staff->email,
-            'role' => 'staff',
         ]);
 
         $response->assertStatus(200);
         $response->assertJsonPath('user.name', 'Updated Name');
         $this->staff->refresh();
         $this->assertSame('Updated Name', $this->staff->name);
+    }
+
+    public function test_admin_cannot_change_own_is_active_via_api(): void
+    {
+        $this->assertTrue($this->admin->is_active);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/users/{$this->admin->id}", [
+            'is_active' => false,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['is_active']);
+        $this->admin->refresh();
+        $this->assertTrue($this->admin->is_active);
     }
 
     public function test_destroy_deactivates_user(): void
@@ -177,11 +222,43 @@ class UserControllerTest extends TestCase
     {
         $response = $this->actingAs($this->admin)->postJson("/api/admin/users/{$this->staff->id}/reset-password", [
             'password' => 'newpassword123',
+            'password_confirmation' => 'newpassword123',
         ]);
 
         $response->assertStatus(200);
         $this->staff->refresh();
-        $this->assertTrue(\Illuminate\Support\Facades\Hash::check('newpassword123', $this->staff->password));
+        $this->assertTrue(Hash::check('newpassword123', $this->staff->password));
+        $this->assertDatabaseHas('admin_action_log', [
+            'user_id' => $this->admin->id,
+            'action' => 'user_password_reset_by_admin',
+            'subject_id' => $this->staff->id,
+        ]);
+        $log = AdminActionLog::query()
+            ->where('action', 'user_password_reset_by_admin')
+            ->where('subject_id', $this->staff->id)
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertSame($this->staff->username, $log->payload['target_username'] ?? null);
+    }
+
+    public function test_reset_password_requires_confirmation(): void
+    {
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/users/{$this->staff->id}/reset-password", [
+            'password' => 'newpassword123',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['password']);
+    }
+
+    public function test_admin_cannot_reset_own_password_via_reset_endpoint(): void
+    {
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/users/{$this->admin->id}/reset-password", [
+            'password' => 'newpassword123',
+            'password_confirmation' => 'newpassword123',
+        ]);
+
+        $response->assertStatus(403);
     }
 
     public function test_non_admin_cannot_store_user(): void
@@ -190,9 +267,68 @@ class UserControllerTest extends TestCase
             'name' => 'New',
             'email' => 'new@example.com',
             'password' => 'password123',
-            'role' => 'staff',
         ]);
 
         $response->assertStatus(403);
+    }
+
+    public function test_update_direct_permissions_syncs_for_staff(): void
+    {
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/users/{$this->staff->id}", [
+            'name' => $this->staff->name,
+            'username' => $this->staff->username,
+            'email' => $this->staff->email,
+            'direct_permissions' => [PermissionCatalog::DASHBOARD_VIEW],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('user.direct_permissions', [PermissionCatalog::DASHBOARD_VIEW]);
+        $this->staff->refresh();
+        $this->assertTrue($this->staff->hasDirectPermission(PermissionCatalog::DASHBOARD_VIEW));
+    }
+
+    public function test_site_admin_cannot_assign_platform_manage_via_direct_permissions(): void
+    {
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/users/{$this->staff->id}", [
+            'name' => $this->staff->name,
+            'username' => $this->staff->username,
+            'email' => $this->staff->email,
+            'direct_permissions' => [PermissionCatalog::PLATFORM_MANAGE],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['direct_permissions']);
+    }
+
+    public function test_cannot_demote_last_active_admin_for_site(): void
+    {
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/users/{$this->admin->id}", [
+            'name' => $this->admin->name,
+            'username' => $this->admin->username,
+            'email' => $this->admin->email,
+            'role' => 'staff',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['role']);
+    }
+
+    public function test_can_demote_admin_when_another_admin_exists_for_site(): void
+    {
+        $secondAdmin = User::factory()->admin()->create([
+            'site_id' => $this->admin->site_id,
+            'email' => 'other-admin-'.Str::random(6).'@example.com',
+        ]);
+
+        $response = $this->actingAs($secondAdmin)->putJson("/api/admin/users/{$this->admin->id}", [
+            'name' => $this->admin->name,
+            'username' => $this->admin->username,
+            'email' => $this->admin->email,
+            'role' => 'staff',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('user.role', 'staff');
+        $this->assertTrue($secondAdmin->fresh()->isAdmin());
     }
 }

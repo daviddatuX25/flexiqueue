@@ -7,7 +7,7 @@
     import { Link } from "@inertiajs/svelte";
     import { usePage } from "@inertiajs/svelte";
     import { router } from "@inertiajs/svelte";
-    import { Monitor, Route } from "lucide-svelte";
+    import { Monitor, UserPlus } from "lucide-svelte";
     import StatusFooter from "./StatusFooter.svelte";
     import FlexiQueueToaster from "../Components/FlexiQueueToaster.svelte";
     import FlashToToast from "../Components/FlashToToast.svelte";
@@ -17,7 +17,11 @@
     import AppBackground from "../Components/AppBackground.svelte";
     import LogoutConfirm from "../Components/LogoutConfirm.svelte";
     import ScanModal from "../Components/ScanModal.svelte";
+    import StatusCheckerModal from "../Components/StatusCheckerModal.svelte";
+    import StaffTriageBindModal from "../Components/StaffTriageBindModal.svelte";
     import { handleQrApproveScan } from "../lib/qrApproveHandler.js";
+    import { isApprovePayload, resolveStaffTokenScan } from "../lib/qrScanResolve.js";
+    import { toaster } from "../lib/toaster.js";
     import { getLocalAllowHidOnThisDevice, isMobileTouch } from "../lib/displayHid.js";
     import { shouldAllowCameraScanner } from "../lib/displayCamera.js";
 
@@ -35,7 +39,12 @@
     const isStation = $derived(
         currentPath === "/station" || currentPath.startsWith("/station/"),
     );
-    const isTriage = $derived(currentPath === "/triage");
+    const isTriage = $derived(
+        currentPath === "/client-registration" ||
+            currentPath.startsWith("/client-registration?") ||
+            currentPath === "/triage" ||
+            currentPath.startsWith("/triage?"),
+    );
     const isTrackOverrides = $derived(currentPath === "/track-overrides");
     const isDevices = $derived(currentPath === "/devices" || currentPath.startsWith("/devices/"));
     const isSuperAdmin = $derived(user?.role === "super_admin");
@@ -43,9 +52,11 @@
     const backHref = $derived(isAdminLike ? "/admin/dashboard" : "/dashboard");
     const backLabel = $derived(isAdminLike ? "Admin panel" : "Dashboard");
     const auth = $derived($pageStore.props?.auth);
-    const canApproveRequests = $derived(auth?.can_approve_requests ?? false);
-    /** QR button for anyone who can approve: super_admin, admin, or program supervisor (program-scoped). */
-    const showFooterQrButton = $derived(!!canApproveRequests);
+    const canApproveRequests = $derived(auth?.can?.approve_requests ?? auth?.can_approve_requests ?? false);
+    /** Approve flows + staff token scan (status / triage); staff.operations covers staff QR. */
+    const showFooterQrButton = $derived(!!canApproveRequests || auth?.can?.staff_operations === true);
+    const staffTriagePageEnabled = $derived($pageStore.props?.staff_triage_page_enabled !== false);
+    const triageNavHref = $derived(staffTriagePageEnabled ? "/client-registration" : "/station");
     /** Account-level scan preferences (same as Triage); auth.user has staff_triage_allow_* when serialized. */
     const accountAllowHid = $derived(user?.staff_triage_allow_hid_barcode !== false);
     const accountAllowCamera = $derived(user?.staff_triage_allow_camera_scanner !== false);
@@ -57,19 +68,85 @@
 
     let showLogoutConfirm = $state(false);
     let showFooterQrScanner = $state(false);
+    let showStatusCheckerModal = $state(false);
+    let statusCheckerQrHash = $state("");
+    let showStaffTriageBindModal = $state(false);
+    let staffTriageBindToken = $state(null);
 
     $effect(() => {
         if (!showFooterQrScanner) return;
         const hidLocal = getLocalAllowHidOnThisDevice("staff_binder");
         localAllowHid = hidLocal !== null ? hidLocal : !isMobileTouch();
-        localAllowCamera = shouldAllowCameraScanner("staff_binder");
+        localAllowCamera = shouldAllowCameraScanner("staff_binder", accountAllowCamera);
     });
 
-    function onFooterQrScan(decodedText) {
-        handleQrApproveScan(decodedText.trim(), {
-            onClose: () => (showFooterQrScanner = false),
-            onSuccess: () => router.reload(),
-        });
+    function getCsrfToken() {
+        const fromProps = $pageStore.props?.csrf_token;
+        if (fromProps) return fromProps;
+        if (typeof document !== "undefined") {
+            return document.querySelector('meta[name="csrf-token"]')?.content ?? "";
+        }
+        return "";
+    }
+
+    async function onFooterQrScan(decodedText) {
+        const raw = decodedText.trim();
+        if (isApprovePayload(raw)) {
+            if (!canApproveRequests) {
+                toaster.error({ title: "Only supervisors or admins can approve device requests." });
+                showFooterQrScanner = false;
+                return;
+            }
+            await handleQrApproveScan(raw, {
+                onClose: () => (showFooterQrScanner = false),
+                onSuccess: () => router.reload(),
+            });
+            return;
+        }
+        const res = await resolveStaffTokenScan(raw, { csrfToken: getCsrfToken() });
+        if (res.kind === "not_token") {
+            if (canApproveRequests) {
+                await handleQrApproveScan(raw, {
+                    onClose: () => (showFooterQrScanner = false),
+                    onSuccess: () => router.reload(),
+                });
+                return;
+            }
+            toaster.warning({ title: "Unrecognized QR code." });
+            showFooterQrScanner = false;
+            return;
+        }
+        if (res.kind === "lookup_error") {
+            toaster.error({ title: res.message });
+            showFooterQrScanner = false;
+            return;
+        }
+        if (res.kind === "token_deactivated") {
+            toaster.error({ title: "Token deactivated." });
+            showFooterQrScanner = false;
+            return;
+        }
+        if (res.kind === "status") {
+            statusCheckerQrHash = res.qr_hash;
+            showStatusCheckerModal = true;
+            showFooterQrScanner = false;
+            return;
+        }
+        if (res.kind === "triage") {
+            staffTriageBindToken = res.token;
+            showStaffTriageBindModal = true;
+            showFooterQrScanner = false;
+        }
+    }
+
+    function closeStatusCheckerModal() {
+        showStatusCheckerModal = false;
+        statusCheckerQrHash = "";
+    }
+
+    function closeStaffTriageBindModal() {
+        showStaffTriageBindModal = false;
+        staffTriageBindToken = null;
     }
 </script>
 
@@ -170,7 +247,7 @@
 
     <!-- Footer: one strip with matching background; nav bar + status footer (program | QR | availability). -->
     <footer class="shrink-0 min-h-0 z-10 flex flex-col ">
-        <!-- Nav bar: Station | Triage | Track overrides; same theme as status bar below -->
+        <!-- Nav bar: Station | Client registration | Track overrides; same theme as status bar below -->
         <div class="px-3 sm:px-4 pt-3 pb-2">
             <div
                 class="fq-nav-bar relative rounded-3xl border bg-surface-50 dark:bg-slate-900 border-t border-surface-200 dark:border-slate-700 shadow-md overflow-visible h-14 md:h-16 flex items-center justify-between px-4 sm:px-6 md:px-8"
@@ -199,15 +276,15 @@
                     <span class="text-[0.55rem] md:text-[0.65rem]">Station</span>
                 </Link>
 
-                <!-- Center: Triage -->
+                <!-- Center: Client registration (or Station when staff page is off) -->
                 <Link
-                    href="/triage"
+                    href={triageNavHref}
                     class="flex flex-col items-center gap-0.5 touch-target justify-center min-w-0 flex-1 py-1 text-surface-800 dark:text-slate-200 {isTriage
                         ? 'text-primary-600 dark:text-primary-400 font-semibold'
                         : ''}"
                 >
-                    <Route class="h-4 w-4 md:h-5 md:w-5 shrink-0" />
-                    <span class="text-[0.55rem] md:text-[0.65rem]">Triage</span>
+                    <UserPlus class="h-4 w-4 md:h-5 md:w-5 shrink-0" aria-hidden="true" />
+                    <span class="text-[0.55rem] md:text-[0.65rem] text-center leading-tight">Client<br />registration</span>
                 </Link>
 
                     <!-- Right: Track overrides -->
@@ -260,13 +337,35 @@
     <ScanModal
         open={showFooterQrScanner}
         onClose={() => (showFooterQrScanner = false)}
-        title="Scan QR to approve"
-        description="Scan the QR that a device is showing (settings or device authorize request). This is only for approving requests — not for token lookup."
+        title="Scan QR"
+        description={canApproveRequests
+            ? "Approve device requests, or scan a token QR to check queue status or start a visit."
+            : "Scan a token QR to check queue status or start a visit."}
         allowHid={effectiveHid}
         allowCamera={effectiveCamera}
         onScan={onFooterQrScan}
         soundOnScan={true}
         wide={true}
+    />
+    <StatusCheckerModal
+        open={showStatusCheckerModal}
+        onClose={closeStatusCheckerModal}
+        qrHash={statusCheckerQrHash}
+        siteId={user?.site_id ?? null}
+        csrfToken={getCsrfToken()}
+    />
+    <StaffTriageBindModal
+        open={showStaffTriageBindModal}
+        onClose={closeStaffTriageBindModal}
+        token={staffTriageBindToken}
+        getCsrfToken={getCsrfToken}
+        staffTriageAllowHid={accountAllowHid}
+        staffTriageAllowCamera={accountAllowCamera}
+        onBound={() => {
+            closeStaffTriageBindModal();
+            toaster.success({ title: "Visit started." });
+            router.reload();
+        }}
     />
     <FlexiQueueToaster />
     <FlashToToast />

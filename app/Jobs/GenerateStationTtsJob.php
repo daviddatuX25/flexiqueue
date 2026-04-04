@@ -5,7 +5,11 @@ namespace App\Jobs;
 use App\Events\StationTtsStatusUpdated;
 use App\Models\Program;
 use App\Models\Station;
-use App\Services\DisplayBoardService;
+use App\Repositories\TokenTtsSettingRepository;
+use App\Services\Tts\AnnouncementBuilder;
+use App\Services\Tts\TtsAssetIdentity;
+use App\Services\Tts\TtsAssetLifecycleManager;
+use App\Services\Tts\TtsGenerationLock;
 use App\Services\TtsService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -27,11 +31,19 @@ class GenerateStationTtsJob implements ShouldQueue
         public Station $station
     ) {}
 
-    public function handle(TtsService $ttsService, DisplayBoardService $displayBoardService): void
-    {
+    public function handle(
+        TtsService $ttsService,
+        AnnouncementBuilder $announcementBuilder,
+        TokenTtsSettingRepository $tokenTtsSettingRepository,
+        TtsAssetIdentity $assetIdentity,
+        TtsAssetLifecycleManager $lifecycleManager,
+        TtsGenerationLock $generationLock
+    ): void {
         if (! $ttsService->isEnabled()) {
             return;
         }
+
+        $tokenTtsSite = $tokenTtsSettingRepository->getInstance();
 
         $station = $this->station->fresh();
         if (! $station) {
@@ -63,25 +75,46 @@ class GenerateStationTtsJob implements ShouldQueue
             if ($voiceId === null || $voiceId === '') {
                 $config['status'] = 'failed';
                 $languagesConfig[$lang] = $config;
+
                 continue;
             }
 
             try {
-                $text = $displayBoardService->getSecondSegmentText($program, $station, $lang);
+                $text = $announcementBuilder->buildSegment2($station, $program, $lang, $tokenTtsSite);
                 if (trim($text) === '') {
-                    $config['status'] = 'failed';
+                    $config = $lifecycleManager->markFailed($config, 'empty_segment2_phrase');
                     $languagesConfig[$lang] = $config;
+
                     continue;
                 }
 
-                $relativePath = 'tts/stations/'.$station->id.'/'.$lang.'.mp3';
-                $stored = $ttsService->storeSegment($text, $voiceId, $rate, $relativePath);
+                $revision = (int) data_get($config, 'asset_meta.revision', 0) + 1;
+                $identity = $assetIdentity->build(
+                    'station',
+                    (int) $station->id,
+                    $lang,
+                    $text,
+                    $voiceId,
+                    $rate,
+                    max(1, $revision),
+                    $ttsService->getProviderKey(),
+                    $ttsService->getAssetIdentityModelKey()
+                );
+                $config = $lifecycleManager->markGenerating($config, $identity);
 
-                if ($stored !== null) {
-                    $config['audio_path'] = $stored;
-                    $config['status'] = 'ready';
-                } else {
-                    $config['status'] = 'failed';
+                $lockSeconds = max(15, (int) config('tts.generation_lock_seconds', 90));
+                $siteId = $program->site_id ?? null;
+                $lockAcquired = $generationLock->run($identity['canonical_key'], function () use (&$config, $ttsService, $text, $voiceId, $rate, $identity, $lifecycleManager, $siteId): void {
+                    $stored = $ttsService->storeSegment($text, $voiceId, $rate, $identity['storage_path'], $siteId, 'job');
+                    if ($stored !== null) {
+                        $config = $lifecycleManager->markReady($config, $identity);
+                    } else {
+                        $config = $lifecycleManager->markFailed($config, 'generation_failed');
+                    }
+                }, $lockSeconds);
+
+                if (! $lockAcquired) {
+                    $config = $lifecycleManager->markFailed($config, 'generation_in_progress');
                 }
             } catch (\Throwable $e) {
                 Log::warning('Station TTS generation failed for station {id} lang {lang}: {message}', [
@@ -89,7 +122,7 @@ class GenerateStationTtsJob implements ShouldQueue
                     'lang' => $lang,
                     'message' => $e->getMessage(),
                 ]);
-                $config['status'] = 'failed';
+                $config = $lifecycleManager->markFailed($config, $e->getMessage());
             }
 
             $languagesConfig[$lang] = $config;

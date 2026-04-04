@@ -2,8 +2,10 @@
 
 namespace Tests\Feature\Api;
 
+use App\Http\Controllers\StationPageController;
 use App\Models\Client;
 use App\Models\IdentityRegistration;
+use App\Models\Process;
 use App\Models\Program;
 use App\Models\ProgramStationAssignment;
 use App\Models\ServiceTrack;
@@ -15,6 +17,8 @@ use App\Models\TrackStep;
 use App\Models\TransactionLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -44,10 +48,10 @@ class StationQueueApiTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->staff = User::factory()->create(['role' => 'staff']);
-        $this->otherStaff = User::factory()->create(['role' => 'staff']);
-        $this->supervisor = User::factory()->create(['role' => 'staff']);
-        $this->admin = User::factory()->create(['role' => 'admin']);
+        $this->staff = User::factory()->create();
+        $this->otherStaff = User::factory()->create();
+        $this->supervisor = User::factory()->create();
+        $this->admin = User::factory()->admin()->create();
 
         $this->program = Program::create([
             'name' => 'Test Program',
@@ -90,7 +94,7 @@ class StationQueueApiTest extends TestCase
         $this->staff->update(['assigned_station_id' => $this->station1->id]);
         $this->otherStaff->update(['assigned_station_id' => $this->station2->id]);
 
-        $this->program->supervisedBy()->attach($this->supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($this->supervisor, $this->program);
     }
 
     public function test_staff_assigned_to_station_can_fetch_queue_returns_200(): void
@@ -194,7 +198,7 @@ class StationQueueApiTest extends TestCase
         $site = Site::create([
             'name' => 'Test Site',
             'slug' => 'test-site',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make('key'),
+            'api_key_hash' => Hash::make('key'),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -267,12 +271,12 @@ class StationQueueApiTest extends TestCase
     /** Per flexiqueue-ui3: when track step has process, serving payload includes process_id and process_name */
     public function test_queue_serving_includes_process_when_step_has_process(): void
     {
-        $process = \App\Models\Process::create([
+        $process = Process::create([
             'program_id' => $this->program->id,
             'name' => 'Verification',
             'description' => null,
         ]);
-        \Illuminate\Support\Facades\DB::table('station_process')->insert([
+        DB::table('station_process')->insert([
             'station_id' => $this->station1->id,
             'process_id' => $process->id,
         ]);
@@ -652,7 +656,7 @@ class StationQueueApiTest extends TestCase
 
     public function test_staff_with_program_station_assignment_but_null_assigned_station_id_can_fetch_queue(): void
     {
-        $staffWithPsaOnly = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        $staffWithPsaOnly = User::factory()->create(['assigned_station_id' => null]);
         ProgramStationAssignment::create([
             'program_id' => $this->program->id,
             'user_id' => $staffWithPsaOnly->id,
@@ -784,7 +788,7 @@ class StationQueueApiTest extends TestCase
 
     public function test_staff_unassigned_gets_422_when_requesting_stations_list(): void
     {
-        $unassigned = User::factory()->create(['role' => 'staff', 'assigned_station_id' => null]);
+        $unassigned = User::factory()->create(['assigned_station_id' => null]);
 
         $response = $this->actingAs($unassigned)->getJson('/api/stations');
 
@@ -794,7 +798,7 @@ class StationQueueApiTest extends TestCase
 
     public function test_admin_without_station_gets_422_when_requesting_stations_list_without_program_context(): void
     {
-        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+        $admin = User::factory()->admin()->create(['assigned_station_id' => null]);
 
         $response = $this->actingAs($admin)->getJson('/api/stations');
 
@@ -804,10 +808,10 @@ class StationQueueApiTest extends TestCase
 
     public function test_admin_without_station_can_get_stations_list_when_session_has_program(): void
     {
-        $admin = User::factory()->create(['role' => 'admin', 'assigned_station_id' => null]);
+        $admin = User::factory()->admin()->create(['assigned_station_id' => null]);
 
         $response = $this
-            ->withSession([\App\Http\Controllers\StationPageController::SESSION_KEY_PROGRAM_ID => $this->program->id])
+            ->withSession([StationPageController::SESSION_KEY_PROGRAM_ID => $this->program->id])
             ->actingAs($admin)
             ->getJson('/api/stations');
 
@@ -1002,7 +1006,7 @@ class StationQueueApiTest extends TestCase
         $site = Site::create([
             'name' => 'Test Site',
             'slug' => 'test-site',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make('key'),
+            'api_key_hash' => Hash::make('key'),
             'settings' => [],
             'edge_settings' => [],
         ]);

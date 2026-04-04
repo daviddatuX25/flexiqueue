@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * Per ISSUES-ELABORATION §2: view/edit global default program settings.
-	 * Used when creating new programs or "Apply default settings" on Program Show.
+	 * New programs start with these defaults; "Apply default settings" on Program Show refreshes from here.
 	 */
 	import AdminLayout from "../../Layouts/AdminLayout.svelte";
 	import { Link } from "@inertiajs/svelte";
@@ -215,7 +215,7 @@
 			<h1 class="text-xl font-semibold text-surface-950">Default program settings</h1>
 		</div>
 		<p class="text-sm text-surface-600 mb-6">
-			These values are used when you click "Apply default settings" on a program's Settings tab. New programs do not auto-apply; use Apply default settings after creating one.
+			These values are applied automatically when a new program is created. Use &quot;Apply default settings&quot; on a program&apos;s Settings tab anytime to reset that program from here.
 		</p>
 
 		{#if loading}
@@ -395,16 +395,16 @@
 					</div>
 					<div class="flex flex-col sm:flex-row gap-4">
 						<div class="sm:w-1/3 shrink-0">
-							<h3 class="font-medium text-surface-950">Public triage &amp; identity</h3>
+							<h3 class="font-medium text-surface-950">Kiosk &amp; identity</h3>
 							<p class="text-xs text-surface-500 mt-1">
-								Default behavior when clients start at Public triage: whether triage is enabled, ID is required, and unverified entries are allowed.
+								Defaults for kiosk self-service and staff Client registration: self-service on/off, identity required, and unverified queue entry.
 							</p>
 						</div>
 						<div class="sm:w-2/3 space-y-3">
 							<div class="form-control">
 								<label class="label cursor-pointer justify-start gap-3 w-fit">
 									<input type="checkbox" class="checkbox" bind:checked={allowPublicTriage} />
-									<span class="label-text text-sm">Allow public triage</span>
+									<span class="label-text text-sm">Allow kiosk self-service</span>
 								</label>
 							</div>
 							<div class="space-y-2">
@@ -412,14 +412,14 @@
 									class="text-xs font-medium text-surface-600"
 									for="default-identity-policy"
 								>
-									Identity policy at triage
+									Identity policy (kiosk + staff)
 								</label>
 								<select
 									id="default-identity-policy"
 									class="select rounded-container border border-surface-200 px-3 py-1 h-9 w-full max-w-xs"
 									bind:value={identityBindingMode}
 								>
-									<option value="disabled">No ID at triage</option>
+									<option value="disabled">No identity step</option>
 									<option value="required">ID or registration required</option>
 								</select>
 								<div class="form-control pt-1">
@@ -431,7 +431,7 @@
 											disabled={!allowPublicTriage || identityBindingMode !== "required"}
 										/>
 										<span class="label-text">
-											Allow unverified registrations to start visits from public triage
+											Allow unverified registrations to start visits from kiosk
 										</span>
 									</label>
 								</div>
@@ -442,7 +442,7 @@
 						<div class="sm:w-1/3 shrink-0">
 							<h3 class="font-medium text-surface-950">Scanners</h3>
 							<p class="text-xs text-surface-500 mt-1">
-								Default scanner inputs available on Display and Public triage screens.
+								Default scanner inputs on Display board and kiosk.
 							</p>
 						</div>
 						<div class="sm:w-2/3 space-y-2">
@@ -463,7 +463,7 @@
 										class="checkbox"
 										bind:checked={enablePublicTriageHidBarcode}
 									/>
-									<span class="label-text">Enable HID barcode on Public triage</span>
+									<span class="label-text">Enable HID barcode on kiosk</span>
 								</label>
 							</div>
 							<div class="form-control">
@@ -483,7 +483,7 @@
 										class="checkbox"
 										bind:checked={enablePublicTriageCameraScanner}
 									/>
-									<span class="label-text">Enable camera/QR scanner on Public triage</span>
+									<span class="label-text">Enable camera/QR scanner on kiosk</span>
 								</label>
 							</div>
 						</div>

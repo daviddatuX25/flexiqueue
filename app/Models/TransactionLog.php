@@ -35,6 +35,24 @@ class TransactionLog extends Model
                 $log->created_at = now();
             }
         });
+
+        static::created(function (TransactionLog $log): void {
+            // Only fire on edge in auto sync mode
+            $edgeModeService = app(\App\Services\EdgeModeService::class);
+            if (! $edgeModeService->isEdge()) {
+                return;
+            }
+
+            $state = \App\Models\EdgeDeviceState::current();
+            if ($state->sync_mode !== 'auto' || ! $state->session_active) {
+                return;
+            }
+
+            $session = $log->session;
+            if ($session) {
+                event(new \App\Events\EdgeSyncableEventCreated($log, $session));
+            }
+        });
     }
 
     protected function casts(): array

@@ -25,11 +25,13 @@ class StationActivity implements ShouldBroadcastNow
         public string $actionType,
         public string $createdAt,
         public string $pronounceAs = 'letters',
-        public ?int $tokenId = null
+        public ?int $tokenId = null,
+        /** @var array<string, string>|null  en/fil/ilo → spoken token body for display TTS fallback */
+        public ?array $tokenSpokenByLang = null
     ) {}
 
     /**
-     * @return array<int, \Illuminate\Broadcasting\Channel>
+     * @return array<int, Channel>
      */
     public function broadcastOn(): array
     {
@@ -58,6 +60,7 @@ class StationActivity implements ShouldBroadcastNow
             'created_at' => $this->createdAt,
             'pronounce_as' => $this->pronounceAs,
             'token_id' => $this->tokenId,
+            'token_spoken_by_lang' => $this->tokenSpokenByLang,
         ];
     }
 }

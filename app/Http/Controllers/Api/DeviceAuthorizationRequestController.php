@@ -5,13 +5,15 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\DeviceAuthorizationRequest;
 use App\Services\DeviceAuthorizationService;
+use App\Services\ProgramDeviceApprovalService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class DeviceAuthorizationRequestController extends Controller
 {
     public function __construct(
-        private DeviceAuthorizationService $deviceAuth
+        private DeviceAuthorizationService $deviceAuth,
+        private ProgramDeviceApprovalService $programDeviceApprovalService
     ) {}
 
     public function approve(Request $request, DeviceAuthorizationRequest $device_authorization_request): JsonResponse
@@ -22,8 +24,7 @@ class DeviceAuthorizationRequestController extends Controller
             return response()->json(['message' => 'Program not found or inactive.'], 400);
         }
 
-        $canApprove = ($user->isAdmin() && $user->site_id === $program->site_id)
-            || $user->isSupervisorForProgram($program->id);
+        $canApprove = $this->programDeviceApprovalService->canApproveForProgram($user, $program);
         if (! $canApprove) {
             return response()->json(['message' => 'You may only approve device authorization for your program or site.'], 403);
         }

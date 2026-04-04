@@ -3,10 +3,12 @@
 namespace App\Http\Requests;
 
 use App\Support\ClientBindingSource;
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
  * Per 08-API-SPEC-PHASE1 §3.1: POST /api/sessions/bind — qr_hash, track_id, client_category.
+ * Optional: priority_lane_override (boolean) only when client_category is an "Other: …" label — see docs/architecture/08-API-SPEC-PHASE1.md.
  */
 class BindSessionRequest extends FormRequest
 {
@@ -16,7 +18,7 @@ class BindSessionRequest extends FormRequest
     }
 
     /**
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
@@ -26,6 +28,7 @@ class BindSessionRequest extends FormRequest
             'qr_hash' => ['required_without:identity_registration_request', 'string', 'max:64'],
             'track_id' => ['required_with:qr_hash', 'integer'],
             'client_category' => ['nullable', 'string', 'max:50'],
+            'priority_lane_override' => ['sometimes', 'boolean'],
             'client_binding' => ['nullable', 'array'],
             'client_binding.client_id' => ['required_with:client_binding', 'integer', 'exists:clients,id'],
             'client_binding.source' => ClientBindingSource::validationRules(),
@@ -55,6 +58,18 @@ class BindSessionRequest extends FormRequest
             $hasRegistration = $this->filled('identity_registration_request');
             if ($hasBinding && $hasRegistration) {
                 $validator->errors()->add('identity_registration_request', 'Cannot send both client_binding and identity_registration_request.');
+            }
+
+            if (array_key_exists('priority_lane_override', $this->all())) {
+                $cat = $this->input('client_category');
+                $trimmed = is_string($cat) ? trim($cat) : '';
+                $isOther = str_starts_with(strtolower($trimmed), 'other:');
+                if (! $isOther) {
+                    $validator->errors()->add(
+                        'priority_lane_override',
+                        'Priority lane override is only allowed when client_category starts with "Other:".'
+                    );
+                }
             }
         });
     }

@@ -74,6 +74,10 @@ Concise checklist so we don’t repeat the same failures. Add new items here whe
   Laravel is set to broadcast via Reverb but the Reverb server isn’t running.  
   → On local we use the `log` driver when `BROADCAST_CONNECTION=reverb` (so no error). To test real-time: add `BROADCAST_FORCE_REVERB=1` to `.env` and run `./vendor/bin/sail artisan reverb:start`. Prod/Pi are safe: build and apply-tarball use only `.env.edge`.
 
+- **Laragon + HTTPS: WebSocket fails, or Reverb `PusherController` HTTP vs WebSocket connection error**  
+  Browsers need `wss://` on HTTPS; Reverb on `:6001` is plain `ws://`. Proxy `/app` on Apache **443** with **`ProxyPass … ws://127.0.0.1:6001/app`** (not `http://`), set `VITE_REVERB_VIA_PROXY=true`, restart Vite.  
+  → Full steps: `docs/SETUP-LARAGON-APACHE-REVERB-HTTPS.md`.
+
 ---
 
 ## Performance (desktop viewport)

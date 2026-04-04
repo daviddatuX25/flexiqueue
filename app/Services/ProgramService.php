@@ -2,9 +2,10 @@
 
 namespace App\Services;
 
+use App\Enums\UserRole;
 use App\Events\ProgramStatusChanged;
+use App\Events\StaffAvailabilityUpdated;
 use App\Models\Program;
-use App\Services\DeviceAuthorizationService;
 use App\Models\ProgramAuditLog;
 use App\Models\ProgramStationAssignment;
 use App\Models\User;
@@ -55,6 +56,12 @@ class ProgramService
      */
     public function activate(Program $program): Program
     {
+        if ($program->edge_locked_by_device_id !== null) {
+            throw new \InvalidArgumentException(
+                'This program is currently assigned to an edge device and cannot be started from central. Unassign the edge device first.'
+            );
+        }
+
         return DB::transaction(function () use ($program) {
             $program->update(['is_active' => true, 'is_paused' => false]);
 
@@ -68,6 +75,7 @@ class ProgramService
             }
 
             $this->syncAssignedStationForProgram($program);
+            $this->setAssignedStaffAvailability($program, User::AVAILABILITY_AWAY);
 
             return $program->fresh();
         });
@@ -79,6 +87,12 @@ class ProgramService
      */
     public function activateExclusive(Program $program): Program
     {
+        if ($program->edge_locked_by_device_id !== null) {
+            throw new \InvalidArgumentException(
+                'This program is currently assigned to an edge device and cannot be started from central. Unassign the edge device first.'
+            );
+        }
+
         $previousActive = Program::where('is_active', true)->where('id', '!=', $program->id)->first();
         if ($previousActive && $previousActive->queueSessions()->active()->exists()) {
             throw new \InvalidArgumentException(
@@ -108,6 +122,7 @@ class ProgramService
             }
 
             $this->syncAssignedStationForProgram($program);
+            $this->setAssignedStaffAvailability($program, User::AVAILABILITY_AWAY);
 
             return $program->fresh();
         });
@@ -126,7 +141,9 @@ class ProgramService
 
         return (int) ProgramStationAssignment::query()
             ->whereIn('program_id', $activeProgramIds)
-            ->whereHas('user', fn ($q) => $q->where('role', 'staff'))
+            ->whereHas('user', function ($q): void {
+                User::withGlobalPermissionsTeam(fn () => $q->role(UserRole::Staff->value));
+            })
             ->select('user_id')
             ->groupBy('user_id')
             ->havingRaw('COUNT(DISTINCT program_id) > 1')
@@ -147,10 +164,48 @@ class ProgramService
         $stationIds = $program->stations()->pluck('id')->all();
         $assignedUserIds = ProgramStationAssignment::where('program_id', $program->id)->pluck('user_id')->all();
 
-        User::where('role', 'staff')
+        User::withGlobalPermissionsTeam(fn () => User::query()
+            ->role(UserRole::Staff->value)
             ->whereIn('assigned_station_id', $stationIds)
             ->whereNotIn('id', $assignedUserIds)
-            ->update(['assigned_station_id' => null]);
+            ->update(['assigned_station_id' => null]));
+    }
+
+    /**
+     * Update availability for staff assigned to this program's stations.
+     * Optionally limit updates to specific source statuses.
+     *
+     * @param  list<string>|null  $fromStatuses
+     */
+    private function setAssignedStaffAvailability(Program $program, string $toStatus, ?array $fromStatuses = null): void
+    {
+        $staff = User::withGlobalPermissionsTeam(fn () => User::query()
+            ->role(UserRole::Staff->value)
+            ->whereIn('id', function ($q) use ($program) {
+                $q->select('user_id')
+                    ->from('program_station_assignments')
+                    ->where('program_id', $program->id);
+            })
+            ->when($fromStatuses !== null, fn ($q) => $q->whereIn('availability_status', $fromStatuses))
+            ->get(['id', 'name', 'availability_status']));
+
+        foreach ($staff as $user) {
+            if (($user->availability_status ?? User::AVAILABILITY_OFFLINE) === $toStatus) {
+                continue;
+            }
+
+            $user->update([
+                'availability_status' => $toStatus,
+                'availability_updated_at' => now(),
+            ]);
+
+            broadcast(new StaffAvailabilityUpdated(
+                $program->id,
+                $user->id,
+                $user->availability_status ?? User::AVAILABILITY_OFFLINE,
+                $user->name ?? ''
+            ));
+        }
     }
 
     /**
@@ -163,6 +218,7 @@ class ProgramService
         }
 
         $program->update(['is_paused' => true]);
+        $this->setAssignedStaffAvailability($program, User::AVAILABILITY_ON_BREAK, [User::AVAILABILITY_AVAILABLE]);
 
         broadcast(new ProgramStatusChanged($program->id, true, true));
 
@@ -179,6 +235,7 @@ class ProgramService
         }
 
         $program->update(['is_paused' => false]);
+        $this->setAssignedStaffAvailability($program, User::AVAILABILITY_AWAY, [User::AVAILABILITY_ON_BREAK]);
 
         broadcast(new ProgramStatusChanged($program->id, false, true));
 

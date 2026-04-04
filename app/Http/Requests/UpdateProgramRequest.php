@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
@@ -15,7 +16,7 @@ class UpdateProgramRequest extends FormRequest
     }
 
     /**
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
@@ -40,6 +41,11 @@ class UpdateProgramRequest extends FormRequest
             'settings.display_tts_repeat_count' => ['sometimes', 'integer', 'min:1', 'max:3'],
             'settings.display_tts_repeat_delay_ms' => ['sometimes', 'integer', 'min:500', 'max:10000'],
             'settings.allow_public_triage' => ['sometimes', 'boolean'],
+            'settings.kiosk_self_service_triage_enabled' => ['sometimes', 'boolean'],
+            'settings.kiosk_status_checker_enabled' => ['sometimes', 'boolean'],
+            'settings.kiosk_enable_hid_barcode' => ['sometimes', 'boolean'],
+            'settings.kiosk_enable_camera_scanner' => ['sometimes', 'boolean'],
+            'settings.kiosk_modal_idle_seconds' => ['sometimes', 'integer', 'min:0', 'max:600'],
             // Per identity-registration plan: when true, public triage may create a session alongside an identity registration (unverified). Default false.
             'settings.allow_unverified_entry' => ['sometimes', 'boolean'],
             'settings.identity_binding_mode' => ['sometimes', 'string', 'in:disabled,required'],

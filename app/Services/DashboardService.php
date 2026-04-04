@@ -7,6 +7,7 @@ use App\Models\Session;
 use App\Models\Station;
 use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Collection;
 
 /**
@@ -18,12 +19,19 @@ class DashboardService
      * Get dashboard stats. Per 08-API-SPEC §6.1 response shape.
      * Per central-edge Phase A: programId from request (admin selection); no single-active.
      */
-    public function getStats(?int $programId = null): array
+    public function getStats(?int $programId = null, ?Authenticatable $viewer = null): array
     {
+        $siteId = $viewer instanceof User ? $viewer->site_id : null;
+        $activeProgramsCount = Program::query()
+            ->forSite($siteId)
+            ->where('is_active', true)
+            ->count();
+
         $program = $programId !== null ? Program::find($programId) : null;
         if (! $program || ! $program->is_active) {
             return [
                 'active_program' => null,
+                'active_programs_count' => $activeProgramsCount,
                 'program' => [
                     'is_active' => false,
                     'is_paused' => false,
@@ -112,6 +120,7 @@ class DashboardService
                 'id' => $program->id,
                 'name' => $program->name,
             ],
+            'active_programs_count' => $activeProgramsCount,
             'program' => [
                 'is_active' => (bool) $program->is_active,
                 'is_paused' => $programIsPaused,

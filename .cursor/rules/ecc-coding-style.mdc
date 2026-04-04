@@ -1,0 +1,36 @@
+---
+description: "ECC coding style: cohesion, errors, validation, pragmatic immutability"
+alwaysApply: true
+---
+
+# Coding Style (ECC-inspired)
+
+## Immutability (pragmatic)
+
+- Prefer **new values / new objects** over mutating shared state when the cost is low (DTOs, value objects, returned collections).
+- **PHP / Eloquent**: mutating a loaded model for persistence is normal; still avoid surprising in-place mutation of arrays passed through many layers—prefer clear assignment or copies where it aids readability.
+
+## File organization
+
+- **Many small, focused files** beat few large ones: high cohesion, low coupling.
+- Target roughly **200–400 lines** per file when practical; treat **~800 lines** as a signal to split.
+- Organize by **feature/domain**, not only by technical type.
+
+## Error handling
+
+- Handle errors **explicitly** at boundaries (HTTP, queues, external APIs).
+- **User-facing**: clear, safe messages; **server-side**: enough context to debug (without leaking secrets).
+
+## Input validation
+
+- Validate at **system boundaries** (HTTP Form Requests, console args, webhooks).
+- Prefer **schema-style** validation (Laravel rules, typed DTOs) over ad hoc checks.
+- **Never trust** external payloads (clients, third-party APIs, uploaded files).
+
+## Quality checklist (before calling work done)
+
+- [ ] Readable names; functions stay small (guide: under roughly **50 lines**).
+- [ ] Avoid deep nesting (guide: at most roughly **4 levels**).
+- [ ] No stray debug output (`dd`, `dump`, `console.log` in committed code).
+- [ ] No hardcoded secrets; use env/config.
+- [ ] Errors are handled, not swallowed.

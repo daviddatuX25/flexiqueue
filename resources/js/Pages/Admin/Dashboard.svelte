@@ -18,17 +18,46 @@
 	let stats = $state<DashboardStats | null>(null);
 	let stations = $state<DashboardStation[]>([]);
 	let loading = $state(true);
-	let refreshIntervalId: ReturnType<typeof setInterval> | null = null;
 
 	const MSG_SESSION_EXPIRED = "Session expired. Please refresh and try again.";
 	const MSG_NETWORK_ERROR = "Network error. Please try again.";
 
 	const page = usePage();
 	const programs = $derived((get(page).props as { programs?: { id: number; name: string }[] })?.programs ?? []);
-	const currentProgramId = $derived(
-		((get(page).props as { currentProgram?: { id: number } | null })?.currentProgram?.id ??
-			(programs.length > 0 ? programs[0].id : null))
+	const defaultProgramId = $derived(
+		(get(page).props as { currentProgram?: { id: number } | null })?.currentProgram?.id ??
+			(programs.length > 0 ? programs[0].id : null)
 	);
+	/** Dashboard-only selection among shared active programs; null = use defaultProgramId */
+	let selectedDashboardProgramId = $state<number | null>(null);
+
+	const effectiveProgramId = $derived.by(() => {
+		if (
+			selectedDashboardProgramId != null &&
+			programs.some((p) => p.id === selectedDashboardProgramId)
+		) {
+			return selectedDashboardProgramId;
+		}
+		return defaultProgramId;
+	});
+
+	$effect(() => {
+		if (
+			selectedDashboardProgramId != null &&
+			programs.length > 0 &&
+			!programs.some((p) => p.id === selectedDashboardProgramId)
+		) {
+			selectedDashboardProgramId = null;
+		}
+	});
+
+	function cycleDashboardProgram() {
+		if (programs.length < 2) return;
+		const current = effectiveProgramId ?? programs[0].id;
+		const idx = Math.max(0, programs.findIndex((p) => p.id === current));
+		selectedDashboardProgramId = programs[(idx + 1) % programs.length].id;
+		void refresh();
+	}
 
 	function getCsrfToken(): string {
 		const p = get(page);
@@ -43,7 +72,9 @@
 
 	async function fetchStats(): Promise<DashboardStats | null> {
 		const url =
-			currentProgramId != null ? `/api/dashboard/stats?program_id=${currentProgramId}` : '/api/dashboard/stats';
+			effectiveProgramId != null
+				? `/api/dashboard/stats?program_id=${effectiveProgramId}`
+				: '/api/dashboard/stats';
 		const res = await fetch(url, {
 			headers: {
 				Accept: 'application/json',
@@ -62,7 +93,9 @@
 
 	async function fetchStations(): Promise<DashboardStation[]> {
 		const url =
-			currentProgramId != null ? `/api/dashboard/stations?program_id=${currentProgramId}` : '/api/dashboard/stations';
+			effectiveProgramId != null
+				? `/api/dashboard/stations?program_id=${effectiveProgramId}`
+				: '/api/dashboard/stations';
 		const res = await fetch(url, {
 			headers: {
 				Accept: 'application/json',
@@ -168,11 +201,11 @@
 		<div class="flex flex-wrap items-center justify-between gap-4">
 			<div>
 				<h1 class="text-2xl font-bold text-surface-950 flex items-center gap-2">
-					<LayoutDashboard class="h-6 w-6 text-primary-600" />
+					<LayoutDashboard class="h-6 w-6 text-primary-500 shrink-0" />
 					Admin Dashboard
 				</h1>
-				<p class="text-sm text-surface-950/60 mt-1 ml-8">
-					Live system status for <span class="font-medium text-surface-900">{formatDate()}</span>
+				<p class="text-sm text-surface-600 mt-2 ml-8 max-w-3xl leading-relaxed">
+					Live system status for <span class="font-medium text-surface-950">{formatDate()}</span>
 				</p>
 			</div>
 			<button
@@ -209,7 +242,12 @@
 				<div class="lg:col-span-8 xl:col-span-9 space-y-6 flex flex-col">
 					<!-- Active Program Card -->
 					<div class="shrink-0">
-						<ActiveProgramCard {stats} />
+						<ActiveProgramCard
+							{stats}
+							activePrograms={programs}
+							selectedProgramId={effectiveProgramId}
+							onCycleActiveProgram={cycleDashboardProgram}
+						/>
 					</div>
 
 					<!-- Station Status Table -->

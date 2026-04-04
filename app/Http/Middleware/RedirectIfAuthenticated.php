@@ -2,7 +2,8 @@
 
 namespace App\Http\Middleware;
 
-use App\Enums\UserRole;
+use App\Models\User;
+use App\Support\PermissionCatalog;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -14,11 +15,14 @@ class RedirectIfAuthenticated
 {
     public function handle(Request $request, Closure $next): Response
     {
-        if ($request->user()) {
-            $user = $request->user();
-
-            if ($user->role === UserRole::Admin || $user->role === UserRole::SuperAdmin) {
+        $user = $request->user();
+        if ($user instanceof User) {
+            if ($user->can(PermissionCatalog::ADMIN_SHARED)) {
                 return redirect()->route('admin.dashboard');
+            }
+
+            if ($user->isStaff() && $user->pending_assignment) {
+                return redirect()->route('pending-assignment');
             }
 
             return redirect()->route('station');

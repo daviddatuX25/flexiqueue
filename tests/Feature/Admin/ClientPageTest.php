@@ -6,7 +6,9 @@ use App\Models\Client;
 use App\Models\Program;
 use App\Models\Site;
 use App\Models\User;
+use App\Services\ClientService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
 /**
@@ -29,7 +31,7 @@ class ClientPageTest extends TestCase
         $this->site = Site::create([
             'name' => 'Default',
             'slug' => 'default',
-            'api_key_hash' => \Illuminate\Support\Facades\Hash::make('key'),
+            'api_key_hash' => Hash::make('key'),
             'settings' => [],
             'edge_settings' => [],
         ]);
@@ -38,7 +40,7 @@ class ClientPageTest extends TestCase
 
     public function test_admin_can_view_clients_index_and_detail_with_masked_ids(): void
     {
-        $client = app(\App\Services\ClientService::class)->createClient(
+        $client = app(ClientService::class)->createClient(
             'Juan',
             'Cruz',
             '1990-01-01',
@@ -72,10 +74,10 @@ class ClientPageTest extends TestCase
             'site_id' => $this->site->id,
             'name' => 'Relief Program',
             'description' => null,
-            'is_active' => false,
+            'is_active' => true,
             'created_by' => $this->admin->id,
         ]);
-        $program->supervisedBy()->attach($supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $program);
 
         $client = Client::factory()->create(['site_id' => $this->site->id]);
 
@@ -88,10 +90,9 @@ class ClientPageTest extends TestCase
 
     public function test_staff_cannot_access_clients_pages(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $indexResponse = $this->actingAs($staff)->get('/admin/clients');
         $indexResponse->assertStatus(403);
     }
 }
-

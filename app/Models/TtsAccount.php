@@ -6,12 +6,15 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Crypt;
 
 /**
- * ElevenLabs TTS account. At most one is_active. Used when no DB account: fall back to config.
+ * Server-side TTS integration account (`provider` matches `config('tts.driver')` for synthesis).
+ * At most one {@see $is_active} row per {@see $provider} (see ADR 001).
+ * When no matching account: fall back to `config('tts.*')` for the current driver.
  */
 class TtsAccount extends Model
 {
     protected $fillable = [
         'label',
+        'provider',
         'api_key',
         'model_id',
         'is_active',
@@ -34,11 +37,33 @@ class TtsAccount extends Model
     }
 
     /**
-     * Get the active TTS account, if any.
+     * Active account for a given provider (e.g. `elevenlabs`), if any.
+     */
+    public static function getActiveForProvider(string $provider): ?self
+    {
+        return self::active()->where('provider', $provider)->first();
+    }
+
+    /**
+     * First active row (legacy). Prefer {@see getActiveForProvider()} when multiple providers exist.
      */
     public static function getActive(): ?self
     {
         return self::active()->first();
+    }
+
+    /**
+     * Active account for {@see config('tts.driver')} only.
+     * Prevents using e.g. an ElevenLabs-stored key when the app driver is a different engine.
+     */
+    public static function getActiveMatchingDriver(): ?self
+    {
+        $driver = (string) config('tts.driver', 'null');
+        if ($driver === 'null' || $driver === '') {
+            return null;
+        }
+
+        return self::getActiveForProvider($driver);
     }
 
     /**
@@ -65,6 +90,7 @@ class TtsAccount extends Model
     {
         if ($value === null || $value === '') {
             $this->attributes['api_key'] = '';
+
             return;
         }
 
@@ -92,6 +118,7 @@ class TtsAccount extends Model
         return [
             'id' => $this->id,
             'label' => $this->label,
+            'provider' => $this->provider ?? 'elevenlabs',
             'model_id' => $this->model_id,
             'is_active' => $this->is_active,
             'masked_api_key' => $this->getMaskedApiKey(),

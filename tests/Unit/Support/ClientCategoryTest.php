@@ -65,6 +65,12 @@ class ClientCategoryTest extends TestCase
         $this->assertFalse(ClientCategory::isPriority(''));
     }
 
+    public function test_is_priority_returns_false_for_staff_other_free_text(): void
+    {
+        $this->assertFalse(ClientCategory::isPriority('Other: walk-in referral'));
+        $this->assertFalse(ClientCategory::isPriority('other: case notes'));
+    }
+
     public function test_is_priority_exact_match_does_not_match_substring(): void
     {
         $this->assertFalse(ClientCategory::isPriority('Not Pregnant'));

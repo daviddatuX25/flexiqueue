@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Program;
 use App\Models\Station;
 use App\Models\User;
+use App\Support\PermissionCatalog;
+use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -14,7 +16,7 @@ use Inertia\Response;
  */
 class ReportPageController extends Controller
 {
-    public function index(\Illuminate\Http\Request $request): Response
+    public function index(Request $request): Response
     {
         $siteId = $request->user()?->site_id;
         $programs = Program::query()
@@ -50,7 +52,7 @@ class ReportPageController extends Controller
             'programs' => $programs,
             'stations' => $stations,
             'staffUsers' => $staffUsers,
-            'auth_is_super_admin' => $authUser->isSuperAdmin(),
+            'auth_is_super_admin' => $authUser->can(PermissionCatalog::PLATFORM_MANAGE),
         ]);
     }
 }

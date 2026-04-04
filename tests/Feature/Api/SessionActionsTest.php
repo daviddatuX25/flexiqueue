@@ -43,7 +43,7 @@ class SessionActionsTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->staff = User::factory()->create(['role' => 'staff']);
+        $this->staff = User::factory()->create();
         $this->program = Program::create([
             'name' => 'Test Program',
             'description' => null,
@@ -114,6 +114,8 @@ class SessionActionsTest extends TestCase
             'status' => 'waiting',
         ]);
         $this->token->update(['current_session_id' => $this->session->id]);
+
+        $this->staff->update(['assigned_station_id' => $this->station1->id]);
     }
 
     /**
@@ -327,6 +329,7 @@ class SessionActionsTest extends TestCase
 
     public function test_transfer_flow_complete_returns_action_required(): void
     {
+        $this->staff->update(['assigned_station_id' => $this->station2->id]);
         $this->session->update([
             'status' => 'serving',
             'current_station_id' => $this->station2->id,
@@ -354,6 +357,7 @@ class SessionActionsTest extends TestCase
 
     public function test_complete_at_final_station_returns_200(): void
     {
+        $this->staff->update(['assigned_station_id' => $this->station2->id]);
         $this->session->update([
             'status' => 'serving',
             'current_station_id' => $this->station2->id,
@@ -395,7 +399,6 @@ class SessionActionsTest extends TestCase
 
     public function test_enqueue_back_from_called_returns_200_and_moves_to_end_of_queue(): void
     {
-        $this->staff->update(['assigned_station_id' => $this->station1->id]);
         $this->session->update([
             'status' => 'called',
             'station_queue_position' => 1,
@@ -415,7 +418,6 @@ class SessionActionsTest extends TestCase
 
     public function test_enqueue_back_from_serving_returns_200_and_moves_to_end_of_queue(): void
     {
-        $this->staff->update(['assigned_station_id' => $this->station1->id]);
         $this->session->update([
             'status' => 'serving',
             'station_queue_position' => 1,
@@ -434,7 +436,6 @@ class SessionActionsTest extends TestCase
 
     public function test_enqueue_back_from_waiting_returns_409(): void
     {
-        $this->staff->update(['assigned_station_id' => $this->station1->id]);
         $this->session->update(['status' => 'waiting']);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/enqueue-back");
@@ -460,7 +461,6 @@ class SessionActionsTest extends TestCase
 
     public function test_no_show_at_max_with_last_call_terminates(): void
     {
-        $this->staff->update(['assigned_station_id' => $this->station1->id]);
         $this->session->update(['status' => 'called', 'no_show_attempts' => 3]);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/no-show", [
@@ -475,7 +475,6 @@ class SessionActionsTest extends TestCase
 
     public function test_no_show_at_max_with_extend_returns_to_waiting(): void
     {
-        $this->staff->update(['assigned_station_id' => $this->station1->id]);
         $this->session->update(['status' => 'called', 'no_show_attempts' => 3]);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/no-show", [
@@ -493,7 +492,6 @@ class SessionActionsTest extends TestCase
 
     public function test_no_show_at_max_without_extend_or_last_call_returns_422(): void
     {
-        $this->staff->update(['assigned_station_id' => $this->station1->id]);
         $this->session->update(['status' => 'called', 'no_show_attempts' => 3]);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/no-show");
@@ -504,7 +502,6 @@ class SessionActionsTest extends TestCase
 
     public function test_no_show_with_enqueue_back_moves_to_end_of_queue(): void
     {
-        $this->staff->update(['assigned_station_id' => $this->station1->id]);
         $this->session->update([
             'status' => 'called',
             'station_queue_position' => 1,
@@ -523,7 +520,6 @@ class SessionActionsTest extends TestCase
 
     public function test_no_show_from_serving_returns_to_waiting(): void
     {
-        $this->staff->update(['assigned_station_id' => $this->station1->id]);
         $this->session->update(['status' => 'serving', 'no_show_attempts' => 0]);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/no-show");
@@ -535,7 +531,6 @@ class SessionActionsTest extends TestCase
 
     public function test_no_show_on_called_session_with_1_attempt_returns_to_waiting(): void
     {
-        $this->staff->update(['assigned_station_id' => $this->station1->id]);
         $this->session->update(['status' => 'called', 'no_show_attempts' => 0]);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/no-show");
@@ -549,7 +544,7 @@ class SessionActionsTest extends TestCase
     public function test_force_complete_with_valid_pin_returns_200(): void
     {
         $supervisor = User::factory()->supervisor()->withOverridePin('123456')->create();
-        $this->program->supervisedBy()->attach($supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $this->program);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/force-complete", [
             'reason' => 'Token accidentally reused',
@@ -569,7 +564,7 @@ class SessionActionsTest extends TestCase
     public function test_force_complete_invalid_pin_returns_401(): void
     {
         $supervisor = User::factory()->supervisor()->withOverridePin('123456')->create();
-        $this->program->supervisedBy()->attach($supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $this->program);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/force-complete", [
             'reason' => 'Token accidentally reused',
@@ -584,7 +579,7 @@ class SessionActionsTest extends TestCase
     public function test_override_with_valid_pin_returns_200(): void
     {
         $supervisor = User::factory()->supervisor()->withOverridePin('123456')->create();
-        $this->program->supervisedBy()->attach($supervisor->id);
+        $this->grantProgramTeamSuperviseForTests($supervisor, $this->program);
         $this->session->update(['status' => 'serving']);
 
         $response = $this->actingAs($this->staff)->postJson("/api/sessions/{$this->session->id}/override", [

@@ -3,14 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Models\Program;
-use App\Models\ProgramStationAssignment;
-use App\Models\ServiceTrack;
 use App\Models\Site;
 use App\Models\Station;
 use App\Services\CheckStatusService;
 use App\Services\DeviceAuthorizationService;
 use App\Services\DisplayBoardService;
 use App\Services\StationQueueService;
+use App\Services\StatusFlowDiagramPresenter;
 use App\Support\DeviceLock;
 use App\Support\SiteResolver;
 use Illuminate\Http\RedirectResponse;
@@ -18,6 +17,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 /**
  * Per 09-UI-ROUTES: Client-facing informant display (no auth).
@@ -28,14 +28,15 @@ class DisplayController extends Controller
         private DisplayBoardService $displayBoardService,
         private CheckStatusService $checkStatusService,
         private DeviceAuthorizationService $deviceAuth,
-        private StationQueueService $stationQueueService
+        private StationQueueService $stationQueueService,
+        private StatusFlowDiagramPresenter $statusFlowDiagramPresenter
     ) {}
 
     /**
      * Per plan: legacy /display and /public-triage with no slug show only this message. No site list, no picker.
      * When a default site exists, redirect to site display.
      */
-    public function showScanQrMessage(): \Illuminate\Http\RedirectResponse|Response
+    public function showScanQrMessage(): RedirectResponse|Response
     {
         $site = SiteResolver::defaultIfExists();
 
@@ -53,7 +54,7 @@ class DisplayController extends Controller
     /**
      * Display board: all active programs for the site (no publish filter). Access requires device auth (PIN/QR).
      *
-     * @return Response|\Illuminate\Http\RedirectResponse
+     * @return Response|RedirectResponse
      */
     public function boardWithSite(Request $request, Site $site)
     {
@@ -144,7 +145,7 @@ class DisplayController extends Controller
     /**
      * Per-site route: station board for a site. Station must belong to a program in this site.
      *
-     * @return Response|\Illuminate\Http\RedirectResponse
+     * @return Response|RedirectResponse
      */
     public function stationBoardWithSite(Site $site, Station $station)
     {
@@ -152,7 +153,7 @@ class DisplayController extends Controller
     }
 
     /**
-     * @return Response|\Illuminate\Http\RedirectResponse
+     * @return Response|RedirectResponse
      */
     private function stationBoardForSite(Site $site, Station $station)
     {
@@ -248,7 +249,7 @@ class DisplayController extends Controller
      * Per public-site plan: read-only board at GET /site/{site}/program/{program}/view.
      * No device auth or lock. RequireSiteAccess ensures site is in known_sites cookie.
      */
-    public function publicDisplay(Request $request, Site $site, string $program_slug): Response|\Illuminate\Http\RedirectResponse
+    public function publicDisplay(Request $request, Site $site, string $program_slug): Response|RedirectResponse
     {
         $program = Program::query()
             ->where('slug', $program_slug)
@@ -327,7 +328,7 @@ class DisplayController extends Controller
      * Per plan: program page at GET /site/{site_slug}/program/{program_slug}. When active, shows device selection.
      * If inactive or not found, 404.
      */
-    public function programPage(Site $site, string $program_slug): Response|\Illuminate\Http\RedirectResponse
+    public function programPage(Site $site, string $program_slug): Response|RedirectResponse
     {
         return $this->renderProgramDeviceChooser($site, $program_slug);
     }
@@ -427,7 +428,7 @@ class DisplayController extends Controller
     /**
      * Per plan: legacy .../devices URL redirects to canonical program URL so one place for device selection.
      */
-    public function chooseDeviceType(Site $site, string $program_slug): \Illuminate\Http\RedirectResponse
+    public function chooseDeviceType(Site $site, string $program_slug): RedirectResponse
     {
         $program = Program::query()
             ->where('slug', $program_slug)
@@ -446,7 +447,7 @@ class DisplayController extends Controller
      * Shared logic: resolve active program for site+slug, device auth, then render device chooser (or redirect to auth).
      * If existing lock is for a different program, clear it before rendering.
      */
-    private function renderProgramDeviceChooser(Site $site, string $program_slug): Response|\Illuminate\Http\RedirectResponse
+    private function renderProgramDeviceChooser(Site $site, string $program_slug): Response|RedirectResponse
     {
         $program = Program::query()
             ->where('slug', $program_slug)
@@ -510,34 +511,42 @@ class DisplayController extends Controller
      * Per plan: legacy /public-triage with no slug. When default site exists, redirect to site triage start;
      * otherwise show "Please scan the QR..." (ScanQrMessage).
      */
-    public function triageStartRedirect(): \Illuminate\Http\RedirectResponse|Response
+    public function triageStartRedirect(): RedirectResponse|Response
     {
         $site = SiteResolver::defaultIfExists();
 
         if ($site !== null) {
-            return redirect()->route('public.triage.site', ['site' => $site->slug]);
+            return redirect()->route('public.kiosk.site', ['site' => $site->slug], 301);
         }
 
         return Inertia::render('Display/ScanQrMessage');
     }
 
     /**
-     * Per-site triage start: first active program with allow_public_triage, or show not available. No publish filter.
+     * Per-site kiosk start: redirect to canonical `/kiosk` list handler (replaces legacy public-triage index).
      */
-    public function triageStartWithSite(Site $site): \Illuminate\Http\RedirectResponse|Response
+    public function triageStartWithSite(Site $site): RedirectResponse
+    {
+        return redirect()->route('public.kiosk.site', ['site' => $site->slug], 301);
+    }
+
+    /**
+     * First active program with kiosk self-service enabled, or empty Kiosk/Start. Canonical: `/site/{site}/kiosk`.
+     */
+    public function kioskStartWithSite(Site $site): RedirectResponse|Response
     {
         $program = Program::query()
             ->forSite($site->id)
             ->where('is_active', true)
             ->orderBy('name')
             ->get()
-            ->first(fn (Program $p) => $p->settings()->getAllowPublicTriage());
+            ->first(fn (Program $p) => $p->settings()->getKioskSurfaceEnabled());
 
         if ($program) {
-            return redirect()->to('/site/'.$site->slug.'/public-triage/'.$program->slug);
+            return redirect()->to('/site/'.$site->slug.'/kiosk/'.$program->slug);
         }
 
-        return Inertia::render('Triage/PublicStart', [
+        return Inertia::render('Kiosk/Start', [
             'allowed' => false,
             'program_id' => null,
             'site_id' => null,
@@ -545,18 +554,19 @@ class DisplayController extends Controller
             'tracks' => [],
             'date' => now()->format('F j, Y'),
             'display_scan_timeout_seconds' => 20,
-            'enable_public_triage_hid_barcode' => true,
-            'enable_public_triage_camera_scanner' => true,
+            'kiosk_enable_hid_barcode' => true,
+            'kiosk_enable_camera_scanner' => true,
+            'kiosk_self_service_triage_enabled' => false,
+            'kiosk_status_checker_enabled' => false,
+            'kiosk_hid_persistent_when_scan_modal_closed' => false,
             'allow_unverified_entry' => false,
         ]);
     }
 
     /**
-     * Per-site public triage by program slug. Resolve program by slug and site; 404 if not found.
-     *
-     * @return Response|\Illuminate\Http\RedirectResponse
+     * Per-site self-service kiosk by program slug (canonical URL). Legacy `/public-triage/{program}` redirects here (301).
      */
-    public function publicTriageWithSite(Site $site, string $program_slug)
+    public function publicKioskWithSite(Site $site, string $program_slug): SymfonyResponse
     {
         $program = Program::query()
             ->where('slug', $program_slug)
@@ -567,17 +577,24 @@ class DisplayController extends Controller
             abort(404);
         }
 
-        return $this->publicTriageForProgram($program);
+        return $this->publicSelfServeKioskForProgram($program);
     }
 
     /**
-     * Show public self-serve triage page for a specific program. When program allows, clients can scan token and choose track.
-     * When program inactive (404) or allow_public_triage is false, show "Self-service is not available" (allowed: false).
-     * Per A.2.3: program from URL; pass program_id in props for API calls.
-     *
-     * @return Response|\Illuminate\Http\RedirectResponse
+     * Legacy route: permanent redirect to kiosk URL.
      */
-    public function publicTriage(Program $program)
+    public function publicTriageWithSite(Site $site, string $program_slug): RedirectResponse
+    {
+        return redirect()->route('public.kiosk.site.program', [
+            'site' => $site->slug,
+            'program_slug' => $program_slug,
+        ], 301);
+    }
+
+    /**
+     * Legacy route `/public/triage/{program}`: permanent redirect to site kiosk URL.
+     */
+    public function publicTriage(Program $program): RedirectResponse
     {
         if (! $program->is_active) {
             abort(404);
@@ -587,42 +604,50 @@ class DisplayController extends Controller
             abort(404);
         }
 
-        return $this->publicTriageForProgram($program);
+        return redirect()->to('/site/'.$site->slug.'/kiosk/'.$program->slug, 301);
     }
 
     /**
-     * @return Response|\Illuminate\Http\RedirectResponse
+     * Self-service kiosk surface (same Inertia page as legacy public triage; device lock type kiosk or legacy triage).
      */
-    private function publicTriageForProgram(Program $program)
+    private function publicSelfServeKioskForProgram(Program $program): SymfonyResponse
     {
         $site = $program->site;
         if (! $site) {
             abort(404);
         }
         $program->load('serviceTracks:id,program_id,name,is_default');
+        $settings = $program->settings();
 
-        if (! $program->settings()->getAllowPublicTriage()) {
-            return Inertia::render('Triage/PublicStart', [
+        $request = request();
+
+        if (! $settings->getKioskSurfaceEnabled()) {
+            return Inertia::render('Kiosk/Start', [
                 'allowed' => false,
                 'program_id' => $program->id,
                 'site_id' => $program->site_id,
+                'site_slug' => $site->slug,
+                'program_slug' => $program->slug,
                 'program_name' => $program->name,
                 'tracks' => [],
                 'date' => now()->format('F j, Y'),
-                'display_scan_timeout_seconds' => $program->settings()->getDisplayScanTimeoutSeconds(),
-                'enable_public_triage_hid_barcode' => $program->settings()->getEnablePublicTriageHidBarcode(),
-                'enable_public_triage_camera_scanner' => $program->settings()->getEnablePublicTriageCameraScanner(),
-                'allow_unverified_entry' => $program->settings()->getAllowUnverifiedEntry(),
-            ]);
+                'display_scan_timeout_seconds' => $settings->getKioskModalIdleSeconds(),
+                'kiosk_enable_hid_barcode' => $settings->getKioskEnableHidBarcode(),
+                'kiosk_enable_camera_scanner' => $settings->getKioskEnableCameraScanner(),
+                'allow_unverified_entry' => $settings->getAllowUnverifiedEntry(),
+                'kiosk_self_service_triage_enabled' => $settings->getKioskSelfServiceTriageEnabled(),
+                'kiosk_status_checker_enabled' => $settings->getKioskStatusCheckerEnabled(),
+                'kiosk_hid_persistent_when_scan_modal_closed' => $settings->getKioskHidPersistentWhenScanModalClosed(),
+            ])->toResponse($request);
         }
 
         $devicesUrl = '/site/'.$site->slug.'/program/'.$program->slug;
-        $request = request();
         $lockToken = $request->query('lock_token');
         $cookieFromToken = null;
         if (is_string($lockToken) && $lockToken !== '') {
             $lock = DeviceLock::consumeLockToken($lockToken);
-            if ($lock !== null && $lock['site_slug'] === $site->slug && $lock['program_slug'] === $program->slug && $lock['device_type'] === DeviceLock::TYPE_TRIAGE) {
+            if ($lock !== null && $lock['site_slug'] === $site->slug && $lock['program_slug'] === $program->slug
+                && in_array($lock['device_type'], [DeviceLock::TYPE_KIOSK, DeviceLock::TYPE_TRIAGE], true)) {
                 $cookieFromToken = DeviceLock::encode($lock['site_slug'], $lock['program_slug'], $lock['device_type'], $lock['station_id'] ?? null);
                 DeviceLock::storeInSession($request, $lock);
             }
@@ -631,7 +656,9 @@ class DisplayController extends Controller
         if ($authRedirect !== null) {
             return $authRedirect;
         }
-        if ($cookieFromToken === null && ! DeviceLock::matches($request, $site->slug, $program->slug, DeviceLock::TYPE_TRIAGE)) {
+        $hasKioskLock = DeviceLock::matches($request, $site->slug, $program->slug, DeviceLock::TYPE_KIOSK)
+            || DeviceLock::matches($request, $site->slug, $program->slug, DeviceLock::TYPE_TRIAGE);
+        if ($cookieFromToken === null && ! $hasKioskLock) {
             return redirect()->to($devicesUrl);
         }
 
@@ -641,7 +668,7 @@ class DisplayController extends Controller
             'is_default' => (bool) $t->is_default,
         ])->values()->all();
 
-        return Inertia::render('Triage/PublicStart', [
+        $response = Inertia::render('Kiosk/Start', [
             'allowed' => true,
             'program_id' => $program->id,
             'site_id' => $program->site_id,
@@ -649,12 +676,15 @@ class DisplayController extends Controller
             'program_slug' => $program->slug,
             'program_name' => $program->name,
             'tracks' => $tracks,
-            'identity_binding_mode' => $program->settings()->getIdentityBindingMode(),
+            'identity_binding_mode' => $settings->getIdentityBindingMode(),
             'date' => now()->format('F j, Y'),
-            'display_scan_timeout_seconds' => $program->settings()->getDisplayScanTimeoutSeconds(),
-            'enable_public_triage_hid_barcode' => $program->settings()->getEnablePublicTriageHidBarcode(),
-            'enable_public_triage_camera_scanner' => $program->settings()->getEnablePublicTriageCameraScanner(),
-            'allow_unverified_entry' => $program->settings()->getAllowUnverifiedEntry(),
+            'display_scan_timeout_seconds' => $settings->getKioskModalIdleSeconds(),
+            'kiosk_enable_hid_barcode' => $settings->getKioskEnableHidBarcode(),
+            'kiosk_enable_camera_scanner' => $settings->getKioskEnableCameraScanner(),
+            'allow_unverified_entry' => $settings->getAllowUnverifiedEntry(),
+            'kiosk_self_service_triage_enabled' => $settings->getKioskSelfServiceTriageEnabled(),
+            'kiosk_status_checker_enabled' => $settings->getKioskStatusCheckerEnabled(),
+            'kiosk_hid_persistent_when_scan_modal_closed' => $settings->getKioskHidPersistentWhenScanModalClosed(),
         ])->toResponse($request);
         if ($cookieFromToken !== null) {
             $response->headers->setCookie($cookieFromToken);
@@ -731,10 +761,33 @@ class DisplayController extends Controller
         }
 
         $inertiaProps['site_slug'] = $siteId !== null ? (Site::find($siteId))?->slug : null;
+        $inertiaProps['return_url'] = $this->sanitizeStatusReturnTo(request()->query('return_to'));
 
         return Inertia::render('Display/Status', $inertiaProps);
     }
 
+    /**
+     * Full-page status: optional safe redirect after timer / “Go back” (e.g. kiosk ?return_to=/site/.../kiosk/...).
+     * Only same-origin path prefixes under /site/ are allowed.
+     */
+    private function sanitizeStatusReturnTo(mixed $raw): ?string
+    {
+        if (! is_string($raw) || $raw === '') {
+            return null;
+        }
+        $path = rawurldecode($raw);
+        if (! str_starts_with($path, '/')) {
+            return null;
+        }
+        if (str_contains($path, "\0") || preg_match('#//|\\\\#', $path)) {
+            return null;
+        }
+        if (! str_starts_with($path, '/site/')) {
+            return null;
+        }
+
+        return $path;
+    }
 
     /**
      * Map CheckStatusService result to Display/Status page props.
@@ -771,76 +824,9 @@ class DisplayController extends Controller
      */
     private function addDiagramProps(array &$inertiaProps, int $programId, int $trackId, ?int $siteId = null): void
     {
-        $q = Program::query()->with('diagram')->where('id', $programId);
-        if ($siteId !== null) {
-            $q->forSite($siteId);
+        foreach ($this->statusFlowDiagramPresenter->propsForProgramTrack($programId, $trackId, $siteId) as $key => $value) {
+            $inertiaProps[$key] = $value;
         }
-        $program = $q->first();
-        if (! $program || ! $program->diagram) {
-            return;
-        }
-
-        $layout = $program->diagram->layout;
-        if (! is_array($layout) || empty($layout['nodes'])) {
-            return;
-        }
-
-        $tracks = $program->serviceTracks()
-            ->with(['trackSteps.process', 'trackSteps.station'])
-            ->orderBy('name')
-            ->get()
-            ->map(fn (ServiceTrack $t) => [
-                'id' => $t->id,
-                'name' => $t->name,
-                'steps' => $t->trackSteps->map(fn ($s) => [
-                    'station_id' => $s->station_id,
-                    'process_id' => $s->process_id,
-                    'step_order' => $s->step_order,
-                ])->values()->all(),
-            ])->values()->all();
-
-        $processes = $program->processes()
-            ->orderBy('name')
-            ->get()
-            ->map(fn ($p) => [
-                'id' => $p->id,
-                'name' => $p->name,
-            ])->values()->all();
-
-        $stations = $program->stations()
-            ->with('processes')
-            ->orderBy('name')
-            ->get()
-            ->map(fn (Station $s) => [
-                'id' => $s->id,
-                'name' => $s->name,
-                'process_ids' => $s->processes->pluck('id')->values()->all(),
-            ])->values()->all();
-
-        $seen = [];
-        $staffList = [];
-        foreach (ProgramStationAssignment::where('program_id', $program->id)->with('user:id,name')->get() as $a) {
-            $uid = $a->user_id;
-            if (! in_array($uid, $seen, true)) {
-                $seen[] = $uid;
-                $staffList[] = ['id' => $a->user->id, 'name' => $a->user->name];
-            }
-        }
-        foreach ($program->supervisedBy()->get() as $u) {
-            if (! in_array($u->id, $seen, true)) {
-                $seen[] = $u->id;
-                $staffList[] = ['id' => $u->id, 'name' => $u->name];
-            }
-        }
-        usort($staffList, fn ($a, $b) => strcmp($a['name'], $b['name']));
-
-        $inertiaProps['diagram'] = $layout;
-        $inertiaProps['diagram_program'] = ['id' => $program->id, 'name' => $program->name];
-        $inertiaProps['diagram_tracks'] = $tracks;
-        $inertiaProps['diagram_stations'] = $stations;
-        $inertiaProps['diagram_processes'] = $processes;
-        $inertiaProps['diagram_staff'] = $staffList;
-        $inertiaProps['diagram_track_id'] = $trackId;
     }
 
     /**

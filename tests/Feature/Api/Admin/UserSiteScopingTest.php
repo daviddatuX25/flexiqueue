@@ -35,9 +35,9 @@ class UserSiteScopingTest extends TestCase
 
         $adminA = User::factory()->admin()->create(['site_id' => $siteA->id]);
         $adminB = User::factory()->admin()->create(['site_id' => $siteB->id]);
-        $userA1 = User::factory()->create(['role' => 'staff', 'site_id' => $siteA->id]);
-        $userA2 = User::factory()->create(['role' => 'staff', 'site_id' => $siteA->id]);
-        $userB1 = User::factory()->create(['role' => 'staff', 'site_id' => $siteB->id]);
+        $userA1 = User::factory()->create(['site_id' => $siteA->id]);
+        $userA2 = User::factory()->create(['site_id' => $siteA->id]);
+        $userB1 = User::factory()->create(['site_id' => $siteB->id]);
 
         $responseA = $this->actingAs($adminA)->getJson('/api/admin/users');
         $responseA->assertStatus(200);
@@ -74,13 +74,13 @@ class UserSiteScopingTest extends TestCase
             'edge_settings' => [],
         ]);
         $adminA = User::factory()->admin()->create(['site_id' => $siteA->id]);
-        $userB = User::factory()->create(['role' => 'staff', 'site_id' => $siteB->id]);
+        $userB = User::factory()->create(['site_id' => $siteB->id]);
 
         // No GET /api/admin/users/{id} route; only PUT/DELETE are used for single-user access
         $this->actingAs($adminA)->putJson("/api/admin/users/{$userB->id}", [
             'name' => $userB->name,
+            'username' => $userB->username,
             'email' => $userB->email,
-            'role' => 'staff',
             'is_active' => true,
         ])->assertStatus(404);
         $this->actingAs($adminA)->deleteJson("/api/admin/users/{$userB->id}")->assertStatus(404);
@@ -96,7 +96,7 @@ class UserSiteScopingTest extends TestCase
             'edge_settings' => [],
         ]);
         $adminNoSite = User::factory()->admin()->create(['site_id' => null]);
-        User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        User::factory()->create(['site_id' => $site->id]);
 
         $response = $this->actingAs($adminNoSite)->getJson('/api/admin/users');
         $response->assertStatus(200);
@@ -109,7 +109,9 @@ class UserSiteScopingTest extends TestCase
 
         $response = $this->actingAs($adminNoSite)->postJson('/api/admin/users', [
             'name' => 'New User',
+            'username' => 'new.user',
             'email' => 'new@example.com',
+            'recovery_gmail' => 'new.recovery@gmail.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
             'role' => 'staff',
@@ -131,7 +133,9 @@ class UserSiteScopingTest extends TestCase
 
         $response = $this->actingAs($admin)->postJson('/api/admin/users', [
             'name' => 'New User',
+            'username' => 'newuser.staff',
             'email' => 'newuser@example.com',
+            'recovery_gmail' => 'newuser.recovery@gmail.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
             'role' => 'staff',

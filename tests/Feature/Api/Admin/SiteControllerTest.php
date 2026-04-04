@@ -2,9 +2,10 @@
 
 namespace Tests\Feature\Api\Admin;
 
+use App\Models\PrintSetting;
 use App\Models\Site;
+use App\Models\TtsPlatformBudget;
 use App\Models\User;
-use App\Services\SiteApiKeyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
@@ -33,7 +34,7 @@ class SiteControllerTest extends TestCase
             'edge_settings' => [],
         ]);
         $this->admin = User::factory()->admin()->create(['site_id' => $this->site->id]);
-        $this->superAdmin = User::factory()->create(['role' => 'super_admin', 'site_id' => null]);
+        $this->superAdmin = User::factory()->superAdmin()->create(['site_id' => null]);
     }
 
     public function test_super_admin_store_creates_site_and_returns_raw_api_key_once(): void
@@ -59,6 +60,15 @@ class SiteControllerTest extends TestCase
         $this->assertNotNull($site->api_key_hash);
         $this->assertNotSame($apiKey, $site->api_key_hash);
         $this->assertTrue(Hash::check($apiKey, $site->api_key_hash));
+
+        $this->assertDatabaseHas('print_settings', [
+            'site_id' => $site->id,
+        ]);
+        $this->assertNotNull(PrintSetting::where('site_id', $site->id)->first());
+
+        $this->assertDatabaseHas('program_default_settings', [
+            'site_id' => $site->id,
+        ]);
     }
 
     public function test_show_site_does_not_expose_raw_api_key(): void
@@ -169,7 +179,7 @@ class SiteControllerTest extends TestCase
 
     public function test_staff_cannot_access_sites_api_returns_403(): void
     {
-        $staff = User::factory()->create(['role' => 'staff']);
+        $staff = User::factory()->create();
 
         $response = $this->actingAs($staff)->postJson('/api/admin/sites', [
             'name' => 'Any',
@@ -196,6 +206,87 @@ class SiteControllerTest extends TestCase
         $response = $this->actingAs($this->superAdmin)->getJson('/api/admin/sites');
         $response->assertStatus(200);
         $response->assertJsonCount(2, 'sites');
+    }
+
+    public function test_update_site_merges_tts_budget_settings(): void
+    {
+        $this->site->update([
+            'settings' => [
+                'tts_budget' => [
+                    'enabled' => false,
+                    'limit' => 100,
+                ],
+            ],
+        ]);
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/sites/{$this->site->id}", [
+            'settings' => [
+                'tts_budget' => [
+                    'enabled' => true,
+                    'period' => 'monthly',
+                    'limit' => 5000,
+                    'warning_threshold_pct' => 75,
+                    'block_on_limit' => true,
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('site.settings.tts_budget.enabled', true);
+        $response->assertJsonPath('site.settings.tts_budget.limit', 5000);
+        $response->assertJsonPath('site.settings.tts_budget.block_on_limit', true);
+
+        $this->site->refresh();
+        $this->assertTrue($this->site->settings['tts_budget']['enabled']);
+        $this->assertSame(5000, $this->site->settings['tts_budget']['limit']);
+
+        $budgetResponse = $this->actingAs($this->admin)->getJson('/api/admin/tts/budget');
+        $budgetResponse->assertOk();
+        $budgetResponse->assertJsonPath('policy.enabled', true);
+        $budgetResponse->assertJsonPath('policy.limit', 5000);
+    }
+
+    public function test_update_site_ignores_tts_budget_when_platform_global_budget_enabled(): void
+    {
+        $this->site->update([
+            'settings' => [
+                'tts_budget' => [
+                    'enabled' => true,
+                    'limit' => 100,
+                ],
+            ],
+        ]);
+        $platform = TtsPlatformBudget::settings();
+        $platform->global_enabled = true;
+        $platform->save();
+
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/sites/{$this->site->id}", [
+            'settings' => [
+                'tts_budget' => [
+                    'enabled' => false,
+                    'limit' => 99999,
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $this->site->refresh();
+        $this->assertTrue($this->site->settings['tts_budget']['enabled']);
+        $this->assertSame(100, $this->site->settings['tts_budget']['limit']);
+    }
+
+    public function test_update_site_rejects_minutes_mode_for_tts_budget(): void
+    {
+        $response = $this->actingAs($this->admin)->putJson("/api/admin/sites/{$this->site->id}", [
+            'settings' => [
+                'tts_budget' => [
+                    'mode' => 'minutes',
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['settings.tts_budget.mode']);
     }
 
     public function test_update_site_edge_settings(): void

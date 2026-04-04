@@ -2,9 +2,10 @@
 
 namespace App\Http\Controllers\Auth;
 
-use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\LoginRequest;
+use App\Models\User;
+use App\Support\GoogleOAuthConfig;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -18,6 +19,8 @@ use Inertia\Response;
  */
 class LoginController extends Controller
 {
+    use Concerns\RedirectsAuthenticatedUser;
+
     private const THROTTLE_KEY_PREFIX = 'login:';
 
     private const MAX_ATTEMPTS = 5;
@@ -27,35 +30,43 @@ class LoginController extends Controller
     public function showLoginForm(Request $request): Response|RedirectResponse
     {
         if (Auth::check()) {
-            return $this->redirectByRole(Auth::user()->role);
+            /** @var User $u */
+            $u = Auth::user();
+
+            return $this->redirectAfterLogin($u);
         }
 
         $payload = [
             'status' => $request->session()->get('status'),
             'error' => $request->session()->get('error'),
+            'googleOAuthEnabled' => GoogleOAuthConfig::isConfigured(),
         ];
         if (config('app.demo')) {
             $payload['demo'] = true;
             $payload['demoAccounts'] = config('app.demo_accounts');
         }
+
         return Inertia::render('Auth/Login', $payload);
     }
 
     public function login(LoginRequest $request): RedirectResponse
     {
-        $key = self::THROTTLE_KEY_PREFIX . $request->ip();
+        $key = self::THROTTLE_KEY_PREFIX.$request->ip();
 
         if (RateLimiter::tooManyAttempts($key, self::MAX_ATTEMPTS)) {
             return back()->with('error', 'Too many attempts. Please try again in 15 minutes.');
         }
 
-        $credentials = $request->only('email', 'password');
+        $credentials = [
+            'username' => $request->validated('username'),
+            'password' => $request->validated('password'),
+        ];
 
         if (! Auth::attempt($credentials, remember: false)) {
             RateLimiter::hit($key, self::DECAY_MINUTES * 60);
 
             throw ValidationException::withMessages([
-                'email' => ['Invalid credentials.'],
+                'username' => ['Invalid credentials.'],
             ]);
         }
 
@@ -67,14 +78,14 @@ class LoginController extends Controller
             $request->session()->regenerateToken();
 
             throw ValidationException::withMessages([
-                'email' => ['Invalid credentials.'],
+                'username' => ['Invalid credentials.'],
             ]);
         }
 
         RateLimiter::clear($key);
         $request->session()->regenerate();
 
-        return $this->redirectByRole($user->role);
+        return $this->redirectAfterLogin($user);
     }
 
     /**
@@ -86,7 +97,7 @@ class LoginController extends Controller
         $user = Auth::user();
         if ($user) {
             $user->update([
-                'availability_status' => \App\Models\User::AVAILABILITY_AWAY,
+                'availability_status' => User::AVAILABILITY_AWAY,
                 'availability_updated_at' => now(),
             ]);
         }
@@ -95,13 +106,5 @@ class LoginController extends Controller
         $request->session()->regenerateToken();
 
         return redirect()->route('login');
-    }
-
-    private function redirectByRole(UserRole $role): RedirectResponse
-    {
-        return match ($role) {
-            UserRole::Admin, UserRole::SuperAdmin => redirect()->route('admin.dashboard'),
-            UserRole::Staff => redirect()->route('station'),
-        };
     }
 }

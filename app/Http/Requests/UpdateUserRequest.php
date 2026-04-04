@@ -3,6 +3,8 @@
 namespace App\Http\Requests;
 
 use App\Enums\UserRole;
+use App\Support\PermissionCatalog;
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -17,7 +19,7 @@ class UpdateUserRequest extends FormRequest
     }
 
     /**
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
@@ -25,12 +27,17 @@ class UpdateUserRequest extends FormRequest
 
         return [
             'name' => ['sometimes', 'required', 'string', 'max:255'],
+            'username' => ['sometimes', 'required', 'string', 'max:255', 'regex:/^[a-zA-Z0-9._-]+$/', Rule::unique('users', 'username')->ignore($user?->id)],
             'email' => ['sometimes', 'required', 'string', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user?->id)],
+            'recovery_gmail' => ['sometimes', 'nullable', 'string', 'email', 'max:255'],
             'password' => ['nullable', 'string', 'min:8', 'max:255'],
             'role' => ['sometimes', 'required', 'string', Rule::enum(UserRole::class)],
             'is_active' => ['sometimes', 'boolean'],
             'override_pin' => ['nullable', 'string', 'size:6', 'regex:/^\d{6}$/'],
             'site_id' => ['nullable', 'integer', 'exists:sites,id'],
+            'direct_permissions' => ['sometimes', 'array'],
+            'direct_permissions.*' => ['string', Rule::in(PermissionCatalog::assignableDirect())],
+            'pending_assignment' => ['sometimes', 'boolean'],
         ];
     }
 

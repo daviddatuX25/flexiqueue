@@ -5,7 +5,7 @@ services:
             dockerfile: Dockerfile
             args:
                 WWWGROUP: '${WWWGROUP}'
-                MYSQL_CLIENT: mariadb-client
+                MYSQL_CLIENT: mysql-client
         image: 'sail-8.5/app'
         extra_hosts:
             - 'host.docker.internal:host-gateway'
@@ -26,10 +26,11 @@ services:
         networks:
             - sail
         depends_on:
-            - mariadb
+            - mysql
             - redis
-    mariadb:
-        image: 'mariadb:11'
+            - mailpit
+    mysql:
+        image: 'mysql:8.0'
         ports:
             - '${FORWARD_DB_PORT:-3306}:3306'
         environment:
@@ -38,20 +39,26 @@ services:
             MYSQL_DATABASE: '${DB_DATABASE}'
             MYSQL_USER: '${DB_USERNAME}'
             MYSQL_PASSWORD: '${DB_PASSWORD}'
-            MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
         volumes:
-            - 'sail-mariadb:/var/lib/mysql'
-            - './vendor/laravel/sail/database/mariadb/create-testing-database.sh:/docker-entrypoint-initdb.d/10-create-testing-database.sh'
+            - 'sail-mysql:/var/lib/mysql'
         networks:
             - sail
         healthcheck:
             test:
                 - CMD
-                - healthcheck.sh
-                - '--connect'
-                - '--innodb_initialized'
+                - mysqladmin
+                - ping
+                - -h
+                - localhost
             retries: 3
             timeout: 5s
+    mailpit:
+        image: 'axllent/mailpit:latest'
+        ports:
+            - '${FORWARD_MAILPIT_DASHBOARD_PORT:-8025}:8025'
+            - '${FORWARD_MAILPIT_SMTP_PORT:-1025}:1025'
+        networks:
+            - sail
     redis:
         image: 'redis:alpine'
         ports:
@@ -71,7 +78,7 @@ networks:
     sail:
         driver: bridge
 volumes:
-    sail-mariadb:
+    sail-mysql:
         driver: local
     sail-redis:
         driver: local

@@ -35,4 +35,14 @@ return [
         ],
     ],
 
+    /*
+    | Per HYBRID_AUTH_ADMIN_FIRST_PRD.md H2: Google OAuth (Laravel Socialite).
+    | Leave client_id empty to hide "Sign in with Google" and return 404 for OAuth routes.
+    */
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_REDIRECT_URI', rtrim((string) env('APP_URL', ''), '/').'/auth/google/callback'),
+    ],
+
 ];

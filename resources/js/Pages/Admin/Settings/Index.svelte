@@ -1,7 +1,6 @@
 <script lang="ts">
     import AdminLayout from "../../../Layouts/AdminLayout.svelte";
     import ConfirmModal from "../../../Components/ConfirmModal.svelte";
-    import Modal from "../../../Components/Modal.svelte";
     import { Link } from "@inertiajs/svelte";
     import { get } from "svelte/store";
     import { onMount } from "svelte";
@@ -10,6 +9,7 @@
     import ProgramDefaultsTab from "./ProgramDefaultsTab.svelte";
     import PrintSettingsTab from "./PrintSettingsTab.svelte";
     import TokenTtsSettingsTab from "./TokenTtsSettingsTab.svelte";
+    import TtsGenerationTab from "./TtsGenerationTab.svelte";
     import {
         HardDrive,
         Database,
@@ -19,11 +19,6 @@
         AlertTriangle,
         RefreshCw,
         Trash2,
-        Plug2,
-        ExternalLink,
-        Plus,
-        Pencil,
-        Check,
         Printer,
         FolderKanban,
     } from "lucide-svelte";
@@ -54,8 +49,38 @@
     }
 
     const page = usePage();
-    const authUser = $derived((page?.props as { auth?: { user?: { role?: string } } })?.auth?.user);
-    const canManageIntegrations = $derived(authUser?.role === "super_admin");
+    type AuthProps = {
+        auth?: {
+            is_super_admin?: boolean;
+            user?: { role?: string | { value?: string } };
+        };
+        edge_mode?: { is_edge?: boolean };
+    };
+
+    /** Laravel may serialize UserRole enum as string or { value: "super_admin" }. */
+    function resolveIsSuperAdmin(auth: AuthProps["auth"] | undefined): boolean {
+        if (auth?.is_super_admin === true) return true;
+        const r = auth?.user?.role;
+        if (r === "super_admin") return true;
+        if (r && typeof r === "object" && "value" in r) {
+            return (r as { value?: string }).value === "super_admin";
+        }
+        return false;
+    }
+
+    /**
+     * usePage() returns a store — use $page.props (not page.props) or get(page).props.
+     * Using page.props left auth undefined, so super_admin always saw the site-admin UI.
+     */
+    const authProps = $derived($page.props.auth);
+    const isSuperAdmin = $derived(resolveIsSuperAdmin(authProps));
+    const isEdge = $derived($page.props.edge_mode?.is_edge === true);
+    /** Site admin: Storage tab only on edge Pi. Super admin: Storage on central server only. */
+    const showStorageForSiteAdmin = $derived(!isSuperAdmin && isEdge);
+    const showStorageForSuperAdmin = $derived(isSuperAdmin && !isEdge);
+    const showStorageTab = $derived(
+        showStorageForSiteAdmin || showStorageForSuperAdmin,
+    );
 
     const MSG_SESSION_EXPIRED = "Session expired. Please refresh and try again.";
     const MSG_NETWORK_ERROR = "Network error. Please try again.";
@@ -83,61 +108,16 @@
     let showClearOrphanedTtsConfirm = $state(false);
     let clearOrphanedTtsLoading = $state(false);
 
-    type SettingsTab = "storage" | "integrations" | "program-defaults" | "print" | "token-tts";
-    let activeTab = $state<SettingsTab>("storage");
+    type AdminSettingsTab = "storage" | "program-defaults" | "print" | "token-tts";
+    type SuperAdminSettingsTab =
+        | "tts-generation"
+        | "program-defaults"
+        | "print-platform"
+        | "storage";
+    type SettingsTab = AdminSettingsTab | SuperAdminSettingsTab;
 
-    interface TtsAccountApi {
-        id: number;
-        label: string;
-        model_id: string;
-        is_active: boolean;
-        masked_api_key: string;
-    }
-
-    interface ElevenLabsStatus {
-        status: "connected" | "not_configured";
-        driver: string;
-        model_id: string;
-        default_voice_id: string;
-        voices_count: number;
-        accounts?: TtsAccountApi[];
-        active_account_id?: number | null;
-    }
-
-    interface VoiceItem {
-        id: string;
-        name: string;
-        lang?: string | null;
-    }
-
-    interface ElevenLabsUsageSubscription {
-        character_count: number;
-        character_limit: number;
-        next_reset_unix: number | null;
-        tier: string | null;
-    }
-
-    interface ElevenLabsUsageResponse {
-        subscription: ElevenLabsUsageSubscription | null;
-        usage_time_series?: { time: number[]; usage: Record<string, number[]> } | null;
-        message?: string | null;
-    }
-
-    let elevenLabsStatus = $state<ElevenLabsStatus | null>(null);
-    let elevenLabsLoading = $state(true);
-    let voicesList = $state<VoiceItem[]>([]);
-    let voicesLoading = $state(false);
-    let accountFormOpen = $state(false);
-    let accountFormEditing = $state<TtsAccountApi | null>(null);
-    let accountFormLabel = $state("");
-    let accountFormApiKey = $state("");
-    let accountFormModelId = $state("eleven_multilingual_v2");
-    let accountFormSubmitting = $state(false);
-    let accountFormError = $state("");
-    let deleteAccountTarget = $state<TtsAccountApi | null>(null);
-    let deleteAccountLoading = $state(false);
-    let usageData = $state<ElevenLabsUsageResponse | null>(null);
-    let usageLoading = $state(false);
+    /** Default; onMount sets edge admin to Storage and super admin to TTS Generation. */
+    let activeTab = $state<SettingsTab>("program-defaults");
 
     function formatBytes(bytes: number): string {
         if (!bytes || bytes <= 0) return "0 B";
@@ -323,299 +303,82 @@
         if (!clearOrphanedTtsLoading) showClearOrphanedTtsConfirm = false;
     }
 
-    async function fetchElevenLabsStatus() {
-        elevenLabsLoading = true;
-        try {
-            const res = await fetch("/api/admin/integrations/elevenlabs", {
-                headers: {
-                    Accept: "application/json",
-                    "X-CSRF-TOKEN": getCsrfToken(),
-                    "X-Requested-With": "XMLHttpRequest",
-                },
-                credentials: "same-origin",
-            });
-            if (res.status === 419) {
-                toaster.error({ title: MSG_SESSION_EXPIRED });
-                elevenLabsStatus = null;
-                return;
-            }
-            const json = (await res.json().catch(() => ({}))) as
-                | ElevenLabsStatus
-                | { message?: string };
-            if (res.ok && "status" in json) {
-                elevenLabsStatus = json as ElevenLabsStatus;
-            } else {
-                elevenLabsStatus = null;
-            }
-        } catch (e) {
-            elevenLabsStatus = null;
-            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
-            if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
-        } finally {
-            elevenLabsLoading = false;
-        }
-    }
-
     function selectTab(tab: SettingsTab) {
         activeTab = tab;
-        if (tab === "integrations") {
-            fetchElevenLabsStatus();
-            fetchUsage();
-        }
         if (typeof window !== "undefined") {
             const url = new URL(window.location.href);
             url.searchParams.set("tab", tab);
             window.history.replaceState({}, "", url.pathname + "?" + url.searchParams.toString());
         }
-    }
-
-    async function fetchUsage() {
-        usageLoading = true;
-        usageData = null;
-        try {
-            const res = await fetch("/api/admin/integrations/elevenlabs/usage", {
-                headers: {
-                    Accept: "application/json",
-                    "X-CSRF-TOKEN": getCsrfToken(),
-                    "X-Requested-With": "XMLHttpRequest",
-                },
-                credentials: "same-origin",
-            });
-            if (res.status === 419) {
-                toaster.error({ title: MSG_SESSION_EXPIRED });
-                usageData = { subscription: null, usage_time_series: null, message: "Usage unavailable." };
-                return;
-            }
-            const json = (await res.json().catch(() => ({}))) as ElevenLabsUsageResponse & { error?: string };
-            if (res.ok) {
-                usageData = json;
-            } else {
-                usageData = { subscription: null, usage_time_series: null, message: json.message ?? "Usage unavailable." };
-            }
-        } catch (e) {
-            usageData = { subscription: null, usage_time_series: null, message: "Usage unavailable." };
-            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
-            if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
-        } finally {
-            usageLoading = false;
-        }
-    }
-
-    async function fetchVoices() {
-        voicesLoading = true;
-        try {
-            const res = await fetch("/api/admin/integrations/elevenlabs/voices", {
-                headers: {
-                    Accept: "application/json",
-                    "X-CSRF-TOKEN": getCsrfToken(),
-                    "X-Requested-With": "XMLHttpRequest",
-                },
-                credentials: "same-origin",
-            });
-            if (res.status === 419) {
-                toaster.error({ title: MSG_SESSION_EXPIRED });
-                voicesList = [];
-                return;
-            }
-            const json = (await res.json().catch(() => ({}))) as
-                | { voices: VoiceItem[] }
-                | { message?: string };
-            if (res.ok && Array.isArray(json?.voices)) {
-                voicesList = json.voices;
-            } else {
-                voicesList = [];
-            }
-        } catch (e) {
-            voicesList = [];
-            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
-            if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
-        } finally {
-            voicesLoading = false;
-        }
-    }
-
-    function openAddAccount() {
-        accountFormEditing = null;
-        accountFormLabel = "";
-        accountFormApiKey = "";
-        accountFormModelId = "eleven_multilingual_v2";
-        accountFormError = "";
-        accountFormOpen = true;
-    }
-
-    function openEditAccount(account: TtsAccountApi) {
-        accountFormEditing = account;
-        accountFormLabel = account.label;
-        accountFormApiKey = "";
-        accountFormModelId = account.model_id || "eleven_multilingual_v2";
-        accountFormError = "";
-        accountFormOpen = true;
-    }
-
-    function closeAccountForm() {
-        if (!accountFormSubmitting) {
-            accountFormOpen = false;
-            accountFormEditing = null;
-            accountFormError = "";
-        }
-    }
-
-    async function submitAccountForm() {
-        accountFormError = "";
-        if (!accountFormLabel.trim()) {
-            accountFormError = "Label is required.";
-            return;
-        }
-        if (!accountFormEditing && !accountFormApiKey.trim()) {
-            accountFormError = "API key is required when adding a new account.";
-            return;
-        }
-        if (accountFormEditing && accountFormApiKey.trim() && accountFormApiKey.length < 10) {
-            accountFormError = "API key must be at least 10 characters.";
-            return;
-        }
-
-        accountFormSubmitting = true;
-        try {
-            const isEdit = !!accountFormEditing;
-            const url = isEdit
-                ? `/api/admin/integrations/elevenlabs/accounts/${accountFormEditing!.id}`
-                : "/api/admin/integrations/elevenlabs/accounts";
-            const body: Record<string, string | boolean> = {
-                label: accountFormLabel.trim(),
-                model_id: accountFormModelId.trim() || "eleven_multilingual_v2",
-            };
-            if (accountFormApiKey.trim()) {
-                body.api_key = accountFormApiKey.trim();
-            }
-            const res = await fetch(url, {
-                method: isEdit ? "PUT" : "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Accept: "application/json",
-                    "X-CSRF-TOKEN": getCsrfToken(),
-                    "X-Requested-With": "XMLHttpRequest",
-                },
-                credentials: "same-origin",
-                body: JSON.stringify(body),
-            });
-            if (res.status === 419) {
-                toaster.error({ title: MSG_SESSION_EXPIRED });
-                accountFormError = MSG_SESSION_EXPIRED;
-                return;
-            }
-            const json = (await res.json().catch(() => ({}))) as
-                | TtsAccountApi
-                | { message?: string; errors?: Record<string, string[]> };
-            if (!res.ok) {
-                const err = json as { message?: string; errors?: Record<string, string[]> };
-                accountFormError =
-                    err.errors?.api_key?.[0] ??
-                    err.errors?.label?.[0] ??
-                    err.message ??
-                    "Failed to save account.";
-                toaster.error({ title: accountFormError });
-                return;
-            }
-            toaster.success({ title: "Account saved." });
-            accountFormOpen = false;
-            await fetchElevenLabsStatus();
-        } catch (e) {
-            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
-            accountFormError = isNetwork ? MSG_NETWORK_ERROR : (e instanceof Error ? e.message : "Failed to save account.");
-            if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
-        } finally {
-            accountFormSubmitting = false;
-        }
-    }
-
-    function confirmDeleteAccount(account: TtsAccountApi) {
-        deleteAccountTarget = account;
-    }
-
-    function closeDeleteAccount() {
-        if (!deleteAccountLoading) deleteAccountTarget = null;
-    }
-
-    async function handleDeleteAccount() {
-        if (!deleteAccountTarget) return;
-        deleteAccountLoading = true;
-        try {
-            const res = await fetch(
-                `/api/admin/integrations/elevenlabs/accounts/${deleteAccountTarget.id}`,
-                {
-                    method: "DELETE",
-                    headers: {
-                        Accept: "application/json",
-                        "X-CSRF-TOKEN": getCsrfToken(),
-                        "X-Requested-With": "XMLHttpRequest",
-                    },
-                    credentials: "same-origin",
-                },
-            );
-            if (res.status === 419) {
-                toaster.error({ title: MSG_SESSION_EXPIRED });
-                return;
-            }
-            if (res.ok) {
-                toaster.success({ title: "Account removed." });
-                deleteAccountTarget = null;
-                await fetchElevenLabsStatus();
-            } else {
-                const errBody = (await res.json().catch(() => ({}))) as { message?: string };
-                toaster.error({ title: errBody.message ?? "Failed to remove account." });
-            }
-        } catch (e) {
-            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
-            if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
-            else toaster.error({ title: "Failed to remove account." });
-        } finally {
-            deleteAccountLoading = false;
-        }
-    }
-
-    async function handleActivateAccount(account: TtsAccountApi) {
-        try {
-            const res = await fetch(
-                `/api/admin/integrations/elevenlabs/accounts/${account.id}/activate`,
-                {
-                    method: "POST",
-                    headers: {
-                        Accept: "application/json",
-                        "X-CSRF-TOKEN": getCsrfToken(),
-                        "X-Requested-With": "XMLHttpRequest",
-                    },
-                    credentials: "same-origin",
-                },
-            );
-            if (res.status === 419) {
-                toaster.error({ title: MSG_SESSION_EXPIRED });
-                return;
-            }
-            if (res.ok) {
-                toaster.success({ title: "Account set as active." });
-                await fetchElevenLabsStatus();
-            } else {
-                const json = (await res.json().catch(() => ({}))) as { message?: string };
-                toaster.error({ title: json.message ?? "Failed to activate account." });
-            }
-        } catch (e) {
-            const isNetwork = e instanceof TypeError && (e as Error).message === "Failed to fetch";
-            if (isNetwork) toaster.error({ title: MSG_NETWORK_ERROR });
-            else toaster.error({ title: "Failed to activate account." });
+        if (tab === "storage") {
+            void fetchSummary();
         }
     }
 
     onMount(() => {
-        fetchSummary();
+        const p = get(page);
+        const auth = (p?.props as AuthProps | undefined)?.auth;
+        const superAdmin = resolveIsSuperAdmin(auth);
+        const edge = (p?.props as AuthProps | undefined)?.edge_mode?.is_edge === true;
+
+        if (superAdmin) {
+            loading = false;
+            if (typeof window !== "undefined") {
+                const params = new URLSearchParams(window.location.search);
+                const raw = params.get("tab");
+                if (raw === "integrations") {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set("tab", "tts-generation");
+                    window.history.replaceState(
+                        {},
+                        "",
+                        url.pathname + "?" + url.searchParams.toString(),
+                    );
+                    activeTab = "tts-generation";
+                } else if (
+                    raw === "program-defaults" ||
+                    raw === "print-platform" ||
+                    raw === "tts-generation"
+                ) {
+                    activeTab = raw as SuperAdminSettingsTab;
+                } else if (raw === "storage" && !edge) {
+                    activeTab = "storage";
+                    void fetchSummary();
+                } else {
+                    activeTab = "tts-generation";
+                }
+            } else {
+                activeTab = "tts-generation";
+            }
+            return;
+        }
+
         const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-        const tab = params?.get("tab");
-        if (tab === "integrations" && canManageIntegrations) {
-            activeTab = "integrations";
-            fetchElevenLabsStatus();
-            fetchUsage();
-        } else if (tab === "program-defaults" || tab === "print" || tab === "token-tts") {
-            activeTab = tab;
+        const rawTab = params?.get("tab");
+
+        if (edge) {
+            if (
+                rawTab === "storage" ||
+                rawTab === "program-defaults" ||
+                rawTab === "print" ||
+                rawTab === "token-tts"
+            ) {
+                activeTab = rawTab as AdminSettingsTab;
+            } else {
+                activeTab = "storage";
+            }
+            void fetchSummary();
+        } else {
+            loading = false;
+            if (
+                rawTab === "program-defaults" ||
+                rawTab === "print" ||
+                rawTab === "token-tts"
+            ) {
+                activeTab = rawTab as AdminSettingsTab;
+            } else {
+                activeTab = "program-defaults";
+            }
         }
     });
 </script>
@@ -631,13 +394,23 @@
                 <h1
                     class="text-2xl font-bold text-surface-950 flex items-center gap-2"
                 >
-                    <HardDrive class="w-6 h-6 text-primary-500" />
-                    Configuration
+                    {#if isSuperAdmin}
+                        <AudioLines class="w-6 h-6 text-primary-500" />
+                        TTS &amp; platform
+                    {:else}
+                        <HardDrive class="w-6 h-6 text-primary-500" />
+                        Configuration
+                    {/if}
                 </h1>
                 <p class="mt-1 text-sm text-surface-600 max-w-2xl">
-                    Storage, integrations, program defaults, print and TTS settings.
+                    {#if isSuperAdmin}
+                        Platform TTS generation, platform program defaults for new sites, and default print settings for new sites.
+                    {:else}
+                        Storage, program defaults, print and TTS settings.
+                    {/if}
                 </p>
             </div>
+            {#if !isSuperAdmin && showStorageTab}
             <button
                 type="button"
                 class="btn preset-filled-primary-500 btn-sm gap-2 shadow-sm hover:shadow-md transition-all"
@@ -651,10 +424,56 @@
                 {/if}
                 Refresh
             </button>
+            {:else if isSuperAdmin && showStorageForSuperAdmin && activeTab === "storage"}
+            <button
+                type="button"
+                class="btn preset-filled-primary-500 btn-sm gap-2 shadow-sm hover:shadow-md transition-all"
+                onclick={fetchSummary}
+                disabled={loading}
+            >
+                {#if loading}
+                    <span class="loading-spinner loading-sm"></span>
+                {:else}
+                    <RefreshCw class="w-4 h-4" />
+                {/if}
+                Refresh
+            </button>
+            {/if}
         </div>
 
-        <!-- Tab switcher -->
-        <div class="flex gap-1 rounded-container border border-surface-200 bg-surface-50 p-1 shadow-sm">
+        {#if isSuperAdmin}
+        <div class="flex flex-wrap gap-1 rounded-container border border-surface-200 bg-surface-50 p-1 shadow-sm">
+            <button
+                type="button"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors touch-target-h {activeTab === 'tts-generation'
+                    ? 'bg-primary-500 text-primary-contrast-500 shadow-sm'
+                    : 'text-surface-700 hover:bg-surface-200 hover:text-surface-950'}"
+                onclick={() => selectTab("tts-generation")}
+            >
+                <AudioLines class="w-4 h-4 shrink-0" />
+                TTS Generation
+            </button>
+            <button
+                type="button"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors touch-target-h {activeTab === 'program-defaults'
+                    ? 'bg-primary-500 text-primary-contrast-500 shadow-sm'
+                    : 'text-surface-700 hover:bg-surface-200 hover:text-surface-950'}"
+                onclick={() => selectTab("program-defaults")}
+            >
+                <FolderKanban class="w-4 h-4 shrink-0" />
+                Platform program defaults
+            </button>
+            <button
+                type="button"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors touch-target-h {activeTab === 'print-platform'
+                    ? 'bg-primary-500 text-primary-contrast-500 shadow-sm'
+                    : 'text-surface-700 hover:bg-surface-200 hover:text-surface-950'}"
+                onclick={() => selectTab("print-platform")}
+            >
+                <Printer class="w-4 h-4 shrink-0" />
+                Default print settings
+            </button>
+            {#if showStorageForSuperAdmin}
             <button
                 type="button"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors touch-target-h {activeTab === 'storage'
@@ -665,17 +484,21 @@
                 <HardDrive class="w-4 h-4 shrink-0" />
                 Storage
             </button>
-            {#if canManageIntegrations}
-                <button
-                    type="button"
-                    class="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors touch-target-h {activeTab === 'integrations'
-                        ? 'bg-primary-500 text-primary-contrast-500 shadow-sm'
-                        : 'text-surface-700 hover:bg-surface-200 hover:text-surface-950'}"
-                    onclick={() => selectTab("integrations")}
-                >
-                    <Plug2 class="w-4 h-4 shrink-0" />
-                    Integrations
-                </button>
+            {/if}
+        </div>
+        {:else}
+        <div class="flex flex-wrap gap-1 rounded-container border border-surface-200 bg-surface-50 p-1 shadow-sm">
+            {#if showStorageForSiteAdmin}
+            <button
+                type="button"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors touch-target-h {activeTab === 'storage'
+                    ? 'bg-primary-500 text-primary-contrast-500 shadow-sm'
+                    : 'text-surface-700 hover:bg-surface-200 hover:text-surface-950'}"
+                onclick={() => selectTab("storage")}
+            >
+                <HardDrive class="w-4 h-4 shrink-0" />
+                Storage
+            </button>
             {/if}
             <button
                 type="button"
@@ -705,11 +528,45 @@
                 onclick={() => selectTab("token-tts")}
             >
                 <AudioLines class="w-4 h-4 shrink-0" />
-                Token TTS
+                Audio &amp; TTS
             </button>
         </div>
+        {/if}
 
-        {#if activeTab === "storage"}
+        {#if isSuperAdmin && activeTab === "tts-generation"}
+        <TtsGenerationTab />
+        {:else if isSuperAdmin && activeTab === "program-defaults"}
+        <section
+            class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6"
+        >
+            <h2
+                class="text-base font-semibold text-surface-950 mb-2 flex items-center gap-2"
+            >
+                <FolderKanban class="w-5 h-5 text-primary-500" />Platform program
+                defaults
+            </h2>
+            <p class="text-sm text-surface-600 mb-4 max-w-3xl">
+                Template copied into each new site&apos;s program defaults (same idea as default print settings). Site admins can then change their site without affecting this platform template.
+            </p>
+            <ProgramDefaultsTab variant="platform" />
+        </section>
+        {:else if isSuperAdmin && activeTab === "print-platform"}
+        <section
+            class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6"
+        >
+            <h2
+                class="text-base font-semibold text-surface-950 mb-2 flex items-center gap-2"
+            >
+                <Printer class="w-5 h-5 text-primary-500" />Default print settings
+            </h2>
+            <p class="text-sm text-surface-600 mb-4 max-w-3xl">
+                Template copied into each new site&apos;s print settings when the site
+                is created. Site admins can then change their site-scoped print
+                settings without affecting this platform default.
+            </p>
+            <PrintSettingsTab variant="platform" />
+        </section>
+        {:else if activeTab === "storage"}
         {#if loading && !summary}
             <div
                 class="rounded-container border border-surface-200 bg-surface-50 p-10 flex flex-col items-center justify-center text-center shadow-sm"
@@ -1033,306 +890,6 @@
                 TTS audio and other heavy assets stay within safe limits.
             </p>
         </section>
-        {:else if activeTab === "integrations"}
-        {#if canManageIntegrations}
-        <!-- Integrations: ElevenLabs -->
-        <section
-            class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6 flex flex-col gap-6"
-        >
-            <div class="flex flex-wrap items-center justify-between gap-4">
-                <div class="flex items-center gap-3">
-                    <AudioLines class="w-6 h-6 text-primary-500" />
-                    <div>
-                        <h2 class="text-base font-semibold text-surface-950">
-                            ElevenLabs
-                        </h2>
-                        <p class="text-xs text-surface-600">
-                            TTS for token call phrases and station announcements.
-                        </p>
-                    </div>
-                </div>
-                {#if elevenLabsLoading}
-                    <span
-                        class="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full bg-surface-200 text-surface-700"
-                    >
-                        <span class="loading-spinner loading-xs"></span>
-                        Loading…
-                    </span>
-                {:else if elevenLabsStatus}
-                    <span
-                        class="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full {elevenLabsStatus.status === 'connected'
-                            ? 'bg-success-100 text-success-800 border border-success-300'
-                            : 'bg-warning-100 text-warning-800 border border-warning-300'}"
-                    >
-                        {elevenLabsStatus.status === "connected"
-                            ? "Connected"
-                            : "Not configured"}
-                    </span>
-                {/if}
-            </div>
-
-            {#if !elevenLabsLoading && !elevenLabsStatus}
-                <div
-                    role="alert"
-                    class="rounded-container border border-error-200 bg-error-50 p-4 text-sm text-error-900"
-                >
-                    Unable to load ElevenLabs integration status.
-                </div>
-            {:else if elevenLabsStatus && !elevenLabsLoading}
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <p class="text-[11px] uppercase tracking-wide text-surface-600 font-semibold">
-                            Model
-                        </p>
-                        <p class="text-sm font-medium text-surface-900 mt-0.5">
-                            {elevenLabsStatus.model_id}
-                        </p>
-                    </div>
-                    <div>
-                        <p class="text-[11px] uppercase tracking-wide text-surface-600 font-semibold">
-                            Default voice ID
-                        </p>
-                        <p class="text-sm font-mono text-surface-900 mt-0.5 truncate" title={elevenLabsStatus.default_voice_id}>
-                            {elevenLabsStatus.default_voice_id || "—"}
-                        </p>
-                    </div>
-                    <div>
-                        <p class="text-[11px] uppercase tracking-wide text-surface-600 font-semibold">
-                            Configured voices
-                        </p>
-                        <p class="text-sm font-medium text-surface-900 mt-0.5">
-                            {elevenLabsStatus.voices_count}
-                        </p>
-                    </div>
-                </div>
-
-                <!-- API usage -->
-                {#if elevenLabsStatus.status === "connected"}
-                    <div>
-                        <div class="flex items-center justify-between gap-4 mb-3">
-                            <h3 class="text-sm font-semibold text-surface-950">API usage</h3>
-                            <button
-                                type="button"
-                                class="btn preset-tonal btn-sm gap-2"
-                                disabled={usageLoading}
-                                onclick={fetchUsage}
-                            >
-                                {#if usageLoading}
-                                    <span class="loading-spinner loading-xs"></span>
-                                {:else}
-                                    <RefreshCw class="w-4 h-4" />
-                                {/if}
-                                Refresh usage
-                            </button>
-                        </div>
-                        {#if usageLoading && !usageData}
-                            <p class="text-sm text-surface-600">Loading usage…</p>
-                        {:else if usageData?.subscription}
-                            {@const sub = usageData.subscription}
-                            {@const usedPercent = sub.character_limit > 0 ? (sub.character_count / sub.character_limit) * 100 : 0}
-                            <div class="rounded-container border border-surface-200 bg-surface-50 p-4 space-y-3">
-                                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                                    <div>
-                                        <p class="text-[11px] uppercase tracking-wide text-surface-600 font-semibold">Characters</p>
-                                        <p class="text-sm font-medium text-surface-900 mt-0.5">
-                                            <span class={usedPercent >= 90 ? "text-warning-700 font-semibold" : ""}>{sub.character_count.toLocaleString()}</span>
-                                            <span class="text-surface-500"> / </span>
-                                            <span>{sub.character_limit.toLocaleString()}</span>
-                                        </p>
-                                        {#if usedPercent >= 90 && sub.character_limit > 0}
-                                            <p class="text-[11px] text-warning-700 mt-0.5">
-                                                {usedPercent >= 100 ? "Over limit" : "Near limit"}
-                                            </p>
-                                        {/if}
-                                    </div>
-                                    <div>
-                                        <p class="text-[11px] uppercase tracking-wide text-surface-600 font-semibold">Resets</p>
-                                        <p class="text-sm text-surface-900 mt-0.5">
-                                            {#if sub.next_reset_unix}
-                                                {new Date(sub.next_reset_unix * 1000).toLocaleDateString(undefined, { dateStyle: "medium" })}
-                                            {:else}
-                                                —
-                                            {/if}
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <p class="text-[11px] uppercase tracking-wide text-surface-600 font-semibold">Tier</p>
-                                        <p class="text-sm text-surface-900 mt-0.5">{sub.tier ?? "—"}</p>
-                                    </div>
-                                </div>
-                                {#if usageData?.usage_time_series?.time?.length && usageData.usage_time_series.usage?.All?.length}
-                                    {@const series = usageData.usage_time_series}
-                                    <div>
-                                        <p class="text-[11px] uppercase tracking-wide text-surface-600 font-semibold mb-2">Usage by day (last 30 days)</p>
-                                        <div class="max-h-40 overflow-y-auto rounded border border-surface-200 bg-surface-100/50 p-2">
-                                            <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                                                {#each series.time as timestamp, idx}
-                                                    {@const dayVal = series.usage?.All?.[idx] ?? 0}
-                                                    {@const dayLabel = new Date(timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                                                    {#if dayVal > 0 || idx === series.time.length - 1}
-                                                        <span class="text-surface-700">{dayLabel}: <span class="font-medium text-surface-900">{Math.round(dayVal).toLocaleString()}</span></span>
-                                                    {/if}
-                                                {/each}
-                                            </div>
-                                        </div>
-                                    </div>
-                                {/if}
-                            </div>
-                        {:else if usageData?.message}
-                            <p class="text-sm text-surface-600">{usageData.message}</p>
-                        {:else}
-                            <p class="text-sm text-surface-600">Add an ElevenLabs API account to see usage.</p>
-                        {/if}
-                    </div>
-                {/if}
-
-                <!-- API accounts -->
-                <div>
-                    <div class="flex items-center justify-between gap-4 mb-3">
-                        <h3 class="text-sm font-semibold text-surface-950">API accounts</h3>
-                        {#if (elevenLabsStatus.accounts?.length ?? 0) > 0 || elevenLabsStatus.status === "connected"}
-                            <button
-                                type="button"
-                                class="btn preset-filled-primary-500 btn-sm gap-2"
-                                onclick={openAddAccount}
-                            >
-                                <Plus class="w-4 h-4" />
-                                Add account
-                            </button>
-                        {:else}
-                            <button
-                                type="button"
-                                class="btn preset-filled-primary-500 btn-sm gap-2"
-                                onclick={openAddAccount}
-                            >
-                                <Plus class="w-4 h-4" />
-                                Add first account
-                            </button>
-                        {/if}
-                    </div>
-                    {#if (elevenLabsStatus.accounts?.length ?? 0) > 0}
-                        <div class="space-y-2">
-                            {#each elevenLabsStatus.accounts ?? [] as account (account.id)}
-                                <div
-                                    class="rounded-container border border-surface-200 bg-surface-50 p-4 flex flex-wrap items-center justify-between gap-3"
-                                >
-                                    <div class="flex items-center gap-3">
-                                        <div>
-                                            <p class="font-medium text-surface-900">{account.label}</p>
-                                            <p class="text-xs text-surface-600">
-                                                Model: <span class="font-mono">{account.model_id}</span>
-                                                {#if account.is_active}
-                                                    <span
-                                                        class="inline-flex items-center gap-1 ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium bg-success-100 text-success-800 border border-success-300"
-                                                    >
-                                                        Active
-                                                    </span>
-                                                {/if}
-                                            </p>
-                                            <p class="text-[11px] text-surface-500 mt-0.5">{account.masked_api_key}</p>
-                                        </div>
-                                    </div>
-                                    <div class="flex items-center gap-2">
-                                        {#if !account.is_active}
-                                            <button
-                                                type="button"
-                                                class="btn preset-tonal btn-sm gap-1"
-                                                onclick={() => handleActivateAccount(account)}
-                                                title="Set as active"
-                                            >
-                                                <Check class="w-3.5 h-3.5" />
-                                                Activate
-                                            </button>
-                                        {/if}
-                                        <button
-                                            type="button"
-                                            class="btn preset-tonal btn-sm btn-icon"
-                                            onclick={() => openEditAccount(account)}
-                                            title="Edit"
-                                        >
-                                            <Pencil class="w-3.5 h-3.5" />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="btn preset-filled-error-500 btn-sm btn-icon"
-                                            onclick={() => confirmDeleteAccount(account)}
-                                            title="Delete"
-                                        >
-                                            <Trash2 class="w-3.5 h-3.5" />
-                                        </button>
-                                    </div>
-                                </div>
-                            {/each}
-                        </div>
-                    {:else}
-                        <div class="rounded-container border border-dashed border-surface-300 bg-surface-50/60 p-4 text-sm text-surface-600">
-                            <p>
-                                Add your first ElevenLabs API account below. Token and station TTS will use this account; you can add more and switch the active one later. Without an account, server-side TTS is disabled and displays use browser voices.
-                            </p>
-                        </div>
-                    {/if}
-                </div>
-
-                <!-- Voices -->
-                <div>
-                    <div class="flex items-center justify-between gap-4 mb-3">
-                        <h3 class="text-sm font-semibold text-surface-950">Voices</h3>
-                        {#if elevenLabsStatus.status === "connected"}
-                            <button
-                                type="button"
-                                class="btn preset-tonal btn-sm gap-2"
-                                disabled={voicesLoading}
-                                onclick={fetchVoices}
-                            >
-                                {#if voicesLoading}
-                                    <span class="loading-spinner loading-xs"></span>
-                                {:else}
-                                    <RefreshCw class="w-4 h-4" />
-                                {/if}
-                                Refresh voices
-                            </button>
-                        {/if}
-                    </div>
-                    {#if elevenLabsStatus.status === "connected"}
-                        {#if voicesList.length > 0}
-                            <div class="max-h-60 overflow-y-auto rounded-container border border-surface-200 bg-surface-50 p-3">
-                                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-sm">
-                                    {#each voicesList as voice (voice.id)}
-                                        <div class="flex items-center justify-between gap-2 py-1.5 px-2 rounded bg-surface-100/80">
-                                            <span class="font-medium text-surface-900 truncate">{voice.name}</span>
-                                            <span class="text-[11px] font-mono text-surface-500 shrink-0 truncate max-w-[6rem]" title={voice.id}>{voice.id}</span>
-                                        </div>
-                                    {/each}
-                                </div>
-                            </div>
-                        {:else if !voicesLoading}
-                            <p class="text-sm text-surface-600">
-                                Click "Refresh voices" to load voices from the active ElevenLabs account.
-                            </p>
-                        {/if}
-                    {:else}
-                        <p class="text-sm text-surface-600">
-                            Add an ElevenLabs API account or configure .env to see available voices.
-                        </p>
-                    {/if}
-                </div>
-
-                <p class="text-sm text-surface-600">
-                    <Link
-                        href="/admin/tokens"
-                        class="inline-flex items-center gap-1.5 text-primary-600 hover:text-primary-700 font-medium"
-                    >
-                        Configure default voices per language on Tokens page
-                        <ExternalLink class="w-4 h-4 shrink-0" />
-                    </Link>
-                </p>
-            {/if}
-        </section>
-        {:else}
-            <p class="text-surface-600 font-medium rounded-container border border-surface-200 bg-surface-50 p-4">
-                Only platform administrators can manage integrations.
-            </p>
-        {/if}
         {:else if activeTab === "program-defaults"}
         <section class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6">
             <h2 class="text-base font-semibold text-surface-950 mb-2 flex items-center gap-2"><FolderKanban class="w-5 h-5 text-primary-500" />Program default settings</h2>
@@ -1344,8 +901,22 @@
             <PrintSettingsTab />
         </section>
         {:else if activeTab === "token-tts"}
-        <section class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6">
-            <h2 class="text-base font-semibold text-surface-950 mb-2 flex items-center gap-2"><AudioLines class="w-5 h-5 text-primary-500" />Token TTS settings</h2>
+        <section class="rounded-container border border-surface-200 bg-surface-50 shadow-sm p-6 flex flex-col gap-4">
+            <div>
+                <h2 class="text-base font-semibold text-surface-950 mb-1 flex items-center gap-2"><AudioLines class="w-5 h-5 text-primary-500" />Audio &amp; TTS</h2>
+                <p class="text-sm text-surface-600 max-w-3xl">
+                    Set <strong>voice</strong>, <strong>speed</strong>, and <strong>playback</strong> toggles here; when station directions are off, you can set an optional line after the token call. Default <strong>token call</strong> phrasing (pre-phrase and token wording) is edited on the
+                    <Link href="/admin/tokens" class="font-semibold text-primary-600 underline hover:text-primary-700">Tokens</Link>
+                    page. <strong>Station directions</strong> (connecting phrase + window or station) are per program: Program → Stations → <em>Connecting phrase TTS</em> and each station&apos;s direction audio when enabled site-wide.
+                </p>
+            </div>
+            <div class="rounded-container border border-surface-200 bg-surface-100/50 p-4 text-sm text-surface-700">
+                <span class="font-medium text-surface-900">Quick links</span>
+                <ul class="list-disc list-inside mt-2 space-y-1">
+                    <li><Link href="/admin/tokens" class="text-primary-600 underline hover:text-primary-700">Tokens</Link> — default token call wording, per-token overrides, samples, generate token call audio</li>
+                    <li><Link href="/admin/programs" class="text-primary-600 underline hover:text-primary-700">Programs</Link> — connecting phrases and station direction audio</li>
+                </ul>
+            </div>
             <TokenTtsSettingsTab />
         </section>
         {/if}
@@ -1371,93 +942,5 @@
         onConfirm={handleClearOrphanedTtsConfirm}
         onCancel={closeClearOrphanedTtsConfirm}
     />
-
-    <ConfirmModal
-        open={!!deleteAccountTarget}
-        title="Remove ElevenLabs account"
-        message={deleteAccountTarget ? `Remove "${deleteAccountTarget.label}"? TTS will use another account or .env if available.` : ""}
-        confirmLabel="Remove"
-        variant="warning"
-        loading={deleteAccountLoading}
-        onConfirm={handleDeleteAccount}
-        onCancel={closeDeleteAccount}
-    />
-
-    <Modal
-        open={accountFormOpen}
-        title={accountFormEditing ? "Edit ElevenLabs account" : "Add ElevenLabs account"}
-        onClose={closeAccountForm}
-    >
-        {#snippet children()}
-            <form
-                class="space-y-4"
-                onsubmit={(e) => {
-                    e.preventDefault();
-                    submitAccountForm();
-                }}
-            >
-                {#if accountFormError}
-                    <div role="alert" class="rounded-container border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-900">
-                        {accountFormError}
-                    </div>
-                {/if}
-                <div>
-                    <label for="account-label" class="block text-sm font-medium text-surface-900 mb-1">Label</label>
-                    <input
-                        id="account-label"
-                        type="text"
-                        class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                        placeholder="e.g. Production, Free tier"
-                        bind:value={accountFormLabel}
-                        required
-                    />
-                </div>
-                <div>
-                    <label for="account-api-key" class="block text-sm font-medium text-surface-900 mb-1">
-                        API key
-                        {#if accountFormEditing}
-                            <span class="text-surface-500 font-normal">(leave blank to keep current)</span>
-                        {/if}
-                    </label>
-                    <input
-                        id="account-api-key"
-                        type="password"
-                        class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                        placeholder={accountFormEditing ? "••••••••" : "Your ElevenLabs API key"}
-                        bind:value={accountFormApiKey}
-                        required={!accountFormEditing}
-                    />
-                    <p class="text-xs text-surface-500 mt-0.5">
-                        Get your key from <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noopener noreferrer" class="text-primary-600 hover:underline">ElevenLabs API settings</a>.
-                    </p>
-                </div>
-                <div>
-                    <label for="account-model" class="block text-sm font-medium text-surface-900 mb-1">Model ID</label>
-                    <input
-                        id="account-model"
-                        type="text"
-                        class="input rounded-container border border-surface-200 px-3 py-2 w-full bg-surface-50 shadow-sm"
-                        placeholder="eleven_multilingual_v2"
-                        bind:value={accountFormModelId}
-                    />
-                    <p class="text-xs text-surface-500 mt-0.5">
-                        Default: eleven_multilingual_v2
-                    </p>
-                </div>
-                <div class="flex justify-end gap-2 pt-2">
-                    <button type="button" class="btn preset-tonal" disabled={accountFormSubmitting} onclick={closeAccountForm}>
-                        Cancel
-                    </button>
-                    <button type="submit" class="btn preset-filled-primary-500" disabled={accountFormSubmitting}>
-                        {#if accountFormSubmitting}
-                            <span class="loading-spinner loading-sm"></span>
-                        {:else}
-                            {accountFormEditing ? "Update" : "Add account"}
-                        {/if}
-                    </button>
-                </div>
-            </form>
-        {/snippet}
-    </Modal>
 </AdminLayout>
 

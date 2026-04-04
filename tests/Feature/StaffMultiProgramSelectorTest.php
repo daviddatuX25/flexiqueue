@@ -9,6 +9,7 @@ use App\Models\Site;
 use App\Models\Station;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -22,7 +23,7 @@ class StaffMultiProgramSelectorTest extends TestCase
             ['slug' => 'default'],
             [
                 'name' => 'Default',
-                'api_key_hash' => \Illuminate\Support\Facades\Hash::make(Str::random(40)),
+                'api_key_hash' => Hash::make(Str::random(40)),
                 'settings' => [],
                 'edge_settings' => [],
             ]
@@ -33,7 +34,7 @@ class StaffMultiProgramSelectorTest extends TestCase
     {
         $site = $this->defaultSite();
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
 
         $program = Program::create([
             'site_id' => $site->id,
@@ -65,7 +66,7 @@ class StaffMultiProgramSelectorTest extends TestCase
     {
         $site = $this->defaultSite();
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
 
         $programA = Program::create([
             'site_id' => $site->id,
@@ -139,7 +140,7 @@ class StaffMultiProgramSelectorTest extends TestCase
             'color_code' => '#333',
         ]);
 
-        $triageResponse = $this->actingAs($staff)->get(route('triage'));
+        $triageResponse = $this->actingAs($staff)->get(route('client-registration'));
         $triageResponse->assertStatus(200);
         $triageResponse->assertInertia(fn ($page) => $page
             ->component('Triage/Index')
@@ -163,7 +164,7 @@ class StaffMultiProgramSelectorTest extends TestCase
     {
         $site = $this->defaultSite();
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
 
         $programA = Program::create([
             'site_id' => $site->id,
@@ -228,7 +229,7 @@ class StaffMultiProgramSelectorTest extends TestCase
     {
         $site = $this->defaultSite();
         $admin = User::factory()->admin()->create(['site_id' => $site->id]);
-        $staff = User::factory()->create(['role' => 'staff', 'site_id' => $site->id]);
+        $staff = User::factory()->create(['site_id' => $site->id]);
 
         $programA = Program::create([
             'site_id' => $site->id,
@@ -304,7 +305,7 @@ class StaffMultiProgramSelectorTest extends TestCase
         );
 
         // 3) Triage uses the same shared program selection.
-        $triageResponse = $this->actingAs($staff)->get(route('triage'));
+        $triageResponse = $this->actingAs($staff)->get(route('client-registration'));
         $triageResponse->assertStatus(200);
         $triageResponse->assertInertia(fn ($page) => $page
             ->component('Triage/Index')
@@ -324,4 +325,3 @@ class StaffMultiProgramSelectorTest extends TestCase
         );
     }
 }
-

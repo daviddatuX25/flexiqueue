@@ -34,34 +34,74 @@ class TtsPhrase
     ];
 
     /**
-     * Build the call phrase for a token (generic "your station" so no station needed at create time).
+     * Spoken token body for a language.
+     * - custom: per-lang `token_phrase` when non-empty (spoken exactly as entered); else same as word split.
+     * - word: contiguous letter runs as one spoken chunk each, then digit runs (e.g. AAB3 → "AAB 3"); ignores `token_phrase`.
+     * - letters: letter phonetics + digit runs (ignores `token_phrase`).
+     *
+     * @param  array<string, mixed>  $mergedLangConfig  Global default + token override for this language.
      */
-    public static function buildCallPhraseForToken(Token $token, ?string $lang = null): string
+    public static function tokenSpokenPartFromMergedConfig(Token $token, string $lang, array $mergedLangConfig): string
     {
-        $aliasSpoken = self::aliasForSpeech(
+        $pronounceAs = $token->pronounce_as ?? 'letters';
+
+        if ($pronounceAs === 'custom') {
+            $raw = isset($mergedLangConfig['token_phrase']) && is_string($mergedLangConfig['token_phrase'])
+                ? trim($mergedLangConfig['token_phrase'])
+                : '';
+            if ($raw !== '') {
+                return $raw;
+            }
+
+            return self::aliasWordLetterRunsAndDigits($token->physical_id ?? 'client');
+        }
+
+        return self::aliasForSpeech(
             $token->physical_id ?? 'client',
-            $token->pronounce_as ?? 'letters',
+            $pronounceAs === 'word' ? 'word' : 'letters',
             $lang
         );
+    }
+
+    /**
+     * Build the call phrase for a token (generic "your station" so no station needed at create time).
+     *
+     * @param  array<string, mixed>  $mergedLangConfig  Optional merged row for $lang (for token_phrase override).
+     */
+    public static function buildCallPhraseForToken(Token $token, ?string $lang = null, array $mergedLangConfig = []): string
+    {
+        $langKey = $lang ?? 'en';
+        $aliasSpoken = self::tokenSpokenPartFromMergedConfig($token, $langKey, $mergedLangConfig);
 
         return 'Calling '.$aliasSpoken.', please proceed to your station';
     }
 
     /**
-     * Full sample phrase for a given language and config (pre_phrase + alias or full call phrase).
+     * Full sample phrase for a given language and config (pre_phrase + body or full call phrase).
+     * Optional $tokenPhraseOverride matches per-lang `token_phrase` (spoken body instead of alias phonetics).
      */
-    public static function getSamplePhrase(string $prePhrase, string $alias, string $pronounceAs, string $lang): string
+    public static function getSamplePhrase(string $prePhrase, string $alias, string $pronounceAs, string $lang, ?string $tokenPhraseOverride = null): string
     {
+        $useOverride = $pronounceAs === 'custom'
+            && $tokenPhraseOverride !== null
+            && trim($tokenPhraseOverride) !== '';
+        $body = $useOverride
+            ? trim($tokenPhraseOverride)
+            : (
+                ($pronounceAs === 'word' || $pronounceAs === 'custom')
+                    ? self::aliasWordLetterRunsAndDigits($alias !== '' ? $alias : 'A1')
+                    : self::aliasForSpeech($alias !== '' ? $alias : 'A1', 'letters', $lang)
+            );
         $prePhrase = trim($prePhrase);
         if ($prePhrase !== '') {
-            return trim($prePhrase.' '.self::aliasForSpeech($alias ?: 'A1', $pronounceAs, $lang));
+            return trim($prePhrase.' '.$body);
         }
 
-        return 'Calling '.self::aliasForSpeech($alias ?: 'A1', $pronounceAs, $lang).', please proceed to your station';
+        return 'Calling '.$body.', please proceed to your station';
     }
 
     /**
-     * Alias text for TTS: letters → phonetic + digit runs; word = as-is. Matches frontend aliasForSpeech.
+     * Alias text for TTS: letters → phonetic per letter + digit runs; word → letter runs as chunks + digit runs. Matches frontend aliasForSpeech.
      *
      * @param  'en'|'fil'|'ilo'|null  $lang  When set, use language-specific letter phonetics (e.g. Ilocano 'a' => 'ah').
      */
@@ -69,7 +109,7 @@ class TtsPhrase
     {
         $raw = trim($alias) !== '' ? trim($alias) : 'client';
         if ($pronounceAs === 'word') {
-            return $raw;
+            return self::aliasWordLetterRunsAndDigits($raw);
         }
 
         $map = self::letterPhoneticForLang($lang);
@@ -104,6 +144,39 @@ class TtsPhrase
         }
 
         return $segments !== [] ? implode(' ', $segments) : $raw;
+    }
+
+    /**
+     * Word mode: each contiguous [A-Za-z]+ is one spoken unit; each digit run stays numeric (e.g. AAB3 → "AAB 3").
+     */
+    private static function aliasWordLetterRunsAndDigits(string $raw): string
+    {
+        $raw = trim($raw) !== '' ? trim($raw) : 'client';
+        $parts = [];
+        $len = strlen($raw);
+        $i = 0;
+        while ($i < $len) {
+            $c = $raw[$i];
+            if (preg_match('/[a-zA-Z]/', $c)) {
+                $run = '';
+                while ($i < $len && preg_match('/[a-zA-Z]/', $raw[$i])) {
+                    $run .= $raw[$i];
+                    $i++;
+                }
+                $parts[] = $run;
+            } elseif (preg_match('/\d/', $c)) {
+                $run = '';
+                while ($i < $len && preg_match('/\d/', $raw[$i])) {
+                    $run .= $raw[$i];
+                    $i++;
+                }
+                $parts[] = $run;
+            } else {
+                $i++;
+            }
+        }
+
+        return $parts !== [] ? implode(' ', $parts) : $raw;
     }
 
     /**

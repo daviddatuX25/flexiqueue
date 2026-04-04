@@ -10,21 +10,19 @@ use App\Services\ElevenLabsClient;
 use App\Services\TtsAccountService;
 use App\Services\TtsService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 
 class ElevenLabsIntegrationController extends Controller
 {
     public function __construct(
         private readonly TtsAccountService $ttsAccountService
-    ) {
-    }
+    ) {}
 
     public function show(TtsService $ttsService): JsonResponse
     {
         $voices = $ttsService->getVoicesList();
         $accounts = TtsAccount::orderBy('is_active', 'desc')->orderBy('label')->get();
-        $active = TtsAccount::getActive();
+        $active = TtsAccount::getActiveForProvider('elevenlabs');
 
         return response()->json([
             'status' => $ttsService->isEnabled() ? 'connected' : 'not_configured',
@@ -55,6 +53,7 @@ class ElevenLabsIntegrationController extends Controller
 
         $account = new TtsAccount([
             'label' => $data['label'],
+            'provider' => 'elevenlabs',
             'api_key' => $data['api_key'],
             'model_id' => $modelId,
             'is_active' => TtsAccount::count() === 0,
@@ -102,7 +101,12 @@ class ElevenLabsIntegrationController extends Controller
         $account->delete();
 
         if ($wasActive) {
-            $next = TtsAccount::first();
+            $provider = $account->provider ?? 'elevenlabs';
+            $next = TtsAccount::query()
+                ->where('provider', $provider)
+                ->where('id', '!=', $account->id)
+                ->orderBy('id')
+                ->first();
             if ($next !== null) {
                 $this->ttsAccountService->setActive($next);
             }

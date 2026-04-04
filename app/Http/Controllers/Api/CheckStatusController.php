@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\CheckStatusService;
+use App\Services\StatusFlowDiagramPresenter;
 use Illuminate\Http\JsonResponse;
 
 /**
@@ -12,7 +13,8 @@ use Illuminate\Http\JsonResponse;
 class CheckStatusController extends Controller
 {
     public function __construct(
-        private CheckStatusService $checkStatusService
+        private CheckStatusService $checkStatusService,
+        private StatusFlowDiagramPresenter $statusFlowDiagramPresenter
     ) {}
 
     /**
@@ -61,8 +63,8 @@ class CheckStatusController extends Controller
             ], 200);
         }
 
-        // in_use: full session payload per spec §2.1
-        return response()->json([
+        // in_use: full session payload per spec §2.1 (+ optional flow diagram, same shape as Display/Status)
+        $body = [
             'alias' => $data['alias'],
             'track' => $data['track'],
             'client_category' => $data['client_category'],
@@ -71,6 +73,20 @@ class CheckStatusController extends Controller
             'progress' => $data['progress'],
             'estimated_wait_minutes' => $data['estimated_wait_minutes'],
             'started_at' => $data['started_at'],
-        ], 200);
+        ];
+
+        if (! empty($data['program_id']) && ! empty($data['track_id'])) {
+            $siteId = isset($data['site_id']) ? (int) $data['site_id'] : null;
+            $body = array_merge(
+                $body,
+                $this->statusFlowDiagramPresenter->propsForProgramTrack(
+                    (int) $data['program_id'],
+                    (int) $data['track_id'],
+                    $siteId
+                )
+            );
+        }
+
+        return response()->json($body, 200);
     }
 }

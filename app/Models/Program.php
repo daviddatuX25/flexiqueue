@@ -2,16 +2,22 @@
 
 namespace App\Models;
 
+use App\Support\PermissionCatalog;
 use App\Support\ProgramSettings;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Spatie\Permission\Models\Permission;
 
 class Program extends Model
 {
+    use HasFactory;
     protected $attributes = [
         'slug' => 'program',
     ];
@@ -26,6 +32,7 @@ class Program extends Model
         'is_published',
         'settings',
         'created_by',
+        'edge_locked_by_device_id',
     ];
 
     protected function casts(): array
@@ -35,6 +42,7 @@ class Program extends Model
             'is_paused' => 'boolean',
             'is_published' => 'boolean',
             'settings' => 'array',
+            'edge_locked_by_device_id' => 'integer',
         ];
     }
 
@@ -69,6 +77,7 @@ class Program extends Model
 
     /**
      * @return array{0: int, 1: int} [priority_count, regular_count] e.g. [2, 1] = 2 priority per 1 regular
+     *
      * @deprecated Use `$program->settings()->getAlternateRatio()`
      */
     public function getAlternateRatio(): array
@@ -176,6 +185,7 @@ class Program extends Model
     /**
      * Active TTS language for this program (used by displays and generation).
      * Defaults to 'en' when not explicitly configured.
+     *
      * @deprecated Use `$program->settings()->getTtsActiveLanguage()`
      */
     public function getTtsActiveLanguage(): string
@@ -188,10 +198,36 @@ class Program extends Model
         return $this->hasMany(Session::class, 'program_id');
     }
 
-    public function supervisedBy(): BelongsToMany
+    /**
+     * User IDs with `programs.supervise` on this program's {@see RbacTeam}.
+     *
+     * @return list<int>
+     */
+    public function programTeamSupervisorUserIds(): array
     {
-        return $this->belongsToMany(User::class, 'program_supervisors')
-            ->withTimestamps();
+        $team = RbacTeam::forProgram($this);
+        $permission = Permission::findByName(PermissionCatalog::PROGRAMS_SUPERVISE, PermissionCatalog::guardName());
+        if ($permission === null) {
+            return [];
+        }
+
+        return DB::table('model_has_permissions')
+            ->where('team_id', $team->id)
+            ->where('permission_id', $permission->id)
+            ->where('model_type', (new User)->getMorphClass())
+            ->pluck('model_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+    }
+
+    /**
+     * All user IDs who supervise this program via program-team `programs.supervise`.
+     *
+     * @return list<int>
+     */
+    public function allSupervisorUserIds(): array
+    {
+        return $this->programTeamSupervisorUserIds();
     }
 
     public function stationAssignments(): HasMany
@@ -238,12 +274,12 @@ class Program extends Model
         return $query->where('is_published', true);
     }
 
-    public function programAccessTokens(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function programAccessTokens(): HasMany
     {
         return $this->hasMany(ProgramAccessToken::class);
     }
 
-    public function shortLinks(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function shortLinks(): HasMany
     {
         return $this->hasMany(SiteShortLink::class, 'program_id');
     }
@@ -253,8 +289,8 @@ class Program extends Model
      * Per central-edge B.4: admin program list and single-resource access are site-scoped.
      * When $siteId is null, returns no rows (admin with no site cannot see any program).
      *
-     * @param  \Illuminate\Database\Eloquent\Builder<Program>  $query
-     * @return \Illuminate\Database\Eloquent\Builder<Program>
+     * @param  Builder<Program>  $query
+     * @return Builder<Program>
      */
     public function scopeForSite($query, ?int $siteId)
     {
@@ -263,5 +299,10 @@ class Program extends Model
         }
 
         return $query->where('site_id', $siteId);
+    }
+
+    public function lockedByDevice(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(\App\Models\EdgeDevice::class, 'edge_locked_by_device_id');
     }
 }

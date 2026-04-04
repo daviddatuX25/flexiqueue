@@ -1,0 +1,32 @@
+---
+description: "ECC-inspired orchestration for Cursor: parallel work, roles, beads precedence"
+alwaysApply: true
+---
+
+# Orchestration (Everything Claude Code → Cursor)
+
+Sourced and adapted from [affaan-m/everything-claude-code](https://github.com/affaan-m/everything-claude-code) (`.cursor/rules`), for use in **Cursor** on FlexiQueue.
+
+## Precedence
+
+When anything here conflicts with **`agentic-workflow.mdc`**, **`plan-first-and-bead-scope.mdc`**, or **`stack-conventions.mdc`**, the **FlexiQueue** rules win (beads, phase contracts, Laravel + Inertia + Svelte stack).
+
+## Roles in Cursor (no `~/.claude/agents/`)
+
+Claude Code “agents” are **prompted subagents**. In Cursor, approximate them by:
+
+- **Planner** — Break work into steps, name risks and dependencies, align with `docs/architecture/` and the current bead.
+- **Architect** — Boundaries, services vs controllers, data flow, security boundaries.
+- **TDD** — Failing test first, then minimal implementation (see `ecc-testing.mdc` and project PHPUnit cadence).
+- **Code reviewer** — After substantive edits: correctness, edge cases, consistency with existing patterns.
+- **Security reviewer** — Before merge-sensitive changes: authz, secrets, injection, CSRF (see `ecc-security.mdc`).
+
+Use the **Task / explore** tool for independent searches in parallel when it reduces wall-clock time.
+
+## Parallel execution
+
+For **independent** investigations (e.g. “find all usages”, “read three unrelated files”, “grep two patterns”), run them **in parallel** instead of strictly serial steps.
+
+## Multi-perspective pass (optional, heavy tasks)
+
+For risky or cross-cutting changes, explicitly consider: correctness, security, consistency with project conventions, and unnecessary duplication.

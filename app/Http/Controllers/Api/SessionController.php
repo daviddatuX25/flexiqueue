@@ -3,37 +3,37 @@
 namespace App\Http\Controllers\Api;
 
 use App\Exceptions\ClientAlreadyQueuedException;
+use App\Exceptions\IdentityBindingException;
 use App\Exceptions\StepsRemainingException;
 use App\Exceptions\TokenInUseException;
 use App\Exceptions\TokenUnavailableException;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\StationPageController;
 use App\Http\Requests\BindSessionRequest;
 use App\Http\Requests\CallSessionRequest;
 use App\Http\Requests\CancelSessionRequest;
+use App\Http\Requests\EnqueueBackSessionRequest;
 use App\Http\Requests\ForceCompleteSessionRequest;
 use App\Http\Requests\HoldSessionRequest;
-use App\Http\Requests\OverrideSessionRequest;
-use App\Http\Requests\EnqueueBackSessionRequest;
 use App\Http\Requests\MarkNoShowSessionRequest;
+use App\Http\Requests\OverrideSessionRequest;
 use App\Http\Requests\ResumeFromHoldSessionRequest;
 use App\Http\Requests\ServeSessionRequest;
 use App\Http\Requests\TransferSessionRequest;
 use App\Http\Resources\SessionResource;
-use App\Exceptions\IdentityBindingException;
-use App\Http\Controllers\StationPageController;
 use App\Models\Program;
 use App\Models\Session;
 use App\Models\User;
 use App\Services\PinService;
 use App\Services\SessionService;
+use App\Services\StaffProgramAccessService;
 use App\Services\SupervisorAuthService;
 use App\Services\TokenService;
 use App\Services\TriageScanLogService;
+use App\Support\SupervisorAuthResult;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\RateLimiter;
-use App\Support\SupervisorAuthResult;
 
 /**
  * Per 08-API-SPEC-PHASE1 §3: Session endpoints (bind, etc.). Auth: any staff.
@@ -50,6 +50,7 @@ class SessionController extends Controller
     public function __construct(
         private SessionService $sessionService,
         private PinService $pinService,
+        private StaffProgramAccessService $staffProgramAccessService,
         private SupervisorAuthService $supervisorAuthService,
         private TokenService $tokenService,
         private TriageScanLogService $triageScanLogService,
@@ -66,7 +67,7 @@ class SessionController extends Controller
 
         // Per central-edge follow-up: admin/supervisor with no assigned station uses session-selected program context.
         if ($programId === null) {
-            if (! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
+            if (! $this->staffProgramAccessService->mayUseProgramPickerWithoutAssignedStation($user)) {
                 return response()->json(['message' => 'No station assigned.'], 422);
             }
 
@@ -79,12 +80,17 @@ class SessionController extends Controller
             if (! $program) {
                 return response()->json(['message' => 'Program not selected or inactive.'], 422);
             }
-            if (! $user->isAdmin() && ! $user->isSupervisorForProgram($program->id)) {
+            if (! $this->staffProgramAccessService->mayAccessProgramWhenUnassigned($user, $program)) {
                 return response()->json(['message' => 'Forbidden.'], 403);
             }
 
             $programId = $program->id;
         }
+
+        $body = $request->all();
+        $priorityLaneOverride = array_key_exists('priority_lane_override', $body)
+            ? $request->boolean('priority_lane_override')
+            : null;
 
         try {
             $result = $this->sessionService->bind(
@@ -95,7 +101,8 @@ class SessionController extends Controller
                 $request->validated('client_binding'),
                 null,
                 null,
-                $programId
+                $programId,
+                $priorityLaneOverride
             );
         } catch (IdentityBindingException $e) {
             return response()->json([
@@ -174,6 +181,7 @@ class SessionController extends Controller
                     'name' => $session->serviceTrack->name,
                 ],
                 'client_category' => $session->client_category,
+                'priority_lane_override' => $session->priority_lane_override,
                 'status' => $session->status,
                 'current_station' => [
                     'id' => $session->currentStation->id,
@@ -193,8 +201,12 @@ class SessionController extends Controller
     public function call(CallSessionRequest $request, Session $session): JsonResponse
     {
         $user = $request->user();
+        Gate::authorize('update', $session);
+
+        $session->loadMissing('program');
+
         // Per docs/REFACTORING-ISSUE-LIST.md Issue 1: supervisor auth via SupervisorAuthService::verifyForAction.
-        if ($this->sessionService->callRequiresOverrideAuth($session) && ! $user->isAdmin() && ! $user->isSupervisorForAnyProgram()) {
+        if ($this->sessionService->callRequiresOverrideAuth($session) && ! $this->staffProgramAccessService->mayBypassSupervisorInteractiveAuth($user, $session->program)) {
             $result = $this->supervisorAuthService->verifyForAction(
                 $request->validated(),
                 $user,
@@ -273,6 +285,8 @@ class SessionController extends Controller
      */
     public function transfer(TransferSessionRequest $request, Session $session): JsonResponse
     {
+        Gate::authorize('update', $session);
+
         try {
             $result = $this->sessionService->transfer(
                 $session,
@@ -305,6 +319,8 @@ class SessionController extends Controller
      */
     public function complete(Session $session): JsonResponse
     {
+        Gate::authorize('update', $session);
+
         try {
             $result = $this->sessionService->complete($session, $this->user()->id);
         } catch (\InvalidArgumentException $e) {
@@ -327,6 +343,8 @@ class SessionController extends Controller
      */
     public function cancel(CancelSessionRequest $request, Session $session): JsonResponse
     {
+        Gate::authorize('update', $session);
+
         try {
             $result = $this->sessionService->cancel($session, $this->user()->id, $request->validated('remarks'));
         } catch (\InvalidArgumentException $e) {
@@ -492,7 +510,11 @@ class SessionController extends Controller
         $user = $request->user();
         $staffUserId = $user->id;
 
-        if ($user->isAdmin() || $user->isSupervisorForAnyProgram()) {
+        Gate::authorize('update', $session);
+
+        $session->loadMissing('program');
+
+        if ($this->staffProgramAccessService->mayForceCompleteOrOverrideWithoutSupervisorProof($user, $session->program)) {
             try {
                 $result = $this->sessionService->forceComplete(
                     $session,
@@ -502,6 +524,7 @@ class SessionController extends Controller
                 );
             } catch (\InvalidArgumentException $e) {
                 $code = $e->getCode() ?: 409;
+
                 return response()->json(['message' => $e->getMessage()], (int) $code);
             }
 
@@ -512,7 +535,6 @@ class SessionController extends Controller
         }
 
         // Per flexiqueue-i87: When program has require_permission_before_override OFF, accept reason only (no PIN/QR).
-        $session->loadMissing('program');
         $program = $session->program;
         if ($program && ! $program->settings()->getRequirePermissionBeforeOverride()) {
             try {
@@ -574,7 +596,11 @@ class SessionController extends Controller
         $user = $request->user();
         $staffUserId = $user->id;
 
-        if ($user->isAdmin() || $user->isSupervisorForAnyProgram()) {
+        Gate::authorize('update', $session);
+
+        $session->loadMissing('program');
+
+        if ($this->staffProgramAccessService->mayForceCompleteOrOverrideWithoutSupervisorProof($user, $session->program)) {
             try {
                 $result = $this->sessionService->overrideByTrack(
                     $session,
@@ -586,6 +612,7 @@ class SessionController extends Controller
                 );
             } catch (\InvalidArgumentException $e) {
                 $code = $e->getCode() ?: 409;
+
                 return response()->json(['message' => $e->getMessage()], (int) $code);
             }
 
@@ -596,7 +623,6 @@ class SessionController extends Controller
         }
 
         // Per flexiqueue-i87: When program has require_permission_before_override OFF, accept reason only (no PIN/QR).
-        $session->loadMissing('program');
         $program = $session->program;
         $customSteps = $this->sanitizeCustomSteps($request->validated('custom_steps'));
         if ($program && ! $program->settings()->getRequirePermissionBeforeOverride()) {
@@ -678,7 +704,7 @@ class SessionController extends Controller
         ]);
     }
 
-    private function user(): \App\Models\User
+    private function user(): User
     {
         return request()->user();
     }
@@ -717,6 +743,7 @@ class SessionController extends Controller
                 return response()->json(['message' => 'physical_id or qr_hash is required.'], 422);
             }
             $this->triageScanLogService->log($request, null, 'not_found', null, null);
+
             return response()->json(['message' => 'Token not found.'], 404);
         }
 

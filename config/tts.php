@@ -80,6 +80,14 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Runtime diagnostics and generation locking
+    |--------------------------------------------------------------------------
+    */
+    'runtime_diagnostics_enabled' => (bool) env('TTS_RUNTIME_DIAGNOSTICS_ENABLED', false),
+    'generation_lock_seconds' => (int) env('TTS_GENERATION_LOCK_SECONDS', 90),
+
+    /*
+    |--------------------------------------------------------------------------
     | ElevenLabs (when driver = elevenlabs)
     |--------------------------------------------------------------------------
     */

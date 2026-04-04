@@ -10,13 +10,13 @@ return new class extends Migration
     /**
      * Run the migrations.
      * Per plan: public self-serve bind records null staff_user_id (audit shows "Public").
-     * MODIFY is MySQL/MariaDB only; SQLite requires table recreate to make column nullable.
+     * MODIFY is MySQL only; SQLite requires table recreate to make column nullable.
      */
     public function up(): void
     {
         $driver = DB::getDriverName();
 
-        if (in_array($driver, ['mysql', 'mariadb'], true)) {
+        if ($driver === 'mysql') {
             Schema::table('transaction_logs', function (Blueprint $table) {
                 $table->dropForeign(['staff_user_id']);
             });
@@ -59,7 +59,7 @@ return new class extends Migration
     {
         $driver = DB::getDriverName();
 
-        if (in_array($driver, ['mysql', 'mariadb'], true)) {
+        if ($driver === 'mysql') {
             Schema::table('transaction_logs', function (Blueprint $table) {
                 $table->dropForeign(['staff_user_id']);
             });

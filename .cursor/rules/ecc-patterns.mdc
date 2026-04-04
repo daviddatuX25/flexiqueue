@@ -1,0 +1,36 @@
+---
+description: "ECC patterns: services, DTOs, consistent API envelopes — Laravel-aligned"
+alwaysApply: true
+---
+
+# Patterns (ECC-inspired, FlexiQueue-aligned)
+
+## Thin controllers, explicit services
+
+- Controllers: **HTTP concerns** — auth, validation (Form Requests), response shape, status codes.
+- **Business rules** live in **`app/Services/`** (and related domain code), easy to test without full HTTP stack.
+
+Per **`stack-conventions.mdc`**: no heavy logic in controllers.
+
+## DTOs and explicit shapes
+
+- Replace **large associative arrays** crossing boundaries with **DTOs** or typed structures when it clarifies contracts (requests, commands, external API payloads).
+- Value objects fit **money**, **identifiers**, and **invariants** (format, range).
+
+## Dependency injection
+
+- Prefer **constructor injection** and narrow interfaces; avoid hidden **service locator** usage in new code.
+
+## API response shape
+
+- Keep **consistent JSON** conventions across endpoints (success / error fields, validation errors, pagination metadata when applicable).
+- Follow **`docs/architecture/08-API-SPEC-PHASE1.md`** and project error-handling docs when they apply.
+
+## Repository pattern
+
+- Use a **repository** when multiple storage backends or complex query encapsulation justify it.
+- Laravel **Eloquent + query scopes** is often enough; don’t add repositories by default if they only wrap one model.
+
+## Reference implementations
+
+When adding **unfamiliar** stack pieces, prefer **official or well-maintained** examples, then adapt—don’t copy opaque “starter” code blindly.
