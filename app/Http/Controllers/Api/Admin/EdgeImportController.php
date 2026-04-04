@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\ImportProgramPackageJob;
+use App\Models\EdgeDeviceState;
 use App\Services\EdgeModeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -59,16 +60,27 @@ class EdgeImportController extends Controller
                     $data = array_merge($contents, $data);
                 }
             }
-            return response()->json($data);
+            return response()->json($this->appendStateFields($data));
         }
 
         if (! Storage::disk('local')->exists('edge_package_imported.json')) {
-            return response()->json(['status' => 'never_synced']);
+            return response()->json($this->appendStateFields(['status' => 'never_synced']));
         }
 
         $contents = Storage::disk('local')->get('edge_package_imported.json');
         $data = json_decode($contents, true);
 
-        return response()->json(is_array($data) ? $data : ['status' => 'unknown']);
+        return response()->json($this->appendStateFields(is_array($data) ? $data : ['status' => 'unknown']));
+    }
+
+    /** Append package_stale and session_active from EdgeDeviceState to the response. */
+    private function appendStateFields(array $data): array
+    {
+        $state = EdgeDeviceState::current();
+
+        return array_merge($data, [
+            'package_stale'  => $state->package_stale ?? false,
+            'session_active' => $state->session_active ?? false,
+        ]);
     }
 }

@@ -136,4 +136,15 @@
             </div>
         </div>
     {/if}
+    {#if importStatus?.package_stale && importStatus?.session_active}
+        <div
+            class="py-2 px-4 bg-warning-50 dark:bg-warning-900/30 border-b border-warning-200 dark:border-warning-700"
+            role="status"
+            aria-live="polite"
+        >
+            <span class="text-sm text-warning-700 dark:text-warning-300 font-medium">
+                Program configuration updated on central. Changes will apply after the current session ends.
+            </span>
+        </div>
+    {/if}
 {/if}

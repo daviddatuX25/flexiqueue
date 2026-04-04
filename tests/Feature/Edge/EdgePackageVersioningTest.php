@@ -324,6 +324,45 @@ class EdgePackageVersioningTest extends TestCase
     }
 
     /** @test */
+    public function import_status_includes_package_stale_and_session_active(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        \App\Models\EdgeDeviceState::where('id', 1)->updateOrInsert(
+            ['id' => 1],
+            [
+                'session_active' => true,
+                'package_stale'  => true,
+                'sync_mode'      => 'auto',
+            ]
+        );
+
+        \Illuminate\Support\Facades\Storage::disk('local')->put(
+            'edge_package_imported.json',
+            json_encode([
+                'status'          => 'complete',
+                'imported_at'     => now()->toIso8601String(),
+                'program_id'      => 1,
+                'site_id'         => 1,
+                'manifest_hash'   => str_repeat('a', 64),
+                'package_version' => str_repeat('b', 64),
+                'sync_tokens'     => false,
+                'sync_clients'    => false,
+                'sync_tts'        => false,
+                'tts_asset_contract_version'  => 2,
+                'tts_asset_references_count'  => 0,
+            ])
+        );
+
+        $user = \App\Models\User::factory()->admin()->create();
+        $this->actingAs($user)
+            ->getJson('/api/admin/edge/import/status')
+            ->assertOk()
+            ->assertJsonFragment(['package_stale' => true])
+            ->assertJsonFragment(['session_active' => true]);
+    }
+
+    /** @test */
     public function heartbeat_command_stores_package_stale_in_device_state(): void
     {
         $state = \App\Models\EdgeDeviceState::firstOrCreate(
