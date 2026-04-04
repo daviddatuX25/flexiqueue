@@ -45,6 +45,12 @@ class HeartbeatController extends Controller
             $updates['last_synced_at'] = $validated['last_synced_at'];
         }
 
+        $latestAppVersion = config('flexiqueue.latest_edge_app_version');
+        if (! empty($validated['app_version']) && $latestAppVersion !== null) {
+            $updateAvailable = version_compare($validated['app_version'], $latestAppVersion, '<');
+            $updates['update_status'] = $updateAvailable ? 'update_available' : 'up_to_date';
+        }
+
         $device->update($updates);
 
         $isVoided = $device->force_cancelled_at !== null;
@@ -57,11 +63,16 @@ class HeartbeatController extends Controller
             $packageStale = $currentVersion !== $validated['package_version'];
         }
 
+        $updateAvailableResponse = false;
+        if (! empty($validated['app_version']) && $latestAppVersion !== null) {
+            $updateAvailableResponse = version_compare($validated['app_version'], $latestAppVersion, '<');
+        }
+
         return response()->json([
             'revoked'                 => false,
             'sync_mode'               => $device->sync_mode,
             'supervisor_admin_access' => $device->supervisor_admin_access,
-            'update_available'        => false,
+            'update_available'        => $updateAvailableResponse,
             'dump_session'            => (bool) $device->dump_requested,
             'session_voided'          => $isVoided,
             'voided_at'               => $isVoided ? $device->force_cancelled_at->toIso8601String() : null,
