@@ -30,6 +30,7 @@ class EdgeDeviceState extends Model
         'id_offset',
         'app_version',
         'package_version',
+        'package_stale',
     ];
 
     protected function casts(): array
@@ -39,6 +40,7 @@ class EdgeDeviceState extends Model
             'last_synced_at' => 'datetime',
             'supervisor_admin_access' => 'boolean',
             'session_active' => 'boolean',
+            'package_stale' => 'boolean',
             'device_token' => 'encrypted',
             'id_offset' => 'integer',
         ];

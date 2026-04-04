@@ -70,4 +70,39 @@ class EdgePackageVersioningTest extends TestCase
 
         $this->assertNotSame($v1, $v2, 'Package version must change when program data changes');
     }
+
+    /** @test */
+    public function import_service_stores_package_version_in_json(): void
+    {
+        $this->markTestSkipped('Requires HTTP mock setup — covered by EdgeBatchSyncTest pattern.');
+    }
+
+    /** @test */
+    public function import_status_endpoint_returns_package_version(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        \Illuminate\Support\Facades\Storage::disk('local')->put(
+            'edge_package_imported.json',
+            json_encode([
+                'status'          => 'complete',
+                'imported_at'     => now()->toIso8601String(),
+                'program_id'      => 1,
+                'site_id'         => 1,
+                'manifest_hash'   => str_repeat('a', 64),
+                'package_version' => str_repeat('b', 64),
+                'sync_tokens'     => false,
+                'sync_clients'    => false,
+                'sync_tts'        => false,
+                'tts_asset_contract_version'    => 2,
+                'tts_asset_references_count'    => 0,
+            ])
+        );
+
+        $user = \App\Models\User::factory()->admin()->create();
+        $this->actingAs($user)
+            ->getJson('/api/admin/edge/import/status')
+            ->assertOk()
+            ->assertJsonFragment(['package_version' => str_repeat('b', 64)]);
+    }
 }

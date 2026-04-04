@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\EdgeDeviceState;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -201,6 +202,7 @@ class EdgePackageImportService
             'site_id' => $manifest['site_id'],
             'imported_at' => now()->toIso8601String(),
             'manifest_hash' => hash('sha256', json_encode($manifest)),
+            'package_version' => $manifest['package_version'],
             'sync_tokens' => $manifest['sync_tokens'],
             'sync_clients' => $manifest['sync_clients'],
             'sync_tts' => $manifest['sync_tts'],
@@ -208,5 +210,10 @@ class EdgePackageImportService
             'tts_asset_references_count' => is_array($package['tts_asset_references'] ?? null) ? count($package['tts_asset_references']) : 0,
             'status' => 'complete',
         ]));
+
+        EdgeDeviceState::current()->update([
+            'package_version' => $manifest['package_version'],
+            'package_stale' => false,
+        ]);
     }
 }
