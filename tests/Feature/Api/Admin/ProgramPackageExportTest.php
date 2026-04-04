@@ -122,9 +122,25 @@ class ProgramPackageExportTest extends TestCase
         $sections = ['program', 'tracks', 'steps', 'processes', 'stations', 'station_process', 'users', 'tokens', 'clients', 'tts_asset_references'];
         foreach ($sections as $section) {
             $this->assertArrayHasKey($section, $checksums);
-            $expected = hash('sha256', json_encode($data[$section]));
+            // Mirror the exporter's sortRecursive logic so our expected hash matches
+            $sorted = $this->sortRecursive($data[$section]);
+            $expected = hash('sha256', json_encode($sorted));
             $this->assertSame($expected, $checksums[$section], "Checksum mismatch for section: {$section}");
         }
+    }
+
+    /**
+     * Recursively sort array keys — mirrors ProgramPackageExporter::sortRecursive().
+     */
+    private function sortRecursive(array $arr): array
+    {
+        foreach ($arr as &$value) {
+            if (is_array($value)) {
+                $value = $this->sortRecursive($value);
+            }
+        }
+        ksort($arr);
+        return $arr;
     }
 
     public function test_client_records_in_response_never_contain_mobile_encrypted_or_mobile_hash(): void
