@@ -150,4 +150,56 @@ class EdgeSessionControlTest extends TestCase
 
         $this->assertTrue($result->is_active);
     }
+
+    // ── E4.3 POST /api/edge/session/start ────────────────────────────────
+
+    /** @test */
+    public function session_start_sets_session_active_on_device(): void
+    {
+        $site    = $this->makeSite();
+        $program = $this->makeProgram($site);
+        $plainToken = 'tok-' . uniqid();
+        $device  = EdgeDevice::create([
+            'site_id'             => $site->id,
+            'name'                => 'Test Pi',
+            'device_token_hash'   => hash('sha256', $plainToken),
+            'id_offset'           => 10_000_000,
+            'sync_mode'           => 'auto',
+            'supervisor_admin_access' => false,
+            'assigned_program_id' => $program->id,
+            'session_active'      => false,
+            'paired_at'           => now(),
+        ]);
+
+        $response = $this->withToken($plainToken)
+            ->postJson('/api/edge/session/start');
+
+        $response->assertOk()->assertJson(['session_active' => true]);
+        $this->assertDatabaseHas('edge_devices', [
+            'id'             => $device->id,
+            'session_active' => true,
+        ]);
+    }
+
+    /** @test */
+    public function session_start_returns_422_when_no_program_assigned(): void
+    {
+        $site       = $this->makeSite();
+        $plainToken = 'tok-' . uniqid();
+        EdgeDevice::create([
+            'site_id'             => $site->id,
+            'name'                => 'Test Pi',
+            'device_token_hash'   => hash('sha256', $plainToken),
+            'id_offset'           => 10_000_000,
+            'sync_mode'           => 'auto',
+            'supervisor_admin_access' => false,
+            'assigned_program_id' => null,
+            'session_active'      => false,
+            'paired_at'           => now(),
+        ]);
+
+        $this->withToken($plainToken)
+            ->postJson('/api/edge/session/start')
+            ->assertUnprocessable();
+    }
 }
