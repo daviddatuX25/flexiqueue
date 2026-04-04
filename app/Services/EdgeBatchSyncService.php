@@ -3,7 +3,12 @@
 namespace App\Services;
 
 use App\Models\EdgeDeviceState;
+use App\Models\EdgeSyncReceipt;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class EdgeBatchSyncService
 {
@@ -122,5 +127,115 @@ class EdgeBatchSyncService
             ->map(fn ($row) => ['id' => $row->id, 'status' => $row->status])
             ->values()
             ->all();
+    }
+
+    /**
+     * Check if there is any data that needs syncing (lightweight EXISTS queries).
+     */
+    public function hasUnsyncedData(): bool
+    {
+        $since = EdgeDeviceState::current()->last_synced_at;
+
+        $check = fn (string $table) => $since
+            ? DB::table($table)->where('created_at', '>', $since)->exists()
+            : DB::table($table)->exists();
+
+        return $check('queue_sessions')
+            || $check('transaction_logs')
+            || $check('clients')
+            || $check('identity_registrations')
+            || $check('program_audit_log');
+    }
+
+    /**
+     * Collect unsynced data, push to central, store receipt.
+     * Returns true on success (or no-op), false on failure.
+     * Uses a cache lock to prevent concurrent sync attempts.
+     */
+    public function pushToCentral(): bool
+    {
+        $lock = Cache::lock('edge.batch_sync', 60);
+
+        if (! $lock->get()) {
+            Log::info('EdgeBatchSyncService: sync already in progress, skipping.');
+            return false;
+        }
+
+        try {
+            return $this->doPush();
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function doPush(): bool
+    {
+        $state = EdgeDeviceState::current();
+        $centralUrl = rtrim($state->central_url, '/');
+        $deviceToken = $state->device_token;
+
+        $payload = $this->collectUnsyncedData();
+
+        // Nothing to sync
+        $hasData = ! empty($payload['queue_sessions'])
+            || ! empty($payload['transaction_logs'])
+            || ! empty($payload['clients'])
+            || ! empty($payload['identity_registrations'])
+            || ! empty($payload['program_audit_log'])
+            || ! empty($payload['staff_activity_log']);
+
+        if (! $hasData) {
+            return true;
+        }
+
+        $batchId = (string) Str::uuid();
+        $receipt = EdgeSyncReceipt::create([
+            'batch_id' => $batchId,
+            'status' => 'pending',
+            'payload_summary' => [
+                'queue_sessions' => count($payload['queue_sessions']),
+                'transaction_logs' => count($payload['transaction_logs']),
+                'clients' => count($payload['clients']),
+                'identity_registrations' => count($payload['identity_registrations']),
+                'program_audit_log' => count($payload['program_audit_log']),
+                'staff_activity_log' => count($payload['staff_activity_log']),
+                'token_updates' => count($payload['token_updates']),
+            ],
+            'started_at' => now(),
+        ]);
+
+        try {
+            $response = Http::timeout(30)
+                ->withToken($deviceToken)
+                ->post("{$centralUrl}/api/edge/sync", $payload);
+
+            if ($response->successful()) {
+                $responseData = $response->json();
+                $receipt->markComplete($responseData);
+                $state->update(['last_synced_at' => now()]);
+
+                Log::info('EdgeBatchSyncService: batch sync complete', [
+                    'batch_id' => $batchId,
+                    'records' => $responseData['records_received'] ?? [],
+                ]);
+
+                return true;
+            }
+
+            Log::warning('EdgeBatchSyncService: central returned ' . $response->status(), [
+                'batch_id' => $batchId,
+            ]);
+
+            $receipt->markFailed();
+            return false;
+        } catch (\Throwable $e) {
+            Log::warning('EdgeBatchSyncService: HTTP failed', [
+                'batch_id' => $batchId,
+                'error' => $e->getMessage(),
+            ]);
+
+            $receipt->markFailed();
+            return false;
+        }
     }
 }

@@ -14,6 +14,7 @@ use App\Services\EdgeBatchSyncService;
 use App\Services\EdgeModeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -130,5 +131,80 @@ class EdgeBatchSyncTest extends TestCase
 
         $this->assertEmpty($payload['queue_sessions']);
         $this->assertEmpty($payload['transaction_logs']);
+    }
+
+    public function test_batch_sync_service_pushes_to_central_and_stores_receipt(): void
+    {
+        Http::fake([
+            '*/api/edge/sync' => Http::response([
+                'status' => 'complete',
+                'synced_at' => '2026-04-04T17:05:00Z',
+                'records_received' => [
+                    'queue_sessions' => 1,
+                    'transaction_logs' => 2,
+                    'clients' => 0,
+                    'identity_registrations' => 0,
+                ],
+                'conflicts' => [],
+            ], 200),
+        ]);
+
+        $this->setupEdgeState('end_of_event', false);
+        [$session, $program, $token] = $this->createEdgeSessionData();
+
+        $service = new EdgeBatchSyncService();
+        $result = $service->pushToCentral();
+
+        $this->assertTrue($result);
+
+        // Receipt was stored
+        $this->assertDatabaseHas('edge_sync_receipts', [
+            'status' => 'complete',
+        ]);
+
+        // last_synced_at was updated
+        $state = EdgeDeviceState::current();
+        $this->assertNotNull($state->last_synced_at);
+
+        Http::assertSent(function ($request) {
+            return str_contains($request->url(), '/api/edge/sync')
+                && isset($request['session_summary'])
+                && isset($request['queue_sessions'])
+                && isset($request['transaction_logs']);
+        });
+    }
+
+    public function test_batch_sync_service_returns_false_on_http_failure(): void
+    {
+        Http::fake([
+            '*/api/edge/sync' => Http::response('Server Error', 500),
+        ]);
+
+        $this->setupEdgeState('end_of_event', false);
+        $this->createEdgeSessionData();
+
+        $service = new EdgeBatchSyncService();
+        $result = $service->pushToCentral();
+
+        $this->assertFalse($result);
+
+        // Receipt marked as failed
+        $this->assertDatabaseHas('edge_sync_receipts', [
+            'status' => 'failed',
+        ]);
+    }
+
+    public function test_batch_sync_service_skips_when_nothing_to_sync(): void
+    {
+        Http::fake();
+
+        $state = $this->setupEdgeState('end_of_event', false);
+        $state->update(['last_synced_at' => now()]);
+
+        $service = new EdgeBatchSyncService();
+        $result = $service->pushToCentral();
+
+        $this->assertTrue($result); // nothing to sync = success (no-op)
+        Http::assertNothingSent();
     }
 }
