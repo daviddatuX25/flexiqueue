@@ -26,6 +26,7 @@ class EdgeDeviceState extends Model
         'active_program_name',
         'session_active',
         'last_synced_at',
+        'scheduled_sync_time',
         'id_offset',
         'app_version',
         'package_version',
