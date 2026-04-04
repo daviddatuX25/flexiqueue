@@ -359,4 +359,64 @@ class EdgeSessionControlTest extends TestCase
             ->assertOk()
             ->assertJson(['dump_session' => false]);
     }
+
+    // ── E4.6 Session-active guard on reassignment ─────────────────────────
+
+    /** @test */
+    public function update_returns_422_when_changing_program_and_session_is_active(): void
+    {
+        $site     = $this->makeSite();
+        $admin    = $this->makeAdmin($site);
+        $program1 = $this->makeProgram($site);
+        $program2 = $this->makeProgram($site);
+        $device   = EdgeDevice::create([
+            'site_id'             => $site->id,
+            'name'                => 'Test Pi',
+            'device_token_hash'   => hash('sha256', 'tok'),
+            'id_offset'           => 10_000_000,
+            'sync_mode'           => 'auto',
+            'supervisor_admin_access' => false,
+            'assigned_program_id' => $program1->id,
+            'session_active'      => true,
+            'paired_at'           => now(),
+        ]);
+
+        $this->actingAs($admin)
+            ->putJson("/api/admin/edge-devices/{$device->id}", [
+                'assigned_program_id'     => $program2->id,
+                'sync_mode'               => 'auto',
+                'supervisor_admin_access' => false,
+            ])
+            ->assertUnprocessable()
+            ->assertJsonFragment(['message' => 'Cannot reassign program while a session is active. End or dump the session first.']);
+    }
+
+    /** @test */
+    public function update_allows_non_program_changes_when_session_is_active(): void
+    {
+        $site    = $this->makeSite();
+        $admin   = $this->makeAdmin($site);
+        $program = $this->makeProgram($site);
+        $device  = EdgeDevice::create([
+            'site_id'             => $site->id,
+            'name'                => 'Test Pi',
+            'device_token_hash'   => hash('sha256', 'tok2'),
+            'id_offset'           => 10_000_000,
+            'sync_mode'           => 'auto',
+            'supervisor_admin_access' => false,
+            'assigned_program_id' => $program->id,
+            'session_active'      => true,
+            'paired_at'           => now(),
+        ]);
+        $program->update(['edge_locked_by_device_id' => $device->id]);
+
+        // Only changing sync_mode and supervisor — same program_id — should pass
+        $this->actingAs($admin)
+            ->putJson("/api/admin/edge-devices/{$device->id}", [
+                'assigned_program_id'     => $program->id,
+                'sync_mode'               => 'end_of_event',
+                'supervisor_admin_access' => true,
+            ])
+            ->assertOk();
+    }
 }

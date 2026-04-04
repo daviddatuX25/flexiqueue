@@ -91,6 +91,14 @@ class EdgeDeviceController extends Controller
             }
         }
 
+        // E4.6: block program reassignment when session is active
+        $changingProgram = $newProgramId !== $device->assigned_program_id;
+        if ($changingProgram && $device->session_active) {
+            return response()->json([
+                'message' => 'Cannot reassign program while a session is active. End or dump the session first.',
+            ], 422);
+        }
+
         $lockConflict = DB::transaction(function () use ($device, $newProgramId, $program, &$validated) {
             // Re-read device inside transaction for fresh state
             $device->refresh();
