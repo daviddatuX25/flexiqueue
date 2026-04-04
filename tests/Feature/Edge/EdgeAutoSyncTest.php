@@ -19,6 +19,7 @@ use App\Models\Site;
 use App\Services\EdgeEventPushService;
 use App\Services\EdgeModeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
@@ -486,5 +487,121 @@ class EdgeAutoSyncTest extends TestCase
             'id' => $session->id,
             'status' => 'called',
         ]);
+    }
+
+    public function test_sync_retry_command_pushes_pending_items(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        Http::fake([
+            '*/api/edge/event' => Http::response(['status' => 'ok'], 200),
+        ]);
+
+        $state = EdgeDeviceState::current();
+        $state->update([
+            'central_url' => 'https://central.test',
+            'device_token' => 'test-token-abc',
+            'sync_mode' => 'auto',
+            'session_active' => true,
+        ]);
+
+        EdgeSyncQueueItem::create([
+            'transaction_log_id' => 1,
+            'session_id' => 100,
+            'event_type' => 'transaction_log',
+            'payload' => ['id' => 1, 'session_id' => 100, 'action_type' => 'bind', 'created_at' => now()->toIso8601String()],
+            'attempts' => 1,
+            'status' => 'pending',
+            'created_at' => now(),
+        ]);
+
+        $this->artisan('edge:sync-retry')->assertSuccessful();
+
+        $this->assertDatabaseHas('edge_sync_queue', [
+            'transaction_log_id' => 1,
+            'status' => 'sent',
+        ]);
+    }
+
+    public function test_sync_retry_degrades_after_5_consecutive_failures(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        Http::fake([
+            '*/api/edge/event' => Http::response('Error', 500),
+        ]);
+
+        $state = EdgeDeviceState::current();
+        $state->update([
+            'central_url' => 'https://central.test',
+            'device_token' => 'test-token-abc',
+            'sync_mode' => 'auto',
+            'session_active' => true,
+        ]);
+
+        // Create 1 item with 4 prior attempts (next failure = 5th = degrade)
+        EdgeSyncQueueItem::create([
+            'transaction_log_id' => 1,
+            'session_id' => 100,
+            'event_type' => 'transaction_log',
+            'payload' => ['id' => 1, 'session_id' => 100, 'action_type' => 'bind', 'created_at' => now()->toIso8601String()],
+            'attempts' => 4,
+            'status' => 'pending',
+            'created_at' => now(),
+        ]);
+
+        $this->artisan('edge:sync-retry')->assertSuccessful();
+
+        $this->assertTrue(Cache::get('edge.sync_degraded', false));
+    }
+
+    public function test_sync_retry_resumes_on_successful_push(): void
+    {
+        config(['app.mode' => 'edge']);
+
+        Http::fake([
+            '*/api/edge/event' => Http::response(['status' => 'ok'], 200),
+        ]);
+
+        Cache::put('edge.sync_degraded', true);
+
+        $state = EdgeDeviceState::current();
+        $state->update([
+            'central_url' => 'https://central.test',
+            'device_token' => 'test-token-abc',
+            'sync_mode' => 'auto',
+            'session_active' => true,
+        ]);
+
+        EdgeSyncQueueItem::create([
+            'transaction_log_id' => 2,
+            'session_id' => 101,
+            'event_type' => 'transaction_log',
+            'payload' => ['id' => 2, 'session_id' => 101, 'action_type' => 'call', 'created_at' => now()->toIso8601String()],
+            'attempts' => 2,
+            'status' => 'pending',
+            'created_at' => now(),
+        ]);
+
+        $this->artisan('edge:sync-retry')->assertSuccessful();
+
+        $this->assertFalse(Cache::get('edge.sync_degraded', false));
+        $this->assertDatabaseHas('edge_sync_queue', [
+            'transaction_log_id' => 2,
+            'status' => 'sent',
+        ]);
+    }
+
+    public function test_sync_retry_skips_when_not_edge(): void
+    {
+        $this->app->bind(EdgeModeService::class, function () {
+            $mock = \Mockery::mock(EdgeModeService::class);
+            $mock->shouldReceive('isEdge')->andReturn(false);
+            return $mock;
+        });
+
+        $this->artisan('edge:sync-retry')
+            ->expectsOutputToContain('Not running on edge')
+            ->assertSuccessful();
     }
 }

@@ -107,8 +107,14 @@ Schedule::command('tts:cleanup-superseded --days=14 --limit=200')
     ->withoutOverlapping();
 
 use App\Console\Commands\EdgeHeartbeat;
+use App\Console\Commands\EdgeSyncRetry;
 
 Schedule::command(EdgeHeartbeat::class)
     ->everyFiveMinutes()
     ->name('edge-heartbeat')
+    ->withoutOverlapping();
+
+Schedule::command(EdgeSyncRetry::class)
+    ->everyThirtySeconds()
+    ->name('edge-sync-retry')
     ->withoutOverlapping();
