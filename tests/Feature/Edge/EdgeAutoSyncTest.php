@@ -13,8 +13,10 @@ use App\Models\Station;
 use App\Models\Token;
 use App\Models\TrackStep;
 use App\Models\TransactionLog;
+use App\Services\EdgeEventPushService;
 use App\Services\EdgeModeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -204,5 +206,100 @@ class EdgeAutoSyncTest extends TestCase
         $item->refresh();
         $this->assertEquals('sent', $item->status);
         $this->assertNotNull($item->synced_at);
+    }
+
+    public function test_push_service_sends_http_post_to_central(): void
+    {
+        Http::fake([
+            '*/api/edge/event' => Http::response(['status' => 'ok'], 200),
+        ]);
+
+        $state = EdgeDeviceState::current();
+        $state->update([
+            'central_url' => 'https://central.test',
+            'device_token' => 'test-token-abc',
+            'sync_mode' => 'auto',
+            'session_active' => true,
+        ]);
+
+        $service = new EdgeEventPushService();
+        $result = $service->push('transaction_log', [
+            'id' => 1,
+            'session_id' => 100,
+            'action_type' => 'bind',
+            'created_at' => '2026-04-04T10:00:00Z',
+        ], transactionLogId: 1, sessionId: 100);
+
+        $this->assertTrue($result);
+
+        Http::assertSent(function ($request) {
+            return str_contains($request->url(), 'https://central.test/api/edge/event')
+                && $request->hasHeader('Authorization', 'Bearer test-token-abc')
+                && $request['event_type'] === 'transaction_log'
+                && $request['payload']['action_type'] === 'bind';
+        });
+    }
+
+    public function test_push_service_queues_on_http_failure(): void
+    {
+        Http::fake([
+            '*/api/edge/event' => Http::response('Server Error', 500),
+        ]);
+
+        $state = EdgeDeviceState::current();
+        $state->update([
+            'central_url' => 'https://central.test',
+            'device_token' => 'test-token-abc',
+            'sync_mode' => 'auto',
+            'session_active' => true,
+        ]);
+
+        $service = new EdgeEventPushService();
+        $result = $service->push('transaction_log', [
+            'id' => 1,
+            'session_id' => 100,
+            'action_type' => 'call',
+            'created_at' => '2026-04-04T10:00:00Z',
+        ], transactionLogId: 1, sessionId: 100);
+
+        $this->assertFalse($result);
+
+        $this->assertDatabaseHas('edge_sync_queue', [
+            'event_type' => 'transaction_log',
+            'status' => 'pending',
+            'transaction_log_id' => 1,
+        ]);
+    }
+
+    public function test_push_service_includes_session_state_in_payload(): void
+    {
+        Http::fake([
+            '*/api/edge/event' => Http::response(['status' => 'ok'], 200),
+        ]);
+
+        $state = EdgeDeviceState::current();
+        $state->update([
+            'central_url' => 'https://central.test',
+            'device_token' => 'test-token-abc',
+            'sync_mode' => 'auto',
+            'session_active' => true,
+        ]);
+
+        $session = $this->createMinimalSession('auto', true);
+        $session->update(['status' => 'called', 'current_station_id' => 1]);
+
+        $service = new EdgeEventPushService();
+        $service->pushWithSession('transaction_log', [
+            'id' => 1,
+            'session_id' => $session->id,
+            'action_type' => 'call',
+            'created_at' => now()->toIso8601String(),
+        ], $session, transactionLogId: 1);
+
+        Http::assertSent(function ($request) use ($session) {
+            return isset($request['session_state'])
+                && $request['session_state']['id'] === $session->id
+                && $request['session_state']['status'] === 'called';
+        });
     }
 }
