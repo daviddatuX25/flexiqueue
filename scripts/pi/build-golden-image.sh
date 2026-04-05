@@ -470,6 +470,46 @@ lockdown_filesystem_inside_chroot() {
 }
 
 ############################################
+# SECTION 6d: NETWORK ROUTER (E12)
+############################################
+setup_network_router() {
+  echo "=== Setting up edge network router (E12) ==="
+
+  # Validate required env vars (fail fast at build time)
+  : "${WIFI_SSID:?WIFI_SSID must be set}"
+  : "${WIFI_PASS:?WIFI_PASS must be set}"
+
+  local network_src="$SCRIPT_DIR/network"
+  local network_dst="$CHROOT_DIR/var/www/flexiqueue/scripts/pi/network"
+
+  # Copy network scripts into chroot
+  mkdir -p "$network_dst"
+  cp -r "$network_src/setup-network.sh" "$network_dst/"
+  cp -r "$network_src/flexiqueue-network.service" "$network_dst/"
+  cp -r "$network_src/boards" "$network_dst/"
+  chmod +x "$network_dst/setup-network.sh"
+  chmod +x "$network_dst/boards"/*.sh
+
+  # Write board name marker
+  mkdir -p "$CHROOT_DIR/etc/flexiqueue"
+  echo "$BOARD" > "$CHROOT_DIR/etc/flexiqueue/board-name"
+
+  # Write WiFi credentials (chmod 600 — root only)
+  printf 'WIFI_SSID=%s\nWIFI_PASS=%s\n' "$WIFI_SSID" "$WIFI_PASS" \
+    > "$CHROOT_DIR/etc/flexiqueue/wifi.conf"
+  chmod 600 "$CHROOT_DIR/etc/flexiqueue/wifi.conf"
+
+  # Install required packages into chroot
+  chroot_exec bash -c "apt-get install -y --no-install-recommends parprouted dnsmasq iptables"
+
+  # Install and enable systemd service
+  cp "$network_dst/flexiqueue-network.service" "$CHROOT_DIR/etc/systemd/system/"
+  chroot_exec bash -c "systemctl enable flexiqueue-network.service"
+
+  echo "Network router configured."
+}
+
+############################################
 # SECTION 7: SSL SETUP INSIDE CHROOT
 ############################################
 
@@ -680,6 +720,7 @@ main() {
   configure_ssh_inside_chroot
   install_kiosk_inside_chroot
   configure_tty_lockdown_inside_chroot
+  setup_network_router
   enable_services
   finalize_image
 

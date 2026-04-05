@@ -1,0 +1,12 @@
+[Unit]
+Description=FlexiQueue Edge Network Router
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/var/www/flexiqueue/scripts/pi/network/setup-network.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
