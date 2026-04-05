@@ -561,8 +561,8 @@
                                     type="button"
                                     class="btn preset-tonal btn-sm p-2"
                                     onclick={() => openEdit(program)}
-                                    disabled={submitting}
-                                    title="Edit Program"
+                                    disabled={submitting || !!edgeMode?.admin_read_only}
+                                    title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : 'Edit Program'}
                                 >
                                     <Edit2 class="w-4 h-4 text-surface-600" />
                                 </button>
@@ -570,8 +570,8 @@
                                     type="button"
                                     class="btn preset-tonal btn-sm p-2 hover:bg-error-50"
                                     onclick={() => openDeleteConfirm(program)}
-                                    disabled={submitting}
-                                    title="Delete Program"
+                                    disabled={submitting || !!edgeMode?.admin_read_only}
+                                    title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : 'Delete Program'}
                                 >
                                     <Trash2 class="w-4 h-4 text-error-500" />
                                 </button>
@@ -725,7 +725,8 @@
                 <button
                     type="submit"
                     class="btn preset-filled-primary-500"
-                    disabled={submitting || !editName.trim()}
+                    disabled={submitting || !editName.trim() || !!edgeMode?.admin_read_only}
+                    title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
                 >
                     {submitting ? "Saving…" : "Save Changes"}
                 </button>
