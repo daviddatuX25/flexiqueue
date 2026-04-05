@@ -66,3 +66,4 @@ root@*
 codemapper-output/*
 !codemapper-output/admin_tokens_program_station_map.txt
 codemapper/
+.worktrees/
