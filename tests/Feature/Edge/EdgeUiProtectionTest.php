@@ -248,4 +248,35 @@ class EdgeUiProtectionTest extends TestCase
         $this->assertNull($state->paired_at);
         $this->assertNull($state->device_token);
     }
+
+    /** @test */
+    public function setup_clears_is_revoked_state(): void
+    {
+        EdgeDeviceState::where('id', 1)->updateOrInsert(
+            ['id' => 1],
+            [
+                'paired_at'     => now(),
+                'device_token'  => Crypt::encrypt('old-token'),
+                'central_url'   => 'http://central.test',
+                'sync_mode'     => 'auto',
+                'session_active' => false,
+                'is_revoked'    => true,
+            ]
+        );
+
+        Http::fake([
+            'http://central.test/api/edge/pair' => Http::response([
+                'device_token' => 'new-token',
+                'site_id'     => $this->site->id,
+                'site_name'   => $this->site->name,
+                'id_offset'   => 10_000_000,
+            ], 200),
+        ]);
+
+        // Directly call the service (writeEnv=false to avoid file system side-effects)
+        $service = new \App\Services\EdgeDeviceSetupService(writeEnv: false);
+        $service->setup('http://central.test', 'PAIR1234', 'auto');
+
+        $this->assertFalse((bool) EdgeDeviceState::current()->is_revoked);
+    }
 }

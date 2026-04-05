@@ -43,6 +43,7 @@ class EdgeDeviceSetupService
                 'paired_at'               => now(),
                 'session_active'          => false,
                 'supervisor_admin_access' => false,
+                'is_revoked'              => false,
             ]
         );
 
