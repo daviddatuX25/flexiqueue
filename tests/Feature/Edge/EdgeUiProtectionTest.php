@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Edge;
 
+use App\Http\Middleware\HandleInertiaRequests;
 use App\Models\EdgeDeviceState;
 use App\Models\Site;
 use App\Models\User;
@@ -60,6 +61,29 @@ class EdgeUiProtectionTest extends TestCase
                 'session_active' => false,
                 'paired_at' => now(),
             ]
+        );
+        config(['app.mode' => 'edge']);
+    }
+
+    /**
+     * Helper: seed a paired device state with optional field overrides.
+     */
+    private function seedPairedState(array $overrides = []): void
+    {
+        $deviceToken = Str::random(64);
+        EdgeDeviceState::updateOrCreate(
+            ['id' => 1],
+            array_merge([
+                'central_url' => 'https://central.test',
+                'device_token' => Crypt::encrypt($deviceToken),
+                'site_id' => $this->site->id,
+                'site_name' => $this->site->name,
+                'id_offset' => 10_000_000,
+                'sync_mode' => 'auto',
+                'supervisor_admin_access' => false,
+                'session_active' => false,
+                'paired_at' => now(),
+            ], $overrides)
         );
         config(['app.mode' => 'edge']);
     }
@@ -169,6 +193,34 @@ class EdgeUiProtectionTest extends TestCase
         $this->assertNotEquals(403, $response->status());
     }
 
+
+    // ── E9.4: EdgeBootGuard revoked redirect ──────────────────────────────
+
+    /** @test */
+    public function boot_guard_redirects_to_revoked_when_is_revoked_true(): void
+    {
+        $this->seedPairedState(['is_revoked' => true]);
+        $this->actAsEdge();
+
+        $this->actingAs($this->admin)->get('/admin/dashboard')
+            ->assertRedirect('/edge/revoked');
+    }
+
+    /** @test */
+    public function boot_guard_allows_access_to_revoked_page_when_is_revoked_true(): void
+    {
+        $this->seedPairedState(['is_revoked' => true]);
+        $this->actAsEdge();
+
+        $this->withoutMiddleware(HandleInertiaRequests::class)
+            ->withoutMiddleware(\App\Http\Middleware\EnforcePendingAssignment::class)
+            ->withoutMiddleware(\App\Http\Middleware\EnforceDeviceLock::class)
+            ->withoutMiddleware(\App\Http\Middleware\AddPermissionsPolicy::class)
+            ->withoutMiddleware(\App\Http\Middleware\SetGlobalPermissionsTeam::class)
+            ->withSession([])
+            ->get('/edge/revoked')
+            ->assertStatus(200);
+    }
 
     public function test_heartbeat_command_sets_is_revoked_when_central_returns_revoked(): void
     {

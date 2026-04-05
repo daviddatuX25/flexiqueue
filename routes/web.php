@@ -351,6 +351,11 @@ Route::get('/edge/waiting-status', function () {
     ]);
 })->name('edge.waiting.status');
 
+// E9.4: revoked device terminal page
+Route::get('/edge/revoked', function () {
+    return Inertia::render('Edge/Revoked');
+})->name('edge.revoked');
+
 // Per 05-SECURITY-CONTROLS §2.4: public routes (no auth)
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login')->middleware('guest');
 Route::post('/login', [LoginController::class, 'login'])->middleware('guest');

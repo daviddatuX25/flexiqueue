@@ -27,6 +27,14 @@ class EdgeBootGuard
 
         $state = EdgeDeviceState::current();
 
+        // E9.4: revoked devices get their own terminal page
+        if ($state->is_revoked) {
+            if (! $request->is('edge/revoked')) {
+                return redirect('/edge/revoked');
+            }
+            return $next($request);
+        }
+
         if ($state->paired_at === null) {
             if (! $request->is('edge/setup') && ! $request->is('edge/setup*')) {
                 return redirect('/edge/setup');
