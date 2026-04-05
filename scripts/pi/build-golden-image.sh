@@ -329,7 +329,8 @@ install_packages_inside_chroot() {
   local pkgs=(
     "$php"
     "${php}-fpm"
-    "${php}-sqlite3"
+    # NOTE: ${php}-sqlite3 intentionally omitted — we compile it against
+    # SQLCipher in install_sqlcipher_php_ext_inside_chroot() below.
     "${php}-mbstring"
     "${php}-xml"
     "${php}-curl"
@@ -344,6 +345,45 @@ install_packages_inside_chroot() {
 
   chroot_exec bash -c "apt-get update"
   chroot_exec bash -c "apt-get install -y --no-install-recommends ${pkgs[*]}"
+}
+
+############################################
+# SECTION 4b: SQLCIPHER PHP EXTENSION
+############################################
+install_sqlcipher_php_ext_inside_chroot() {
+  echo "=== Compiling PHP sqlite3 extension against SQLCipher ==="
+  # Build dependencies
+  chroot_exec bash -c "apt-get install -y --no-install-recommends \
+  sqlcipher libsqlcipher-dev php${PHP_VERSION}-dev make autoconf pkg-config"
+  # Determine the exact PHP version string (e.g. "8.3.14")
+  local php_full_ver
+  php_full_ver=$(chroot_exec bash -c "php${PHP_VERSION} -r 'echo PHP_VERSION;'")
+  echo "PHP version inside chroot: ${php_full_ver}"
+  # Download matching PHP source (needs internet during build)
+  chroot_exec bash -c "
+  set -e
+  wget -q 'https://www.php.net/distributions/php-${php_full_ver}.tar.gz' \
+    -O /tmp/php-src.tar.gz
+  tar -xzf /tmp/php-src.tar.gz -C /tmp/
+  rm /tmp/php-src.tar.gz
+  "
+  # Compile only ext/sqlite3, pointing it at SQLCipher headers and library
+  chroot_exec bash -c "
+  set -e
+  cd /tmp/php-${php_full_ver}/ext/sqlite3
+  phpize${PHP_VERSION}
+  ./configure \
+    --with-sqlite3=/usr \
+    CPPFLAGS='-I/usr/include/sqlcipher -DHAVE_USLEEP=1' \
+    LDFLAGS='-lsqlcipher'
+  make -j\$(nproc)
+  EXT_DIR=\$(php${PHP_VERSION} -r 'echo ini_get(\"extension_dir\");')
+  cp modules/sqlite3.so \"\$EXT_DIR/sqlite3.so\"
+  rm -rf /tmp/php-${php_full_ver}
+  "
+  # Smoke-test: opening an in-memory database should succeed
+  chroot_exec bash -c "php${PHP_VERSION} -r \
+  'new SQLite3(\":memory:\"); echo \"SQLCipher sqlite3 extension OK\n\";'"
 }
 
 ############################################
@@ -405,6 +445,31 @@ setup_laravel_inside_chroot() {
 }
 
 ############################################
+# SECTION 6b: FILESYSTEM LOCKDOWN
+############################################
+lockdown_filesystem_inside_chroot() {
+  echo "=== Applying filesystem lockdown (§14.6 Layer 2) ==="
+  local app_root="/var/www/flexiqueue"
+  # App directory: root owns, www-data group can read/execute, others nothing.
+  # This prevents the web process from modifying its own source code.
+  chroot_exec bash -c "chown -R root:www-data '$app_root'"
+  chroot_exec bash -c "chmod -R 750 '$app_root'"
+  # Writable directories: www-data must be able to write here at runtime.
+  for subdir in storage "bootstrap/cache" database; do
+    chroot_exec bash -c "chown -R www-data:www-data '$app_root/$subdir'"
+    chroot_exec bash -c "chmod -R 770 '$app_root/$subdir'"
+  done
+  # .env: root owns, www-data can read (for config loading), others nothing.
+  chroot_exec bash -c "
+  if [ -f '$app_root/.env' ]; then
+    chown root:www-data '$app_root/.env'
+    chmod 640 '$app_root/.env'
+  fi
+  "
+  echo "Lockdown complete: $app_root → root:www-data 750 | storage/bootstrap/cache/database → www-data 770"
+}
+
+############################################
 # SECTION 7: SSL SETUP INSIDE CHROOT
 ############################################
 
@@ -446,6 +511,84 @@ setup_ssl_inside_chroot() {
   # - install nginx-flexiqueue-ssl.conf and enable it via sites-enabled
   # - update APP_URL and cache config
   chroot_exec bash -c "cd '$app_root' && FQ_HOSTNAME='$fq_hostname' ./scripts/pi/setup-ssl.sh --no-reload"
+}
+
+############################################
+# SECTION 6c: SSH CONFIGURATION
+############################################
+configure_ssh_inside_chroot() {
+  echo "=== Configuring SSH (disabled by default, 30-min toggle) ==="
+  # Install 'at' daemon for time-based auto-disable
+  chroot_exec bash -c "apt-get install -y --no-install-recommends at"
+  # Ensure sshd is installed but disabled at boot
+  chroot_exec bash -c "apt-get install -y --no-install-recommends openssh-server" || true
+  systemctl --root="$CHROOT_DIR" disable ssh 2>/dev/null || true
+  # Write the enable-ssh helper script
+  cat > "$CHROOT_DIR/usr/local/bin/flexiqueue-enable-ssh" <<'SSHSCRIPT'
+#!/usr/bin/env bash
+# FlexiQueue: enable SSH for 30 minutes, then auto-disable.
+# Must be called via: sudo /usr/local/bin/flexiqueue-enable-ssh
+# Called by the Laravel web process (www-data) via EdgeSshController.
+set -euo pipefail
+systemctl start ssh
+# Schedule auto-disable after 30 minutes using 'at', or fall back to background sleep
+echo "systemctl stop ssh" | at now + 30 minutes 2>/dev/null || \
+  nohup bash -c 'sleep 1800; systemctl stop ssh' </dev/null >/dev/null 2>&1 &
+echo "SSH enabled. Will auto-disable after 30 minutes."
+SSHSCRIPT
+  chmod +x "$CHROOT_DIR/usr/local/bin/flexiqueue-enable-ssh"
+  # Install sudoers rule: www-data may run ONLY the enable script as root, no password.
+  # Scope is intentionally narrow — one command, one user, no shell.
+  mkdir -p "$CHROOT_DIR/etc/sudoers.d"
+  cat > "$CHROOT_DIR/etc/sudoers.d/flexiqueue-www-data" <<'SUDOERS'
+# FlexiQueue: allow web process to enable SSH for 30 minutes.
+www-data ALL=(root) NOPASSWD: /usr/local/bin/flexiqueue-enable-ssh
+SUDOERS
+  chmod 0440 "$CHROOT_DIR/etc/sudoers.d/flexiqueue-www-data"
+  # Validate sudoers syntax (prevents a broken sudoers file from locking out root)
+  chroot_exec bash -c "visudo -c -f /etc/sudoers.d/flexiqueue-www-data"
+  echo "SSH configured: disabled at boot, enable script at /usr/local/bin/flexiqueue-enable-ssh"
+}
+
+############################################
+# SECTION 8b: KIOSK MODE INSTALLATION
+############################################
+install_kiosk_inside_chroot() {
+  echo "=== Installing kiosk mode (Cage + Chromium) ==="
+  # Cage: minimal Wayland compositor (runs one app fullscreen, no window chrome)
+  # chromium: the kiosk browser
+  chroot_exec bash -c "apt-get install -y --no-install-recommends \
+  cage chromium chromium-sandbox \
+  libinput-tools xkb-data"
+  # Create a dedicated system user for the kiosk (UID 2000, no login shell, no home)
+  chroot_exec bash -c "
+  id -u flexiqueue-kiosk >/dev/null 2>&1 || \
+  useradd -r -u 2000 -g nogroup -s /usr/sbin/nologin -M flexiqueue-kiosk
+  "
+  # The kiosk user needs access to video, input, and render devices for Wayland/DRM
+  chroot_exec bash -c "usermod -aG video,input,render flexiqueue-kiosk || true"
+  # Make kiosk-start.sh executable inside the image (it may have been extracted read-only)
+  chroot_exec bash -c "chmod +x /var/www/flexiqueue/scripts/pi/kiosk-start.sh"
+  # Install and enable the kiosk systemd service
+  local systemd_dir="$CHROOT_DIR/etc/systemd/system"
+  cp "$SCRIPT_DIR/flexiqueue-kiosk.service" "$systemd_dir/flexiqueue-kiosk.service"
+  systemctl --root="$CHROOT_DIR" enable flexiqueue-kiosk.service
+  echo "Kiosk service installed and enabled."
+}
+
+configure_tty_lockdown_inside_chroot() {
+  echo "=== Configuring TTY lockdown (NAutoVTs=0, ReserveVT=0) ==="
+  # Disable virtual console switching (Ctrl+Alt+F1–F6).
+  # Without virtual consoles, an attacker with a keyboard cannot get a shell.
+  # Per §18.3.2: "Ctrl+Alt+F1–F6 — Cage does not expose TTY switching."
+  local logind_drop="$CHROOT_DIR/etc/systemd/logind.conf.d"
+  mkdir -p "$logind_drop"
+  cat > "$logind_drop/flexiqueue-kiosk.conf" <<'EOF'
+[Login]
+NAutoVTs=0
+ReserveVT=0
+EOF
+  echo "TTY lockdown applied: NAutoVTs=0 ReserveVT=0"
 }
 
 ############################################
@@ -529,9 +672,14 @@ main() {
   setup_workdirs_and_image
   setup_chroot_env
   install_packages_inside_chroot
+  install_sqlcipher_php_ext_inside_chroot
   extract_app_inside_chroot
   setup_laravel_inside_chroot
+  lockdown_filesystem_inside_chroot
   setup_ssl_inside_chroot
+  configure_ssh_inside_chroot
+  install_kiosk_inside_chroot
+  configure_tty_lockdown_inside_chroot
   enable_services
   finalize_image
 

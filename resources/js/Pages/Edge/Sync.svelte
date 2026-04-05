@@ -48,6 +48,9 @@
 
     const page = usePage();
     let syncing = $state(false);
+    let sshEnabling = $state(false);
+    let sshMessage = $state<string | null>(null);
+    let sshError = $state<string | null>(null);
     let pollHandle: ReturnType<typeof setInterval> | null = null;
 
     function getCsrfToken(): string {
@@ -134,6 +137,36 @@
             case 'partial':  return 'badge preset-filled-warning-500';
             case 'running':  return 'badge preset-filled-primary-500';
             default:         return 'badge preset-tonal';
+        }
+    }
+
+    async function enableSsh(): Promise<void> {
+        if (sshEnabling) return;
+        sshEnabling = true;
+        sshMessage  = null;
+        sshError    = null;
+        try {
+            const res = await fetch('/api/edge/ssh/enable', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+            });
+            const data: { message?: string; expires_at?: string; error?: string } = await res.json();
+            if (res.ok) {
+                const expiry = data.expires_at ? formatDate(data.expires_at) : '';
+                sshMessage = data.message + (expiry ? ' Expires: ' + expiry + '.' : '');
+            } else {
+                sshError = data.error ?? 'Failed to enable SSH.';
+            }
+        } catch {
+            sshError = 'Network error. Could not reach the server.';
+        } finally {
+            sshEnabling = false;
         }
     }
 </script>
@@ -296,6 +329,41 @@
                     </table>
                 </div>
             {/if}
+        </div>
+
+        <!-- Maintenance Access — SSH toggle (§18.3.3) -->
+        <div class="card bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 p-5 space-y-4">
+            <h2 class="text-xs font-semibold uppercase tracking-wider text-surface-500 dark:text-surface-400">
+                Maintenance Access
+            </h2>
+            <p class="text-sm text-surface-600 dark:text-surface-400">
+                SSH is disabled by default on this device. Enable it temporarily for remote diagnostics.
+                It will auto-disable after 30 minutes.
+            </p>
+            {#if sshMessage}
+                <div class="rounded-container bg-success-50 dark:bg-success-900/30 border border-success-200 dark:border-success-700 p-3 text-sm text-success-800 dark:text-success-300">
+                    {sshMessage}
+                </div>
+            {/if}
+            {#if sshError}
+                <div class="rounded-container bg-error-50 dark:bg-error-900/30 border border-error-200 dark:border-error-700 p-3 text-sm text-error-800 dark:text-error-300">
+                    {sshError}
+                </div>
+            {/if}
+            <button
+                type="button"
+                class="btn preset-tonal flex items-center gap-2"
+                onclick={enableSsh}
+                disabled={sshEnabling}
+                aria-busy={sshEnabling}
+            >
+                {#if sshEnabling}
+                    <Loader2 class="w-4 h-4 animate-spin" aria-hidden="true" />
+                    Enabling SSH…
+                {:else}
+                    Enable SSH for 30 minutes
+                {/if}
+            </button>
         </div>
     </div>
 </AdminLayout>

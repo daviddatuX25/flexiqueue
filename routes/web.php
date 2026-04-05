@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\Admin\AnalyticsController as AdminAnalyticsControll
 use App\Http\Controllers\Api\Admin\ClientAdminController;
 use App\Http\Controllers\Api\Admin\EdgeDeviceController;
 use App\Http\Controllers\Api\Admin\EdgeImportController;
+use App\Http\Controllers\Api\Admin\EdgeSshController;
 use App\Http\Controllers\Api\Admin\ElevenLabsIntegrationController;
 use App\Http\Controllers\Api\Admin\PermissionCatalogController;
 use App\Http\Controllers\Api\Admin\PrintPlatformDefaultsController;
@@ -292,6 +293,7 @@ Route::middleware(['auth', 'permission:admin.manage'])->prefix('api/edge')->grou
     Route::post('/sync-trigger', [\App\Http\Controllers\Edge\SyncTriggerController::class, 'trigger'])->name('api.edge.sync-trigger');
     Route::get('/sync-status', [\App\Http\Controllers\Edge\SyncTriggerController::class, 'status'])->name('api.edge.sync-status');
     Route::get('/sync-receipts', [\App\Http\Controllers\Edge\SyncTriggerController::class, 'receipts'])->name('api.edge.sync-receipts');
+    Route::post('/ssh/enable', [EdgeSshController::class, 'enable'])->name('api.admin.edge.ssh.enable');
 });
 
 // Per 08-API-SPEC-PHASE1 §3–4: Session and station endpoints (any staff)

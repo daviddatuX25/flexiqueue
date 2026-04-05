@@ -22,6 +22,8 @@ use App\Services\Tts\Engines\ElevenLabsEngine;
 use App\Services\Tts\Engines\NullTtsEngine;
 use App\Services\TtsService;
 use Illuminate\Auth\Notifications\ResetPassword;
+use Illuminate\Database\Connection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
@@ -70,5 +72,23 @@ class AppServiceProvider extends ServiceProvider
                 'username' => $user->username,
             ], false));
         });
+
+        if (config('app.mode') === 'edge') {
+            DB::afterConnecting(static function (Connection $connection): void {
+                if ($connection->getDriverName() === 'sqlite') {
+                    $hexKey = self::deriveSqlCipherKey((string) config('app.key'));
+                    $connection->statement("PRAGMA key = \"x'{$hexKey}'\";");
+                }
+            });
+        }
+    }
+
+    /**
+     * Derive a 64-char hex SQLCipher key from the Laravel app.key.
+     * E11.2: SQLCipher requires a 256-bit (64 hex char) key derived via SHA-256.
+     */
+    public static function deriveSqlCipherKey(string $appKey): string
+    {
+        return hash('sha256', $appKey);
     }
 }

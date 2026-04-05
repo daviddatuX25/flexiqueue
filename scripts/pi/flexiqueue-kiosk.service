@@ -1,0 +1,24 @@
+[Unit]
+Description=FlexiQueue Kiosk Browser (Cage + Chromium)
+# Start after the display manager and login daemon are ready.
+After=multi-user.target systemd-logind.service
+Wants=multi-user.target
+
+[Service]
+Type=simple
+User=flexiqueue-kiosk
+Group=flexiqueue-kiosk
+# XDG_RUNTIME_DIR must exist for Wayland socket.
+# UID 2000 is created by install_kiosk_inside_chroot().
+Environment=XDG_RUNTIME_DIR=/run/user/2000
+ExecStartPre=/bin/mkdir -p /run/user/2000
+ExecStartPre=/bin/chown flexiqueue-kiosk:flexiqueue-kiosk /run/user/2000
+ExecStart=/var/www/flexiqueue/scripts/pi/kiosk-start.sh
+# Restart on crash — if Chromium dies the kiosk comes back automatically.
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
