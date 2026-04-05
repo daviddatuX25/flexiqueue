@@ -430,22 +430,27 @@ fi
 ok "FTP upload complete."
 msg "lftp log: $LFTP_LOG"
 
-# ---------- deploy marker cleanup ----------
-section "Post-Deploy"
+# ---------- deploy marker: upload AND remove ----------
+# Uploading deploy_pending triggers the cron: everyMinute scheduler on hosting
+# runs flexiqueue:deploy-update, which calls migrate + config:cache + route:cache.
+# The marker is deleted after upload so the cron fires once per deploy.
+section "Post-Deploy (triggering cron-aware update)"
 
-# Remove deploy_pending on remote (RunDeployUpdate.php will recreate it on next artisan call)
-# This is done via a mini lftp batch inline
 if [ -f "$STAGE_DIR/bootstrap/cache/deploy_pending" ]; then
-  DEPLOY_CLEANUP_BATCH=$(mktemp)
+  DEPLOY_BATCH=$(mktemp)
   {
-    cat <<CLEANUP
+    cat <<DEPLOY
 open -u ${FTP_USER},${FTP_PASSWORD} ${FTP_HOST}
+mkdir -p ${REMOTE_BASE}bootstrap/cache
+put bootstrap/cache/deploy_pending -o ${REMOTE_BASE}bootstrap/cache/deploy_pending
 rm -f ${REMOTE_BASE}bootstrap/cache/deploy_pending
 bye
-CLEANUP
-  } > "$DEPLOY_CLEANUP_BATCH"
-  lftp -f "$DEPLOY_CLEANUP_BATCH" > /dev/null 2>&1 || true
-  rm -f "$DEPLOY_CLEANUP_BATCH"
+DEPLOY
+  } > "$DEPLOY_BATCH"
+  msg "Uploading deploy_pending marker (triggers flexiqueue:deploy-update cron)..."
+  lftp -f "$DEPLOY_BATCH" > /dev/null 2>&1 || true
+  rm -f "$DEPLOY_BATCH"
+  ok "Cron triggered. The scheduler will run migrate + config:cache + route:cache within 1 minute."
 fi
 
 # ---------- worktree cleanup ----------
@@ -473,7 +478,8 @@ echo ""
 echo -e "${BOLD}=== POST-DEPLOY CHECKLIST ===${NC}"
 echo -e "  1. ${RED}Database export/import:${NC} If this is a fresh deploy or schema changed,"
 echo -e "     export your local database and import it on hosting (phpMyAdmin or CLI)."
-echo -e "     Run: php artisan migrate on hosting if new migrations exist."
+echo -e "     The hosting scheduler (everyMinute) will run: migrate + config:cache + route:cache"
+echo -e "     automatically via flexiqueue:deploy-update within ~1 minute of this deploy."
 echo ""
 echo -e "  2. ${YELLOW}Google OAuth (if used):${NC} Set these in .env on hosting BEFORE going live:"
 echo -e "       GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com"
@@ -482,7 +488,6 @@ echo -e "     Then in Google Cloud Console → Authorized redirect URIs add:"
 echo -e "       https://yourdomain.com/auth/google/callback"
 echo -e "     Until these are set, the Google login button stays hidden."
 echo ""
-echo -e "  3. ${CYAN}Clear caches on hosting:${NC}"
-echo -e "       php artisan config:clear"
-echo -e "       php artisan view:clear"
-echo -e "       php artisan route:clear"
+echo -e "  3. ${CYAN}No SSH/console needed:${NC} The deploy_pending marker uploaded triggers"
+echo -e "     the hosting Laravel scheduler to run cache clears + migrations automatically."
+echo -e "     No manual php artisan needed unless the cron hasn't fired within 2 minutes."
