@@ -28,6 +28,10 @@
     } = $props();
 
     const page = usePage();
+    const edgeMode = $derived(
+        ($page?.props as { edge_mode?: { is_edge?: boolean; admin_read_only?: boolean } } | undefined)
+            ?.edge_mode ?? null
+    );
     let settingDefault = $state(false);
 
     function getCsrfToken(): string {
@@ -86,7 +90,7 @@
                     Manage sites and API keys for edge mode and sync.
                 </p>
             </div>
-            {#if auth_is_super_admin}
+            {#if auth_is_super_admin && !edgeMode?.admin_read_only}
                 <div class="flex flex-col gap-3 w-full sm:w-auto sm:min-w-[200px]">
                     <Link
                         href="/admin/sites/create"
@@ -114,7 +118,7 @@
                 <p class="text-surface-600 max-w-sm mt-2 mb-6">
                     Add a site to manage API keys and edge settings.
                 </p>
-                {#if auth_is_super_admin}
+                {#if auth_is_super_admin && !edgeMode?.admin_read_only}
                     <Link
                         href="/admin/sites/create"
                         class="btn preset-filled-primary-500 flex items-center gap-2 touch-target-h"
@@ -138,7 +142,7 @@
                     <select
                         id="default-site-select"
                         class="input filled surface max-w-xs"
-                        disabled={settingDefault}
+                        disabled={settingDefault || !!edgeMode?.admin_read_only}
                         value={default_site_id ?? ""}
                         onchange={(e) => {
                             const id = Number((e.currentTarget as HTMLSelectElement).value);

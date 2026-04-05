@@ -97,6 +97,10 @@
     >({});
 
     const page = usePage();
+    const edgeMode = $derived(
+        ($page?.props as { edge_mode?: { is_edge?: boolean; admin_read_only?: boolean } } | undefined)
+            ?.edge_mode ?? null
+    );
     function getCsrfToken(): string {
         const p = get(page);
         const fromProps = (p?.props as { csrf_token?: string } | undefined)
@@ -432,6 +436,8 @@
                 class="btn preset-filled-primary-500 flex justify-center items-center gap-2 w-full sm:w-auto shadow-sm transition-transform active:scale-95 md:flex hidden"
                 onclick={openCreate}
                 aria-label="Add Staff"
+                disabled={!!edgeMode?.admin_read_only}
+                title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
             >
                 <UserPlus class="w-4 h-4" /> Add Staff
             </button>
@@ -442,6 +448,8 @@
                 class="fixed bottom-[87px] right-[23px] z-50 flex md:hidden items-center justify-center w-14 h-14 rounded-full bg-primary-500 text-primary-contrast-500 shadow-lg hover:bg-primary-600 active:scale-95 transition-transform touch-manipulation"
                 onclick={openCreate}
                 aria-label="Add Staff"
+                disabled={!!edgeMode?.admin_read_only}
+                title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
             >
                 <UserPlus class="w-6 h-6" aria-hidden="true" />
             </button>
@@ -468,6 +476,8 @@
                 type="button"
                 class="btn preset-filled-primary-500 flex items-center gap-2 touch-target-h"
                 onclick={openCreate}
+                disabled={!!edgeMode?.admin_read_only}
+                title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
             >
                 <UserPlus class="w-4 h-4" /> Add Staff
             </button>
@@ -567,7 +577,8 @@
                                     type="button"
                                     class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
                                     onclick={() => openEdit(user)}
-                                    disabled={submitting}
+                                    disabled={submitting || !!edgeMode?.admin_read_only}
+                                    title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
                                 >
                                     <Edit2 class="w-3.5 h-3.5" /> Edit
                                 </button>
@@ -577,7 +588,8 @@
                                         class="btn btn-sm preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
                                         onclick={() =>
                                             openDeactivateConfirm(user)}
-                                        disabled={submitting}
+                                        disabled={submitting || !!edgeMode?.admin_read_only}
+                                        title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
                                     >
                                         <Ban class="w-3.5 h-3.5" /> Disable
                                     </button>
@@ -587,7 +599,8 @@
                                     type="button"
                                     class="btn btn-sm preset-outlined bg-surface-50 text-surface-700 hover:bg-surface-50 flex items-center gap-1 shadow-sm px-3 py-1.5 transition-colors"
                                     onclick={() => openEdit(user)}
-                                    disabled={submitting}
+                                    disabled={submitting || !!edgeMode?.admin_read_only}
+                                    title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
                                 >
                                     <Edit2 class="w-3.5 h-3.5" /> Edit
                                 </button>
@@ -714,7 +727,8 @@
                             type="button"
                             class="btn btn-sm flex-1 preset-outlined bg-surface-50 text-surface-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
                             onclick={() => openEdit(user)}
-                            disabled={submitting}
+                            disabled={submitting || !!edgeMode?.admin_read_only}
+                            title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
                         >
                             <Edit2 class="w-3.5 h-3.5" /> Edit
                         </button>
@@ -723,7 +737,8 @@
                                 type="button"
                                 class="btn btn-sm flex-1 preset-outlined bg-surface-50 text-error-600 hover:bg-error-50 border-error-200 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
                                 onclick={() => openDeactivateConfirm(user)}
-                                disabled={submitting}
+                                disabled={submitting || !!edgeMode?.admin_read_only}
+                                title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
                             >
                                 <Ban class="w-3.5 h-3.5" /> Disable
                             </button>
@@ -733,7 +748,8 @@
                             type="button"
                             class="btn btn-sm flex-1 preset-outlined bg-surface-50 text-surface-700 flex items-center justify-center gap-1.5 shadow-sm transition-colors"
                             onclick={() => openEdit(user)}
-                            disabled={submitting}
+                            disabled={submitting || !!edgeMode?.admin_read_only}
+                            title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
                         >
                             <Edit2 class="w-3.5 h-3.5" /> Edit
                         </button>

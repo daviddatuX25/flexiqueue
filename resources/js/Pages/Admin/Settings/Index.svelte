@@ -75,6 +75,7 @@
     const authProps = $derived($page.props.auth);
     const isSuperAdmin = $derived(resolveIsSuperAdmin(authProps));
     const isEdge = $derived($page.props.edge_mode?.is_edge === true);
+    const adminReadOnly = $derived($page.props.edge_mode?.admin_read_only === true);
     /** Site admin: Storage tab only on edge Pi. Super admin: Storage on central server only. */
     const showStorageForSiteAdmin = $derived(!isSuperAdmin && isEdge);
     const showStorageForSuperAdmin = $derived(isSuperAdmin && !isEdge);
@@ -533,6 +534,7 @@
         </div>
         {/if}
 
+        <fieldset disabled={adminReadOnly} class="contents">
         {#if isSuperAdmin && activeTab === "tts-generation"}
         <TtsGenerationTab />
         {:else if isSuperAdmin && activeTab === "program-defaults"}
@@ -920,6 +922,7 @@
             <TokenTtsSettingsTab />
         </section>
         {/if}
+        </fieldset>
     </div>
 
     <ConfirmModal

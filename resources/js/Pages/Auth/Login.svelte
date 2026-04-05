@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { useForm } from '@inertiajs/svelte';
+	import { useForm, usePage } from '@inertiajs/svelte';
 	import AuthLayout from '../../Layouts/AuthLayout.svelte';
 	import AppBackground from '../../Components/AppBackground.svelte';
 	import Modal from '../../Components/Modal.svelte';
@@ -26,6 +26,7 @@
 		password: ''
 	});
 
+	const page = usePage();
 	const edgeMode = $derived(
 		($page?.props as { edge_mode?: { is_edge?: boolean } } | undefined)
 			?.edge_mode ?? null

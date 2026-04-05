@@ -73,6 +73,10 @@
     let submitting = $state(false);
 
     const page = usePage();
+    const edgeMode = $derived(
+        ($page?.props as { edge_mode?: { is_edge?: boolean; admin_read_only?: boolean } } | undefined)
+            ?.edge_mode ?? null
+    );
 
     function getCsrfToken(): string {
         const p = get(page);
@@ -370,6 +374,8 @@
                     class="btn preset-filled-primary-500 flex justify-center items-center gap-2 w-full sm:w-auto shadow-sm transition-transform active:scale-95 md:flex hidden"
                     onclick={openCreate}
                     aria-label="Create Program"
+                    disabled={!!edgeMode?.admin_read_only}
+                    title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
                 >
                     <Plus class="w-4 h-4" />
                     Create Program
@@ -381,6 +387,8 @@
                 class="fixed bottom-[87px] right-[23px] z-50 flex md:hidden items-center justify-center w-14 h-14 rounded-full bg-primary-500 text-primary-contrast-500 shadow-lg hover:bg-primary-600 active:scale-95 transition-transform touch-manipulation"
                 onclick={openCreate}
                 aria-label="Create Program"
+                disabled={!!edgeMode?.admin_read_only}
+                title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
             >
                 <Plus class="w-6 h-6" aria-hidden="true" />
             </button>
@@ -407,6 +415,8 @@
                     type="button"
                     class="btn preset-filled-primary-500 flex items-center gap-2 touch-target-h"
                     onclick={openCreate}
+                    disabled={!!edgeMode?.admin_read_only}
+                    title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
                 >
                     <Plus class="w-4 h-4" /> Create First Program
                 </button>

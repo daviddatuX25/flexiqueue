@@ -174,6 +174,10 @@ import {
     let programsForFilter = $state<{ id: number; name: string }[]>([]);
 
     const page = usePage();
+    const edgeMode = $derived(
+        ($page?.props as { edge_mode?: { is_edge?: boolean; admin_read_only?: boolean } } | undefined)
+            ?.edge_mode ?? null
+    );
     const serverTtsConfigured = $derived((get(page)?.props as { server_tts_configured?: boolean } | undefined)?.server_tts_configured ?? true);
     const allowCustomPronunciation = $derived(
         (get(page)?.props as { tts_allow_custom_pronunciation?: boolean } | undefined)?.tts_allow_custom_pronunciation !== false,
@@ -1325,6 +1329,8 @@ import {
                     class="btn preset-filled-primary-500 flex justify-center items-center gap-2 w-full sm:w-auto shadow-sm transition-transform active:scale-95 md:flex hidden"
                     onclick={openBatchModal}
                     aria-label="Create Batch"
+                    disabled={!!edgeMode?.admin_read_only}
+                    title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
                 >
                     <Plus class="w-4 h-4" /> Create Batch
                 </button>
@@ -1335,6 +1341,8 @@ import {
                 class="fixed bottom-[87px] right-[23px] z-50 flex md:hidden items-center justify-center w-14 h-14 rounded-full bg-primary-500 text-primary-contrast-500 shadow-lg hover:bg-primary-600 active:scale-95 transition-transform touch-manipulation"
                 onclick={openBatchModal}
                 aria-label="Create Batch"
+                disabled={!!edgeMode?.admin_read_only}
+                title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
             >
                 <Plus class="w-6 h-6" aria-hidden="true" />
             </button>
@@ -1935,8 +1943,8 @@ import {
                                         type="button"
                                         class="btn btn-sm btn-token-delete flex items-center gap-1 min-h-[2rem] px-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                         onclick={() => handleDeleteToken(token)}
-                                        disabled={someSelected || submitting || token.status === "in_use"}
-                                        title="Delete token"
+                                        disabled={someSelected || submitting || token.status === "in_use" || !!edgeMode?.admin_read_only}
+                                        title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : 'Delete token'}
                                     >
                                         <Trash2 class="w-3.5 h-3.5" />
                                     </button>
@@ -2118,8 +2126,9 @@ import {
                                 type="button"
                                 class="btn btn-xs btn-token-delete flex items-center gap-1 px-2 py-1 min-h-0 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                                 onclick={() => handleDeleteToken(token)}
-                                disabled={someSelected || submitting || token.status === "in_use"}
+                                disabled={someSelected || submitting || token.status === "in_use" || !!edgeMode?.admin_read_only}
                                 aria-label="Delete token"
+                                title={edgeMode?.admin_read_only ? 'Changes must be made on the central server and re-synced.' : undefined}
                             >
                                 <Trash2 class="w-3 h-3" /> Delete
                             </button>
