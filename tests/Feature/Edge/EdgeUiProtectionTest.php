@@ -1,0 +1,170 @@
+<?php
+
+namespace Tests\Feature\Edge;
+
+use App\Models\EdgeDeviceState;
+use App\Models\Site;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
+use Tests\TestCase;
+
+/**
+ * E9.1 — Write failing tests for EdgeWriteProtection (tests 1-7)
+ *
+ * These tests verify that the EdgeWriteProtection middleware blocks
+ * write operations on the admin UI when running on edge, while still
+ * allowing edge-specific operations (program activate, edge import)
+ * and read operations.
+ */
+class EdgeUiProtectionTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private User $admin;
+
+    private Site $site;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->site = Site::create([
+            'name' => 'Test Site',
+            'slug' => 'test-site-' . Str::random(4),
+            'api_key_hash' => Hash::make(Str::random(40)),
+            'settings' => [],
+            'edge_settings' => [],
+        ]);
+        $this->admin = User::factory()->admin()->create(['site_id' => $this->site->id]);
+    }
+
+    /**
+     * Helper: put the application into edge mode and seed a paired device state.
+     */
+    private function actAsEdge(): void
+    {
+        $deviceToken = Str::random(64);
+        EdgeDeviceState::updateOrCreate(
+            ['id' => 1],
+            [
+                'central_url' => 'https://central.test',
+                'device_token' => Crypt::encrypt($deviceToken),
+                'site_id' => $this->site->id,
+                'site_name' => $this->site->name,
+                'id_offset' => 10_000_000,
+                'sync_mode' => 'auto',
+                'supervisor_admin_access' => false,
+                'session_active' => false,
+                'paired_at' => now(),
+            ]
+        );
+        config(['app.mode' => 'edge']);
+    }
+
+    // ── Tests 1-3: Blocked operations on edge ─────────────────────────────
+
+    public function test_write_protection_blocks_post_to_admin_users_on_edge(): void
+    {
+        $this->actAsEdge();
+
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/users', [
+            'name' => 'New Staff',
+            'username' => 'new.staff',
+            'email' => 'new@example.com',
+            'recovery_gmail' => 'new.recovery@gmail.com',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+            'role' => 'staff',
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_write_protection_blocks_delete_to_admin_users_on_edge(): void
+    {
+        $this->actAsEdge();
+        $staff = User::factory()->create(['site_id' => $this->site->id]);
+
+        $response = $this->actingAs($this->admin)->deleteJson("/api/admin/users/{$staff->id}");
+
+        $response->assertStatus(403);
+    }
+
+    public function test_write_protection_blocks_put_to_settings_on_edge(): void
+    {
+        $this->actAsEdge();
+
+        $response = $this->actingAs($this->admin)->patchJson('/api/admin/site/settings', [
+            'site_name' => 'Updated Site Name',
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    // ── Tests 4-5: Allowed operations on edge ─────────────────────────────
+
+    public function test_write_protection_allows_program_activate_on_edge(): void
+    {
+        $this->actAsEdge();
+
+        $program = \App\Models\Program::create([
+            'site_id' => $this->site->id,
+            'name' => 'Test Program',
+            'slug' => 'test-prog-' . Str::random(4),
+            'is_active' => false,
+            'created_by' => $this->admin->id,
+        ]);
+
+        $response = $this->actingAs($this->admin)->postJson("/api/admin/programs/{$program->id}/activate");
+
+        // Should NOT be blocked by write protection (returns 200 or whatever the controller returns)
+        $this->assertNotEquals(403, $response->status());
+    }
+
+    public function test_write_protection_allows_edge_import_on_edge(): void
+    {
+        $this->actAsEdge();
+
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/edge/import', [
+            'program_id' => 1,
+        ]);
+
+        // Should NOT be blocked by write protection (returns 200 or 409 based on lock file)
+        $this->assertNotEquals(403, $response->status());
+    }
+
+    // ── Test 6: Read operations still allowed on edge ────────────────────
+
+    public function test_write_protection_does_not_block_get_on_edge(): void
+    {
+        $this->actAsEdge();
+
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/users');
+
+        // GET should never be blocked by write protection
+        $this->assertNotEquals(403, $response->status());
+    }
+
+    // ── Test 7: Central mode is unaffected ───────────────────────────────
+
+    public function test_write_protection_is_inactive_on_central(): void
+    {
+        // Central mode: write operations should NOT be blocked
+        config(['app.mode' => 'central']);
+
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/users', [
+            'name' => 'New Staff',
+            'username' => 'new.staff.on.central',
+            'email' => 'new.central@example.com',
+            'recovery_gmail' => 'new.central@gmail.com',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+            'role' => 'staff',
+        ]);
+
+        // Should succeed (201) or fail for other reasons, but NOT 403
+        $this->assertNotEquals(403, $response->status());
+    }
+}

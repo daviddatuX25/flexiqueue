@@ -4,6 +4,7 @@ use App\Http\Middleware\AddPermissionsPolicy;
 use App\Http\Middleware\AuthenticateSiteByApiKey;
 use App\Http\Middleware\BlockOnEdge;
 use App\Http\Middleware\EdgeBootGuard;
+use App\Http\Middleware\EdgeWriteProtection;
 use App\Http\Middleware\EnforceDeviceLock;
 use App\Http\Middleware\EnforcePendingAssignment;
 use App\Http\Middleware\HandleInertiaRequests;
@@ -45,6 +46,7 @@ return Application::configure(basePath: dirname(__DIR__))
             HandleInertiaRequests::class,
             AddPermissionsPolicy::class,
             EnforcePendingAssignment::class,
+            EdgeWriteProtection::class,
         ]);
         $middleware->alias([
             'guest' => RedirectIfAuthenticated::class,
