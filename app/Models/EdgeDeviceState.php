@@ -29,6 +29,7 @@ class EdgeDeviceState extends Model
         'package_version',
         'package_stale',
         'update_available',  // E8.2: set by EdgeHeartbeat command
+        'is_revoked',        // E9.4: set when device token is revoked
     ];
 
     protected function casts(): array
@@ -40,6 +41,7 @@ class EdgeDeviceState extends Model
             'session_active' => 'boolean',
             'package_stale' => 'boolean',
             'update_available' => 'boolean',  // E8.2
+            'is_revoked' => 'boolean',         // E9.4
             'device_token' => 'encrypted',
             'id_offset' => 'integer',
         ];
@@ -58,6 +60,7 @@ class EdgeDeviceState extends Model
                 'session_active' => false,
                 'package_stale' => false,
                 'update_available' => false,
+                'is_revoked' => false,  // E9.4
             ]
         );
     }
