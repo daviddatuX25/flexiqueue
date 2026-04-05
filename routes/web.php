@@ -76,6 +76,7 @@ use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\DisplayController;
+use App\Http\Controllers\EdgeSyncController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\ProgramOverridesPageController;
 use App\Http\Controllers\ShortLinkResolverController;
@@ -490,6 +491,11 @@ Route::middleware(['auth', 'permission:admin.shared'])->prefix('admin')->name('a
     Route::get('/sites', [SitesPageController::class, 'index'])->name('sites');
     Route::get('/sites/create', [SitesPageController::class, 'create'])->name('sites.create');
     Route::get('/sites/{site}', [SitesPageController::class, 'show'])->name('sites.show');
+});
+
+// E10: Edge Sync status page — requires auth, stays at /edge/* (not /admin/*) for consistency with other edge lifecycle pages.
+Route::middleware(['auth', 'permission:admin.shared'])->group(function (): void {
+    Route::get('/edge/sync', [EdgeSyncController::class, 'show'])->name('edge.sync');
 });
 
 // Per SUPER-ADMIN-VS-ADMIN-SPEC: programs, tokens, analytics are admin-only (super_admin has no access).
