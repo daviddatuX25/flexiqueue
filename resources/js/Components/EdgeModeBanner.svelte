@@ -118,6 +118,12 @@
                         Last synced: {formatLastSynced(importStatus.imported_at)}
                     </span>
                 {/if}
+                <a
+                    href="/edge/sync"
+                    class="text-xs text-warning-700 dark:text-warning-300 hover:underline"
+                >
+                    Sync details →
+                </a>
                 <button
                     type="button"
                     class="btn preset-tonal btn-sm flex items-center gap-1.5"
