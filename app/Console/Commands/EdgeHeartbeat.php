@@ -56,8 +56,9 @@ class EdgeHeartbeat extends Command
                 $state->update([
                     'paired_at'    => null,
                     'device_token' => null,
+                    'is_revoked'   => true,   // E9.4: persist for EdgeBootGuard redirect
                 ]);
-                $this->warn('Device has been revoked by central. Device requires re-pairing.');
+                $this->warn('Device has been revoked by central. Redirecting to revoked page.');
 
                 return self::SUCCESS;
             }

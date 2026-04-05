@@ -7,6 +7,7 @@ use App\Models\Site;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -166,5 +167,33 @@ class EdgeUiProtectionTest extends TestCase
 
         // Should succeed (201) or fail for other reasons, but NOT 403
         $this->assertNotEquals(403, $response->status());
+    }
+
+
+    public function test_heartbeat_command_sets_is_revoked_when_central_returns_revoked(): void
+    {
+        EdgeDeviceState::where('id', 1)->updateOrInsert(
+            ['id' => 1],
+            [
+                'paired_at'    => now(),
+                'device_token' => Crypt::encrypt('test-token'),
+                'central_url'  => 'http://central.test',
+                'sync_mode'    => 'auto',
+                'session_active' => false,
+                'is_revoked'   => false,
+            ]
+        );
+
+        Http::fake([
+            'http://central.test/api/edge/heartbeat' => Http::response(['revoked' => true], 200),
+        ]);
+
+        config(['app.mode' => 'edge']);
+        $this->artisan('edge:heartbeat')->assertSuccessful();
+
+        $state = EdgeDeviceState::current();
+        $this->assertTrue((bool) $state->is_revoked);
+        $this->assertNull($state->paired_at);
+        $this->assertNull($state->device_token);
     }
 }
