@@ -26,6 +26,11 @@
 		password: ''
 	});
 
+	const edgeMode = $derived(
+		($page?.props as { edge_mode?: { is_edge?: boolean } } | undefined)
+			?.edge_mode ?? null
+	);
+
 	let showDemoAccountsModal = $state(false);
 
 	function applyDemoAccount(account: DemoAccount) {
@@ -139,12 +144,14 @@
 				</div>
 
 				<div class="text-right">
-					<a
-						href="/forgot-password"
-						class="text-sm font-medium text-primary-600 hover:text-primary-700 hover:underline"
-					>
-						Forgot password?
-					</a>
+					{#if !edgeMode?.is_edge}
+						<a
+							href="/forgot-password"
+							class="text-sm font-medium text-primary-600 hover:text-primary-700 hover:underline"
+						>
+							Forgot password?
+						</a>
+					{/if}
 				</div>
 
 				<button
@@ -156,7 +163,7 @@
 				</button>
 			</form>
 
-			{#if googleOAuthEnabled}
+			{#if googleOAuthEnabled && !edgeMode?.is_edge}
 				<div class="relative mt-6">
 					<div class="absolute inset-0 flex items-center" aria-hidden="true">
 						<div class="w-full border-t border-surface-200"></div>
