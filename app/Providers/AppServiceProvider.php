@@ -56,6 +56,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        if (config('app.env') === 'production' && config('app.mode') == 'edge') {
+            \Illuminate\Support\Facades\URL::forceScheme('https');
+        }
         Gate::policy(Station::class, StationPolicy::class);
         Gate::policy(Session::class, SessionPolicy::class);
 
