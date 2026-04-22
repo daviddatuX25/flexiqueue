@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\EdgeDeviceResource;
 use App\Models\EdgeDevice;
 use App\Models\Program;
 use App\Models\Site;
@@ -33,7 +34,7 @@ class EdgeDeviceController extends Controller
             ->with('assignedProgram:id,name')
             ->orderBy('name')
             ->get()
-            ->map(fn (EdgeDevice $d) => $this->deviceResource($d));
+            ->map(fn (EdgeDevice $d) => new EdgeDeviceResource($d));
 
         $maxDevices = (int) ($site->edge_settings['max_edge_devices'] ?? 0);
 
@@ -144,7 +145,7 @@ class EdgeDeviceController extends Controller
             return response()->json(['message' => 'Program not found.'], 422);
         }
 
-        return response()->json(['device' => $this->deviceResource($device->fresh(['assignedProgram']))]);
+        return response()->json(['device' => new EdgeDeviceResource($device->fresh(['assignedProgram']))]);
     }
 
     /**

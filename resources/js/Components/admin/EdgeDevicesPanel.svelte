@@ -12,6 +12,7 @@
         id: number;
         name: string;
         status: "online" | "waiting" | "idle" | "stale" | "offline";
+        runtime: "pi" | "phone" | "dev" | string;
         sync_mode: "auto" | "end_of_event";
         supervisor_admin_access: boolean;
         assigned_program_id: number | null;
@@ -281,6 +282,7 @@
             <thead>
                 <tr>
                     <th>Name</th>
+                    <th>Type</th>
                     <th>Status</th>
                     <th>Program</th>
                     <th>Mode</th>
@@ -293,6 +295,15 @@
                         <td class="font-medium text-surface-950 dark:text-white"
                             >{device.name}</td
                         >
+                        <td>
+                            {#if device.runtime === 'phone'}
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">Phone</span>
+                            {:else if device.runtime === 'pi'}
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">Pi</span>
+                            {:else}
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">Unknown</span>
+                            {/if}
+                        </td>
                         <td>
                             <span
                                 class="flex items-center gap-1.5 {STATUS_COLORS[
