@@ -163,14 +163,14 @@ Route::middleware(['auth', 'permission:admin.manage'])->prefix('api/admin')->gro
     Route::get('/tts/preview-token-spoken-part', [TokenTtsSettingsController::class, 'previewTokenSpokenPart']);
     Route::get('/tts/budget', [TtsBudgetController::class, 'index']);
     Route::post('/print-settings/image', [PrintSettingsController::class, 'upload']);
-    Route::get('/analytics/summary', [AdminAnalyticsController::class, 'summary']);
-    Route::get('/analytics/throughput', [AdminAnalyticsController::class, 'throughput']);
-    Route::get('/analytics/wait-time-distribution', [AdminAnalyticsController::class, 'waitTimeDistribution']);
-    Route::get('/analytics/station-utilization', [AdminAnalyticsController::class, 'stationUtilization']);
-    Route::get('/analytics/tracks', [AdminAnalyticsController::class, 'tracks']);
-    Route::get('/analytics/busiest-hours', [AdminAnalyticsController::class, 'busiestHours']);
-    Route::get('/analytics/drop-off-funnel', [AdminAnalyticsController::class, 'dropOffFunnel']);
-    Route::get('/analytics/token-tts-health', [AdminAnalyticsController::class, 'tokenTtsHealth']);
+    Route::get('/analytics/summary', [AdminAnalyticsController::class, 'summary'])->middleware('throttle:30,1');
+    Route::get('/analytics/throughput', [AdminAnalyticsController::class, 'throughput'])->middleware('throttle:30,1');
+    Route::get('/analytics/wait-time-distribution', [AdminAnalyticsController::class, 'waitTimeDistribution'])->middleware('throttle:30,1');
+    Route::get('/analytics/station-utilization', [AdminAnalyticsController::class, 'stationUtilization'])->middleware('throttle:30,1');
+    Route::get('/analytics/tracks', [AdminAnalyticsController::class, 'tracks'])->middleware('throttle:30,1');
+    Route::get('/analytics/busiest-hours', [AdminAnalyticsController::class, 'busiestHours'])->middleware('throttle:30,1');
+    Route::get('/analytics/drop-off-funnel', [AdminAnalyticsController::class, 'dropOffFunnel'])->middleware('throttle:30,1');
+    Route::get('/analytics/token-tts-health', [AdminAnalyticsController::class, 'tokenTtsHealth'])->middleware('throttle:30,1');
     // Deprecated: use PUT /api/admin/sites/{site} for site and settings.
     Route::patch('/site/settings', [SiteSettingsController::class, 'update'])->name('api.admin.site.settings');
 
@@ -358,6 +358,12 @@ Route::get('/edge/waiting-status', function () {
 Route::get('/edge/revoked', function () {
     return Inertia::render('Edge/Revoked');
 })->name('edge.revoked');
+
+// E13.4: runtime detection endpoint
+Route::get('/api/edge/runtime', function () {
+    $edgeModeService = new \App\Services\EdgeModeService();
+    return response()->json(['runtime' => $edgeModeService->runtime()]);
+})->middleware('web');
 
 // Per 05-SECURITY-CONTROLS §2.4: public routes (no auth)
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login')->middleware('guest');
