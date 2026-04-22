@@ -11,7 +11,8 @@
     "deploy:hosting-folder": "bash scripts/build-deploy-hosting-folder.sh",
     "deploy:zip-current": "bash scripts/build-deploy-zip-current.sh",
     "test:e2e": "playwright test",
-    "test:e2e:report": "playwright show-report --host 0.0.0.0"
+    "test:e2e:report": "playwright show-report --host 0.0.0.0",
+    "build:apk": "npm run build && npx cap sync android && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
     "@fontsource/inter": "^5.0.0",
@@ -26,6 +27,9 @@
     "scrollbooster": "^3.0.2"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.3.1",
+    "@capacitor/cli": "^8.3.1",
+    "@capacitor/core": "^8.3.1",
     "@hyvor/laravel-playwright": "^2.0.0",
     "@inertiajs/svelte": "^2.0.0",
     "@playwright/test": "^1.49.0",

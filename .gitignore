@@ -67,3 +67,12 @@ codemapper-output/*
 !codemapper-output/admin_tokens_program_station_map.txt
 codemapper/
 .worktrees/
+
+# Android build artifacts (Capacitor)
+android/.gradle/
+android/app/build/
+android/build/
+android/app/src/main/assets/
+android/app/src/main/res/apk/
+android/capacitor.build.log
+android/app/.cxx/
