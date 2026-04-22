@@ -1,6 +1,8 @@
 <script lang="ts">
-	import { useForm } from '@inertiajs/svelte';
+	import { useForm, page } from '@inertiajs/svelte';
 	import AuthLayout from '../../Layouts/AuthLayout.svelte';
+
+	let edgeRuntime = $derived($page.props.edgeRuntime);
 
 	let step = $state(1);
 	let centralUrl = $state('https://flexiqueue.click');
@@ -13,6 +15,7 @@
 		central_url: '',
 		pairing_code: '',
 		sync_mode: 'auto' as 'auto' | 'end_of_event',
+		runtime: '',
 	});
 
 	async function testConnection() {
@@ -45,6 +48,7 @@
 		$form.central_url = centralUrl;
 		$form.pairing_code = pairingCode.toUpperCase();
 		$form.sync_mode = syncMode;
+		$form.runtime = edgeRuntime;
 		$form.post('/edge/setup');
 	}
 </script>
@@ -140,6 +144,15 @@
 			{#if step === 3}
 				<h2 class="text-lg font-semibold mb-2">Sync Mode</h2>
 				<p class="text-sm text-surface-600 mb-4">How should this device sync data with the central server?</p>
+				{#if edgeRuntime === 'phone'}
+					<div class="mb-4 rounded-lg bg-purple-50 border border-purple-200 p-3 text-sm text-purple-700 dark:bg-purple-950/20 dark:text-purple-300">
+						Pairing as <strong>Phone Edge</strong> — this device will run Laravel locally via Termux.
+					</div>
+				{:else if edgeRuntime === 'pi'}
+					<div class="mb-4 rounded-lg bg-orange-50 border border-orange-200 p-3 text-sm text-orange-700 dark:bg-orange-950/20 dark:text-orange-300">
+						Pairing as <strong>Pi Edge</strong> — standard Orange Pi edge device.
+					</div>
+				{/if}
 				<fieldset class="flex flex-col gap-3 mb-6">
 					<label class="flex items-start gap-3 p-3 rounded-container border cursor-pointer {syncMode === 'auto' ? 'border-primary-500 bg-primary-50 dark:bg-primary-950/20' : 'border-surface-200'}">
 						<input type="radio" bind:group={syncMode} value="auto" class="mt-0.5" />
