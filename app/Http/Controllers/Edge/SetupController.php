@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Edge;
 
 use App\Http\Controllers\Controller;
 use App\Services\EdgeDeviceSetupService;
+use App\Services\EdgeModeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -15,7 +16,9 @@ class SetupController extends Controller
 {
     public function show(): Response
     {
-        return Inertia::render('Edge/Setup');
+        return Inertia::render('Edge/Setup', [
+            'edgeRuntime' => app(EdgeModeService::class)->runtime(),
+        ]);
     }
 
     public function store(Request $request, EdgeDeviceSetupService $setupService): RedirectResponse
