@@ -40,6 +40,11 @@
         setKnownSites([...sites, { slug, name }]);
     }
 
+    function removeKnownSite(slug: string) {
+        const sites = getKnownSites();
+        setKnownSites(sites.filter((s) => s.slug !== slug));
+    }
+
     interface Props {
         dashboardRoute?: string | null;
         dashboardLabel?: string | null;
@@ -1233,13 +1238,30 @@
             </p>
             <ul class="space-y-2">
                 {#each knownSitesList as site (site.slug)}
-                    <li>
+                    <li class="flex items-center gap-2">
                         <Link
                             href="/site/{site.slug}"
-                            class="btn preset-tonal flex w-full justify-start"
+                            class="btn preset-tonal flex-1 flex justify-start"
                         >
                             {site.name}
                         </Link>
+                        <button
+                            type="button"
+                            onclick={() => {
+                                removeKnownSite(site.slug);
+                                knownSitesList = getKnownSites();
+                                if (knownSitesList.length === 0) {
+                                    showSitePickerModal = false;
+                                } else if (knownSitesList.length === 1) {
+                                    showSitePickerModal = false;
+                                    router.visit("/site/" + knownSitesList[0].slug);
+                                }
+                            }}
+                            class="btn variant-ghost text-sm px-2 py-1 text-surface-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400"
+                            title="Remove {site.name}"
+                        >
+                            &times;
+                        </button>
                     </li>
                 {/each}
             </ul>

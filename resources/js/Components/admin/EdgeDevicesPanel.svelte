@@ -11,8 +11,9 @@
     interface Device {
         id: number;
         name: string;
-        status: "online" | "waiting" | "idle" | "stale" | "offline";
+        status: "online" | "waiting" | "idle" | "stale" | "offline" | "pending_approval";
         runtime: "pi" | "phone" | "dev" | string;
+        approval_status: "pending" | "approved" | "rejected" | null;
         sync_mode: "auto" | "end_of_event";
         supervisor_admin_access: boolean;
         assigned_program_id: number | null;
@@ -61,6 +62,11 @@
 
     // Open dropdown
     let openDropdownId = $state<number | null>(null);
+
+    // Approve/reject submitting
+    let approveSubmittingId = $state<number | null>(null);
+    let rejectConfirmDevice = $state<Device | null>(null);
+    let rejectSubmitting = $state(false);
 
     function getCsrfToken(): string {
         return (
@@ -202,6 +208,7 @@
         idle: "text-primary-500",
         stale: "text-error-400",
         offline: "text-surface-400",
+        pending_approval: "text-amber-500",
     };
 
     const STATUS_LABELS: Record<string, string> = {
@@ -210,7 +217,62 @@
         idle: "Idle",
         stale: "Stale",
         offline: "Offline",
+        pending_approval: "Pending",
     };
+
+    async function handleApprove(device: Device): Promise<void> {
+        approveSubmittingId = device.id;
+        errorMsg = null;
+        try {
+            const res = await fetch(
+                `/api/admin/edge-devices/${device.id}/approve`,
+                {
+                    method: "POST",
+                    headers: {
+                        Accept: "application/json",
+                        "X-CSRF-TOKEN": getCsrfToken(),
+                    },
+                },
+            );
+            if (!res.ok) {
+                const data = await res.json();
+                errorMsg = data.message ?? "Failed to approve device.";
+            }
+            await loadDevices();
+        } catch (e) {
+            errorMsg = e instanceof Error ? e.message : "Unknown error.";
+        } finally {
+            approveSubmittingId = null;
+        }
+    }
+
+    async function handleReject(): Promise<void> {
+        if (!rejectConfirmDevice) return;
+        rejectSubmitting = true;
+        errorMsg = null;
+        try {
+            const res = await fetch(
+                `/api/admin/edge-devices/${rejectConfirmDevice.id}/reject`,
+                {
+                    method: "POST",
+                    headers: {
+                        Accept: "application/json",
+                        "X-CSRF-TOKEN": getCsrfToken(),
+                    },
+                },
+            );
+            if (!res.ok) {
+                const data = await res.json();
+                errorMsg = data.message ?? "Failed to reject device.";
+            }
+            rejectConfirmDevice = null;
+            await loadDevices();
+        } catch (e) {
+            errorMsg = e instanceof Error ? e.message : "Unknown error.";
+        } finally {
+            rejectSubmitting = false;
+        }
+    }
 
     const availablePrograms = $derived(
         programs.filter(
@@ -311,8 +373,13 @@
                                 ]}"
                             >
                                 <Circle class="w-2 h-2 fill-current" />
-                                {STATUS_LABELS[device.status]}
+                                {STATUS_LABELS[device.status] ?? device.status}
                             </span>
+                            {#if device.approval_status === 'pending'}
+                                <span class="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                                    Awaiting Approval
+                                </span>
+                            {/if}
                         </td>
                         <td class="text-surface-600 dark:text-surface-300">
                             {device.assigned_program_name ?? "—"}
@@ -342,26 +409,49 @@
                                         class="absolute right-0 z-20 mt-1 w-48 bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 rounded-container shadow-lg py-1"
                                         role="menu"
                                     >
-                                        <button
-                                            type="button"
-                                            class="w-full text-left px-4 py-2 text-sm hover:bg-surface-100 dark:hover:bg-surface-700"
-                                            role="menuitem"
-                                            onclick={() =>
-                                                openAssignModal(device)}
-                                        >
-                                            Assign / Configure
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="w-full text-left px-4 py-2 text-sm text-error-600 hover:bg-surface-100 dark:hover:bg-surface-700"
-                                            role="menuitem"
-                                            onclick={() => {
-                                                revokingDevice = device;
-                                                openDropdownId = null;
-                                            }}
-                                        >
-                                            Revoke Device
-                                        </button>
+                                        {#if device.approval_status === 'pending'}
+                                            <button
+                                                type="button"
+                                                class="w-full text-left px-4 py-2 text-sm text-success-600 hover:bg-surface-100 dark:hover:bg-surface-700"
+                                                role="menuitem"
+                                                disabled={approveSubmittingId === device.id}
+                                                onclick={() => handleApprove(device)}
+                                            >
+                                                {approveSubmittingId === device.id ? 'Approving…' : 'Approve Device'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="w-full text-left px-4 py-2 text-sm text-error-600 hover:bg-surface-100 dark:hover:bg-surface-700"
+                                                role="menuitem"
+                                                onclick={() => {
+                                                    rejectConfirmDevice = device;
+                                                    openDropdownId = null;
+                                                }}
+                                            >
+                                                Reject Device
+                                            </button>
+                                        {:else}
+                                            <button
+                                                type="button"
+                                                class="w-full text-left px-4 py-2 text-sm hover:bg-surface-100 dark:hover:bg-surface-700"
+                                                role="menuitem"
+                                                onclick={() =>
+                                                    openAssignModal(device)}
+                                            >
+                                                Assign / Configure
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="w-full text-left px-4 py-2 text-sm text-error-600 hover:bg-surface-100 dark:hover:bg-surface-700"
+                                                role="menuitem"
+                                                onclick={() => {
+                                                    revokingDevice = device;
+                                                    openDropdownId = null;
+                                                }}
+                                            >
+                                                Revoke Device
+                                            </button>
+                                        {/if}
                                     </div>
                                 {/if}
                             </div>
@@ -577,6 +667,46 @@
                     disabled={revokeSubmitting}
                 >
                     {revokeSubmitting ? "Revoking…" : "Revoke"}
+                </button>
+            </div>
+        </div>
+    </div>
+{/if}
+
+<!-- Reject Confirm Modal -->
+{#if rejectConfirmDevice}
+    <div
+        class="modal-backdrop"
+        role="presentation"
+        onclick={() => {
+            rejectConfirmDevice = null;
+        }}
+    ></div>
+    <div class="modal-container" role="dialog" aria-modal="true">
+        <div class="modal-content max-w-sm">
+            <h3 class="text-base font-semibold mb-2 text-error-600">
+                Reject Device
+            </h3>
+            <p class="text-sm text-surface-600 dark:text-surface-300 mb-4">
+                Reject <strong>{rejectConfirmDevice.name}</strong>? The device will need to re-pair with a new pairing code.
+            </p>
+            <div class="flex gap-2 justify-end">
+                <button
+                    type="button"
+                    class="btn preset-outlined"
+                    onclick={() => {
+                        rejectConfirmDevice = null;
+                    }}
+                >
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    class="btn preset-filled-error-500"
+                    onclick={handleReject}
+                    disabled={rejectSubmitting}
+                >
+                    {rejectSubmitting ? "Rejecting…" : "Reject"}
                 </button>
             </div>
         </div>

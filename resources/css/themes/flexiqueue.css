@@ -854,6 +854,29 @@
 	color: var(--color-error-200);
 }
 
+/* Dark mode: Google OAuth button + "or" divider on auth pages — preset-outlined-surface-200
+   forces dark text (color-surface-950) which is invisible on dark backgrounds.
+   surface-50/surface-100 are dark navy in dark mode (#0f172a / #1e293b), so use
+   surface-950 (white) / surface-400 (light gray) for readable text instead. */
+[data-theme='flexiqueue'][data-mode='dark'] .btn.preset-outlined-surface-200 {
+	color: var(--color-surface-950) !important;
+	border-color: var(--color-surface-500) !important;
+}
+[data-theme='flexiqueue'][data-mode='dark'] .btn.preset-outlined-surface-200:hover:not(:disabled) {
+	color: var(--color-surface-50) !important;
+	border-color: var(--color-surface-400) !important;
+	background-color: var(--color-surface-800) !important;
+}
+/* Auth page divider: border-surface-200 becomes nearly invisible; use a visible mid-tone */
+[data-theme='flexiqueue'][data-mode='dark'] .fq-auth-divider-line {
+	border-color: var(--color-surface-600);
+}
+/* "or" badge text on auth pages — use surface-800 bg + surface-300 text for contrast */
+[data-theme='flexiqueue'][data-mode='dark'] .fq-auth-divider-text {
+	background-color: var(--color-surface-800);
+	color: var(--color-surface-300);
+}
+
 /* Touch targets — 48px minimum per stack convention (mobile a11y) */
 @utility touch-target-h {
 	min-height: 48px;

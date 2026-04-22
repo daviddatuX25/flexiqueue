@@ -32,9 +32,9 @@
 			</svg>
 			Back to sign in
 		</a>
-		<div class="card bg-surface-50 rounded-container shadow-xl max-w-md w-full p-6">
+		<div class="card bg-surface-50 dark:bg-slate-800/90 border border-surface-200 dark:border-slate-700 rounded-container shadow-xl max-w-md w-full p-6">
 			<h1 class="text-2xl font-bold text-primary-500 text-center">Forgot password</h1>
-			<p class="mt-2 text-center text-surface-950/80 text-sm">
+			<p class="mt-2 text-center text-surface-950/80 dark:text-slate-200 text-sm">
 				Enter your username. If a recovery Gmail is on file, we will email a reset link there.
 			</p>
 
@@ -65,14 +65,14 @@
 				action="/forgot-password"
 			>
 				<div class="w-full">
-					<label for="username" class="block text-sm font-medium text-surface-950 mb-1">Username</label>
+					<label for="username" class="block text-sm font-medium text-surface-950 dark:text-slate-100 mb-1">Username</label>
 					<input
 						id="username"
 						type="text"
 						name="username"
 						autocomplete="username"
 						required
-						class="input w-full rounded-container border border-surface-200 px-3 py-2 {$form.errors?.username ? 'border-error-500 bg-error-50' : ''}"
+						class="input w-full rounded-container border border-surface-200 dark:border-slate-600 dark:bg-slate-700/50 px-3 py-2 {$form.errors?.username ? 'border-error-500 bg-error-50' : ''}"
 						bind:value={$form.username}
 						aria-invalid={!!$form.errors?.username}
 					/>

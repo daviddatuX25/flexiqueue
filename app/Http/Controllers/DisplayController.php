@@ -223,7 +223,7 @@ class DisplayController extends Controller
         $settings = $site->settings ?? [];
         $heroPath = $settings['landing_hero_image_path'] ?? null;
         $heroUrl = $heroPath && is_string($heroPath)
-            ? Storage::url($heroPath)
+            ? Storage::disk('public')->url($heroPath)
             : null;
 
         $landing = [
@@ -298,7 +298,7 @@ class DisplayController extends Controller
         $settings = $program->settings ?? [];
         $bannerPath = $settings['page_banner_image_path'] ?? null;
         $bannerUrl = $bannerPath && is_string($bannerPath)
-            ? Storage::url($bannerPath)
+            ? Storage::disk('public')->url($bannerPath)
             : null;
 
         return Inertia::render('Site/ProgramInfo', [

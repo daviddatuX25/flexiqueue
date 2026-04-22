@@ -1,6 +1,8 @@
 <script lang="ts">
-    // No props — this is a terminal state page.
+    import { page } from '@inertiajs/svelte';
     import AuthLayout from '../../Layouts/AuthLayout.svelte';
+
+    let edgeRuntime = $derived($page.props.edgeRuntime);
 </script>
 
 <svelte:head>
@@ -36,10 +38,23 @@
                 Device Revoked
             </h1>
 
-            <p class="text-surface-600 dark:text-surface-400">
+            <p class="text-surface-600 dark:text-surface-400 mb-4">
                 This device has been revoked by your administrator.
-                Please contact them to re-pair this device with a new pairing code.
             </p>
+
+            {#if edgeRuntime === 'phone'}
+                <div class="rounded-container bg-purple-50 border border-purple-200 p-3 text-sm text-purple-700 dark:bg-purple-950/20 dark:text-purple-300">
+                    Contact your site administrator to re-pair this device with a new pairing code.
+                </div>
+            {:else if edgeRuntime === 'pi'}
+                <div class="rounded-container bg-orange-50 border border-orange-200 p-3 text-sm text-orange-700 dark:bg-orange-950/20 dark:text-orange-300">
+                    SSH into this device to reconfigure, or contact your administrator for a new pairing code.
+                </div>
+            {:else}
+                <div class="rounded-container bg-surface-100 border border-surface-200 p-3 text-sm text-surface-700 dark:bg-surface-800 dark:text-surface-300">
+                    Contact your administrator to re-pair this device with a new pairing code.
+                </div>
+            {/if}
         </div>
     </div>
 </AuthLayout>

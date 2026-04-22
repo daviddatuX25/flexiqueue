@@ -61,14 +61,14 @@
 			</svg>
 			Back to home
 		</a>
-		<div class="card bg-surface-50 rounded-container shadow-xl max-w-md w-full p-6">
+		<div class="card bg-surface-50 dark:bg-slate-800/90 border border-surface-200 dark:border-slate-700 rounded-container shadow-xl max-w-md w-full p-6">
 			<h1 class="text-2xl font-bold text-primary-500 text-center">FlexiQueue</h1>
 			<div class="mt-1 flex items-center justify-center gap-2">
-				<p class="text-center text-surface-950/80 text-sm">Sign in with your username and password.</p>
+				<p class="text-center text-surface-950/80 dark:text-slate-200 text-sm">Sign in with your username and password.</p>
 				{#if demo && demoAccounts.length > 0}
 					<button
 						type="button"
-						class="inline-flex items-center justify-center h-7 w-7 rounded-full border border-surface-300 text-surface-600 hover:bg-surface-100 hover:text-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-500"
+						class="inline-flex items-center justify-center h-7 w-7 rounded-full border border-surface-300 dark:border-slate-600 text-surface-600 dark:text-slate-400 hover:bg-surface-100 dark:hover:bg-slate-700 hover:text-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-500"
 						title="View demo accounts"
 						aria-label="View demo accounts"
 						onclick={() => {
@@ -109,14 +109,14 @@
 				action="/login"
 			>
 				<div class="w-full">
-					<label for="username" class="block text-sm font-medium text-surface-950 mb-1">Username</label>
+					<label for="username" class="block text-sm font-medium text-surface-950 dark:text-slate-100 mb-1">Username</label>
 					<input
 						id="username"
 						type="text"
 						name="username"
 						autocomplete="username"
 						required
-						class="input w-full rounded-container border border-surface-200 px-3 py-2 {$form.errors?.username ? 'border-error-500 bg-error-50' : ''}"
+						class="input w-full rounded-container border border-surface-200 dark:border-slate-600 dark:bg-slate-700/50 px-3 py-2 {$form.errors?.username ? 'border-error-500 bg-error-50' : ''}"
 						bind:value={$form.username}
 						aria-invalid={!!$form.errors?.username}
 						aria-describedby={$form.errors?.username ? 'username-error' : undefined}
@@ -127,14 +127,14 @@
 				</div>
 
 				<div class="w-full">
-					<label for="password" class="block text-sm font-medium text-surface-950 mb-1">Password</label>
+					<label for="password" class="block text-sm font-medium text-surface-950 dark:text-slate-100 mb-1">Password</label>
 					<input
 						id="password"
 						type="password"
 						name="password"
 						autocomplete="current-password"
 						required
-						class="input w-full rounded-container border border-surface-200 px-3 py-2 {$form.errors?.password ? 'border-error-500 bg-error-50' : ''}"
+						class="input w-full rounded-container border border-surface-200 dark:border-slate-600 dark:bg-slate-700/50 px-3 py-2 {$form.errors?.password ? 'border-error-500 bg-error-50' : ''}"
 						bind:value={$form.password}
 						aria-invalid={!!$form.errors?.password}
 						aria-describedby={$form.errors?.password ? 'password-error' : undefined}
@@ -148,7 +148,7 @@
 					{#if !edgeMode?.is_edge}
 						<a
 							href="/forgot-password"
-							class="text-sm font-medium text-primary-600 hover:text-primary-700 hover:underline"
+							class="text-sm font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 hover:underline"
 						>
 							Forgot password?
 						</a>
@@ -167,10 +167,10 @@
 			{#if googleOAuthEnabled && !edgeMode?.is_edge}
 				<div class="relative mt-6">
 					<div class="absolute inset-0 flex items-center" aria-hidden="true">
-						<div class="w-full border-t border-surface-200"></div>
+						<div class="w-full border-t border-surface-200 fq-auth-divider-line"></div>
 					</div>
 					<div class="relative flex justify-center text-xs">
-						<span class="bg-surface-50 px-2 text-surface-500">or</span>
+						<span class="bg-surface-50 dark:bg-slate-800 px-2 text-surface-500 dark:text-slate-400 fq-auth-divider-text">or</span>
 					</div>
 				</div>
 				<a
@@ -211,25 +211,25 @@
 			}}
 		>
 			<div class="space-y-4">
-				<p class="text-sm text-surface-600">
+				<p class="text-sm text-surface-600 dark:text-slate-400">
 					Choose an account to auto-fill the login form.
 				</p>
-				<p class="text-xs text-surface-600">
-					Password: <kbd class="px-1 rounded bg-surface-200 font-mono text-xs">password</kbd>
-					· Override PIN: <kbd class="px-1 rounded bg-surface-200 font-mono text-xs">123456</kbd>
+				<p class="text-xs text-surface-600 dark:text-slate-400">
+					Password: <kbd class="px-1 rounded bg-surface-200 dark:bg-slate-700 font-mono text-xs">password</kbd>
+					· Override PIN: <kbd class="px-1 rounded bg-surface-200 dark:bg-slate-700 font-mono text-xs">123456</kbd>
 				</p>
 				<ul class="space-y-2 max-h-72 overflow-y-auto">
 					{#each demoAccounts as account (account.username)}
 						<li>
 							<button
 								type="button"
-								class="text-left w-full text-sm py-2 px-3 rounded border border-surface-200 hover:bg-primary-500/10 focus:bg-primary-500/10 focus:outline-none focus:ring-2 focus:ring-primary-500"
+								class="text-left w-full text-sm py-2 px-3 rounded border border-surface-200 dark:border-slate-600 hover:bg-primary-500/10 dark:hover:bg-primary-500/20 focus:bg-primary-500/10 focus:outline-none focus:ring-2 focus:ring-primary-500"
 								onclick={() => applyDemoAccount(account)}
 							>
-								<span class="font-medium text-surface-800">{account.label}</span>
-								<span class="block text-xs text-surface-500 font-mono truncate" title={account.username}>{account.username}</span>
+								<span class="font-medium text-surface-800 dark:text-slate-200">{account.label}</span>
+								<span class="block text-xs text-surface-500 dark:text-slate-400 font-mono truncate" title={account.username}>{account.username}</span>
 								{#if account.email}
-									<span class="block text-xs text-surface-400 truncate" title={account.email}>{account.email}</span>
+									<span class="block text-xs text-surface-400 dark:text-slate-500 truncate" title={account.email}>{account.email}</span>
 								{/if}
 							</button>
 						</li>

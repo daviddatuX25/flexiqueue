@@ -2,17 +2,19 @@
 	/**
 	 * Per public-site plan: site landing with hero, sections, two-action program cards (Monitor your queue / Use this device), optional stats.
 	 * Program key modal when ?program_key_prompt={slug} (e.g. after scan of private program QR).
+	 * Switch-site button removes known_sites entry and redirects to home.
 	 */
 	import { Link, router, usePage } from '@inertiajs/svelte';
 	import DisplayLayout from '../../Layouts/DisplayLayout.svelte';
 	import Modal from '../../Components/Modal.svelte';
-	import { Monitor, Smartphone, Key } from 'lucide-svelte';
+	import { Monitor, Smartphone, Key, ArrowLeft, LogOut, ExternalLink } from 'lucide-svelte';
 
 	const page = usePage();
 	const csrfToken = $derived((page?.props as { csrf_token?: string })?.csrf_token ?? '');
 
 	const KNOWN_PROGRAMS_COOKIE = 'known_programs';
 	const KNOWN_PROGRAMS_MAX_AGE_DAYS = 365;
+	const KNOWN_SITES_COOKIE = 'known_sites';
 
 	type KnownProgramEntry = { site_slug: string; program_slug: string; program_name: string; token: string; expires_at: string };
 
@@ -43,6 +45,23 @@
 		setKnownPrograms([...without, entry]);
 	}
 
+	function forgetThisSite() {
+		if (typeof document === 'undefined') return;
+		const raw = document.cookie.split('; ').find((row) => row.startsWith(KNOWN_SITES_COOKIE + '='));
+		if (!raw) { router.visit('/'); return; }
+		try {
+			const value = decodeURIComponent(raw.slice(KNOWN_SITES_COOKIE.length + 1).trim());
+			const parsed = JSON.parse(value);
+			if (!Array.isArray(parsed)) { router.visit('/'); return; }
+			const remaining = parsed.filter((x: { slug: string }) => typeof x?.slug === 'string' && x.slug !== site.slug);
+			const encoded = encodeURIComponent(JSON.stringify(remaining));
+			document.cookie = `${KNOWN_SITES_COOKIE}=${encoded}; path=/; max-age=${365 * 86400}; SameSite=Lax`;
+			router.visit('/');
+		} catch {
+			router.visit('/');
+		}
+	}
+
 	type Landing = {
 		hero_title: string;
 		hero_description: string | null;
@@ -68,6 +87,8 @@
 	} = $props();
 
 	const heroTitle = $derived(landing?.hero_title || site.name);
+
+	let showSwitchConfirm = $state(false);
 
 	/** Per public-site plan: optional site-scoped stats when landing.show_stats. */
 	let siteStats = $state<{ served_count: number; session_hours: number } | null>(null);
@@ -199,92 +220,149 @@
 		</form>
 	</Modal>
 
-	<div class="flex flex-1 flex-col px-6 py-8 max-w-2xl mx-auto">
-		<!-- Hero -->
-		<header class="text-center mb-8">
-			{#if landing?.hero_image_url}
-				<img
-					src={landing.hero_image_url}
-					alt=""
-					class="w-full max-h-48 object-cover rounded-2xl mb-4"
-				/>
-			{/if}
-			<h1 class="text-2xl font-bold text-surface-950 dark:text-white">
-				{heroTitle}
-			</h1>
-			{#if landing?.hero_description}
-				<p class="text-surface-600 dark:text-slate-400 mt-2">
-					{landing.hero_description}
-				</p>
-			{/if}
-		</header>
-
-		<!-- Optional site stats -->
-		{#if landing?.show_stats && siteStats}
-			<div class="flex gap-6 justify-center mb-8 rounded-xl border border-surface-200 dark:border-slate-700 bg-surface-50 dark:bg-slate-800/80 p-4">
-				<div class="text-center">
-					<div class="text-2xl font-bold text-surface-900 dark:text-white">{siteStats.served_count}</div>
-					<div class="text-xs text-surface-500 uppercase tracking-wider">People served</div>
-				</div>
-				<div class="text-center">
-					<div class="text-2xl font-bold text-primary-600 dark:text-primary-400">{siteStats.session_hours}</div>
-					<div class="text-xs text-surface-500 uppercase tracking-wider">Program hours</div>
-				</div>
-			</div>
-		{/if}
-
-		<!-- Content sections -->
-		{#if landing?.sections?.length}
-			<div class="space-y-4 mb-8">
-				{#each landing.sections as section (section.title)}
-					{#if section.type === 'text'}
-						<section class="rounded-xl border border-surface-200 dark:border-slate-700 bg-surface-50/80 dark:bg-slate-800/50 p-4">
-							<h2 class="font-semibold text-surface-900 dark:text-white">{section.title}</h2>
-							{#if section.body}
-								<p class="text-sm text-surface-600 dark:text-slate-400 mt-1 whitespace-pre-wrap">{section.body}</p>
-							{/if}
-						</section>
-					{/if}
-				{/each}
-			</div>
-		{/if}
-
-		<!-- Programs: two actions per program -->
-		<div class="space-y-4">
-			<h2 class="text-lg font-semibold text-surface-950 dark:text-white">
-				Choose a program
-			</h2>
-			{#if programs.length === 0}
-				<p class="text-sm text-surface-500 dark:text-slate-500">
-					No active programs at the moment.
-				</p>
-			{:else}
-				<ul class="space-y-4">
-					{#each programs as program (program.id)}
-						<li
-							class="rounded-2xl border border-surface-200 dark:border-slate-700 bg-surface-50/90 dark:bg-slate-800/90 p-4 flex flex-col gap-3"
-						>
-							<span class="font-medium text-surface-900 dark:text-white">{program.name}</span>
-							<div class="flex flex-col gap-2">
-								<Link
-									href="/site/{site.slug}/program/{program.slug}/view"
-									class="btn preset-filled-primary-500 flex items-center justify-center gap-2 w-full touch-target-h py-4 text-base font-semibold rounded-xl"
-								>
-									<Monitor class="h-5 w-5 shrink-0" />
-									Monitor your queue
-								</Link>
-								<Link
-									href="/site/{site.slug}/program/{program.slug}"
-									class="inline-flex items-center justify-center gap-1.5 py-2 px-3 text-sm font-medium rounded-lg border touch-target-h min-h-[44px] text-primary-600 dark:text-primary-200 border-primary-300 dark:border-primary-500/80 bg-primary-500/5 dark:bg-primary-400/15 hover:bg-primary-500/10 dark:hover:bg-primary-400/25 hover:underline focus:outline-none focus:ring-2 focus:ring-primary-500/50"
-								>
-									<Smartphone class="h-4 w-4 shrink-0" />
-									Use this device
-								</Link>
-							</div>
-						</li>
-					{/each}
-				</ul>
-			{/if}
+	<!-- Switch site confirmation modal -->
+	<Modal
+		open={showSwitchConfirm}
+		onclose={() => (showSwitchConfirm = false)}
+		title="Switch to another site?"
+	>
+		<p class="text-sm text-surface-600 dark:text-slate-400 mb-4">
+			This will remove <strong>{site.name}</strong> from your saved sites and take you back to the home page. You'll need to enter a new site key to access a different site.
+		</p>
+		<div class="flex gap-2 justify-end">
+			<button type="button" class="btn variant-outline" onclick={() => (showSwitchConfirm = false)}>Cancel</button>
+			<button type="button" class="btn preset-filled-primary-500" onclick={forgetThisSite}>
+				Switch site
+			</button>
 		</div>
+	</Modal>
+
+	<div class="flex flex-1 flex-col">
+		<!-- Sticky top bar with back + switch site -->
+		<div class="sticky top-0 z-30 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-surface-200/60 dark:border-slate-700/60">
+			<div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+				<Link
+					href="/"
+					class="inline-flex items-center gap-1.5 text-sm font-medium text-surface-600 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+				>
+					<ArrowLeft class="h-4 w-4" />
+					Home
+				</Link>
+				<button
+					type="button"
+					onclick={() => (showSwitchConfirm = true)}
+					class="inline-flex items-center gap-1.5 text-sm font-medium text-surface-500 dark:text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+					title="Remove this site and switch to another"
+				>
+					<LogOut class="h-4 w-4" />
+					Switch site
+				</button>
+			</div>
+		</div>
+
+		<!-- Article-style content -->
+		<article class="max-w-3xl mx-auto px-5 py-10">
+			<!-- Hero -->
+			<header class="mb-10">
+				{#if landing?.hero_image_url}
+					<img
+						src={landing.hero_image_url}
+						alt=""
+						class="w-full max-h-64 object-cover rounded-2xl mb-6 shadow-sm"
+					/>
+				{/if}
+				<h1 class="text-3xl md:text-4xl font-extrabold text-surface-950 dark:text-white leading-tight">
+					{heroTitle}
+				</h1>
+				{#if landing?.hero_description}
+					<p class="text-lg text-surface-600 dark:text-slate-400 mt-3 leading-relaxed">
+						{landing.hero_description}
+					</p>
+				{/if}
+			</header>
+
+			<!-- Optional site stats (article-style stat bar) -->
+			{#if landing?.show_stats && siteStats}
+				<div class="flex gap-8 mb-10 pb-8 border-b border-surface-200 dark:border-slate-700/60">
+					<div>
+						<div class="text-3xl font-bold text-surface-900 dark:text-white">{siteStats.served_count}</div>
+						<div class="text-xs font-semibold text-surface-500 dark:text-slate-500 uppercase tracking-widest mt-0.5">People served</div>
+					</div>
+					<div>
+						<div class="text-3xl font-bold text-primary-600 dark:text-primary-400">{siteStats.session_hours}</div>
+						<div class="text-xs font-semibold text-surface-500 dark:text-slate-500 uppercase tracking-widest mt-0.5">Program hours</div>
+					</div>
+				</div>
+			{/if}
+
+			<!-- Content sections (article paragraphs) -->
+			{#if landing?.sections?.length}
+				<div class="space-y-8 mb-10">
+					{#each landing.sections as section (section.title)}
+						{#if section.type === 'text'}
+							<section>
+								<h2 class="text-xl font-bold text-surface-900 dark:text-white mb-3">{section.title}</h2>
+								{#if section.body}
+									<div class="prose prose-surface dark:prose-invert max-w-none text-surface-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">
+										{section.body}
+									</div>
+								{/if}
+							</section>
+						{/if}
+					{/each}
+				</div>
+			{/if}
+
+			<!-- Programs section -->
+			{#if programs.length > 0}
+				<section class="border-t border-surface-200 dark:border-slate-700/60 pt-8">
+					<h2 class="text-xl font-bold text-surface-900 dark:text-white mb-2">
+						Programs
+					</h2>
+					<p class="text-sm text-surface-500 dark:text-slate-400 mb-6">
+						Choose a program to monitor or use this device as a client.
+					</p>
+					<ul class="space-y-4">
+						{#each programs as program (program.id)}
+							<li class="group rounded-xl border border-surface-200 dark:border-slate-700 bg-white dark:bg-slate-800/70 p-5 hover:shadow-md hover:border-primary-300 dark:hover:border-primary-600/50 transition-all">
+								<div class="flex items-start justify-between gap-3 mb-4">
+									<h3 class="font-semibold text-surface-900 dark:text-white text-lg">{program.name}</h3>
+									<ExternalLink class="h-4 w-4 text-surface-400 dark:text-slate-500 shrink-0 mt-1 group-hover:text-primary-500 transition-colors" />
+								</div>
+								<div class="flex flex-col sm:flex-row gap-2">
+									<Link
+										href="/site/{site.slug}/program/{program.slug}/view"
+										class="btn preset-filled-primary-500 flex items-center justify-center gap-2 flex-1 touch-target-h py-3 text-sm font-semibold rounded-lg"
+									>
+										<Monitor class="h-4 w-4 shrink-0" />
+										Monitor your queue
+									</Link>
+									<Link
+										href="/site/{site.slug}/program/{program.slug}"
+										class="inline-flex items-center justify-center gap-1.5 py-3 px-4 text-sm font-medium rounded-lg border touch-target-h text-primary-600 dark:text-primary-300 border-primary-300 dark:border-primary-500/80 bg-primary-500/5 dark:bg-primary-400/10 hover:bg-primary-500/10 dark:hover:bg-primary-400/20 hover:border-primary-400 dark:hover:border-primary-400 transition-colors"
+									>
+										<Smartphone class="h-4 w-4 shrink-0" />
+										Use this device
+									</Link>
+								</div>
+							</li>
+						{/each}
+					</ul>
+				</section>
+			{:else}
+				<section class="border-t border-surface-200 dark:border-slate-700/60 pt-8 text-center">
+					<p class="text-surface-500 dark:text-slate-400">
+						No active programs at the moment.
+					</p>
+				</section>
+			{/if}
+
+			<!-- Article footer -->
+			<footer class="mt-12 pt-6 border-t border-surface-200 dark:border-slate-700/60 text-center">
+				<p class="text-xs text-surface-400 dark:text-slate-500">
+					{site.name} on FlexiQueue
+				</p>
+			</footer>
+		</article>
 	</div>
 </DisplayLayout>

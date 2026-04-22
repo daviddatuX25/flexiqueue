@@ -32,9 +32,9 @@
 			</svg>
 			Back to sign in
 		</a>
-		<div class="card bg-surface-50 rounded-container shadow-xl max-w-md w-full p-6">
+		<div class="card bg-surface-50 dark:bg-slate-800/90 border border-surface-200 dark:border-slate-700 rounded-container shadow-xl max-w-md w-full p-6">
 			<h1 class="text-2xl font-bold text-primary-500 text-center">Set new password</h1>
-			<p class="mt-2 text-center text-surface-950/80 text-sm">Choose a new password for your account.</p>
+			<p class="mt-2 text-center text-surface-950/80 dark:text-slate-200 text-sm">Choose a new password for your account.</p>
 
 			<form
 				class="flex flex-col gap-4 mt-4"
@@ -46,14 +46,14 @@
 				action="/reset-password"
 			>
 				<div class="w-full">
-					<label for="password" class="block text-sm font-medium text-surface-950 mb-1">New password</label>
+					<label for="password" class="block text-sm font-medium text-surface-950 dark:text-slate-100 mb-1">New password</label>
 					<input
 						id="password"
 						type="password"
 						name="password"
 						autocomplete="new-password"
 						required
-						class="input w-full rounded-container border border-surface-200 px-3 py-2 {$form.errors?.password ? 'border-error-500 bg-error-50' : ''}"
+						class="input w-full rounded-container border border-surface-200 dark:border-slate-600 dark:bg-slate-700/50 px-3 py-2 {$form.errors?.password ? 'border-error-500 bg-error-50' : ''}"
 						bind:value={$form.password}
 					/>
 					{#if $form.errors?.password}
@@ -62,7 +62,7 @@
 				</div>
 
 				<div class="w-full">
-					<label for="password_confirmation" class="block text-sm font-medium text-surface-950 mb-1"
+					<label for="password_confirmation" class="block text-sm font-medium text-surface-950 dark:text-slate-100 mb-1"
 						>Confirm password</label
 					>
 					<input
@@ -71,7 +71,7 @@
 						name="password_confirmation"
 						autocomplete="new-password"
 						required
-						class="input w-full rounded-container border border-surface-200 px-3 py-2"
+						class="input w-full rounded-container border border-surface-200 dark:border-slate-600 dark:bg-slate-700/50 px-3 py-2"
 						bind:value={$form.password_confirmation}
 					/>
 				</div>

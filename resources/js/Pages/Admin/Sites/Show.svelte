@@ -309,6 +309,9 @@
                 body: formData,
             });
             if (res.ok) {
+                const data = await res.json().catch(() => ({}));
+                const url = (data as { url?: string })?.url;
+                if (url) site.landing_hero_image_url = url;
                 toaster.success({ title: "Hero image uploaded." });
                 router.reload();
             } else {
