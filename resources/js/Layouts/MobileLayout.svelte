@@ -19,6 +19,7 @@
     import ScanModal from "../Components/ScanModal.svelte";
     import StatusCheckerModal from "../Components/StatusCheckerModal.svelte";
     import StaffTriageBindModal from "../Components/StaffTriageBindModal.svelte";
+    import PhoneEdgeStatus from "../Components/PhoneEdgeStatus.svelte";
     import { handleQrApproveScan } from "../lib/qrApproveHandler.js";
     import { isApprovePayload, resolveStaffTokenScan } from "../lib/qrScanResolve.js";
     import { toaster } from "../lib/toaster.js";
@@ -369,6 +370,9 @@
     />
     <FlexiQueueToaster />
     <FlashToToast />
+    {#if $pageStore.props?.edge_mode?.runtime === 'phone'}
+        <PhoneEdgeStatus />
+    {/if}
 </div>
 
 <style>

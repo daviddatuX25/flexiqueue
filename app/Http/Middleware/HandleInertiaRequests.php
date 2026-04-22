@@ -93,6 +93,7 @@ class HandleInertiaRequests extends Middleware
                 'admin_read_only' => app(EdgeModeService::class)->isAdminReadOnly(),
                 'sync_back' => app(EdgeModeService::class)->syncBack(),
                 'bridge_mode_enabled' => app(EdgeModeService::class)->bridgeModeEnabled(),
+                'runtime' => app(EdgeModeService::class)->runtime(),
             ],
         ];
 
