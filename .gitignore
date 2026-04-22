@@ -36,6 +36,8 @@ flexiqueue-*.tar.gz
 /storage/*.key
 /storage/pail
 /vendor
+/android/.gradle/
+/android/app/build/
 Homestead.json
 Homestead.yaml
 Thumbs.db
