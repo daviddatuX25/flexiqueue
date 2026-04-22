@@ -42,6 +42,7 @@ class EdgeHeartbeat extends Command
                     'last_synced_at'  => $state->last_synced_at?->toIso8601String(),
                     'package_version' => $state->package_version,
                     'app_version'     => $appVersion,
+                    'runtime'         => $state->runtime,
                 ]);
 
             if (! $response->successful()) {

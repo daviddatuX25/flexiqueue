@@ -117,4 +117,15 @@ class EdgeModeService
 
         return (bool) config('app.edge_bridge_mode', false);
     }
+
+    /**
+     * Returns the runtime chassis: 'pi' (Orange Pi), 'phone' (Android + Termux), or 'dev' (local dev).
+     * Driven by EDGE_RUNTIME env var. Defaults to 'dev' when not set.
+     */
+    public function runtime(): string
+    {
+        $value = config('app.edge_runtime');
+
+        return in_array($value, ['pi', 'phone'], true) ? $value : 'dev';
+    }
 }

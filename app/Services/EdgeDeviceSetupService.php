@@ -15,12 +15,13 @@ class EdgeDeviceSetupService
      *
      * @throws \RuntimeException if pairing fails.
      */
-    public function setup(string $centralUrl, string $pairingCode, string $syncMode): void
+    public function setup(string $centralUrl, string $pairingCode, string $syncMode, ?string $runtime = null): void
     {
         $centralUrl = rtrim($centralUrl, '/');
 
         $response = Http::timeout(10)->post("{$centralUrl}/api/edge/pair", [
             'pairing_code' => $pairingCode,
+            'runtime'      => $runtime,
         ]);
 
         if (! $response->successful()) {
@@ -44,6 +45,7 @@ class EdgeDeviceSetupService
                 'session_active'          => false,
                 'supervisor_admin_access' => false,
                 'is_revoked'              => false,
+                'runtime'                 => $runtime,
             ]
         );
 

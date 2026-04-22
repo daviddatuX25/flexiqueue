@@ -33,6 +33,7 @@ class EdgeDevice extends Model
         'force_cancelled_at',
         'update_status',
         'dump_requested',
+        'runtime',           // E13.1: pi|phone|dev chassis
     ];
 
     protected function casts(): array

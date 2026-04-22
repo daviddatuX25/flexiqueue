@@ -70,6 +70,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Edge Runtime Chassis (edge only)
+    |--------------------------------------------------------------------------
+    |
+    | Returns the runtime chassis: 'pi' (Orange Pi), 'phone' (Android + Termux),
+    | or 'dev' (local dev). Driven by EDGE_RUNTIME env var. Defaults to 'dev'.
+    |
+    */
+
+    'edge_runtime' => env('EDGE_RUNTIME', 'dev'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Edge central connection (edge Pi only)
     |--------------------------------------------------------------------------
     |

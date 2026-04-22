@@ -29,7 +29,8 @@ class EdgeDeviceState extends Model
         'package_version',
         'package_stale',
         'update_available',  // E8.2: set by EdgeHeartbeat command
-        'is_revoked',        // E9.4: set when device token is revoked
+        'is_revoked',         // E9.4: set when device token is revoked
+        'runtime',             // E13.1: pi|phone|dev chassis
     ];
 
     protected function casts(): array
@@ -42,6 +43,7 @@ class EdgeDeviceState extends Model
             'package_stale' => 'boolean',
             'update_available' => 'boolean',  // E8.2
             'is_revoked' => 'boolean',         // E9.4
+            'runtime' => 'string',             // E13.1
             'device_token' => 'encrypted',
             'id_offset' => 'integer',
         ];

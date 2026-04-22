@@ -77,6 +77,11 @@ class AppServiceProvider extends ServiceProvider
         });
 
         if (config('app.mode') === 'edge') {
+            // Phone (Termux) has no SQLCipher extension — only plain SQLite
+            if (app(EdgeModeService::class)->runtime() === 'phone') {
+                return;
+            }
+
             DB::afterConnecting(static function (Connection $connection): void {
                 if ($connection->getDriverName() === 'sqlite') {
                     $hexKey = self::deriveSqlCipherKey((string) config('app.key'));

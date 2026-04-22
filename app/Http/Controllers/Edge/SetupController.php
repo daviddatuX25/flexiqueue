@@ -24,13 +24,15 @@ class SetupController extends Controller
             'central_url'  => ['required', 'url', 'max:255'],
             'pairing_code' => ['required', 'string', 'size:8'],
             'sync_mode'    => ['required', 'in:auto,end_of_event'],
+            'runtime'      => ['nullable', 'string', 'in:pi,phone,dev'],
         ]);
 
         try {
             $setupService->setup(
                 $validated['central_url'],
                 $validated['pairing_code'],
-                $validated['sync_mode']
+                $validated['sync_mode'],
+                $validated['runtime'] ?? null
             );
         } catch (\RuntimeException $e) {
             return back()->withErrors(['pairing_code' => $e->getMessage()]);
