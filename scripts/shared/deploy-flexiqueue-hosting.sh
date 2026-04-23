@@ -3,12 +3,12 @@
 # FlexiQueue — Deploy to flexiqueue.click hosting via lftp
 #
 # Usage:
-#   ./scripts/shared/deploy-flexiqueue-hosting.sh [--local-build] [--keep-worktree] [--no-vendor-sync]
+#   ./scripts/shared/deploy-flexiqueue-hosting.sh [--local-build] [--keep-worktree] [--no-vendor-sync] [--no-composer]
 #
 # What it does:
 #   1. Reads FTP credentials from .env.hosting (or prompts interactively)
 #   2. Creates a git worktree from the LOCAL dev branch (no remote push needed)
-#   3. Runs composer install --no-dev --optimize-autoloader + npm run build
+#   3. Runs npm ci + npm run build (composer install skipped with --no-composer)
 #   4. Stages only essential app files (no docs, no tests, no CI config)
 #   5. Uploads essential dirs via lftp (always replace)
 #   6. Asks interactively before pushing vendor/
@@ -27,6 +27,7 @@ cd "$REPO_ROOT"
 # ---------- defaults ----------
 BUILD_MODE="local"          # always local — no docker dependency
 KEEP_WORKTREE="0"          # cleanup worktree on exit by default
+SKIP_COMPOSER="0"          # skip composer install (hosting keeps existing vendor)
 SYNC_VENDOR=""              # "" = interactive ask; "1" = always push; "0" = never push
 HOSTING_REMOTE_PATH="/"     # remote path on FTP server (adjust if hosting uses a subdir)
 APP_REMOTE_PATH=""          # e.g. "" for root, or "subdir/" if hosting serves from a subdirectory
@@ -54,6 +55,7 @@ Options:
   --keep-worktree      Do NOT remove the git worktree after deploy (keep for inspection)
   --sync-vendor        Always push vendor/ without asking (use when deps changed)
   --no-vendor-sync     Never push vendor/ (hosting keeps existing vendor)
+  --no-composer        Skip composer install entirely (hosting keeps existing vendor)
   --app-path=NAME      Remote subdirectory on hosting (e.g. "flexiqueue/"). Default: /
 
 Environment variables (override .env.hosting or prompt):
@@ -80,6 +82,7 @@ for arg in "$@"; do
     --keep-worktree)    KEEP_WORKTREE="1" ;;
     --sync-vendor)      SYNC_VENDOR="1" ;;
     --no-vendor-sync)   SYNC_VENDOR="0" ;;
+    --no-composer)      SKIP_COMPOSER="1" ;;
     --app-path=*)       APP_REMOTE_PATH="${arg#--app-path=}" ;;
     *)                  err "Unknown argument: $arg"; usage; exit 1 ;;
   esac
@@ -94,8 +97,8 @@ if ! command -v lftp >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v composer >/dev/null 2>&1; then
-  err "composer not found. Install Composer and try again."
+if [ "$SKIP_COMPOSER" != "1" ] && ! command -v composer >/dev/null 2>&1; then
+  err "composer not found. Install Composer and try again, or use --no-composer to skip."
   exit 1
 fi
 
@@ -189,21 +192,26 @@ section "Building in worktree (local)"
 
 BUILD_LOG="$REPO_ROOT/.build/deploy-build.log"
 
-msg "Installing Composer dependencies..."
-cd "$WORKTREE_DIR"
-composer config platform.php 8.2 2>/dev/null || true
-composer install \
-  --no-dev \
-  --optimize-autoloader \
-  --prefer-dist \
-  --no-interaction \
-  --ignore-platform-reqs \
-  > "$BUILD_LOG" 2>&1 || {
-    err "composer install failed. See: $BUILD_LOG"
-    cat "$BUILD_LOG" >&2
-    exit 1
-  }
-ok "Composer install complete"
+if [ "$SKIP_COMPOSER" = "1" ]; then
+  msg "Skipping composer install (--no-composer)"
+  cd "$WORKTREE_DIR"
+else
+  msg "Installing Composer dependencies..."
+  cd "$WORKTREE_DIR"
+  composer config platform.php 8.2 2>/dev/null || true
+  composer install \
+    --no-dev \
+    --optimize-autoloader \
+    --prefer-dist \
+    --no-interaction \
+    --ignore-platform-reqs \
+    > "$BUILD_LOG" 2>&1 || {
+      err "composer install failed. See: $BUILD_LOG"
+      cat "$BUILD_LOG" >&2
+      exit 1
+    }
+  ok "Composer install complete"
+fi
 
 msg "Running npm ci + npm run build..."
 npm ci > "$BUILD_LOG" 2>&1 || {
@@ -219,12 +227,19 @@ npm run build >> "$BUILD_LOG" 2>&1 || {
 ok "Build complete"
 
 msg "Generating APP_KEY in worktree..."
+# Ensure .env exists (key:generate needs it)
+if [ ! -f "$WORKTREE_DIR/.env" ]; then
+  if [ -f "$WORKTREE_DIR/.env.example" ]; then
+    cp "$WORKTREE_DIR/.env.example" "$WORKTREE_DIR/.env"
+    msg "  Created .env from .env.example"
+  else
+    touch "$WORKTREE_DIR/.env"
+    warn "  No .env or .env.example — created empty .env"
+  fi
+fi
 php artisan key:generate --force >> "$BUILD_LOG" 2>&1 || {
-  err "php artisan key:generate failed. See: $BUILD_LOG"
-  cat "$BUILD_LOG" >&2
-  exit 1
+  warn "php artisan key:generate failed (non-fatal) — you'll need to set APP_KEY on hosting manually."
 }
-ok "APP_KEY generated and written to .env"
 
 # Record deploy marker
 mkdir -p "$WORKTREE_DIR/bootstrap/cache" "$WORKTREE_DIR/storage/app"
