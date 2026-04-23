@@ -78,3 +78,7 @@ android/app/src/main/assets/
 android/app/src/main/res/apk/
 android/capacitor.build.log
 android/app/.cxx/
+
+# Android online build (Capacitor)
+/android-online/node_modules/
+/android-online/android/
