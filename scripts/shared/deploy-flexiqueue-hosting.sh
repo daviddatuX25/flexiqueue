@@ -345,8 +345,9 @@ section "FTP Upload via lftp"
 REMOTE_BASE="${APP_REMOTE_PATH%/}"
 [ -n "$REMOTE_BASE" ] && REMOTE_BASE="${REMOTE_BASE}/"
 
-# Build the lftp batch file
-LFTP_BATCH=$(mktemp)
+# Build the lftp batch file (use .build dir instead of mktemp — avoids Windows temp cleanup issues)
+mkdir -p "$REPO_ROOT/.build"
+LFTP_BATCH="$REPO_ROOT/.build/lftp-batch.txt"
 LFTP_LOG="$REPO_ROOT/.build/deploy-ftp.log"
 
 {
@@ -452,7 +453,7 @@ msg "lftp log: $LFTP_LOG"
 section "Post-Deploy (triggering cron-aware update)"
 
 if [ -f "$STAGE_DIR/bootstrap/cache/deploy_pending" ]; then
-  DEPLOY_BATCH=$(mktemp)
+  DEPLOY_BATCH="$REPO_ROOT/.build/lftp-deploy-marker.txt"
   {
     cat <<DEPLOY
 open -u ${FTP_USER},${FTP_PASSWORD} ${FTP_HOST}
