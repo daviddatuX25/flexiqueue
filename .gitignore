@@ -66,3 +66,7 @@ root@*
 codemapper-output/*
 !codemapper-output/admin_tokens_program_station_map.txt
 codemapper/
+
+# Android online build (Capacitor)
+/android-online/node_modules/
+/android-online/android/
