@@ -16,6 +16,7 @@ use App\Support\DeviceLock;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Middleware\HandleCors;
 use Spatie\Permission\Middleware\PermissionMiddleware;
 use Spatie\Permission\Middleware\RoleMiddleware;
 use Spatie\Permission\Middleware\RoleOrPermissionMiddleware;
@@ -48,6 +49,7 @@ return Application::configure(basePath: dirname(__DIR__))
             EnforcePendingAssignment::class,
             EdgeWriteProtection::class,
         ]);
+        $middleware->prepend(HandleCors::class);
         $middleware->alias([
             'guest' => RedirectIfAuthenticated::class,
             'permission' => PermissionMiddleware::class,

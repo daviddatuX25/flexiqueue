@@ -170,7 +170,7 @@
 						<div class="w-full border-t border-surface-200"></div>
 					</div>
 					<div class="relative flex justify-center text-xs">
-						<span class="bg-surface-50 px-2 text-surface-500">or</span>
+						<span class="bg-surface-50 dark:bg-surface-950 px-2 text-surface-500 dark:text-surface-400">or</span>
 					</div>
 				</div>
 				<a
